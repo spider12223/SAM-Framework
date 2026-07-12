@@ -1,0 +1,55 @@
+# ---------------------------------------------------------------------------
+# S.A.M Framework — this repo contains ONLY S.A.M's own code, schemas, GUI and
+# docs. Barony's source is a sibling folder outside this repo and is never
+# tracked here (it belongs to Turning Wheel LLC). The entries below keep build
+# artifacts, dependencies, and any stray copy of the game/engine out of commits.
+# ---------------------------------------------------------------------------
+
+# --- Node / React (gui/) ---
+node_modules/
+dist/
+.vite/
+*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- C++ build artifacts (framework is built into Barony elsewhere) ---
+build/
+out/
+*.obj
+*.o
+*.exe
+*.dll
+*.lib
+*.a
+*.pdb
+*.ilk
+*.exp
+*.idb
+
+# --- Visual Studio / IDE ---
+.vs/
+*.user
+*.suo
+*.sln.docstates
+*.vcxproj.user
+CMakeCache.txt
+CMakeFiles/
+.idea/
+
+# --- Barony / engine source — do NOT commit TurningWheel's code ---
+# (defensive: these are siblings outside this repo, but guard anyway)
+Barony/
+barony-src/
+baronymoreclasses/
+sam_log.txt
+log.txt
+# NOTE: S.A.M's OWN bundled models under model-library/ are content and SHOULD
+# be committed, so .vox/.png are intentionally NOT ignored here.
+
+# --- OS cruft ---
+.DS_Store
+Thumbs.db
+desktop.ini

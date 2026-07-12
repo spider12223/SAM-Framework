@@ -1,0 +1,11 @@
+{
+  "$comment": "Public S.A.M namespace registry. To reserve a namespace for your mod, open a pull request adding an entry below. Namespaces must be unique and match ^[a-z][a-z0-9_]*$ (same rule as mod.json). Keep the list sorted by namespace.",
+  "namespaces": [
+    {
+      "namespace": "sam_test",
+      "author": "spider12223",
+      "description": "Official SAM test mod",
+      "workshop_id": ""
+    }
+  ]
+}

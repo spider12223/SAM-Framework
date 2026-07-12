@@ -1,0 +1,322 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   S.A.M Framework — medieval RPG theme (matches the design reference)
+   Background #1a1208 · Panels #2a1f0e · Gold text #d4a84b · Fills #c9922a
+--------------------------------------------------------------------------- */
+@theme {
+  --color-abyss: #120c05;        /* page edge vignette */
+  --color-stone: #1a1208;        /* main background     */
+  --color-wood: #2a1f0e;         /* panel background    */
+  --color-wood-deep: #211808;    /* inset wells         */
+  --color-wood-raised: #33260f;  /* hover / raised      */
+  --color-gold: #d4a84b;         /* primary text/accent */
+  --color-gold-bright: #f0cd7a;  /* highlights          */
+  --color-gold-fill: #c9922a;    /* slider fills        */
+  --color-gold-dim: #8a6d2e;     /* muted gold          */
+  --color-parchment: #e8d5a3;    /* light text          */
+  --color-ember: #7a1f1a;        /* red accent (save)   */
+  --color-moss: #2e4a1f;         /* green accent (test) */
+  --color-blood: #a03327;        /* remove/error        */
+  --font-medieval: "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(ellipse at 50% -10%, #2c2010 0%, transparent 55%),
+    radial-gradient(ellipse at 15% 110%, #241a0c 0%, transparent 45%),
+    var(--color-stone);
+  color: var(--color-gold);
+  font-family: var(--font-medieval);
+  letter-spacing: 0.02em;
+}
+
+/* faint stone grain over everything */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.05;
+  background-image: repeating-linear-gradient(0deg, transparent 0 2px, #000 2px 3px),
+    repeating-linear-gradient(90deg, transparent 0 3px, #000 3px 4px);
+  z-index: 50;
+}
+
+/* ------------------------------------------------------------------ text */
+.sam-title {
+  font-variant: small-caps;
+  letter-spacing: 0.12em;
+  color: var(--color-gold);
+  text-shadow: 0 2px 3px rgba(0, 0, 0, 0.9), 0 0 18px rgba(212, 168, 75, 0.15);
+}
+
+.sam-subtitle {
+  font-variant: small-caps;
+  letter-spacing: 0.35em;
+  color: var(--color-gold-dim);
+}
+
+/* ------------------------------------------------------------- ornate panel */
+.sam-panel {
+  position: relative;
+  background:
+    linear-gradient(180deg, rgba(255, 235, 180, 0.03) 0%, transparent 18%),
+    var(--color-wood);
+  border: 1px solid #4a3617;
+  outline: 1px solid #0c0803;
+  outline-offset: -4px;
+  box-shadow:
+    inset 0 0 0 2px rgba(0, 0, 0, 0.55),
+    inset 0 0 30px rgba(0, 0, 0, 0.5),
+    0 4px 14px rgba(0, 0, 0, 0.7);
+  border-radius: 4px;
+}
+
+/* gold corner nubs */
+.sam-panel::before,
+.sam-panel::after {
+  content: "";
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  background: linear-gradient(135deg, var(--color-gold-bright), var(--color-gold-dim));
+  transform: rotate(45deg);
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.8);
+  z-index: 1;
+}
+.sam-panel::before { top: -3px; left: -3px; }
+.sam-panel::after { bottom: -3px; right: -3px; }
+
+.sam-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  padding: 0.55rem 1rem 0.5rem;
+  border-bottom: 1px solid #4a3617;
+  background: linear-gradient(180deg, #241a0b, #1e1509);
+  font-variant: small-caps;
+  letter-spacing: 0.18em;
+  font-size: 1.02rem;
+  color: var(--color-gold);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+  border-radius: 4px 4px 0 0;
+}
+
+.sam-ornament {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-gold-dim);
+  font-size: 0.65rem;
+}
+.sam-ornament::before,
+.sam-ornament::after {
+  content: "";
+  display: block;
+  width: 26px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--color-gold-dim));
+}
+.sam-ornament::after {
+  background: linear-gradient(90deg, var(--color-gold-dim), transparent);
+}
+
+/* -------------------------------------------------------------- inset well */
+.sam-well {
+  background: var(--color-wood-deep);
+  border: 1px solid #0e0a04;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.7), 0 1px 0 rgba(212, 168, 75, 0.08);
+  border-radius: 3px;
+}
+
+/* ------------------------------------------------------------------ inputs */
+.sam-input {
+  background: linear-gradient(180deg, #17100a, #1d1409);
+  border: 1px solid #4a3617;
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.8);
+  color: var(--color-parchment);
+  border-radius: 3px;
+  padding: 0.45rem 0.7rem;
+  font-family: inherit;
+  font-size: 0.95rem;
+  outline: none;
+  width: 100%;
+}
+.sam-input:focus {
+  border-color: var(--color-gold-dim);
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.8), 0 0 8px rgba(212, 168, 75, 0.25);
+}
+.sam-input::placeholder { color: #6b5a35; opacity: 0.7; }
+
+select.sam-input { appearance: none; cursor: pointer; }
+
+.sam-label {
+  font-variant: small-caps;
+  letter-spacing: 0.1em;
+  color: var(--color-gold-dim);
+  font-size: 0.85rem;
+}
+
+/* ------------------------------------------------------------------ slider */
+.sam-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background:
+    linear-gradient(var(--color-gold-fill), var(--color-gold-fill)) 0 / var(--fill, 50%) 100% no-repeat,
+    linear-gradient(180deg, #0d0905, #171006);
+  border: 1px solid #0c0803;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.9);
+  outline: none;
+  cursor: pointer;
+}
+.sam-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  background: linear-gradient(135deg, var(--color-gold-bright) 0%, var(--color-gold-fill) 55%, #8a6217 100%);
+  transform: rotate(45deg);
+  border: 1px solid #3a2a08;
+  border-radius: 2px;
+  box-shadow: 0 0 5px rgba(0, 0, 0, 0.9), 0 0 6px rgba(212, 168, 75, 0.35);
+}
+.sam-slider::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  background: linear-gradient(135deg, var(--color-gold-bright) 0%, var(--color-gold-fill) 55%, #8a6217 100%);
+  transform: rotate(45deg);
+  border: 1px solid #3a2a08;
+  border-radius: 2px;
+  box-shadow: 0 0 5px rgba(0, 0, 0, 0.9), 0 0 6px rgba(212, 168, 75, 0.35);
+}
+
+/* value box beside sliders / steppers */
+.sam-valuebox {
+  min-width: 3rem;
+  text-align: center;
+  padding: 0.3rem 0.4rem;
+  background: linear-gradient(180deg, #17100a, #1d1409);
+  border: 1px solid #4a3617;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.8);
+  border-radius: 3px;
+  color: var(--color-parchment);
+  font-size: 0.95rem;
+}
+
+/* ----------------------------------------------------------------- buttons */
+.sam-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1.4rem;
+  background: linear-gradient(180deg, #33260f, #241a0b);
+  border: 1px solid var(--color-gold-dim);
+  outline: 1px solid #0c0803;
+  outline-offset: -3px;
+  border-radius: 3px;
+  color: var(--color-gold);
+  font-family: inherit;
+  font-variant: small-caps;
+  letter-spacing: 0.14em;
+  font-size: 1rem;
+  cursor: pointer;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(240, 205, 122, 0.12);
+  transition: filter 120ms ease, transform 60ms ease;
+  user-select: none;
+}
+.sam-btn:hover { filter: brightness(1.18); }
+.sam-btn:active { transform: translateY(1px); }
+.sam-btn:disabled { opacity: 0.45; cursor: not-allowed; filter: none; }
+
+.sam-btn-red { background: linear-gradient(180deg, #5c1813, #3a0f0c); border-color: #a03327; }
+.sam-btn-green { background: linear-gradient(180deg, #2e4a1f, #1d3013); border-color: #5a7a3a; }
+
+/* small square +/- stepper buttons */
+.sam-step {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, #33260f, #241a0b);
+  border: 1px solid #4a3617;
+  border-radius: 3px;
+  color: var(--color-gold);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.6);
+  user-select: none;
+}
+.sam-step:hover { filter: brightness(1.25); border-color: var(--color-gold-dim); }
+.sam-step:active { transform: translateY(1px); }
+
+.sam-remove {
+  color: #d46a5a;
+  border-color: #5c1813;
+}
+.sam-remove:hover { border-color: var(--color-blood); }
+
+/* --------------------------------------------------------------- nav (left) */
+.sam-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.65rem 1.1rem;
+  color: var(--color-gold-dim);
+  font-variant: small-caps;
+  letter-spacing: 0.1em;
+  font-size: 1.02rem;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: color 120ms ease, background 120ms ease;
+}
+.sam-nav-item:hover { color: var(--color-gold); background: rgba(212, 168, 75, 0.05); }
+.sam-nav-item.active {
+  color: var(--color-gold-bright);
+  background: linear-gradient(90deg, #5c1813, #3a0f0c);
+  border-color: #7a2a1e;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(240, 205, 122, 0.1);
+}
+
+/* --------------------------------------------------------------- scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #4a3617 #17100a;
+}
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: #17100a; }
+*::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #4a3617, #33260f);
+  border-radius: 5px;
+  border: 2px solid #17100a;
+}
+
+/* --------------------------------------------------------------- misc */
+.sam-error { color: #e07a6a; }
+.sam-ok { color: #9dc76a; }
+.sam-mono { font-family: Consolas, "Courier New", monospace; font-size: 0.85rem; }
+
+.sam-divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #4a3617 20%, #4a3617 80%, transparent);
+  margin: 0.6rem 0;
+}

@@ -1,0 +1,143 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://sam-framework.dev/schemas/item.schema.json",
+  "title": "S.A.M Item / Weapon",
+  "description": "Defines a custom item or weapon. S.A.M registers it into the items[] table at a reserved runtime slot (>=5000) and wires up its models, names, category and slot.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "name_identified",
+    "category"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*:[a-z][a-z0-9_]*$",
+      "description": "Unique item id in 'namespace:item' form (e.g. 'darkblade:shadowblade'). S.A.M assigns the runtime numeric item slot (>=5000) automatically."
+    },
+    "name_identified": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Item name shown once identified (e.g. 'Shadowblade')."
+    },
+    "name_unidentified": {
+      "type": "string",
+      "description": "Item name shown before identification (e.g. 'black sword')."
+    },
+    "category": {
+      "enum": [
+        "WEAPON",
+        "ARMOR",
+        "AMULET",
+        "POTION",
+        "SCROLL",
+        "MAGICSTAFF",
+        "RING",
+        "SPELLBOOK",
+        "GEM",
+        "THROWN",
+        "TOOL",
+        "FOOD",
+        "BOOK",
+        "SPELL_CAT",
+        "TOME_SPELL"
+      ],
+      "description": "Item category (Barony Category enum, from items.hpp). Governs how the game classifies the item."
+    },
+    "slot": {
+      "enum": [
+        "EQUIPPABLE_IN_SLOT_WEAPON",
+        "EQUIPPABLE_IN_SLOT_SHIELD",
+        "EQUIPPABLE_IN_SLOT_MASK",
+        "EQUIPPABLE_IN_SLOT_HELM",
+        "EQUIPPABLE_IN_SLOT_GLOVES",
+        "EQUIPPABLE_IN_SLOT_BOOTS",
+        "EQUIPPABLE_IN_SLOT_BREASTPLATE",
+        "EQUIPPABLE_IN_SLOT_CLOAK",
+        "EQUIPPABLE_IN_SLOT_AMULET",
+        "EQUIPPABLE_IN_SLOT_RING",
+        "NO_EQUIP"
+      ],
+      "default": "NO_EQUIP",
+      "description": "Equipment slot the item occupies (Barony ItemEquippableSlot enum). Use NO_EQUIP for non-equippable items."
+    },
+    "weight": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Item weight in Barony weight units."
+    },
+    "gold_value": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Base gold value of the item."
+    },
+    "level": {
+      "type": "integer",
+      "minimum": -1,
+      "description": "Item level for random-generation curves. -1 excludes the item from random generation."
+    },
+    "model": {
+      "type": "string",
+      "description": "Path (relative to the mod folder) to the third-person/world .vox model other players see."
+    },
+    "model_fp": {
+      "type": "string",
+      "description": "Path to the first-person .vox model the wielder sees. If omitted, S.A.M falls back to the world model."
+    },
+    "icon": {
+      "type": "string",
+      "description": "Path to the 2D inventory icon image for the item."
+    },
+    "attributes": {
+      "type": "object",
+      "description": "Named integer attributes/effects for the item (maps to ItemGeneric.attributes). Keys are attribute names, values are integers.",
+      "additionalProperties": {
+        "type": "integer",
+        "description": "An integer attribute value."
+      }
+    },
+    "on_hit_effect": {
+      "type": "string",
+      "description": "Status effect applied on a successful hit (e.g. an EFF_ effect name from stat.hpp), used by the effect/plugin system."
+    },
+    "on_hit_chance": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Probability (0.0-1.0) that on_hit_effect triggers on a hit."
+    },
+    "stackable": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether multiple copies stack into one inventory slot."
+    },
+    "magic_level": {
+      "type": "integer",
+      "description": "Magic/enchantment level of the item (affects value and behavior)."
+    }
+  },
+  "examples": [
+    {
+      "id": "darkblade:shadowblade",
+      "name_identified": "Shadowblade",
+      "name_unidentified": "black sword",
+      "category": "WEAPON",
+      "slot": "EQUIPPABLE_IN_SLOT_WEAPON",
+      "weight": 3,
+      "gold_value": 400,
+      "level": 6,
+      "model": "models/shadowblade.vox",
+      "model_fp": "models/shadowblade_fp.vox",
+      "icon": "icons/shadowblade.png",
+      "attributes": {
+        "ATK": 4,
+        "shadow_damage": 5
+      },
+      "on_hit_effect": "EFF_BLIND",
+      "on_hit_chance": 0.25,
+      "stackable": false,
+      "magic_level": 2
+    }
+  ]
+}

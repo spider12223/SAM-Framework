@@ -1,0 +1,9 @@
+# Normalize line endings so the repo is consistent across Windows/macOS/Linux
+# (the Pages build runs on Ubuntu). Text files use LF in the repo.
+* text=auto eol=lf
+
+# Binary assets: never touch line endings
+*.png binary
+*.vox binary
+*.zip binary
+*.ico binary

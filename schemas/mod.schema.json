@@ -1,0 +1,99 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://sam-framework.dev/schemas/mod.schema.json",
+  "title": "S.A.M Mod Manifest",
+  "description": "Manifest (mod.json) for a Support-All-Mods content pack. Declares the mod's identity, its S.A.M framework requirements, and the class/item/plugin files it ships. S.A.M reads this at launch to load the mod.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "namespace",
+    "name",
+    "version",
+    "framework_min_version"
+  ],
+  "properties": {
+    "namespace": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "Unique lowercase mod namespace. Every class and item id in this mod is prefixed with it (e.g. 'darkblade' -> 'darkblade:assassin')."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable mod name shown to players and in the workshop listing."
+    },
+    "author": {
+      "type": "string",
+      "description": "Name or handle of the mod author."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "This mod's version in MAJOR.MINOR.PATCH form (e.g. '1.0.0')."
+    },
+    "framework_min_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "Minimum S.A.M framework version required, in MAJOR.MINOR.PATCH form. S.A.M skips this mod (and logs an error) if its own version is lower."
+    },
+    "dependencies": {
+      "type": "array",
+      "description": "Namespaces of other S.A.M mods that must load before this one. Optionally pin a minimum version with 'namespace@1.0.0'.",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_]*(@[0-9]+\\.[0-9]+\\.[0-9]+)?$",
+        "description": "A dependency namespace, optionally version-pinned as 'namespace@MAJOR.MINOR.PATCH'."
+      }
+    },
+    "classes": {
+      "type": "array",
+      "description": "Relative paths (from the mod folder) to class definition JSON files provided by this mod.",
+      "items": {
+        "type": "string",
+        "pattern": "\\.json$",
+        "description": "Path to a class JSON file conforming to class.schema.json."
+      }
+    },
+    "items": {
+      "type": "array",
+      "description": "Relative paths (from the mod folder) to item/weapon definition JSON files provided by this mod.",
+      "items": {
+        "type": "string",
+        "pattern": "\\.json$",
+        "description": "Path to an item JSON file conforming to item.schema.json."
+      }
+    },
+    "plugins": {
+      "type": "array",
+      "description": "Relative paths to compiled plugin .dll files (advanced; loaded by the S.A.M plugin system). Most mods leave this empty.",
+      "items": {
+        "type": "string",
+        "pattern": "\\.dll$",
+        "description": "Path to a compiled S.A.M plugin DLL."
+      }
+    },
+    "description": {
+      "type": "string",
+      "description": "Short description of what the mod adds, shown to players."
+    }
+  },
+  "examples": [
+    {
+      "namespace": "darkblade",
+      "name": "Darkblade Pack",
+      "author": "coolmodder",
+      "version": "1.0.0",
+      "framework_min_version": "0.1.0",
+      "dependencies": [],
+      "classes": [
+        "classes/assassin.json"
+      ],
+      "items": [
+        "items/shadowblade.json",
+        "items/smoke_bomb.json"
+      ],
+      "plugins": [],
+      "description": "Adds the Assassin class and a set of shadow-themed weapons."
+    }
+  ]
+}
