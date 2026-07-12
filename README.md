@@ -19,15 +19,17 @@
 
 ## Install
 
-1. Own and install **Barony** on Steam.
-2. Download the latest **S.A.M build** from the [Releases page](https://github.com/spider12223/SAM-Framework/releases).
-3. Back up your existing `barony.exe`, then drop the S.A.M `barony.exe` into your Barony install folder, replacing it:
-   ```
-   …/steamapps/common/Barony/barony.exe
-   ```
-4. Launch Barony as usual. S.A.M initializes automatically and writes a log to `sam_log.txt` in the Barony folder.
+S.A.M is a **patched Barony executable**, so you need to own **Barony on Steam**.
 
-To go back to vanilla, verify the game files through Steam (or restore your backup).
+- **Via Steam Workshop** *(intended channel, once published)* — subscribe to S.A.M on the Workshop; it delivers the patched build and keeps it in step with the mods that depend on it.
+- **Build it yourself** *(available now)* — follow [Build from source](#build-from-source-contributors) to produce a patched `barony.exe` against your own copy of Barony, back up your existing one, and drop the S.A.M build into:
+  ```
+  …/steamapps/common/Barony/barony.exe
+  ```
+
+Launch Barony as usual — S.A.M initializes automatically and writes `sam_log.txt` to the Barony folder. To go back to vanilla, verify the game files through Steam (or restore your backup).
+
+> **This repository ships S.A.M's source, schemas, GUI and docs — not a prebuilt game binary.** Barony and any patched build of it belong to [Turning Wheel LLC](https://github.com/TurningWheel/Barony) and aren't ours to redistribute; S.A.M is built against a copy of Barony you already own.
 
 ---
 

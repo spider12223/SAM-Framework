@@ -20,7 +20,7 @@ First public build of **S.A.M (Support All Mods)** — a patched Barony that loa
 
 ## Install
 
-You need **Barony on Steam**. Back up your `barony.exe`, then drop this build's `barony.exe` into `…/steamapps/common/Barony/`. See the [README](https://github.com/spider12223/SAM-Framework#install) for details.
+This is a **source release** — it does not ship a prebuilt game binary (a patched Barony exe links proprietary middleware and is a derivative of the paid game, which isn't ours to redistribute). You need **Barony on Steam**, then either subscribe to S.A.M on the Steam Workshop (once published) or **build it from source** against your own copy of Barony. See the [README](https://github.com/spider12223/SAM-Framework#install) for details.
 
 ## Known limitations
 
