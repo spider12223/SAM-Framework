@@ -22,10 +22,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Pages (auto-enable on first run)
-        uses: actions/configure-pages@v5
-        with:
-          enablement: true
+      # NOTE: enable Pages once under Settings → Pages → Source: "GitHub Actions".
+      # (The base path is hardcoded to /SAM-Framework/ in vite.config.js, so no
+      # configure-pages step is needed here.)
       - uses: actions/setup-node@v4
         with:
           node-version: 20
