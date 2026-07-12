@@ -8,6 +8,7 @@
 
 #include "sam_workshop.hpp"
 #include "sam_logger.hpp"
+#include "sam_errors.hpp"
 #include "nlohmann/json.hpp"
 
 #include <cstdio>   // sscanf
@@ -88,18 +89,82 @@ static std::string dependencyNamespace(const std::string& dep)
 	return (at == std::string::npos) ? dep : dep.substr(0, at);
 }
 
+// Strip a leading 'v'/'V' from a version string ("v5.0.2" -> "5.0.2").
+static std::string stripVersionPrefix(const std::string& v)
+{
+	if ( !v.empty() && (v[0] == 'v' || v[0] == 'V') )
+	{
+		return v.substr(1);
+	}
+	return v;
+}
+
+// Validate a mod's declared version windows against the current S.A.M + Barony
+// versions. Philosophy (P3): NEVER hard-block on a version mismatch — warn and
+// let the player decide. The ONE exception is an explicit
+// `incompatible_with_barony_version` that matches the running game, which returns
+// false (skip). Missing/unknown versions are simply not checked.
+static bool checkVersions(const SAMModManifest& m, const std::string& baronyVersionRaw)
+{
+	const std::string label = "[" + m.ns + " v" + m.version + "]";
+
+	// --- S.A.M framework version window ---
+	if ( !m.frameworkMinVersion.empty() && !versionAtLeast(SAM_FRAMEWORK_VERSION, m.frameworkMinVersion) )
+	{
+		SAM_WARN(MOD, "Mod " + label + " requires S.A.M >= " + m.frameworkMinVersion
+			+ ", you have " + SAM_FRAMEWORK_VERSION + ". Loaded anyway (may be unstable) — check for a mod update.");
+	}
+	if ( !m.frameworkMaxVersion.empty() && !versionAtLeast(m.frameworkMaxVersion, SAM_FRAMEWORK_VERSION) )
+	{
+		SAM_WARN(MOD, "Mod " + label + " was built for S.A.M <= " + m.frameworkMaxVersion
+			+ ", you have " + SAM_FRAMEWORK_VERSION + ". Loaded anyway (may be unstable) — check for a mod update.");
+	}
+
+	// --- Barony version window (only if we know the running game version) ---
+	const std::string bv = stripVersionPrefix(baronyVersionRaw);
+	if ( !bv.empty() )
+	{
+		if ( !m.baronyMinVersion.empty() && !versionAtLeast(bv, m.baronyMinVersion) )
+		{
+			SAM_WARN(MOD, "Mod " + label + " requires Barony " + m.baronyMinVersion
+				+ "+, you have " + bv + ". Loaded anyway (may be unstable) — check for a mod update.");
+		}
+		if ( !m.baronyMaxVersion.empty() && !versionAtLeast(m.baronyMaxVersion, bv) )
+		{
+			SAM_WARN(MOD, "Mod " + label + " was built for Barony <= " + m.baronyMaxVersion
+				+ ", you have " + bv + ". Loaded anyway (may be unstable) — check for a mod update.");
+		}
+		if ( !m.incompatibleWithBaronyVersion.empty()
+			&& stripVersionPrefix(m.incompatibleWithBaronyVersion) == bv )
+		{
+			SAM_ERROR(MOD, "Mod " + label + " declares itself INCOMPATIBLE with Barony " + bv
+				+ " — NOT loaded (explicit incompatibility).");
+			return false;
+		}
+	}
+	return true;
+}
+
 // Parse one mod.json document into a manifest. Returns false (and logs) if the
 // JSON is malformed or a required field is missing.
 static bool parseManifest(const std::string& jsonText, const std::string& modPath,
 	const std::string& displayName, SAMModManifest& out)
 {
-	// allow_exceptions = false: json::parse returns a discarded value on error
-	// instead of throwing, so this is safe regardless of the build's exception
-	// settings.
-	json j = json::parse(jsonText, nullptr, /*allow_exceptions=*/false);
-	if ( j.is_discarded() || !j.is_object() )
+	const std::string fileLabel = SAMErrors::displayFile(displayName, "mod.json");
+	json j;
+	try
 	{
-		SAM_ERROR(MOD, "Invalid mod.json (not valid JSON object) in: " + modPath);
+		j = json::parse(jsonText);
+	}
+	catch ( const json::parse_error& e )
+	{
+		SAMErrors::reportSyntax(MOD, fileLabel, jsonText, e.what(), e.byte, "mod not loaded.");
+		return false;
+	}
+	if ( !j.is_object() )
+	{
+		SAMErrors::reportSemantic(MOD, fileLabel, "(root)", "", "not a JSON object",
+			"a JSON object: { ... }", "wrap the file contents in { }", "mod not loaded.");
 		return false;
 	}
 
@@ -132,10 +197,15 @@ static bool parseManifest(const std::string& jsonText, const std::string& modPat
 	out.author = getString("author");
 	out.version = getString("version");
 	out.frameworkMinVersion = getString("framework_min_version");
+	out.frameworkMaxVersion = getString("framework_max_version");
+	out.baronyMinVersion = getString("barony_min_version");
+	out.baronyMaxVersion = getString("barony_max_version");
+	out.incompatibleWithBaronyVersion = getString("incompatible_with_barony_version");
 	out.description = getString("description");
 	out.dependencies = getStringArray("dependencies");
 	out.classes = getStringArray("classes");
 	out.items = getStringArray("items");
+	out.patches = getStringArray("patches");
 	out.plugins = getStringArray("plugins");
 	out.modPath = modPath;
 	out.displayName = displayName;
@@ -143,22 +213,26 @@ static bool parseManifest(const std::string& jsonText, const std::string& modPat
 	// Required fields (mirrors mod.schema.json "required").
 	if ( out.ns.empty() )
 	{
-		SAM_ERROR(MOD, "mod.json missing required 'namespace' in: " + modPath);
+		SAMErrors::reportSemantic(MOD, fileLabel, "/namespace", "", "missing (required)",
+			"a lowercase id, e.g. \"darkblade\"", "add a \"namespace\" field", "mod not loaded.");
 		return false;
 	}
 	if ( out.name.empty() )
 	{
-		SAM_ERROR(MOD, "mod.json missing required 'name' [" + out.ns + "] in: " + modPath);
+		SAMErrors::reportSemantic(MOD, fileLabel, "/name", "", "missing (required)",
+			"a display name, e.g. \"Darkblade Pack\"", "add a \"name\" field", "mod not loaded.");
 		return false;
 	}
 	if ( out.version.empty() )
 	{
-		SAM_ERROR(MOD, "mod.json missing required 'version' [" + out.ns + "] in: " + modPath);
+		SAMErrors::reportSemantic(MOD, fileLabel, "/version", "", "missing (required)",
+			"a MAJOR.MINOR.PATCH string, e.g. \"1.0.0\"", "add a \"version\" field", "mod not loaded.");
 		return false;
 	}
 	if ( out.frameworkMinVersion.empty() )
 	{
-		SAM_ERROR(MOD, "mod.json missing required 'framework_min_version' [" + out.ns + "] in: " + modPath);
+		SAMErrors::reportSemantic(MOD, fileLabel, "/framework_min_version", "", "missing (required)",
+			"the minimum S.A.M version, e.g. \"0.1.0\"", "add a \"framework_min_version\" field", "mod not loaded.");
 		return false;
 	}
 	return true;
@@ -232,7 +306,8 @@ static std::vector<SAMModManifest> sortByDependencies(const std::vector<SAMModMa
 -------------------------------------------------------------------------------*/
 
 std::vector<SAMModManifest> SAMWorkshop::scan(
-	const std::vector<std::pair<std::string, std::string>>& mountedPaths)
+	const std::vector<std::pair<std::string, std::string>>& mountedPaths,
+	const std::string& baronyVersion)
 {
 	// Fully clear and rebuild — never append (loadMods() fires on every Play).
 	clear();
@@ -258,10 +333,10 @@ std::vector<SAMModManifest> SAMWorkshop::scan(
 			continue; // parseManifest already logged the reason
 		}
 
-		if ( !versionAtLeast(SAM_FRAMEWORK_VERSION, manifest.frameworkMinVersion) )
+		// Version compatibility — warns on a mismatch (loads anyway), and only
+		// skips a mod that declares an explicit incompatibility with this Barony.
+		if ( !checkVersions(manifest, baronyVersion) )
 		{
-			SAM_ERROR(MOD, "Skipping '" + manifest.name + "' [" + manifest.ns + "]: requires S.A.M >= "
-				+ manifest.frameworkMinVersion + " but this build is " + SAM_FRAMEWORK_VERSION + ".");
 			continue;
 		}
 

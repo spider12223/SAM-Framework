@@ -1,0 +1,21 @@
+{
+  "//": "S.A.M Framework — associates each mod JSON with its schema so VS Code gives autocomplete + inline validation as you type. Copy this file into your own mod folder's .vscode/ (or add a \"$schema\" field to each JSON) to get the same in your mod project. No extension needed — VS Code's built-in JSON support handles it.",
+  "json.schemas": [
+    {
+      "fileMatch": ["**/mod.json"],
+      "url": "https://spider12223.github.io/SAM-Framework/schemas/mod.schema.json"
+    },
+    {
+      "fileMatch": ["**/classes/*.json"],
+      "url": "https://spider12223.github.io/SAM-Framework/schemas/class.schema.json"
+    },
+    {
+      "fileMatch": ["**/items/*.json"],
+      "url": "https://spider12223.github.io/SAM-Framework/schemas/item.schema.json"
+    },
+    {
+      "fileMatch": ["**/patches/*.json"],
+      "url": "https://spider12223.github.io/SAM-Framework/schemas/patch.schema.json"
+    }
+  ]
+}

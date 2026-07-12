@@ -19,6 +19,7 @@
 #include "sam_items.hpp"
 #include "sam_workshop.hpp"
 #include "sam_logger.hpp"
+#include "sam_errors.hpp"
 #include "nlohmann/json.hpp"
 
 #include "main.hpp"    // list_t/string_t, stringCopy, stringDeconstructor, list_* helpers
@@ -60,6 +61,32 @@ static std::string joinPath(const std::string& dir, const std::string& file)
 	}
 	const char back = dir.back();
 	return (back == '/' || back == '\\') ? (dir + file) : (dir + "/" + file);
+}
+
+// Valid enum-name lists (for validation + "did you mean?" suggestions). Kept in
+// step with categoryFromName/slotFromName below and with item.schema.json.
+static const std::vector<std::string>& validCategoryNames()
+{
+	static const std::vector<std::string> v = {
+		"WEAPON", "ARMOR", "AMULET", "POTION", "SCROLL", "MAGICSTAFF", "RING",
+		"SPELLBOOK", "GEM", "THROWN", "TOOL", "FOOD", "BOOK", "SPELL_CAT", "TOME_SPELL"
+	};
+	return v;
+}
+static const std::vector<std::string>& validSlotNames()
+{
+	static const std::vector<std::string> v = {
+		"EQUIPPABLE_IN_SLOT_WEAPON", "EQUIPPABLE_IN_SLOT_SHIELD", "EQUIPPABLE_IN_SLOT_MASK",
+		"EQUIPPABLE_IN_SLOT_HELM", "EQUIPPABLE_IN_SLOT_GLOVES", "EQUIPPABLE_IN_SLOT_BOOTS",
+		"EQUIPPABLE_IN_SLOT_BREASTPLATE", "EQUIPPABLE_IN_SLOT_CLOAK", "EQUIPPABLE_IN_SLOT_AMULET",
+		"EQUIPPABLE_IN_SLOT_RING", "NO_EQUIP"
+	};
+	return v;
+}
+static bool listContains(const std::vector<std::string>& v, const std::string& s)
+{
+	for ( const std::string& x : v ) { if ( x == s ) { return true; } }
+	return false;
 }
 
 static Category categoryFromName(const std::string& n)
@@ -211,10 +238,21 @@ void SAMItems::loadFromManifest(const SAMModManifest& manifest)
 			continue;
 		}
 
-		json j = json::parse(text, nullptr, /*allow_exceptions=*/false);
-		if ( j.is_discarded() || !j.is_object() )
+		const std::string fileLabel = SAMErrors::displayFile(manifest.ns, relPath);
+		json j;
+		try
 		{
-			SAM_ERROR(MOD, "Invalid item JSON (not a JSON object): " + path);
+			j = json::parse(text);
+		}
+		catch ( const json::parse_error& e )
+		{
+			SAMErrors::reportSyntax(MOD, fileLabel, text, e.what(), e.byte, "item not loaded.");
+			continue;
+		}
+		if ( !j.is_object() )
+		{
+			SAMErrors::reportSemantic(MOD, fileLabel, "(root)", "", "not a JSON object",
+				"a JSON object: { ... }", "wrap the file contents in { }", "item not loaded.");
 			continue;
 		}
 
@@ -243,23 +281,47 @@ void SAMItems::loadFromManifest(const SAMModManifest& manifest)
 
 		if ( def.id.empty() )
 		{
-			SAM_ERROR(MOD, "Item missing required 'id' in: " + path);
+			SAMErrors::reportSemantic(MOD, fileLabel, "/id", "", "missing (required)",
+				"an id in \"namespace:item\" form, e.g. \"" + manifest.ns + ":shadowblade\"",
+				"add an \"id\" field", "item not loaded.");
 			continue;
 		}
 		if ( def.nameIdentified.empty() )
 		{
-			SAM_ERROR(MOD, "Item [" + def.id + "] missing required 'name_identified' in: " + path);
+			SAMErrors::reportSemantic(MOD, fileLabel, "/name_identified", "", "missing (required)",
+				"the identified name, e.g. \"Shadowblade\"", "add a \"name_identified\" field",
+				"item [" + def.id + "] not loaded.");
 			continue;
 		}
 		if ( def.category.empty() )
 		{
-			SAM_ERROR(MOD, "Item [" + def.id + "] missing required 'category' in: " + path);
+			SAMErrors::reportSemantic(MOD, fileLabel, "/category", "", "missing (required)",
+				"one of the 15 Category names (WEAPON, ARMOR, POTION, ...)", "add a \"category\" field",
+				"item [" + def.id + "] not loaded.");
 			continue;
+		}
+		// Category present but not a known enum name → warn + suggest, then fall back.
+		if ( !listContains(validCategoryNames(), def.category) )
+		{
+			const std::string sug = SAMErrors::suggest(def.category, validCategoryNames());
+			SAMErrors::reportSemantic(MOD, fileLabel, "/category", def.category, "not a known category",
+				"one of the 15 Category names (see item.schema.json)",
+				sug.empty() ? "" : ("did you mean \"" + sug + "\"?"),
+				"item [" + def.id + "] treated as WEAPON.", /*warn=*/true);
 		}
 
 		def.nameUnidentified = getStr("name_unidentified");
 		def.slot = getStr("slot");
 		if ( def.slot.empty() ) { def.slot = "NO_EQUIP"; }
+		// Slot present but not a known enum name → warn + suggest, then fall back.
+		if ( !listContains(validSlotNames(), def.slot) )
+		{
+			const std::string sug = SAMErrors::suggest(def.slot, validSlotNames());
+			SAMErrors::reportSemantic(MOD, fileLabel, "/slot", def.slot, "not a known equip slot",
+				"one of the 11 ItemEquippableSlot names, or omit for NO_EQUIP",
+				sug.empty() ? "" : ("did you mean \"" + sug + "\"?"),
+				"item [" + def.id + "] slot treated as NO_EQUIP.", /*warn=*/true);
+		}
 		def.weight = getInt("weight", 0);
 		def.goldValue = getInt("gold_value", 0);
 		def.level = getInt("level", -1);

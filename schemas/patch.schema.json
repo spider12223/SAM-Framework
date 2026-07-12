@@ -1,0 +1,70 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://sam-framework.dev/schemas/patch.schema.json",
+  "title": "S.A.M Layered Patch",
+  "description": "An additive patch that modifies an existing data file (a vanilla file like 'items/items.json', or another mod's file) WITHOUT replacing it. S.A.M reads the currently-resolved target, applies every mod's operations in load order (stacking, not overwriting), and writes the merged result to a private overlay it mounts at high priority. If two mods edit the same field, last-loaded wins and S.A.M logs a warning. A target that doesn't exist is logged and skipped — never a crash.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "target",
+    "operations"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Optional. URL of this JSON Schema, so editors give autocomplete + validation as you type. Ignored by S.A.M itself."
+    },
+    "target": {
+      "type": "string",
+      "description": "Logical path of the data file to patch, as Barony reads it, e.g. 'items/items.json' or 'data/gameplaymodifiers.json'. Must be a file Barony loads via its data-file system.",
+      "examples": [
+        "items/items.json"
+      ]
+    },
+    "operations": {
+      "type": "array",
+      "description": "Operations applied in order to the target's JSON. Later operations see the result of earlier ones (and of earlier-loaded mods).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "op",
+          "path"
+        ],
+        "properties": {
+          "op": {
+            "enum": [
+              "edit_field",
+              "add_entry",
+              "remove_field",
+              "multiply_field"
+            ],
+            "description": "edit_field: set an EXISTING field to 'value' (never replaces a whole entry; a missing path is warned + skipped, catching typos). add_entry: set/create the field at 'path' to 'value' (adds a new key). remove_field: delete the field at 'path'. multiply_field: multiply the numeric field at 'path' by the numeric 'value' (integer fields stay integers) — handy for balance mods."
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Dot-separated path into the target JSON, matching the file's real structure. For items/items.json the item keys are LOWERCASE internal names and fields use snake_case, e.g. 'items.iron_sword.gold_value' or 'items.wooden_shield.weight_value'. (Keys are looked up literally; use the names exactly as they appear in the file.)",
+            "examples": [
+              "items.iron_sword.gold_value",
+              "items.wooden_shield.stats.AC"
+            ]
+          },
+          "value": {
+            "description": "The new value (edit_field/add_entry) or the numeric factor (multiply_field). Omitted for remove_field. May be any JSON type for edit_field/add_entry; must be a number for multiply_field."
+          }
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "target": "items/items.json",
+      "operations": [
+        { "op": "edit_field", "path": "items.iron_sword.gold_value", "value": 150 },
+        { "op": "multiply_field", "path": "items.wooden_shield.weight_value", "value": 0.5 },
+        { "op": "edit_field", "path": "items.wooden_shield.stats.AC", "value": 2 }
+      ]
+    }
+  ]
+}

@@ -70,17 +70,30 @@ my_mod/
 
 Multiplayer: S.A.M sends a mod fingerprint from host to client on join and **warns** (never hard-blocks) when the two don't match, so mismatches are obvious before a run.
 
+New to this? Follow **[Getting Started →](docs/getting-started.md)** to build a class + item in ~5 minutes.
+
+### Autocomplete as you type
+
+S.A.M publishes its schemas so **VS Code validates and autocompletes your JSON** — every field's valid options in a dropdown, red squiggles on typos before you ever launch. No extension needed. Either add a `$schema` line to each file:
+
+```json
+{ "$schema": "https://spider12223.github.io/SAM-Framework/schemas/class.schema.json", "id": "mymod:myclass", ... }
+```
+
+…or copy this repo's [`.vscode/settings.json`](.vscode/settings.json) into your mod folder to map every file automatically. The [Mod Builder](https://spider12223.github.io/SAM-Framework/) stamps `$schema` into everything it exports, so exported mods get this for free.
+
 ---
 
 ## Schema reference
 
-All content is validated against three JSON Schemas (draft-07), which are the single source of truth for both the framework and the GUI:
+All content is validated against JSON Schemas (draft-07), which are the single source of truth for the framework, the GUI, and editor autocomplete:
 
 | Schema | Describes |
 |---|---|
 | [`mod.schema.json`](schemas/mod.schema.json) | The `mod.json` manifest |
 | [`class.schema.json`](schemas/class.schema.json) | A custom class |
 | [`item.schema.json`](schemas/item.schema.json) | A custom item / weapon |
+| [`patch.schema.json`](schemas/patch.schema.json) | A layered patch to an existing data file |
 
 A human-readable, always-in-sync field reference is generated from these: **[Schema Reference →](https://spider12223.github.io/SAM-Framework/docs/schema-reference.html)** (or open [`docs/schema-reference.html`](docs/schema-reference.html) locally).
 

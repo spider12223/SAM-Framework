@@ -24,7 +24,8 @@ public:
 	// Scan + register all S.A.M mods from the mounted mod paths, logging each
 	// mod found and a summary. Fully rebuilds state on every call (Barony calls
 	// this every time the player starts a modded game).
-	static void load(const std::vector<std::pair<std::string, std::string>>& mountedPaths);
+	static void load(const std::vector<std::pair<std::string, std::string>>& mountedPaths,
+		const std::string& baronyVersion = "");
 
 	// Tear down all S.A.M state back to vanilla (called from Mods::unloadMods()).
 	static void unload();

@@ -32,11 +32,16 @@ struct SAMModManifest
 	std::string author;               // author/handle
 	std::string version;              // MAJOR.MINOR.PATCH
 	std::string frameworkMinVersion;  // minimum S.A.M version required
+	std::string frameworkMaxVersion;  // maximum S.A.M version targeted (optional)
+	std::string baronyMinVersion;     // minimum Barony version targeted (optional)
+	std::string baronyMaxVersion;     // maximum Barony version targeted (optional)
+	std::string incompatibleWithBaronyVersion; // exact Barony version to hard-block on (optional)
 	std::string description;          // short description
 
 	std::vector<std::string> dependencies; // other namespaces ("ns" or "ns@x.y.z")
 	std::vector<std::string> classes;      // relative paths to class JSON files
 	std::vector<std::string> items;        // relative paths to item JSON files
+	std::vector<std::string> patches;      // relative paths to patch JSON files
 	std::vector<std::string> plugins;      // relative paths to plugin .dll files
 
 	std::string modPath;      // absolute directory this mod was loaded from
@@ -54,8 +59,12 @@ public:
 	// This FULLY CLEARS and rebuilds the registry on every call — it never
 	// appends — because Barony calls Mods::loadMods() every time the player
 	// starts a modded game, not once per session.
+	// `baronyVersion` is the running Barony version string (e.g. "v5.0.2", passed
+	// from the game hook); used to warn on barony_min/max_version mismatches. Pass
+	// "" (the default) when the game version is unknown/irrelevant (e.g. tests).
 	static std::vector<SAMModManifest> scan(
-		const std::vector<std::pair<std::string, std::string>>& mountedPaths);
+		const std::vector<std::pair<std::string, std::string>>& mountedPaths,
+		const std::string& baronyVersion = "");
 
 	// Wipes the manifest registry (used by the unload hook).
 	static void clear();

@@ -20,7 +20,9 @@
 
 #include "sam_classes.hpp"
 #include "sam_workshop.hpp"
+#include "sam_items.hpp"     // SAMItems::itemIdForIdString (custom-item validation)
 #include "sam_logger.hpp"
+#include "sam_errors.hpp"
 #include "nlohmann/json.hpp"
 
 #include <fstream>
@@ -96,22 +98,40 @@ static bool fileExists(const std::string& path)
 /*-------------------------------------------------------------------------------
 	SAMClasses::loadFromManifest
 -------------------------------------------------------------------------------*/
+#ifndef EDITOR
+// Game-only: validate a parsed class's enum-name references (item types, skills,
+// spells, statuses, stat rolls) against the real game data, emitting rich
+// "did you mean?" diagnostics. Defined below, near the other game helpers.
+static void validateClassSemantics(const SAMClassDef& def, const std::string& fileLabel);
+#endif
+
 void SAMClasses::loadFromManifest(const SAMModManifest& manifest)
 {
 	for ( const std::string& relPath : manifest.classes )
 	{
 		const std::string path = joinPath(manifest.modPath, relPath);
+		const std::string fileLabel = SAMErrors::displayFile(manifest.ns, relPath);
 		std::string text;
 		if ( !readWholeFile(path, text) )
 		{
-			SAM_ERROR(MOD, "Class file not found: " + path + " (declared by [" + manifest.ns + "])");
+			SAM_ERROR(MOD, "Class file not found: " + path + " (declared by [" + manifest.ns + "]) — class not loaded.");
 			continue;
 		}
 
-		json j = json::parse(text, nullptr, /*allow_exceptions=*/false);
-		if ( j.is_discarded() || !j.is_object() )
+		json j;
+		try
 		{
-			SAM_ERROR(MOD, "Invalid class JSON (not a JSON object): " + path);
+			j = json::parse(text);
+		}
+		catch ( const json::parse_error& e )
+		{
+			SAMErrors::reportSyntax(MOD, fileLabel, text, e.what(), e.byte, "class not loaded.");
+			continue;
+		}
+		if ( !j.is_object() )
+		{
+			SAMErrors::reportSemantic(MOD, fileLabel, "(root)", "", "not a JSON object",
+				"a JSON object: { ... }", "wrap the file contents in { }", "class not loaded.");
 			continue;
 		}
 
@@ -137,12 +157,16 @@ void SAMClasses::loadFromManifest(const SAMModManifest& manifest)
 
 		if ( def.id.empty() )
 		{
-			SAM_ERROR(MOD, "Class missing required 'id' in: " + path);
+			SAMErrors::reportSemantic(MOD, fileLabel, "/id", "", "missing (required)",
+				"an id in \"namespace:class\" form, e.g. \"" + manifest.ns + ":assassin\"",
+				"add an \"id\" field", "class not loaded.");
 			continue;
 		}
 		if ( def.name.empty() )
 		{
-			SAM_ERROR(MOD, "Class [" + def.id + "] missing required 'name' in: " + path);
+			SAMErrors::reportSemantic(MOD, fileLabel, "/name", "", "missing (required)",
+				"the class's display name, e.g. \"Assassin\"", "add a \"name\" field",
+				"class [" + def.id + "] not loaded.");
 			continue;
 		}
 
@@ -245,6 +269,12 @@ void SAMClasses::loadFromManifest(const SAMModManifest& manifest)
 		}
 
 		def.gold = getInt(j, "gold", 0);
+
+#ifndef EDITOR
+		// Load-time validation of enum-name references, with "did you mean?" hints.
+		// Warns (never blocks) — a bad reference just isn't applied at play time.
+		validateClassSemantics(def, fileLabel);
+#endif
 
 		def.numericId = s_nextClassId++;
 		s_registry[def.numericId] = def;
@@ -377,6 +407,119 @@ static int spellIdFromName(const std::string& n)
 		}
 	}
 	return -1;
+}
+
+/*-------------------------------------------------------------------------------
+	Load-time enum validation + "did you mean?" diagnostics (game build only)
+-------------------------------------------------------------------------------*/
+static std::string toUpper(std::string s)
+{
+	for ( char& c : s ) { c = static_cast<char>(std::toupper(static_cast<unsigned char>(c))); }
+	return s;
+}
+
+// Uppercased vanilla item names (schema convention), built once for suggestions.
+static const std::vector<std::string>& validItemTypeNames()
+{
+	static std::vector<std::string> v;
+	if ( v.empty() )
+	{
+		for ( const auto& kv : ItemTooltips.itemNameStringToItemID ) { v.push_back(toUpper(kv.first)); }
+	}
+	return v;
+}
+static const std::vector<std::string>& validSpellNames()
+{
+	static std::vector<std::string> v;
+	if ( v.empty() )
+	{
+		for ( const auto& kv : ItemTooltips.spellItems ) { v.push_back(toUpper(kv.second.internalName)); }
+	}
+	return v;
+}
+static const std::vector<std::string> kSkillNames = {
+	"PRO_LOCKPICKING", "PRO_STEALTH", "PRO_TRADING", "PRO_APPRAISAL", "PRO_THAUMATURGY",
+	"PRO_LEADERSHIP", "PRO_MYSTICISM", "PRO_SORCERY", "PRO_RANGED", "PRO_SWORD", "PRO_MACE",
+	"PRO_AXE", "PRO_POLEARM", "PRO_SHIELD", "PRO_UNARMED", "PRO_ALCHEMY"
+};
+static const std::vector<std::string> kStatusNames = { "BROKEN", "DECREPIT", "WORN", "SERVICABLE", "EXCELLENT" };
+static const std::vector<std::string> kRollNames = { "STR", "DEX", "CON", "INT", "PER", "CHR" };
+
+static bool listHas(const std::vector<std::string>& v, const std::string& s)
+{
+	for ( const std::string& x : v ) { if ( x == s ) { return true; } }
+	return false;
+}
+
+static void validateClassSemantics(const SAMClassDef& def, const std::string& fileLabel)
+{
+	// Skills — must be a PRO_ name.
+	for ( const auto& kv : def.skills )
+	{
+		if ( proIdFromName(kv.first) < 0 )
+		{
+			const std::string sug = SAMErrors::suggest(kv.first, kSkillNames);
+			SAMErrors::reportSemantic(MOD, fileLabel, "/skills/" + kv.first, kv.first, "not a known skill",
+				"a PRO_ skill name (16 total; see class.schema.json)",
+				sug.empty() ? "" : ("did you mean \"" + sug + "\"?"),
+				"class [" + def.id + "] skips this skill.", /*warn=*/true);
+		}
+	}
+	// Starting items — must be a vanilla ItemType or a loaded custom "ns:item".
+	for ( size_t i = 0; i < def.startingItems.size(); ++i )
+	{
+		const SAMStartingItem& si = def.startingItems[i];
+		ItemType t;
+		const bool isCustomRef = si.type.find(':') != std::string::npos;
+		const bool vanilla = itemTypeFromName(si.type, t);
+		const bool custom = isCustomRef && (SAMItems::itemIdForIdString(si.type) >= 0);
+		if ( !vanilla && !custom )
+		{
+			const std::string sug = isCustomRef ? "" : SAMErrors::suggest(si.type, validItemTypeNames());
+			SAMErrors::reportSemantic(MOD, fileLabel,
+				"/starting_items/" + std::to_string(i) + "/type", si.type,
+				isCustomRef ? "custom item not found (is that mod loaded?)" : "not a known ItemType",
+				"a vanilla ItemType (e.g. \"IRON_SWORD\") or a \"namespace:item\" id",
+				sug.empty() ? "" : ("did you mean \"" + sug + "\"?"),
+				"class [" + def.id + "] skips this starting item.", /*warn=*/true);
+		}
+		if ( !si.status.empty() && !listHas(kStatusNames, si.status) )
+		{
+			const std::string sug = SAMErrors::suggest(si.status, kStatusNames);
+			SAMErrors::reportSemantic(MOD, fileLabel,
+				"/starting_items/" + std::to_string(i) + "/status", si.status, "not a known status",
+				"one of BROKEN, DECREPIT, WORN, SERVICABLE, EXCELLENT",
+				sug.empty() ? "" : ("did you mean \"" + sug + "\"? (note Barony's spelling: SERVICABLE)"),
+				"treated as SERVICABLE.", /*warn=*/true);
+		}
+	}
+	// Starting spells — must be a SPELL_ name.
+	for ( const std::string& sp : def.startingSpells )
+	{
+		if ( spellIdFromName(sp) < 0 )
+		{
+			const std::string sug = SAMErrors::suggest(sp, validSpellNames());
+			SAMErrors::reportSemantic(MOD, fileLabel, "/starting_spells", sp, "not a known spell",
+				"a SPELL_ name (e.g. \"SPELL_FORCEBOLT\")",
+				sug.empty() ? "" : ("did you mean \"" + sug + "\"?"),
+				"class [" + def.id + "] skips this spell.", /*warn=*/true);
+		}
+	}
+	// Stat-growth rolls — must be a stat name.
+	auto checkRolls = [&](const std::vector<std::string>& rolls, const char* which) {
+		for ( const std::string& r : rolls )
+		{
+			if ( !listHas(kRollNames, r) )
+			{
+				const std::string sug = SAMErrors::suggest(r, kRollNames);
+				SAMErrors::reportSemantic(MOD, fileLabel, std::string("/stat_growth/") + which, r,
+					"not a known stat", "one of STR, DEX, CON, INT, PER, CHR",
+					sug.empty() ? "" : ("did you mean \"" + sug + "\"?"), "ignored.", /*warn=*/true);
+			}
+		}
+	};
+	checkRolls(def.strongRolls, "strong_rolls");
+	checkRolls(def.weakRolls, "weak_rolls");
 }
 
 void SAMClasses::applyStats(int classnum, Stat* stat)
