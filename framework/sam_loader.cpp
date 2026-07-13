@@ -14,6 +14,7 @@
 #ifndef EDITOR
 #include "sam_sync.hpp"    // multiplayer sync — game build only (not in EDITOR_SOURCES)
 #include "sam_patcher.hpp" // layered data patches — game build only (needs PhysFS + outputdir)
+#include "sam_monsters.hpp"// custom monster overlay — game build only (needs PhysFS + outputdir)
 #include "sam_backup.hpp"  // daily save backup — game build only (needs outputdir + fs)
 #endif
 #include "sam_logger.hpp"
@@ -42,20 +43,28 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 	// re-reads the data files. The patcher writes merged copies to a private
 	// prepend-mounted overlay, so that re-read transparently picks them up.
 	SAMPatcher::applyAll(mods);
+
+	// Write custom-monster variant files + a merged monstercurve.json into a
+	// private prepend-mounted overlay. Barony reads these lazily at map
+	// generation (long after this hook), so the mount alone suffices.
+	SAMMonsters::applyAll(mods);
 #endif
 
 	int totalClasses = 0;
 	int totalItems = 0;
+	int totalMonsters = 0;
 	int totalPlugins = 0;
 	for ( const auto& m : mods )
 	{
 		totalClasses += static_cast<int>(m.classes.size());
 		totalItems += static_cast<int>(m.items.size());
+		totalMonsters += static_cast<int>(m.monsters.size());
 		totalPlugins += static_cast<int>(m.plugins.size());
 
 		SAM_INFO("WORKSHOP", "Found mod: " + m.name + " [" + m.ns + "] v" + m.version
 			+ " (" + std::to_string(m.classes.size()) + " classes, "
 			+ std::to_string(m.items.size()) + " items, "
+			+ std::to_string(m.monsters.size()) + " monsters, "
 			+ std::to_string(m.plugins.size()) + " plugins)");
 		if ( !m.author.empty() )
 		{
@@ -86,7 +95,10 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 			+ std::to_string(totalItems) + " declared), ";
 #ifndef EDITOR
 		summary += std::to_string(SAMPatcher::operationsApplied()) + " patch op(s) across "
-			+ std::to_string(SAMPatcher::filesPatched()) + " file(s), ";
+			+ std::to_string(SAMPatcher::filesPatched()) + " file(s), "
+			+ std::to_string(SAMMonsters::count()) + " monster(s) registered ("
+			+ std::to_string(totalMonsters) + " declared) across "
+			+ std::to_string(SAMMonsters::curveLevels()) + " spawn level(s), ";
 #endif
 		summary += std::to_string(totalPlugins) + " plugins declared.";
 		SAM_INFO("CORE", summary);
@@ -104,13 +116,14 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 
 void SAMLoader::unload()
 {
-	SAM_INFO("CORE", "S.A.M unloading — clearing mod + class + item + sync registries and patch overlay.");
+	SAM_INFO("CORE", "S.A.M unloading — clearing mod + class + item + sync registries and patch/monster overlays.");
 	SAMWorkshop::clear();
 	SAMClasses::clear();
 	SAMItems::clear();
 #ifndef EDITOR
 	SAMSync::clear();
-	SAMPatcher::clear(); // unmount + wipe the generated patch overlay
+	SAMPatcher::clear();  // unmount + wipe the generated patch overlay
+	SAMMonsters::clear(); // unmount + wipe the generated monster overlay
 #endif
 	loaded = false;
 }
@@ -118,4 +131,22 @@ void SAMLoader::unload()
 bool SAMLoader::isLoaded()
 {
 	return loaded;
+}
+
+bool SAMLoader::isModLoaded(const std::string& namespaceId)
+{
+	for ( const SAMModManifest& m : SAMWorkshop::manifests() )
+	{
+		if ( m.ns == namespaceId ) { return true; }
+	}
+	return false;
+}
+
+const SAMModManifest* SAMLoader::getManifest(const std::string& namespaceId)
+{
+	for ( const SAMModManifest& m : SAMWorkshop::manifests() )
+	{
+		if ( m.ns == namespaceId ) { return &m; }
+	}
+	return nullptr;
 }

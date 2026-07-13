@@ -140,7 +140,7 @@ export function GoldButton({ children, onClick, tone = 'gold', disabled, classNa
  * Searchable dropdown over a large option list (e.g. all vanilla ItemTypes).
  * Filters as you type; Enter or click picks; Esc closes.
  */
-export function SearchSelect({ options, value, onPick, placeholder = 'Search…', maxShown = 50 }) {
+export function SearchSelect({ options, value, onPick, placeholder = 'Search…', maxShown = 50, allowCustom = false }) {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const boxRef = useRef(null);
@@ -172,6 +172,11 @@ export function SearchSelect({ options, value, onPick, placeholder = 'Search…'
             onPick(matches[0]);
             setOpen(false);
             e.preventDefault();
+          } else if (e.key === 'Enter' && allowCustom && query.trim()) {
+            // No match, but free-form values are allowed (e.g. custom item names).
+            onPick(query.trim());
+            setOpen(false);
+            e.preventDefault();
           } else if (e.key === 'Escape') {
             setOpen(false);
           }
@@ -183,7 +188,18 @@ export function SearchSelect({ options, value, onPick, placeholder = 'Search…'
           role="listbox"
         >
           {matches.length === 0 && (
-            <div className="px-3 py-2 text-sm" style={{ color: '#6b5a35' }}>No matches</div>
+            allowCustom && query.trim() ? (
+              <div
+                role="option"
+                className="px-3 py-1.5 cursor-pointer text-sm hover:bg-[rgba(212,168,75,0.12)]"
+                style={{ color: 'var(--color-parchment)' }}
+                onMouseDown={() => { onPick(query.trim()); setOpen(false); }}
+              >
+                Use “<span className="sam-mono">{query.trim()}</span>” <span style={{ color: '#6b5a35' }}>(custom)</span>
+              </div>
+            ) : (
+              <div className="px-3 py-2 text-sm" style={{ color: '#6b5a35' }}>No matches</div>
+            )
           )}
           {matches.map((o) => (
             <div
@@ -208,8 +224,8 @@ export function SearchSelect({ options, value, onPick, placeholder = 'Search…'
   );
 }
 
-/** Row in a Starting Items-style list: name, count box, red X. */
-export function ItemRow({ icon = '⚔', name, count, onCount, onRemove, sub }) {
+/** Row in a Starting Items-style list: name, count box, optional clone, red X. */
+export function ItemRow({ icon = '⚔', name, count, onCount, onRemove, onClone, sub }) {
   return (
     <div className="sam-well flex items-center gap-3 px-3 py-2">
       <span className="opacity-40 select-none cursor-grab" aria-hidden>⣿</span>
@@ -228,7 +244,29 @@ export function ItemRow({ icon = '⚔', name, count, onCount, onRemove, sub }) {
           aria-label={`${name} count`}
         />
       )}
+      {onClone && (
+        <button type="button" className="sam-step" onClick={onClone} title="Duplicate" aria-label={`duplicate ${name}`}>⧉</button>
+      )}
       <button type="button" className="sam-step sam-remove" onClick={onRemove} aria-label={`remove ${name}`}>✕</button>
+    </div>
+  );
+}
+
+/** Advisory balance-hint panel — amber, never blocks save. Renders null when empty. */
+export function BalanceHints({ hints }) {
+  if (!hints || hints.length === 0) return null;
+  return (
+    <div className="sam-well p-3" style={{ borderColor: '#7a5a2a' }}>
+      <div className="sam-label mb-2" style={{ color: '#d4a84b' }}>⚖ Balance Hints</div>
+      <ul className="space-y-1">
+        {hints.map((h, i) => (
+          <li key={i} className="text-sm" style={{ color: 'var(--color-parchment)' }}>
+            <span aria-hidden>{h.level === 'warn' ? '⚠' : 'ℹ'}</span>{' '}
+            {h.message}
+          </li>
+        ))}
+      </ul>
+      <div className="text-xs mt-2" style={{ color: '#6b5a35' }}>advisory only — these never block saving or exporting</div>
     </div>
   );
 }

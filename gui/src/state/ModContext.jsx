@@ -1,7 +1,9 @@
 /*
  * Session-only mod state (no localStorage by design — see SAM_WORKFLOW):
  *  - meta: the mod.json fields being built
- *  - classes / items: schema-shaped objects saved from the editors
+ *  - classes / items / monsters: schema-shaped objects saved from the editors
+ *  - assets: mod-relative path -> data URL (e.g. uploaded portraits) shipped in the zip
+ *  - baseline: snapshot taken at export/import time, drives the Mod Builder diff panel
  * The Mod Builder page bundles all of it into a zip.
  */
 import { createContext, useContext, useMemo, useReducer } from 'react';
@@ -17,33 +19,64 @@ const initialState = {
     framework_min_version: '0.1.0',
     description: '',
   },
-  classes: [], // class.schema.json-shaped objects
-  items: [],   // item.schema.json-shaped objects
+  classes: [],  // class.schema.json-shaped objects
+  items: [],    // item.schema.json-shaped objects
+  monsters: [], // monster.schema.json-shaped objects
+  assets: {},   // 'portraits/x.png' -> 'data:image/png;base64,...'
+  baseline: null, // { meta, classes, items, monsters } snapshot or null
 };
+
+/** Upsert `def` into `list` by id (replace if the id exists, else append). */
+function upsert(list, def) {
+  const i = list.findIndex((x) => x.id === def.id);
+  return i >= 0 ? list.map((x, j) => (j === i ? def : x)) : [...list, def];
+}
 
 function reducer(state, action) {
   switch (action.type) {
     case 'setMeta':
       return { ...state, meta: { ...state.meta, ...action.patch } };
-    case 'saveClass': {
-      // replace by id if it exists, else append
-      const i = state.classes.findIndex((c) => c.id === action.def.id);
-      const classes = i >= 0
-        ? state.classes.map((c, j) => (j === i ? action.def : c))
-        : [...state.classes, action.def];
-      return { ...state, classes };
-    }
+    case 'saveClass':
+      return { ...state, classes: upsert(state.classes, action.def) };
     case 'removeClass':
       return { ...state, classes: state.classes.filter((c) => c.id !== action.id) };
-    case 'saveItem': {
-      const i = state.items.findIndex((it) => it.id === action.def.id);
-      const items = i >= 0
-        ? state.items.map((it, j) => (j === i ? action.def : it))
-        : [...state.items, action.def];
-      return { ...state, items };
-    }
+    case 'saveItem':
+      return { ...state, items: upsert(state.items, action.def) };
     case 'removeItem':
       return { ...state, items: state.items.filter((it) => it.id !== action.id) };
+    case 'saveMonster':
+      return { ...state, monsters: upsert(state.monsters, action.def) };
+    case 'removeMonster':
+      return { ...state, monsters: state.monsters.filter((m) => m.id !== action.id) };
+    case 'setAsset':
+      return { ...state, assets: { ...state.assets, [action.path]: action.dataUrl } };
+    case 'removeAsset': {
+      const assets = { ...state.assets };
+      delete assets[action.path];
+      return { ...state, assets };
+    }
+    case 'loadMod':
+      // Wholesale replace (zip import) — setMeta only merges patches, so a
+      // dedicated action keeps import semantics unambiguous.
+      return {
+        ...state,
+        meta: action.meta,
+        classes: action.classes ?? [],
+        items: action.items ?? [],
+        monsters: action.monsters ?? [],
+        assets: action.assets ?? {},
+      };
+    case 'setBaseline':
+      // Snapshot for the diff panel. Deep-cloned so later edits can't mutate it.
+      return {
+        ...state,
+        baseline: structuredClone({
+          meta: state.meta,
+          classes: state.classes,
+          items: state.items,
+          monsters: state.monsters,
+        }),
+      };
     default:
       return state;
   }

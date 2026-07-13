@@ -15,8 +15,9 @@ const SAM_FRAMEWORK_VERSION = '0.1.0';
 const TRAVELS = [
   { to: '/class-editor', icon: '🛡', label: 'Class Editor', desc: 'Forge a playable class — attributes, skills, starting gear.' },
   { to: '/item-editor', icon: '⚔', label: 'Item Editor', desc: 'Define a custom item — category, slot, stats and effects.' },
-  { to: '/mod-builder', icon: '📦', label: 'Mod Builder', desc: 'Set the manifest and bundle everything into a drop-in zip.' },
-  { to: '/validator', icon: '📜', label: 'Validator', desc: 'Check any class, item or mod against the draft-07 schemas.' },
+  { to: '/monster-editor', icon: '👹', label: 'Monster Editor', desc: 'Craft a monster variant — stats, gear, followers, world spawns.' },
+  { to: '/mod-builder', icon: '📦', label: 'Mod Builder', desc: 'Set the manifest, import/export zips, test in Barony, see changes.' },
+  { to: '/validator', icon: '📜', label: 'Validator', desc: 'Check any class, item, monster or mod against the draft-07 schemas.' },
 ];
 
 /** sam-well stat box: big gold number over a small-caps label. */
@@ -33,7 +34,7 @@ function StatTile({ value, label }) {
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { meta, classes, items } = useMod();
+  const { meta, classes, items, monsters } = useMod();
 
   const hasMod = Boolean(meta.name.trim() || meta.namespace.trim());
 
@@ -55,9 +56,10 @@ export default function Dashboard() {
 
       {/* --------------------------------------------------- forge status */}
       <Panel title="Forge Status">
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <StatTile value={classes.length} label="Saved Classes" />
           <StatTile value={items.length} label="Saved Items" />
+          <StatTile value={monsters.length} label="Saved Monsters" />
           <div className="sam-well px-4 py-3 text-center flex flex-col justify-center">
             {hasMod ? (
               <>

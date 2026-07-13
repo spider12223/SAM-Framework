@@ -18,6 +18,8 @@
 #include <vector>
 #include <utility>
 
+struct SAMModManifest; // from sam_workshop.hpp (full type only needed in the .cpp)
+
 class SAMLoader
 {
 public:
@@ -32,6 +34,15 @@ public:
 
 	// Global "is S.A.M active" flag other systems can query.
 	static bool isLoaded();
+
+	// --- Cross-mod integration queries (for other mods' plugin DLLs, etc.) ---
+	// True if a mod with the given namespace is currently loaded (post dependency
+	// resolution). Lets an optional integration check "is mod X here?".
+	static bool isModLoaded(const std::string& namespaceId);
+
+	// The loaded manifest for a namespace, or nullptr. The pointer is valid until
+	// the next load/unload (it points into the workshop registry).
+	static const SAMModManifest* getManifest(const std::string& namespaceId);
 
 private:
 	static bool loaded;

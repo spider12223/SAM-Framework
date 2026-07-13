@@ -320,3 +320,10 @@ select.sam-input { appearance: none; cursor: pointer; }
   background: linear-gradient(90deg, transparent, #4a3617 20%, #4a3617 80%, transparent);
   margin: 0.6rem 0;
 }
+
+/* ------ JSON diff viewer (Mod Builder "Changes" panel) --------------- */
+.sam-diff-add { color: #9dc76a; background: rgba(90, 122, 58, 0.16); white-space: pre; }
+.sam-diff-del { color: #e07a6a; background: rgba(160, 51, 39, 0.16); white-space: pre; }
+.sam-diff-ctx { color: #9b8a5a; white-space: pre; }
+.sam-diff-add-text { color: #9dc76a; }
+.sam-diff-del-text { color: #e07a6a; }

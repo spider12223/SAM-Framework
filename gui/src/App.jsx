@@ -3,6 +3,7 @@ import { ModProvider } from '@/state/ModContext.jsx';
 import Dashboard from '@/pages/Dashboard.jsx';
 import ClassEditor from '@/pages/ClassEditor.jsx';
 import ItemEditor from '@/pages/ItemEditor.jsx';
+import MonsterEditor from '@/pages/MonsterEditor.jsx';
 import ModBuilder from '@/pages/ModBuilder.jsx';
 import Validator from '@/pages/Validator.jsx';
 
@@ -10,6 +11,7 @@ const NAV = [
   { to: '/dashboard', icon: '🏰', label: 'Dashboard' },
   { to: '/class-editor', icon: '🛡', label: 'Class Editor' },
   { to: '/item-editor', icon: '⚔', label: 'Item Editor' },
+  { to: '/monster-editor', icon: '👹', label: 'Monster Editor' },
   { to: '/mod-builder', icon: '📦', label: 'Mod Builder' },
   { to: '/validator', icon: '📜', label: 'Validator' },
 ];
@@ -59,6 +61,7 @@ export default function App() {
                 <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/class-editor" element={<ClassEditor />} />
                 <Route path="/item-editor" element={<ItemEditor />} />
+                <Route path="/monster-editor" element={<MonsterEditor />} />
                 <Route path="/mod-builder" element={<ModBuilder />} />
                 <Route path="/validator" element={<Validator />} />
               </Routes>

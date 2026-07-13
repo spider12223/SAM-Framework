@@ -62,11 +62,11 @@
     },
     "dependencies": {
       "type": "array",
-      "description": "Namespaces of other S.A.M mods that must load before this one. Optionally pin a minimum version with 'namespace@1.0.0'.",
+      "description": "Other S.A.M mods this one relates to. A bare namespace is REQUIRED (this mod is skipped if it's missing). Prefix with '?' for OPTIONAL (integrate if present, fine if not; it loads first) or '!' for INCOMPATIBLE (this mod is skipped if that one is present). Optionally pin a minimum version with '@1.0.0'.",
       "items": {
         "type": "string",
-        "pattern": "^[a-z][a-z0-9_]*(@[0-9]+\\.[0-9]+\\.[0-9]+)?$",
-        "description": "A dependency namespace, optionally version-pinned as 'namespace@MAJOR.MINOR.PATCH'."
+        "pattern": "^[?!]?[a-z][a-z0-9_]*(@[0-9]+\\.[0-9]+\\.[0-9]+)?$",
+        "description": "e.g. 'darkblade_core' (required), '?enchanting_system' (optional), '!old_mod' (incompatible), 'core@1.2.0' (required, min version)."
       }
     },
     "classes": {
@@ -94,6 +94,15 @@
         "type": "string",
         "pattern": "\\.json$",
         "description": "Path to a patch JSON file conforming to patch.schema.json."
+      }
+    },
+    "monsters": {
+      "type": "array",
+      "description": "Relative paths (from the mod folder) to monster definition JSON files provided by this mod. Each monster is a variant of an existing Barony creature type (custom stats/gear/name/behaviour) and, via its 'spawn' block, is woven into the world spawn tables. Each file conforms to monster.schema.json.",
+      "items": {
+        "type": "string",
+        "pattern": "\\.json$",
+        "description": "Path to a monster JSON file conforming to monster.schema.json."
       }
     },
     "plugins": {

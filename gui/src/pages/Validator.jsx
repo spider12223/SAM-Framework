@@ -10,11 +10,12 @@ import {
   Panel, Field, Select, GoldButton, ErrorList, SavedNote,
 } from '@/components/ui.jsx';
 
-/** Friendly labels for the three schema kinds. */
+/** Friendly labels for the schema kinds. */
 const SCHEMA_LABELS = {
   mod: 'Mod manifest (mod.json)',
   class: 'Class definition',
   item: 'Item definition',
+  monster: 'Monster definition',
 };
 
 /** Which schema file each kind validates against (for the success note). */
@@ -22,12 +23,15 @@ const SCHEMA_FILE = {
   mod: 'schemas/mod.schema.json',
   class: 'schemas/class.schema.json',
   item: 'schemas/item.schema.json',
+  monster: 'schemas/monster.schema.json',
 };
 
 /** Guess the schema kind from an object's shape (see task heuristics). */
 function detectKind(data) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
   if ('namespace' in data && 'framework_min_version' in data) return 'mod';
+  // Monsters also carry a `stats` object, so test base_type FIRST.
+  if ('base_type' in data) return 'monster';
   if ('stats' in data) return 'class';
   if ('name_identified' in data) return 'item';
   return null;
@@ -152,7 +156,7 @@ export default function Validator() {
         <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-3 items-end">
           <Field
             label="Validate against"
-            hint="Auto-detect reads the shape: namespace + framework_min_version → mod, stats → class, name_identified → item."
+            hint="Auto-detect reads the shape: namespace + framework_min_version → mod, base_type → monster, stats → class, name_identified → item."
           >
             <Select value={schemaKind} onChange={setSchemaKind} options={schemaOptions} />
           </Field>
@@ -192,6 +196,7 @@ export default function Validator() {
             <li><span className="sam-mono">mod.schema.json</span> <span style={{ color: '#6b5a35' }}>— the {SCHEMA_LABELS.mod.toLowerCase()}</span></li>
             <li><span className="sam-mono">class.schema.json</span> <span style={{ color: '#6b5a35' }}>— a {SCHEMA_LABELS.class.toLowerCase()}</span></li>
             <li><span className="sam-mono">item.schema.json</span> <span style={{ color: '#6b5a35' }}>— an {SCHEMA_LABELS.item.toLowerCase()}</span></li>
+            <li><span className="sam-mono">monster.schema.json</span> <span style={{ color: '#6b5a35' }}>— a {SCHEMA_LABELS.monster.toLowerCase()}</span></li>
           </ul>
         </div>
       </Panel>

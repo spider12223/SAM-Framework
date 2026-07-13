@@ -1,15 +1,16 @@
 /*
- * Single source of truth: the three JSON schemas in SAM-Framework/schemas/.
+ * Single source of truth: the JSON schemas in SAM-Framework/schemas/.
  * Every enum list the GUI shows (item types, skills, categories, slots,
- * statuses, roll stats...) is DERIVED from them here — never hardcoded.
- * If the C++ side gains an item type or skill, updating the schema updates
- * the GUI automatically.
+ * statuses, roll stats, monster base types...) is DERIVED from them here —
+ * never hardcoded. If the C++ side gains an item type or skill, updating the
+ * schema updates the GUI automatically.
  */
 import modSchema from '@schemas/mod.schema.json';
 import classSchema from '@schemas/class.schema.json';
 import itemSchema from '@schemas/item.schema.json';
+import monsterSchema from '@schemas/monster.schema.json';
 
-export { modSchema, classSchema, itemSchema };
+export { modSchema, classSchema, itemSchema, monsterSchema };
 
 /** All vanilla Barony ItemType names (from class.schema.json's itemType enum). */
 export const ITEM_TYPES = classSchema.definitions.itemType.enum;
@@ -55,3 +56,47 @@ export const ID_PATTERN = new RegExp(classSchema.properties.id.pattern);
 
 /** Version pattern (MAJOR.MINOR.PATCH). */
 export const VERSION_PATTERN = new RegExp(modSchema.properties.version.pattern);
+
+/* ------------------------------------------------------------------ */
+/* Monster enums (from monster.schema.json — note it uses $defs, not   */
+/* definitions like the class/item schemas).                           */
+/* ------------------------------------------------------------------ */
+
+/** The 49 Barony base creature types a monster variant can build on. */
+export const MONSTER_BASE_TYPES = monsterSchema.properties.base_type.enum;
+
+/** Monster stat keys (HP/MAXHP/.../GOLD) in schema order. */
+export const MONSTER_STAT_KEYS = Object.keys(monsterSchema.properties.stats.properties);
+
+/** RANDOM_* variance keys in schema order. */
+export const MONSTER_RANDOM_STAT_KEYS =
+  Object.keys(monsterSchema.properties.random_stats.properties);
+
+/** Engine skill display names (Tinkering..Alchemy — NOT the PRO_ constants). */
+export const MONSTER_PROFICIENCIES =
+  monsterSchema.properties.proficiencies.propertyNames.enum;
+
+/** The 10 equipment slot keys (Barony spellings: helmet, breastplate, shoes...). */
+export const MONSTER_EQUIP_SLOTS =
+  Object.keys(monsterSchema.properties.equipped_items.properties);
+
+/** Item condition statuses for monster gear (lowercase, incl. 'serviceable'). */
+export const MONSTER_ITEM_STATUSES =
+  monsterSchema.$defs.itemEntry.properties.status.oneOf[0].enum;
+
+/** Boolean behaviour flag keys from properties (numbers filtered out). */
+export const MONSTER_FLAG_KEYS = Object.entries(
+  monsterSchema.properties.properties.properties
+).filter(([, v]) => v.type === 'boolean').map(([k]) => k);
+
+/** Shopkeeper store types. */
+export const STORE_TYPES =
+  monsterSchema.properties.shopkeeper_properties.properties.store_type_chances
+    .propertyNames.enum;
+
+/** Spawn modes ('random' | 'fixed'). */
+export const SPAWN_MODES = monsterSchema.properties.spawn.items.properties.mode.enum;
+
+/** Lowercase vanilla item names for monster gear (Barony's itemNameStrings
+ *  are lowercase — the class schema's enum is the uppercase twin). */
+export const ITEM_TYPES_LOWER = ITEM_TYPES.map((t) => t.toLowerCase());

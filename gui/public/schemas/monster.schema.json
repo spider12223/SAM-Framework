@@ -1,0 +1,311 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://sam-framework.dev/schemas/monster.schema.json",
+  "title": "S.A.M Monster",
+  "description": "A custom monster for a Support-All-Mods content pack. IMPORTANT: Barony has a fixed set of 48 creature types (sprite/AI/limbs are hard-coded) and cannot add brand-new ones. A S.A.M monster is a VARIANT of an existing type ('base_type') with your own stats, equipment, inventory, name, proficiencies, and behaviour flags. S.A.M writes this file into Barony's data/custom-monsters/ and, from the 'spawn' block, generates the data/monstercurve.json spawn table so the monster actually appears in play.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "name",
+    "base_type"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Optional. URL of this JSON Schema, so editors (VS Code, etc.) give autocomplete + validation as you type. Ignored by S.A.M itself."
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*:[a-z][a-z0-9_]*$",
+      "description": "Unique id in 'namespace:monster' form (e.g. 'darkblade:goblin_captain'). The namespace must match your mod's namespace. S.A.M writes the on-disk file as '<namespace>_<monster>.json' so ids never collide across mods."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 127,
+      "description": "Display name of this monster variant (e.g. 'Goblin Captain'). Shown in-game unless 'properties.display_as_generic_species' is true."
+    },
+    "base_type": {
+      "type": "string",
+      "description": "Which existing Barony creature this variant is built from. Its sprite, model, limbs, and AI come from this base type; you override the stats/gear/name/behaviour. A typo here would silently produce a 'nothing' monster in vanilla Barony — S.A.M rejects an unknown base_type at load with the list of valid names.",
+      "enum": [
+        "human", "rat", "goblin", "slime", "troll", "bat", "spider", "ghoul",
+        "skeleton", "scorpion", "imp", "crab", "gnome", "demon", "succubus",
+        "mimic", "lich", "minotaur", "devil", "shopkeeper", "kobold", "scarab",
+        "crystalgolem", "incubus", "vampire", "shadow", "cockatrice", "insectoid",
+        "goatman", "automaton", "lichice", "lichfire", "sentrybot", "spellbot",
+        "gyrobot", "dummybot", "bugbear", "dryad", "myconid", "salamander",
+        "gremlin", "revenant_skull", "minimimic", "monster_adorcised_weapon",
+        "flame_elemental", "hologram", "moth", "earth_elemental", "duck_small"
+      ]
+    },
+    "sex": {
+      "type": "integer",
+      "enum": [0, 1],
+      "description": "0 = male, 1 = female. Affects some sprites/voices for the base type."
+    },
+    "appearance": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Cosmetic appearance index passed to the base type (varies per monster; leave unset for the default)."
+    },
+    "stats": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Base attributes. Any omitted stat keeps the base type's default.",
+      "properties": {
+        "HP": { "type": "integer", "description": "Current hit points." },
+        "MAXHP": { "type": "integer", "description": "Maximum hit points." },
+        "MP": { "type": "integer", "description": "Current mana." },
+        "MAXMP": { "type": "integer", "description": "Maximum mana." },
+        "STR": { "type": "integer", "description": "Strength." },
+        "DEX": { "type": "integer", "description": "Dexterity (attack speed / movement)." },
+        "CON": { "type": "integer", "description": "Constitution." },
+        "INT": { "type": "integer", "description": "Intelligence (spell power)." },
+        "PER": { "type": "integer", "description": "Perception (ranged / detection)." },
+        "CHR": { "type": "integer", "description": "Charisma (recruitment / trading)." },
+        "EXP": { "type": "integer", "description": "Starting experience toward its next level." },
+        "LVL": { "type": "integer", "description": "Monster level." },
+        "GOLD": { "type": "integer", "description": "Gold carried / dropped." }
+      }
+    },
+    "random_stats": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Random variance added on spawn (a value of N adds a random 0..N to the matching stat). Leave 0 for a fixed statline.",
+      "properties": {
+        "RANDOM_STR": { "type": "integer", "minimum": 0 },
+        "RANDOM_DEX": { "type": "integer", "minimum": 0 },
+        "RANDOM_CON": { "type": "integer", "minimum": 0 },
+        "RANDOM_INT": { "type": "integer", "minimum": 0 },
+        "RANDOM_PER": { "type": "integer", "minimum": 0 },
+        "RANDOM_CHR": { "type": "integer", "minimum": 0 },
+        "RANDOM_MAXHP": { "type": "integer", "minimum": 0 },
+        "RANDOM_HP": { "type": "integer", "minimum": 0 },
+        "RANDOM_MAXMP": { "type": "integer", "minimum": 0 },
+        "RANDOM_MP": { "type": "integer", "minimum": 0 },
+        "RANDOM_LVL": { "type": "integer", "minimum": 0 },
+        "RANDOM_GOLD": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "proficiencies": {
+      "type": "object",
+      "additionalProperties": { "type": "integer", "minimum": 0, "maximum": 100 },
+      "description": "Skill levels 0-100. Keys must be Barony's skill display names: Tinkering, Stealth, Trading, Lore, Thaumaturgy, Leader, Mysticism, Sorcery, Ranged, Sword, Mace, Axe, Polearm, Shield, Unarmed, Alchemy. (Thaumaturgy/Mysticism/Sorcery are the three spellcasting schools.) Unknown keys are warned + dropped at load.",
+      "propertyNames": {
+        "enum": [
+          "Tinkering", "Stealth", "Trading", "Lore", "Thaumaturgy", "Leader",
+          "Mysticism", "Sorcery", "Ranged", "Sword", "Mace", "Axe", "Polearm",
+          "Shield", "Unarmed", "Alchemy"
+        ]
+      }
+    },
+    "equipped_items": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Gear the monster spawns wearing/wielding. Each slot is a single item, or an array of items for a weighted random pick. Unlisted slots use the base type's default gear only if 'properties.fill_empty_equipment_with_defaults' is true.",
+      "properties": {
+        "weapon": { "$ref": "#/$defs/itemSlot" },
+        "shield": { "$ref": "#/$defs/itemSlot", "description": "Off-hand slot (shields, torches, lanterns, spellbooks)." },
+        "helmet": { "$ref": "#/$defs/itemSlot" },
+        "breastplate": { "$ref": "#/$defs/itemSlot", "description": "Body armour slot." },
+        "gloves": { "$ref": "#/$defs/itemSlot" },
+        "shoes": { "$ref": "#/$defs/itemSlot", "description": "Boots slot (Barony calls it 'shoes')." },
+        "cloak": { "$ref": "#/$defs/itemSlot" },
+        "ring": { "$ref": "#/$defs/itemSlot" },
+        "amulet": { "$ref": "#/$defs/itemSlot" },
+        "mask": { "$ref": "#/$defs/itemSlot" }
+      }
+    },
+    "inventory_items": {
+      "type": "array",
+      "description": "Carried (not equipped) items, e.g. spellbooks it can cast (see 'enable_casting_inventory_spellbooks'), potions, or loot to drop. Each entry is one item, or an array for a weighted random pick.",
+      "items": { "$ref": "#/$defs/itemSlot" }
+    },
+    "properties": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Behaviour flags for this variant.",
+      "properties": {
+        "display_as_generic_species": { "type": "boolean", "description": "If true, show the generic species name (e.g. 'skeleton') instead of 'name'." },
+        "fill_empty_equipment_with_defaults": { "type": "boolean", "description": "If true, slots you did NOT specify are filled with the base type's default gear. If false, unspecified slots are empty." },
+        "populate_default_inventory": { "type": "boolean", "description": "If true, the base type's default inventory is added on top of your 'inventory_items'." },
+        "disable_miniboss_chance": { "type": "boolean", "description": "If true, this monster can never roll the random miniboss upgrade." },
+        "force_player_recruitable": { "type": "boolean", "description": "If true, players can always recruit this monster (bypasses the normal recruit check)." },
+        "force_player_friendly": { "type": "boolean", "description": "If true, spawns allied to the players." },
+        "force_player_enemy": { "type": "boolean", "description": "If true, spawns hostile to the players even if the base type would be neutral." },
+        "disable_item_drops": { "type": "boolean", "description": "If true, drops no items on death (overrides drop chances)." },
+        "xp_award_percent": { "type": "integer", "minimum": 0, "maximum": 100, "description": "Percent of normal XP awarded for killing it." },
+        "enable_casting_inventory_spellbooks": { "type": "boolean", "description": "If true, the monster casts spells from spellbooks in its 'inventory_items'." },
+        "spellbook_cast_cooldown": { "type": "integer", "minimum": 0, "description": "Ticks between spellbook casts (default ~250)." }
+      }
+    },
+    "followers": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Minions spawned alongside this monster as its followers.",
+      "properties": {
+        "num_followers": { "type": "integer", "minimum": 0, "description": "How many followers to spawn." },
+        "follower_variants": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 },
+          "description": "Weighted map of follower monsters to pick from. Keys are OTHER S.A.M monsters in 'namespace:monster' form (S.A.M rewrites them to the on-disk filename); use 'default' for a plain vanilla monster. e.g. { \"darkblade:rat_swarm\": 3, \"default\": 1 }."
+        }
+      }
+    },
+    "shopkeeper_properties": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Only meaningful when base_type is 'shopkeeper'. Controls the shop this keeper runs.",
+      "properties": {
+        "store_type_chances": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 },
+          "description": "Weighted map of store types the keeper may run. Keys: equipment, hats, jewelry, books, apothecary, staffs, food, hardware, hunting, general.",
+          "propertyNames": {
+            "enum": ["equipment", "hats", "jewelry", "books", "apothecary", "staffs", "food", "hardware", "hunting", "general"]
+          }
+        },
+        "generate_default_shop_items": { "type": "boolean", "description": "If true, stock the shop with the usual generated items for its store type." },
+        "num_generated_items_min": { "type": "integer", "minimum": 0 },
+        "num_generated_items_max": { "type": "integer", "minimum": 0 },
+        "generated_item_blessing_max": { "type": "integer", "description": "Maximum blessing (+enchant) on generated stock." }
+      }
+    },
+    "spawn": {
+      "type": "array",
+      "description": "Where this monster appears in the world. S.A.M merges these into data/monstercurve.json. NOTE: listing a level makes S.A.M manage that level's random spawn table — the level then spawns the species that loaded mods list (plus a 'default' weight that keeps the vanilla version of each listed species appearing). Levels you don't list keep vanilla spawning untouched. Leave 'spawn' empty to only appear via followers, map-editor placement (entity name ending .json), or the console.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["level_name"],
+        "properties": {
+          "level_name": {
+            "type": "string",
+            "description": "Barony map name this monster spawns on (e.g. 'The Mines', 'The Swamp', 'The Labyrinth'). Free-form; S.A.M soft-warns on names it doesn't recognise so mod-added levels still work."
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["random", "fixed"],
+            "default": "random",
+            "description": "'random' = part of the level's random monster generation (uses weighted_chance + depth). 'fixed' = attached to the level's fixed/scripted spawns."
+          },
+          "base_species": {
+            "type": "string",
+            "description": "Which vanilla species slot in the level's spawn table this variant attaches to. Defaults to 'base_type'. Keep equal to base_type unless you know what you're doing."
+          },
+          "weighted_chance": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 1,
+            "description": "For 'random' mode: how often this species is chosen among the level's spawnable species."
+          },
+          "dungeon_depth_minimum": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "Earliest floor (within this level's biome) the monster can appear on."
+          },
+          "dungeon_depth_maximum": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 99,
+            "description": "Latest floor the monster can appear on."
+          },
+          "variant_weight": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 1,
+            "description": "When this species rolls, how often the pick is THIS custom variant."
+          },
+          "default_weight": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 1,
+            "description": "When this species rolls, how often the pick is the plain vanilla monster (keep > 0 so vanilla versions still spawn alongside your variant)."
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "itemEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One item. Most fields accept either a single value or an array (a random pick is made from the array on spawn).",
+      "properties": {
+        "type": {
+          "description": "Vanilla item name (lowercase, e.g. 'magicstaff_lightning', 'hat_wizard', 'spellbook_cold'), an array of names for a random pick, or 'empty' for no item. Unknown names are warned at load and fall back to a default item.",
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" } }
+          ]
+        },
+        "status": {
+          "description": "Condition: broken, decrepit, worn, serviceable, or excellent (single or array).",
+          "oneOf": [
+            { "type": "string", "enum": ["broken", "decrepit", "worn", "serviceable", "excellent"] },
+            { "type": "array", "items": { "type": "string", "enum": ["broken", "decrepit", "worn", "serviceable", "excellent"] } }
+          ]
+        },
+        "beatitude": {
+          "description": "Blessing/curse level, e.g. -1 (cursed) .. +2 (single or array).",
+          "oneOf": [
+            { "type": "integer" },
+            { "type": "array", "items": { "type": "integer" } }
+          ]
+        },
+        "count": {
+          "description": "Stack size (single or array).",
+          "oneOf": [
+            { "type": "integer", "minimum": 1 },
+            { "type": "array", "items": { "type": "integer", "minimum": 1 } }
+          ]
+        },
+        "appearance": {
+          "description": "Appearance index, an array of indices, or the literal 'random'.",
+          "oneOf": [
+            { "type": "integer", "minimum": 0 },
+            { "type": "string", "enum": ["random"] },
+            { "type": "array", "items": { "type": "integer", "minimum": 0 } }
+          ]
+        },
+        "identified": { "type": "boolean", "description": "Whether the item spawns identified." },
+        "spawn_percent_chance": { "type": "integer", "minimum": 0, "maximum": 100, "description": "Chance (0-100) this item spawns at all." },
+        "drop_percent_chance": { "type": "integer", "minimum": 0, "maximum": 100, "description": "Chance (0-100) the item drops on death." },
+        "slot_weighted_chance": { "type": "integer", "minimum": 1, "description": "Relative weight when this entry is one option in an array (weighted random pick)." }
+      }
+    },
+    "itemSlot": {
+      "description": "A single item, or an array of items for a weighted random pick (weights via 'slot_weighted_chance').",
+      "oneOf": [
+        { "$ref": "#/$defs/itemEntry" },
+        { "type": "array", "items": { "$ref": "#/$defs/itemEntry" } }
+      ]
+    }
+  },
+  "examples": [
+    {
+      "$schema": "https://spider12223.github.io/SAM-Framework/schemas/monster.schema.json",
+      "id": "darkblade:goblin_captain",
+      "name": "Goblin Captain",
+      "base_type": "goblin",
+      "stats": { "HP": 90, "MAXHP": 90, "STR": 8, "CON": 4, "LVL": 5 },
+      "random_stats": { "RANDOM_HP": 20 },
+      "proficiencies": { "Sword": 60, "Shield": 40 },
+      "equipped_items": {
+        "weapon": [
+          { "type": "steel_sword", "status": ["worn", "serviceable"], "slot_weighted_chance": 2 },
+          { "type": "iron_spear", "status": "serviceable", "slot_weighted_chance": 1 }
+        ],
+        "shield": { "type": "steel_shield", "status": "worn" }
+      },
+      "properties": { "disable_miniboss_chance": true, "force_player_enemy": true },
+      "followers": { "num_followers": 2, "follower_variants": { "darkblade:goblin_grunt": 1 } },
+      "spawn": [
+        { "level_name": "The Mines", "mode": "random", "weighted_chance": 2, "dungeon_depth_minimum": 1, "dungeon_depth_maximum": 4, "variant_weight": 1, "default_weight": 6 }
+      ]
+    }
+  ]
+}

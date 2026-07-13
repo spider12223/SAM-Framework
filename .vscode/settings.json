@@ -16,6 +16,10 @@
     {
       "fileMatch": ["**/patches/*.json"],
       "url": "https://spider12223.github.io/SAM-Framework/schemas/patch.schema.json"
+    },
+    {
+      "fileMatch": ["**/monsters/*.json"],
+      "url": "https://spider12223.github.io/SAM-Framework/schemas/monster.schema.json"
     }
   ]
 }

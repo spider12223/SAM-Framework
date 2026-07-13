@@ -82,11 +82,29 @@ static bool versionAtLeast(const std::string& have, const std::string& need)
 	return true; // equal
 }
 
-// Strip an optional "@x.y.z" version pin from a dependency string.
-static std::string dependencyNamespace(const std::string& dep)
+// A dependency declaration: optional prefix ('?' = optional, '!' = incompatible;
+// none = required), a namespace, and an optional "@x.y.z" minimum-version pin.
+//   "darkblade_core"        -> required
+//   "?enchanting_system"    -> optional (load if present; adjust order; fine if not)
+//   "!bad_weapons_mod"      -> incompatible (skip THIS mod if that one is present)
+//   "core@1.2.0"            -> required, at least v1.2.0
+enum class DepKind { Required, Optional, Incompatible };
+struct ParsedDep
 {
-	const size_t at = dep.find('@');
-	return (at == std::string::npos) ? dep : dep.substr(0, at);
+	DepKind kind = DepKind::Required;
+	std::string ns;
+	std::string minVersion; // "" if unpinned
+};
+static ParsedDep parseDep(const std::string& dep)
+{
+	ParsedDep d;
+	std::string s = dep;
+	if ( !s.empty() && s[0] == '?' ) { d.kind = DepKind::Optional; s = s.substr(1); }
+	else if ( !s.empty() && s[0] == '!' ) { d.kind = DepKind::Incompatible; s = s.substr(1); }
+	const size_t at = s.find('@');
+	if ( at != std::string::npos ) { d.ns = s.substr(0, at); d.minVersion = s.substr(at + 1); }
+	else { d.ns = s; }
+	return d;
 }
 
 // Strip a leading 'v'/'V' from a version string ("v5.0.2" -> "5.0.2").
@@ -206,6 +224,7 @@ static bool parseManifest(const std::string& jsonText, const std::string& modPat
 	out.classes = getStringArray("classes");
 	out.items = getStringArray("items");
 	out.patches = getStringArray("patches");
+	out.monsters = getStringArray("monsters");
 	out.plugins = getStringArray("plugins");
 	out.modPath = modPath;
 	out.displayName = displayName;
@@ -267,9 +286,10 @@ static std::vector<SAMModManifest> sortByDependencies(const std::vector<SAMModMa
 			bool ready = true;
 			for ( const auto& dep : m->dependencies )
 			{
-				const std::string dns = dependencyNamespace(dep);
-				// Only block on dependencies that ARE present but not yet emitted.
-				if ( present.count(dns) && !emitted.count(dns) )
+				const ParsedDep pd = parseDep(dep);
+				if ( pd.kind == DepKind::Incompatible ) { continue; } // not an ordering edge
+				// Only block on required/optional deps that ARE present but not yet emitted.
+				if ( present.count(pd.ns) && !emitted.count(pd.ns) )
 				{
 					ready = false;
 					break;
@@ -343,26 +363,82 @@ std::vector<SAMModManifest> SAMWorkshop::scan(
 		found.push_back(manifest);
 	}
 
-	// Warn about declared dependencies that are not installed.
-	std::set<std::string> presentNs;
-	for ( const auto& m : found )
+	// --- Dependency resolution ---
+	// `present` = namespaces that survived parsing + version checks.
+	std::set<std::string> present;
+	for ( const auto& m : found ) { present.insert(m.ns); }
+
+	// Drop mods whose REQUIRED dep is missing, or which are INCOMPATIBLE with a
+	// present mod. Removing a mod can cascade (a dependent's required dep goes
+	// missing), so iterate to a fixpoint.
+	std::set<std::string> removed;
+	bool changed = true;
+	while ( changed )
 	{
-		presentNs.insert(m.ns);
-	}
-	for ( const auto& m : found )
-	{
-		for ( const auto& dep : m.dependencies )
+		changed = false;
+		for ( const auto& m : found )
 		{
-			const std::string dns = dependencyNamespace(dep);
-			if ( !presentNs.count(dns) )
+			if ( removed.count(m.ns) ) { continue; }
+			for ( const auto& dep : m.dependencies )
 			{
-				SAM_WARN(MOD, "'" + m.name + "' [" + m.ns + "] depends on '" + dns
-					+ "', which is not installed.");
+				const ParsedDep pd = parseDep(dep);
+				if ( pd.kind == DepKind::Required && !present.count(pd.ns) )
+				{
+					SAM_ERROR(MOD, "'" + m.name + "' [" + m.ns + "] requires mod [" + pd.ns
+						+ "] which is not loaded — NOT loaded (missing required dependency).");
+					removed.insert(m.ns); present.erase(m.ns); changed = true; break;
+				}
+				if ( pd.kind == DepKind::Incompatible && present.count(pd.ns) )
+				{
+					SAM_ERROR(MOD, "'" + m.name + "' [" + m.ns + "] is incompatible with loaded mod ["
+						+ pd.ns + "] — NOT loaded (declared incompatibility).");
+					removed.insert(m.ns); present.erase(m.ns); changed = true; break;
+				}
 			}
 		}
 	}
 
-	registry = sortByDependencies(found);
+	// Survivors, with a clear per-mod resolution summary for any mod with deps.
+	std::vector<SAMModManifest> survivors;
+	for ( const auto& m : found )
+	{
+		if ( removed.count(m.ns) ) { continue; }
+		survivors.push_back(m);
+		if ( m.dependencies.empty() ) { continue; }
+		SAM_INFO(MOD, "Resolving dependencies for [" + m.ns + " v" + m.version + "]...");
+		for ( const auto& dep : m.dependencies )
+		{
+			const ParsedDep pd = parseDep(dep);
+			const bool here = present.count(pd.ns) > 0;
+			if ( pd.kind == DepKind::Required )
+			{
+				SAM_INFO(MOD, "  Required: [" + pd.ns + "] - present.");
+			}
+			else if ( pd.kind == DepKind::Optional )
+			{
+				SAM_INFO(MOD, here ? ("  Optional: [" + pd.ns + "] - present, loading before.")
+					: ("  Optional: [" + pd.ns + "] - not present, skipping integration."));
+			}
+			else // Incompatible (survived, so it's absent)
+			{
+				SAM_INFO(MOD, "  Incompatible: [" + pd.ns + "] - not present, no conflict.");
+			}
+			// Present dep with a version pin that's too old: warn (informational).
+			if ( here && !pd.minVersion.empty() )
+			{
+				for ( const auto& x : found )
+				{
+					if ( x.ns == pd.ns && !versionAtLeast(x.version, pd.minVersion) )
+					{
+						SAM_WARN(MOD, "  [" + pd.ns + "] is v" + x.version + " but [" + m.ns
+							+ "] wants >= " + pd.minVersion + " - loaded anyway.");
+					}
+				}
+			}
+		}
+	}
+
+	registry = sortByDependencies(survivors);
 	return registry;
 }
 

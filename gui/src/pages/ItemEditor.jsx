@@ -7,10 +7,11 @@
 import { useMemo, useState } from 'react';
 import { CATEGORIES, SLOTS } from '@/data/schemas.js';
 import { validate } from '@/lib/validate.js';
+import { checkBalance } from '@/lib/balance.js';
 import { useMod } from '@/state/ModContext.jsx';
 import {
   Panel, Field, TextInput, NumberInput, Select, GoldButton,
-  ErrorList, SavedNote,
+  ErrorList, SavedNote, BalanceHints,
 } from '@/components/ui.jsx';
 
 function slugify(name) {
@@ -93,10 +94,12 @@ export default function ItemEditor() {
     setSavedAs(def.id);
   };
 
-  const preview = useMemo(() => JSON.stringify(buildDef(), null, 2),
+  const def = useMemo(buildDef,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [nameId, nameUnid, category, slot, weight, goldValue, level, stackable,
       magicLevel, model, modelFp, icon, attribs, namespace]);
+  const preview = useMemo(() => JSON.stringify(def, null, 2), [def]);
+  const hints = useMemo(() => checkBalance('item', def), [def]);
 
   return (
     <div className="space-y-4 max-w-7xl mx-auto">
@@ -235,6 +238,7 @@ export default function ItemEditor() {
       </div>
 
       {/* --------------------------------------------------- save row */}
+      <BalanceHints hints={hints} />
       <ErrorList errors={errors} />
       <div className="flex items-center justify-end gap-3">
         {savedAs && (

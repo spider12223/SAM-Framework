@@ -4,17 +4,20 @@
  * panels side by side; spells, stat growth and gold below; SAVE CLASS bottom.
  * Every list here comes from the schemas at runtime (see data/schemas.js).
  */
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   CORE_ATTRIBUTES, OFFSET_STATS, SKILLS, ITEM_TYPES, ROLL_STATS,
   skillLabel, skillBaseAttr,
 } from '@/data/schemas.js';
 import { validate } from '@/lib/validate.js';
+import { checkBalance } from '@/lib/balance.js';
 import { useMod } from '@/state/ModContext.jsx';
 import {
   Panel, Field, TextInput, NumberInput, GoldSlider, Stepper, GoldButton,
-  SearchSelect, ItemRow, ErrorList, SavedNote,
+  SearchSelect, ItemRow, ErrorList, SavedNote, BalanceHints,
 } from '@/components/ui.jsx';
+
+const MAX_PORTRAIT_BYTES = 256 * 1024; // portraits are 54x54 — anything big is a mistake
 
 const ATTR_ICONS = { STR: '💪', DEX: '🪶', CON: '❤️', INT: '📖', PER: '👁️', CHR: '🎭' };
 
@@ -76,11 +79,31 @@ export default function ClassEditor() {
   const [spellError, setSpellError] = useState('');
   const [growth, setGrowth] = useState({}); // attr -> 'strong' | 'weak' | undefined
   const [gold, setGold] = useState(0);
+  const [portrait, setPortrait] = useState({ path: '', dataUrl: '' });
+  const [portraitError, setPortraitError] = useState('');
   const [errors, setErrors] = useState([]);
   const [savedAs, setSavedAs] = useState('');
+  const portraitRef = useRef(null);
 
   const namespace = meta.namespace || 'mymod';
   const classId = `${namespace}:${slugify(name)}`;
+  const defaultPortraitPath = `portraits/${slugify(name)}.png`;
+
+  const onPortraitFile = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > MAX_PORTRAIT_BYTES) {
+      setPortraitError(`That PNG is ${Math.round(file.size / 1024)} KB — portraits are 54×54; keep it under 256 KB.`);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setPortraitError('');
+      setPortrait((p) => ({ path: p.path || defaultPortraitPath, dataUrl: String(reader.result ?? '') }));
+    };
+    reader.readAsDataURL(file);
+  };
 
   const addItem = (type) => {
     setItems((prev) => {
@@ -140,6 +163,7 @@ export default function ClassEditor() {
       if (weak.length) def.stat_growth.weak_rolls = weak;
     }
     if (gold > 0) def.gold = gold;
+    if (portrait.path.trim()) def.portrait = portrait.path.trim();
     return def;
   };
 
@@ -152,26 +176,36 @@ export default function ClassEditor() {
       return;
     }
     setErrors([]);
+    // Ship the uploaded PNG as a mod asset at the portrait path.
+    if (portrait.path.trim() && portrait.dataUrl) {
+      dispatch({ type: 'setAsset', path: portrait.path.trim(), dataUrl: portrait.dataUrl });
+    }
     dispatch({ type: 'saveClass', def });
     setSavedAs(def.id);
   };
 
-  const preview = useMemo(() => JSON.stringify(buildDef(), null, 2),
+  const def = useMemo(buildDef,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [name, description, attrs, offsets, skills, items, spells, growth, gold, namespace]);
+    [name, description, attrs, offsets, skills, items, spells, growth, gold, portrait, namespace]);
+  const preview = useMemo(() => JSON.stringify(def, null, 2), [def]);
+  const hints = useMemo(() => checkBalance('class', def), [def]);
 
   return (
     <div className="space-y-4 max-w-7xl mx-auto">
       {/* ------------------------------------------------ name + portrait */}
       <div className="flex items-center gap-4">
-        <div
-          className="sam-panel flex items-center justify-center shrink-0"
-          style={{ width: 84, height: 84, fontSize: '2.2rem' }}
-          title="Class portrait (post-launch: custom art)"
-          aria-hidden
+        <button
+          type="button"
+          className="sam-panel flex items-center justify-center shrink-0 overflow-hidden"
+          style={{ width: 84, height: 84, fontSize: '2.2rem', padding: 0, cursor: 'pointer' }}
+          title="Upload class portrait (PNG, 54×54)"
+          onClick={() => portraitRef.current?.click()}
         >
-          🛡
-        </div>
+          {portrait.dataUrl
+            ? <img src={portrait.dataUrl} alt="Class portrait" style={{ width: 54, height: 54, imageRendering: 'pixelated' }} />
+            : <span aria-hidden>🛡</span>}
+        </button>
+        <input ref={portraitRef} type="file" accept="image/png" className="hidden" onChange={onPortraitFile} />
         <div className="flex-1">
           <TextInput
             value={name}
@@ -186,6 +220,27 @@ export default function ClassEditor() {
           </div>
         </div>
       </div>
+
+      {/* ------------------------------------------------------- portrait */}
+      <Panel title="Portrait">
+        <div className="grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-4 items-end">
+          <GoldButton onClick={() => portraitRef.current?.click()}>🖼 Upload PNG</GoldButton>
+          <Field label="Portrait path (mod-relative)" hint="Shipped in the zip; shown as the class-select icon in-game.">
+            <TextInput
+              value={portrait.path}
+              onChange={(v) => setPortrait((p) => ({ ...p, path: v }))}
+              placeholder={defaultPortraitPath}
+            />
+          </Field>
+        </div>
+        {portrait.dataUrl && (
+          <div className="mt-2 text-xs" style={{ color: '#6b5a35' }}>
+            PNG loaded — it will export at <span className="sam-mono">{portrait.path || defaultPortraitPath}</span>.
+            <button type="button" className="ml-2 underline" style={{ color: '#a03327' }} onClick={() => setPortrait((p) => ({ ...p, dataUrl: '' }))}>clear image</button>
+          </div>
+        )}
+        {portraitError && <div className="sam-error text-sm mt-1">{portraitError}</div>}
+      </Panel>
 
       {/* ------------------------------------------- three main panels */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
@@ -325,6 +380,7 @@ export default function ClassEditor() {
       </div>
 
       {/* ------------------------------------------------------- save row */}
+      <BalanceHints hints={hints} />
       <ErrorList errors={errors} />
       <div className="flex items-center justify-end gap-3">
         {savedAs && <SavedNote>Saved <span className="sam-mono">{savedAs}</span> to this session's mod — see Mod Builder.</SavedNote>}
