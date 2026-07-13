@@ -1,0 +1,7 @@
+# Build artifacts + bundled binaries. Populate payload/ from a Release build to
+# build the installer; these are release artifacts, not committed source.
+payload/
+dist/
+build/
+__pycache__/
+*.pyc

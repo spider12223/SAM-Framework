@@ -1,0 +1,94 @@
+===============================================================================
+  PREVIEW THUMBNAIL SPEC  —  S.A.M Framework Workshop item
+===============================================================================
+Give this file to any AI image tool (Midjourney, DALL-E, SDXL, Firefly, etc.)
+or a human artist. Goal: a 512x512 icon that matches the S.A.M Mod Builder's
+"illuminated manuscript / dark fantasy" look so the Workshop page feels of a
+piece with the tool.
+
+-------------------------------------------------------------------------------
+HARD REQUIREMENTS
+-------------------------------------------------------------------------------
+  * Dimensions .......... 512 x 512 pixels, exactly square.
+  * Format .............. PNG (JPG acceptable). No transparency needed;
+                          fill the whole square.
+  * Safe area ........... Keep the main emblem + title within the centre 85%.
+                          Steam crops/rounds corners on some views.
+  * Readable at 64px .... It must still read as "S.A.M" when shrunk to a tiny
+                          Workshop tile. Big shapes, high contrast, few words.
+  * File size ........... Under 1 MB.
+
+-------------------------------------------------------------------------------
+COLOR PALETTE  (copy these hex values — they are the GUI's exact colors)
+-------------------------------------------------------------------------------
+  Background stone (darkest) .... #1a1208
+  Background wood (panel) ....... #2a1f0e
+  Deep well / inset ............. #211808
+  Gold (primary) ................ #d4a84b
+  Gold bright (highlights) ...... #f0cd7a
+  Gold dim (muted) .............. #8a6d2e
+  Parchment (light text) ........ #e8d5a3
+  Border / frame ................ #4a3617
+  Accent red (sparing, optional). #a03327
+
+  Mood: warm candle-lit gold on near-black brown. NOT neon, NOT cool blues.
+
+-------------------------------------------------------------------------------
+COMPOSITION
+-------------------------------------------------------------------------------
+  1. BACKGROUND: dark stone/aged-parchment texture with a subtle radial glow
+     (lighter warm brown at top-center fading to near-black at the edges), like
+     a torch lighting an old tome. A faint vignette.
+  2. FRAME: an ornate thin GOLD border just inside the edges, with a small
+     diamond ornament ( a "◆" shape ) at each of the four corners or at the
+     top-center. This mirrors the app's «◆ TITLE ◆» panel headers.
+  3. CENTRAL EMBLEM (the hero element — pick ONE):
+       (a) A stylized gold monogram "S.A.M" set as a heraldic crest, OR
+       (b) An anvil-and-quill / gear-and-scroll motif (forging + writing =
+           "make mods without code"), OR
+       (c) A shield split into three quadrants showing a tiny sword, a helm,
+           and a monster eye (class + item + monster), unified by a gold border.
+     Whichever you choose: gold linework on the dark ground, softly embossed,
+     with a faint inner glow.
+  4. TITLE TEXT: "S.A.M" large, in an engraved small-caps SERIF face
+     (think Palatino / Trajan / Cinzel), gold (#d4a84b) with a bright top edge
+     (#f0cd7a) and a soft dark drop shadow.
+  5. SUBTITLE: "SUPPORT ALL MODS" in small letter-spaced small-caps beneath,
+     in muted gold (#8a6d2e). Optional tiny line: "a Barony modding framework".
+
+-------------------------------------------------------------------------------
+STYLE KEYWORDS
+-------------------------------------------------------------------------------
+  dark fantasy, illuminated manuscript, medieval heraldry, engraved gold leaf,
+  candle-lit, ornate but clean, game icon, emblem/crest, roguelike, Barony-esque
+  pixel-adjacent but rendered smooth. High craft, low clutter.
+
+-------------------------------------------------------------------------------
+AVOID (negative prompt)
+-------------------------------------------------------------------------------
+  neon, cyberpunk, blue/purple glow, photorealistic faces, modern UI chrome,
+  cartoon mascots, busy backgrounds, lens flare, text errors / gibberish text,
+  watermarks, more than ~5 words of text, low contrast, washed-out grays.
+
+-------------------------------------------------------------------------------
+READY-TO-PASTE PROMPT (edit to taste)
+-------------------------------------------------------------------------------
+"Square 512x512 game workshop icon, dark fantasy illuminated-manuscript style.
+A heraldic crest centered on an aged near-black stone-and-parchment background
+with a warm radial candle glow and soft vignette. Ornate thin gold border with
+small diamond ornaments at the corners. Central emblem: a gold engraved shield
+divided into three, showing a small sword, a helm, and a monster eye. Above the
+crest, large engraved small-caps serif title 'S.A.M' in warm gold (#d4a84b) with
+a bright top highlight (#f0cd7a) and a soft dark shadow; below it, letter-spaced
+small-caps subtitle 'SUPPORT ALL MODS' in muted gold (#8a6d2e). Warm gold-on-
+black palette only, high contrast, clean, readable when tiny. No neon, no blue,
+no photorealism, no gibberish text. --ar 1:1"
+
+-------------------------------------------------------------------------------
+AFTER GENERATING
+-------------------------------------------------------------------------------
+  * Resize/crop to EXACTLY 512x512 if the tool output differs.
+  * Save as  preview.png  in this folder before uploading.
+  * Sanity check: shrink it to 64x64 on screen — can you still tell it says
+    S.A.M? If not, make the title bigger and drop a word.
+===============================================================================

@@ -1,0 +1,78 @@
+[h1]S.A.M Framework — Support All Mods[/h1]
+
+[b]Mod Barony with plain JSON. No C++. No compiler. No engine knowledge.[/b] S.A.M is a modding framework that turns simple .json files into real, working custom classes, items, and monsters the moment the game launches. Build a whole content pack in a browser, drop it in your mods folder, and play — S.A.M does the rest.
+
+[b][i]S.A.M is a dependency, not a playable mod.[/i][/b] On its own it adds nothing you can play; it is the engine that other mods are built on. Install it once, and every mod made with S.A.M just works.
+
+[hr][/hr]
+
+[h1]What Modders Can Do[/h1]
+[list]
+[*][b]Custom Classes[/b] — attributes, skills, starting gear, starting spells, level-up growth, gold, and a custom character-select portrait.
+[*][b]Custom Items & Weapons[/b] — new items registered straight into Barony's item table, with categories, equip slots, weight, value, and named effects.
+[*][b]Custom Monsters[/b] — variants of any existing creature with your own stats, equipment, inventory, name, behaviour, followers, and world spawn locations.
+[*][b]Layered Patches[/b] — additively edit vanilla data files (like items.json) so multiple mods stack instead of overwriting each other.
+[*][b]Cross-Mod Dependencies[/b] — declare required, optional, or incompatible relationships between mods and let S.A.M resolve the load order.
+[*][b]Multiplayer-Aware[/b] — S.A.M checks that everyone in a lobby is running the same set of mods.
+[*][b]Safe by Design[/b] — automatic daily save backups when mods are active, clear error messages with "did you mean?" suggestions, and no vanilla files ever altered on disk.
+[/list]
+
+[hr][/hr]
+
+[h1]Lua Scripting (v0.3.0)[/h1]
+[b]JSON defines what your content IS. Lua defines how it BEHAVES.[/b]
+Drop a .lua file next to any class or item JSON and SAM loads it automatically. Write on_event handlers to react to game events. No C++. No compiler. Just Lua.
+Available hooks: player.on_level_up (more coming)
+Available API: sam_log(), sam_grant_item()
+
+[hr][/hr]
+
+[h1]How to Install[/h1]
+S.A.M extends Barony's executable so it can read the JSON, so it ships as a patched [b]barony.exe[/b] rather than a normal data folder.
+[list]
+[*][b]1.[/b] Own Barony on Steam and launch it once so the base game files exist.
+[*][b]2.[/b] Back up your original [b]barony.exe[/b] (right-click Barony in Steam → Manage → Browse local files).
+[*][b]3.[/b] Copy the S.A.M [b]barony.exe[/b] into that same folder, replacing the original.
+[*][b]4.[/b] Launch Barony. A file called [b]sam_log.txt[/b] appears in the folder — that means S.A.M is live.
+[*][b]5.[/b] Install any S.A.M mod into [b]Barony/mods/[/b] and enable it from the in-game Mods menu.
+[/list]
+[i]To go back to vanilla at any time, restore your backed-up barony.exe.[/i]
+
+[hr][/hr]
+
+[h1]How to Use[/h1]
+The easiest way to build a mod is the free browser tool — nothing to download:
+
+[b][url=https://spider12223.github.io/SAM-Framework/]➤ Open the S.A.M Mod Builder[/url][/b]
+
+Design a class, item, or monster with sliders and dropdowns; watch the live JSON update; then click [b]Export[/b] for a ready-to-drop .zip. The builder validates everything against the exact same schemas the game uses, so if it exports, it loads. You can also import an existing mod to edit it, clone content, check balance, and even write straight into your Barony/mods folder with one click.
+
+Prefer to write JSON by hand? Every file is a documented schema — point your editor at them for autocomplete:
+[b][url=https://spider12223.github.io/SAM-Framework/docs/schema-reference.html]➤ Full Schema Reference[/url][/b]
+
+[hr][/hr]
+
+[h1]Publishing Your Own Mod[/h1]
+Your mod is just a folder — [b]mod.json[/b] plus your [b]classes/[/b], [b]items/[/b], and [b]monsters/[/b] JSON. To ship it on the Workshop and have Steam pull S.A.M in automatically for your players:
+[list]
+[*][b]1.[/b] Build and test your mod locally with S.A.M installed.
+[*][b]2.[/b] Upload your mod folder as a Workshop item.
+[*][b]3.[/b] Add [b]S.A.M Framework[/b] as a [b]Required Item[/b] on your Workshop page, so subscribers are pointed to it.
+[*][b]4.[/b] In your description, tell players they need S.A.M installed (link this page).
+[/list]
+Multiple mods that all use S.A.M coexist cleanly — thanks to layered patches and namespaced ids, they stack instead of clobbering one another.
+
+[hr][/hr]
+
+[h1]For Developers[/h1]
+S.A.M is open source. Read the code, file issues, or build the patched executable yourself from Barony's source:
+
+[b][url=https://github.com/spider12223/SAM-Framework]➤ GitHub: spider12223/SAM-Framework[/url][/b]
+
+The repo contains the C++ framework sources, the browser Mod Builder (React), the JSON schemas, and full docs. Contributions welcome.
+
+[hr][/hr]
+
+[b]Version 0.3.0[/b] — Lua scripting: a sandboxed Lua 5.4 runtime with automatic .lua loading beside your JSON, the first behavior hook (player.on_level_up), and the sam_log() / sam_grant_item() API. Builds on v0.2.0 (layered patches, friendly errors, version compatibility, save backups, editor autocomplete, cross-mod dependencies, monster modding, and the full GUI editor suite).
+
+[i]Barony (c) Turning Wheel LLC. S.A.M is an unofficial community framework, not affiliated with or endorsed by Turning Wheel LLC.[/i]

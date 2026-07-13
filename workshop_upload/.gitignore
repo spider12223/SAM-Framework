@@ -1,0 +1,5 @@
+# Large release binaries are distributed via GitHub Releases / the Workshop
+# upload, not committed to git. Only the text of the Workshop package lives here.
+barony.exe
+typescript.js
+preview.png

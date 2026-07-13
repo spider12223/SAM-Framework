@@ -1,0 +1,119 @@
+===============================================================================
+  S.A.M FRAMEWORK  —  STEAM WORKSHOP PUBLISHING CHECKLIST
+  Everything in this file is a MANUAL step only you can do. This package has
+  prepared all the files; the actions below require your Steam account,
+  your judgement, and (for the image) an art tool.
+===============================================================================
+
+-------------------------------------------------------------------------------
+  ⚠  READ FIRST — HOW S.A.M CAN ACTUALLY BE DISTRIBUTED
+-------------------------------------------------------------------------------
+Steam Workshop items are CONTENT FOLDERS that Barony mounts at runtime. A
+Workshop subscription CANNOT replace the game's executable. S.A.M is compiled
+INTO barony.exe, so:
+
+  * The patched barony.exe (in this folder) must reach players as a FILE —
+    e.g. attached to a GitHub Release, or linked from the Workshop description.
+    It is NOT delivered by "Subscribe".
+  * Your project already chose "source-only distribution (no prebuilt binary in
+    releases)". Distributing a modified copy of a commercial game's .exe is your
+    call to make and may have licensing implications — decide deliberately.
+
+  Practical options (pick one before publishing):
+    (A) Workshop item = a small "pointer" item + rich description that links to
+        a GitHub Release containing barony.exe. Other mods mark it "Required".
+    (B) Skip Workshop for the framework entirely; distribute the exe via GitHub
+        Release only, and use the Workshop just for individual JSON mods (which
+        DO work as normal Workshop folders once players have the S.A.M exe).
+    (C) Ship the framework as a source build guide (players compile it), which
+        sidesteps binary redistribution.
+
+  The description/README/INSTALL in this package are written to work with option
+  (A) or (B). Confirm your choice, then fill in the "Workshop link: TBD" spots.
+
+-------------------------------------------------------------------------------
+  1. PREVIEW IMAGE  (you generate it)
+-------------------------------------------------------------------------------
+  [ ] Read preview_spec.txt.
+  [ ] Generate a 512x512 image with an AI tool (prompt is included in the spec)
+      or an artist.
+  [ ] Crop/resize to EXACTLY 512x512, save as  preview.png  in this folder.
+  [ ] Eyeball it at ~64px — is "S.A.M" still legible? If not, redo bigger.
+
+-------------------------------------------------------------------------------
+  2. DECIDE THE DISTRIBUTION MODEL  (see the warning above)
+-------------------------------------------------------------------------------
+  [ ] Pick option A, B, or C.
+  [ ] If distributing the exe: create a GitHub Release on
+      https://github.com/spider12223/SAM-Framework , attach barony.exe (and,
+      ideally, a zip with README.txt + INSTALL.md), tag it v0.2.0.
+  [ ] Copy the release URL and paste it into:
+        - INSTALL.md  (the "Workshop link: TBD" / Option B spots)
+        - README.txt  (if you want a direct download line)
+        - workshop_description.txt  (add a "Download the framework" link)
+
+-------------------------------------------------------------------------------
+  3. PUBLISH THE WORKSHOP ITEM  (your Steam account)
+-------------------------------------------------------------------------------
+  Barony publishes Workshop items from IN-GAME (Barony's own mod uploader) or via
+  SteamCMD/Steamworks. There is no generic file you can hand to Steam here.
+  [ ] Launch Barony, open its Mods / Workshop upload tool.
+  [ ] Create a new Workshop item for "S.A.M Framework".
+  [ ] Title:  S.A.M Framework  (or "S.A.M Framework — Support All Mods").
+  [ ] Description: paste the CONTENTS of workshop_description.txt
+      (it is already in Steam BBCode: [h1], [b], [url], [list], [*], [hr]).
+  [ ] Preview image: upload your preview.png (step 1).
+  [ ] Visibility: start as "Hidden" or "Friends only" to proofread, then Public.
+  [ ] Tags: choose Barony's modding/tool/library tags if offered.
+  [ ] Note the published Workshop item URL for the next steps.
+
+-------------------------------------------------------------------------------
+  4. FILL IN THE "TBD" LINKS  (once you have the Workshop URL)
+-------------------------------------------------------------------------------
+  [ ] INSTALL.md  — replace "Workshop link: TBD" with the real URL.
+  [ ] README.txt  — add the Workshop URL if you want it there.
+  [ ] Re-upload / update the Workshop description if you referenced the URL in it.
+
+-------------------------------------------------------------------------------
+  5. WIRE UP DEPENDENT MODS  (for every mod that USES S.A.M)
+-------------------------------------------------------------------------------
+  [ ] On each dependent mod's Workshop page: Add/Remove Required Items →
+      add the S.A.M Framework item as a REQUIRED item, so subscribers are
+      pointed to it.
+  [ ] In each dependent mod's description, state that players need the S.A.M
+      framework (the patched exe) installed, and link this page.
+  [ ] (Optional) In the mod's mod.json, list "framework_min_version": "0.2.0"
+      so S.A.M warns players on older framework builds.
+
+-------------------------------------------------------------------------------
+  6. VERIFY THE END-USER FLOW YOURSELF  (before announcing)
+-------------------------------------------------------------------------------
+  [ ] On a clean-ish setup: follow INSTALL.md exactly (back up exe, drop S.A.M
+      exe, launch, confirm sam_log.txt).
+  [ ] Subscribe to a test dependent mod (or drop one in mods/), enable it,
+      confirm it loads in sam_log.txt and appears in-game.
+  [ ] Confirm "Verify integrity of game files" restores vanilla (documented risk)
+      and that re-copying the S.A.M exe fixes it.
+
+-------------------------------------------------------------------------------
+  7. NICE-TO-HAVE  (optional polish)
+-------------------------------------------------------------------------------
+  [ ] Add 2-3 extra Workshop screenshots: the GUI Mod Builder, a custom class on
+      the character-select screen, a custom monster in a dungeon.
+  [ ] Add a "Change Notes" entry for v0.2.0 listing the 8 features.
+  [ ] Pin a comment / FAQ answering "why isn't it just a Subscribe button?"
+      (link the distribution note in INSTALL.md).
+  [ ] Keep framework_version.json in sync with the version you actually ship.
+
+-------------------------------------------------------------------------------
+  FILES ALREADY PREPARED FOR YOU IN THIS FOLDER
+-------------------------------------------------------------------------------
+    barony.exe               - patched Barony v5.0.2 + S.A.M loader (the build)
+    framework_version.json   - machine-readable version/metadata
+    README.txt               - end-user readme
+    workshop_description.txt  - Steam BBCode description (paste into Workshop)
+    preview_spec.txt         - spec + AI prompt for the 512x512 thumbnail
+    INSTALL.md               - full step-by-step install + troubleshooting
+    workshop_checklist.txt   - this file
+    preview.png              - (you create this in step 1)
+===============================================================================
