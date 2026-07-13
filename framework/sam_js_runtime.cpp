@@ -53,6 +53,11 @@ extern "C" {
 #	include "player.hpp"
 #	include "net.hpp"
 #	include "mod_tools.hpp"
+#	include "stat.hpp"      // Stat members, EFF_* effect ids, stats[], MAX_PLAYER_STAT_VALUE
+#	include "entity.hpp"    // Entity::setEffect/setHP/setMP/getUID, act* behaviors, map iteration
+#	include "monster.hpp"   // actMonster, Monster enum
+#	include "collision.hpp" // entityDist
+#	include "engine/audio/sound.hpp" // playSoundPlayer, numsounds
 #	include <cctype>
 #endif
 
@@ -228,6 +233,236 @@ namespace
 #endif
 	}
 
+#ifdef SAM_JS_HAVE_BARONY
+	// ---- shared helpers for the host API (primitives only) --------------------
+	inline int samClampInt(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
+	inline std::string samUpper(const char* in)
+	{
+		std::string o = in ? in : "";
+		for ( char& c : o ) { c = (char)std::toupper((unsigned char)c); }
+		return o;
+	}
+
+	int samEffectNameToId(const char* nameIn)
+	{
+		const std::string n = samUpper(nameIn);
+		if ( n == "LEVITATING" ) { return EFF_LEVITATING; }
+		if ( n == "INVISIBLE" )  { return EFF_INVISIBLE;  }
+		if ( n == "CONFUSED" )   { return EFF_CONFUSED;   }
+		if ( n == "POISONED" )   { return EFF_POISONED;   }
+		if ( n == "BLEEDING" )   { return EFF_BLEEDING;   }
+		if ( n == "ASLEEP" )     { return EFF_ASLEEP;     }
+		if ( n == "PARALYZED" )  { return EFF_PARALYZED;  }
+		if ( n == "DRUNK" )      { return EFF_DRUNK;      }
+		if ( n == "BLIND" )      { return EFF_BLIND;      }
+		if ( n == "GREASY" )     { return EFF_GREASY;     }
+		if ( n == "VOMITING" )   { return EFF_VOMITING;   }
+		if ( n == "WEBBED" )     { return EFF_WEBBED;     }
+		if ( n == "SLOW" )       { return EFF_SLOW;       }
+		if ( n == "FAST" )       { return EFF_FAST;       }
+		return -1;
+	}
+
+	JSValue js_sam_grant_gold(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		int32_t player = -1, amount = 0;
+		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( argc >= 2 ) { JS_ToInt32(ctx, &amount, argv[1]); }
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_grant_gold refused: host only."); return JS_NewBool(ctx, 0); }
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !stats[player] )
+		{ SAM_ERROR("JS", "sam_grant_gold: invalid player index " + std::to_string(player) + "."); return JS_NewBool(ctx, 0); }
+		stats[player]->GOLD += amount;
+		if ( stats[player]->GOLD < 0 ) { stats[player]->GOLD = 0; }
+		if ( multiplayer == SERVER && player > 0 && !players[player]->isLocalPlayer() )
+		{
+			strcpy((char*)net_packet->data, "GOLD");
+			SDLNet_Write32(stats[player]->GOLD, &net_packet->data[4]);
+			net_packet->address.host = net_clients[player - 1].host;
+			net_packet->address.port = net_clients[player - 1].port;
+			net_packet->len = 8;
+			sendPacketSafe(net_sock, -1, net_packet, player - 1);
+		}
+		SAM_INFO("JS", "Granted " + std::to_string(amount) + " gold to player " + std::to_string(player));
+		return JS_NewBool(ctx, 1);
+	}
+
+	JSValue js_sam_apply_effect(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		int32_t player = -1, ticks = 0;
+		std::string name;
+		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( argc >= 2 ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
+		if ( argc >= 3 ) { JS_ToInt32(ctx, &ticks, argv[2]); }
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_apply_effect refused: host only."); return JS_NewBool(ctx, 0); }
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity )
+		{ SAM_ERROR("JS", "sam_apply_effect: invalid player index " + std::to_string(player) + "."); return JS_NewBool(ctx, 0); }
+		const int eff = samEffectNameToId(name.c_str());
+		if ( eff < 0 ) { SAM_ERROR("JS", "sam_apply_effect: unknown effect '" + name + "'."); return JS_NewBool(ctx, 0); }
+		const bool ok = players[player]->entity->setEffect(eff, true, ticks, true);
+		SAM_INFO("JS", "Applied effect " + name + " to player " + std::to_string(player) + (ok ? "" : " (refused/immune)"));
+		return JS_NewBool(ctx, ok ? 1 : 0);
+	}
+
+	JSValue js_sam_remove_effect(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		int32_t player = -1;
+		std::string name;
+		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( argc >= 2 ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_remove_effect refused: host only."); return JS_NewBool(ctx, 0); }
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity )
+		{ SAM_ERROR("JS", "sam_remove_effect: invalid player index " + std::to_string(player) + "."); return JS_NewBool(ctx, 0); }
+		const int eff = samEffectNameToId(name.c_str());
+		if ( eff < 0 ) { SAM_ERROR("JS", "sam_remove_effect: unknown effect '" + name + "'."); return JS_NewBool(ctx, 0); }
+		players[player]->entity->setEffect(eff, false, 0, true);
+		SAM_INFO("JS", "Removed effect " + name + " from player " + std::to_string(player));
+		return JS_NewBool(ctx, 1);
+	}
+
+	JSValue js_sam_get_stat(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		int32_t player = -1;
+		std::string name;
+		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( argc >= 2 ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_get_stat refused: host only."); return JS_NewInt32(ctx, 0); }
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !stats[player] )
+		{ SAM_ERROR("JS", "sam_get_stat: invalid player index " + std::to_string(player) + "."); return JS_NewInt32(ctx, 0); }
+		const std::string n = samUpper(name.c_str());
+		Stat* s = stats[player];
+		long long v = 0;
+		if      ( n == "STR" )   { v = s->STR; }
+		else if ( n == "DEX" )   { v = s->DEX; }
+		else if ( n == "CON" )   { v = s->CON; }
+		else if ( n == "INT" )   { v = s->INT; }
+		else if ( n == "PER" )   { v = s->PER; }
+		else if ( n == "CHR" )   { v = s->CHR; }
+		else if ( n == "HP" )    { v = s->HP; }
+		else if ( n == "MAXHP" ) { v = s->MAXHP; }
+		else if ( n == "MP" )    { v = s->MP; }
+		else if ( n == "MAXMP" ) { v = s->MAXMP; }
+		else if ( n == "GOLD" )  { v = s->GOLD; }
+		else if ( n == "LEVEL" || n == "LVL" ) { v = s->LVL; }
+		else if ( n == "EXP" )   { v = s->EXP; }
+		else { SAM_ERROR("JS", "sam_get_stat: unknown stat '" + name + "'."); return JS_NewInt32(ctx, 0); }
+		return JS_NewInt64(ctx, v);
+	}
+
+	JSValue js_sam_set_stat(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		int32_t player = -1, value = 0;
+		std::string name;
+		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( argc >= 2 ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
+		if ( argc >= 3 ) { JS_ToInt32(ctx, &value, argv[2]); }
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_set_stat refused: host only."); return JS_NewBool(ctx, 0); }
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !stats[player] )
+		{ SAM_ERROR("JS", "sam_set_stat: invalid player index " + std::to_string(player) + "."); return JS_NewBool(ctx, 0); }
+		const std::string n = samUpper(name.c_str());
+		Stat* s = stats[player];
+		Entity* e = players[player]->entity;
+		if      ( n == "HP" )    { if ( e ) { e->setHP(value); } else { s->HP = samClampInt(value, 0, s->MAXHP); } }
+		else if ( n == "MP" )    { if ( e ) { e->setMP(value); } else { s->MP = samClampInt(value, 0, s->MAXMP); } }
+		else if ( n == "MAXHP" ) { s->MAXHP = (value < 1 ? 1 : value); if ( s->HP > s->MAXHP ) { s->HP = s->MAXHP; } }
+		else if ( n == "MAXMP" ) { s->MAXMP = (value < 0 ? 0 : value); if ( s->MP > s->MAXMP ) { s->MP = s->MAXMP; } }
+		else if ( n == "STR" )   { s->STR = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
+		else if ( n == "DEX" )   { s->DEX = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
+		else if ( n == "CON" )   { s->CON = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
+		else if ( n == "INT" )   { s->INT = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
+		else if ( n == "PER" )   { s->PER = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
+		else if ( n == "CHR" )   { s->CHR = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
+		else if ( n == "GOLD" )  { s->GOLD = (value < 0 ? 0 : value); }
+		else if ( n == "LEVEL" || n == "LVL" ) { s->LVL = samClampInt(value, 1, 255); }
+		else if ( n == "EXP" )   { s->EXP = samClampInt(value, 0, 99); }
+		else { SAM_ERROR("JS", "sam_set_stat: unknown stat '" + name + "'."); return JS_NewBool(ctx, 0); }
+		SAM_INFO("JS", "Set stat " + n + " = " + std::to_string(value) + " on player " + std::to_string(player));
+		return JS_NewBool(ctx, 1);
+	}
+
+	JSValue js_sam_get_floor(JSContext* ctx, JSValueConst /*this_val*/, int /*argc*/, JSValueConst* /*argv*/)
+	{
+		return JS_NewInt32(ctx, currentlevel);
+	}
+
+	JSValue js_sam_spawn_item(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		int32_t x = 0, y = 0;
+		std::string name;
+		if ( argc >= 1 ) { JS_ToInt32(ctx, &x, argv[0]); }
+		if ( argc >= 2 ) { JS_ToInt32(ctx, &y, argv[1]); }
+		if ( argc >= 3 ) { const char* s = JS_ToCString(ctx, argv[2]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_spawn_item refused: host only."); return JS_NewBool(ctx, 0); }
+		std::string lower = name;
+		for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
+		auto it = ItemTooltips.itemNameStringToItemID.find(lower);
+		if ( it == ItemTooltips.itemNameStringToItemID.end() )
+		{ SAM_ERROR("JS", "sam_spawn_item: unknown item type '" + name + "'."); return JS_NewBool(ctx, 0); }
+		Entity* e = spawnGroundItem(static_cast<ItemType>(it->second), EXCELLENT, 0, 1, x, y);
+		if ( !e ) { SAM_ERROR("JS", "sam_spawn_item: invalid tile (" + std::to_string(x) + "," + std::to_string(y) + ")."); return JS_NewBool(ctx, 0); }
+		SAM_INFO("JS", "Spawned item " + name + " at (" + std::to_string(x) + "," + std::to_string(y) + ")");
+		return JS_NewBool(ctx, 1);
+	}
+
+	JSValue js_sam_message(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		int32_t player = -1;
+		std::string text;
+		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( argc >= 2 ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { text = s; JS_FreeCString(ctx, s); } }
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_message refused: host only."); return JS_NewBool(ctx, 0); }
+		if ( player < 0 || player >= MAXPLAYERS )
+		{ SAM_ERROR("JS", "sam_message: invalid player index " + std::to_string(player) + "."); return JS_NewBool(ctx, 0); }
+		messagePlayer(player, MESSAGE_MISC, "%s", text.c_str());
+		return JS_NewBool(ctx, 1);
+	}
+
+	JSValue js_sam_play_sound(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		int32_t soundId = -1, vol = 128;
+		if ( argc >= 1 ) { JS_ToInt32(ctx, &soundId, argv[0]); }
+		if ( argc >= 2 && !JS_IsUndefined(argv[1]) ) { JS_ToInt32(ctx, &vol, argv[1]); }
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_play_sound refused: host only."); return JS_NewBool(ctx, 0); }
+		if ( soundId < 0 || (Uint32)soundId >= numsounds )
+		{ SAM_ERROR("JS", "sam_play_sound: sound id " + std::to_string(soundId) + " out of range (0.." + std::to_string(numsounds) + ")."); return JS_NewBool(ctx, 0); }
+		vol = samClampInt(vol, 0, 255);
+		for ( int i = 0; i < MAXPLAYERS; ++i )
+		{
+			if ( players[i] && !client_disconnected[i] )
+			{
+				playSoundPlayer(i, (Uint16)soundId, (Uint8)vol);
+			}
+		}
+		return JS_NewBool(ctx, 1);
+	}
+
+	JSValue js_sam_get_nearby_entities(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		int32_t player = -1;
+		double radiusTiles = 0.0;
+		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( argc >= 2 ) { JS_ToFloat64(ctx, &radiusTiles, argv[1]); }
+		JSValue arr = JS_NewArray(ctx);
+		if ( multiplayer == CLIENT ) { return arr; }
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity || !map.entities ) { return arr; }
+		Entity* pe = players[player]->entity;
+		const double thresholdPx = radiusTiles * 16.0;
+		uint32_t idx = 0;
+		for ( node_t* node = map.entities->first; node != nullptr; node = node->next )
+		{
+			Entity* ent = (Entity*)node->element;
+			if ( !ent || ent == pe ) { continue; }
+			if ( !(ent->behavior == &actMonster || ent->behavior == &actPlayer) ) { continue; }
+			if ( entityDist(pe, ent) <= thresholdPx )
+			{
+				JS_SetPropertyUint32(ctx, arr, idx++, JS_NewInt64(ctx, (int64_t)ent->getUID()));
+				if ( idx >= 32 ) { break; }
+			}
+		}
+		return arr;
+	}
+#endif // SAM_JS_HAVE_BARONY
+
 	// ---- sandbox construction -------------------------------------------------
 	JSContext* newSandboxContext(JSRuntime* rt)
 	{
@@ -247,6 +482,18 @@ namespace
 		JSValue g = JS_GetGlobalObject(ctx);
 		JS_SetPropertyStr(ctx, g, "sam_log", JS_NewCFunction(ctx, js_sam_log, "sam_log", 1));
 		JS_SetPropertyStr(ctx, g, "sam_grant_item", JS_NewCFunction(ctx, js_sam_grant_item, "sam_grant_item", 2));
+#ifdef SAM_JS_HAVE_BARONY
+		JS_SetPropertyStr(ctx, g, "sam_grant_gold", JS_NewCFunction(ctx, js_sam_grant_gold, "sam_grant_gold", 2));
+		JS_SetPropertyStr(ctx, g, "sam_apply_effect", JS_NewCFunction(ctx, js_sam_apply_effect, "sam_apply_effect", 3));
+		JS_SetPropertyStr(ctx, g, "sam_remove_effect", JS_NewCFunction(ctx, js_sam_remove_effect, "sam_remove_effect", 2));
+		JS_SetPropertyStr(ctx, g, "sam_get_stat", JS_NewCFunction(ctx, js_sam_get_stat, "sam_get_stat", 2));
+		JS_SetPropertyStr(ctx, g, "sam_set_stat", JS_NewCFunction(ctx, js_sam_set_stat, "sam_set_stat", 3));
+		JS_SetPropertyStr(ctx, g, "sam_get_floor", JS_NewCFunction(ctx, js_sam_get_floor, "sam_get_floor", 0));
+		JS_SetPropertyStr(ctx, g, "sam_spawn_item", JS_NewCFunction(ctx, js_sam_spawn_item, "sam_spawn_item", 3));
+		JS_SetPropertyStr(ctx, g, "sam_message", JS_NewCFunction(ctx, js_sam_message, "sam_message", 2));
+		JS_SetPropertyStr(ctx, g, "sam_play_sound", JS_NewCFunction(ctx, js_sam_play_sound, "sam_play_sound", 2));
+		JS_SetPropertyStr(ctx, g, "sam_get_nearby_entities", JS_NewCFunction(ctx, js_sam_get_nearby_entities, "sam_get_nearby_entities", 2));
+#endif
 		JS_FreeValue(ctx, g);
 	}
 

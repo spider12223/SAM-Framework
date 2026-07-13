@@ -4,8 +4,16 @@
 	File: sam_patcher.cpp
 	Desc: implementation of layered / additive JSON patches.
 
-	Operation engine works on a parsed nlohmann::json document; the overlay
+	Operation engine works on a parsed nlohmann::ordered_json document; the overlay
 	lifecycle (wipe → write → prepend-mount) makes Barony read the merged result.
+
+	CRITICAL: we use ordered_json (insertion order preserved), NOT the default
+	nlohmann::json (a sorted std::map). Barony's item loader keys some data by an
+	item's positional index / by item->type into the parsed file, so re-sorting the
+	object keys (which plain json does on dump) silently DESYNCS vanilla item data
+	(names/sprites render as a different item). ordered_json round-trips the base
+	file with its original key order untouched, so patching gold/weight/etc. never
+	disturbs anything else.
 	Game build only (GAME_SOURCES); the caller is #ifndef EDITOR-guarded.
 
 -------------------------------------------------------------------------------*/
@@ -31,7 +39,10 @@
 #include <cmath>
 #include <system_error>
 
-using nlohmann::json;
+// ordered_json preserves object key order on dump (plain nlohmann::json sorts keys
+// via std::map, which reorders vanilla items.json and desyncs Barony's positional /
+// by-type item lookups). Aliasing `json` to it flips the whole engine below.
+using json = nlohmann::ordered_json;
 namespace fs = std::filesystem;
 
 static const char* MOD = "PATCHER";

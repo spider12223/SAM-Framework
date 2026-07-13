@@ -429,3 +429,27 @@ int SAMItems::itemIdForIdString(const std::string& idString)
 	}
 	return -1;
 }
+
+std::string SAMItems::getIconPath(int itemId)
+{
+	auto it = s_registry.find(itemId);
+	if ( it == s_registry.end() || it->second.icon.empty() )
+	{
+		return std::string();
+	}
+	// Same absolute path we resolved at registration, but collapse any accidental
+	// "//" into "/" so Image::get (PhysFS + raw fallback) resolves it cleanly.
+	const std::string raw = toForwardSlashes(joinPath(it->second.modPath, it->second.icon));
+	std::string out;
+	out.reserve(raw.size());
+	for ( char c : raw )
+	{
+		if ( c == '/' && !out.empty() && out.back() == '/' ) { continue; }
+		out.push_back(c);
+	}
+	if ( !fileExists(out) )
+	{
+		return std::string(); // fall back to the placeholder rather than a broken path
+	}
+	return out;
+}

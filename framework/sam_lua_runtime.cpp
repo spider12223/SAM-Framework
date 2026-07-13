@@ -53,6 +53,11 @@ extern "C" {
 #	include "player.hpp"    // players[], isLocalPlayer()
 #	include "net.hpp"
 #	include "mod_tools.hpp" // ItemTooltips.itemNameStringToItemID
+#	include "stat.hpp"      // Stat members, EFF_* effect ids, stats[], MAX_PLAYER_STAT_VALUE
+#	include "entity.hpp"    // Entity::setEffect/setHP/setMP/getUID, act* behaviors, map iteration
+#	include "monster.hpp"   // actMonster, Monster enum
+#	include "collision.hpp" // entityDist
+#	include "engine/audio/sound.hpp" // playSoundPlayer, numsounds
 #	include <cctype>
 #endif
 
@@ -271,6 +276,244 @@ namespace
 		lua_pushboolean(Ls, 1);
 		return 1;
 	}
+
+	// ---- shared helpers for the host API (primitives only) --------------------
+	inline int samClampInt(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
+	inline std::string samUpper(const char* in)
+	{
+		std::string o = in ? in : "";
+		for ( char& c : o ) { c = (char)std::toupper((unsigned char)c); }
+		return o;
+	}
+
+	// Map a case-insensitive effect name to its EFF_* id, or -1 if unknown.
+	int samEffectNameToId(const char* nameIn)
+	{
+		const std::string n = samUpper(nameIn);
+		if ( n == "LEVITATING" ) { return EFF_LEVITATING; }
+		if ( n == "INVISIBLE" )  { return EFF_INVISIBLE;  }
+		if ( n == "CONFUSED" )   { return EFF_CONFUSED;   }
+		if ( n == "POISONED" )   { return EFF_POISONED;   }
+		if ( n == "BLEEDING" )   { return EFF_BLEEDING;   }
+		if ( n == "ASLEEP" )     { return EFF_ASLEEP;     }
+		if ( n == "PARALYZED" )  { return EFF_PARALYZED;  }
+		if ( n == "DRUNK" )      { return EFF_DRUNK;      }
+		if ( n == "BLIND" )      { return EFF_BLIND;      }
+		if ( n == "GREASY" )     { return EFF_GREASY;     }
+		if ( n == "VOMITING" )   { return EFF_VOMITING;   }
+		if ( n == "WEBBED" )     { return EFF_WEBBED;     }
+		if ( n == "SLOW" )       { return EFF_SLOW;       }
+		if ( n == "FAST" )       { return EFF_FAST;       }
+		return -1;
+	}
+
+	// sam_grant_gold(player, amount) — add gold to a player (host-authoritative),
+	// mirroring the vanilla actgold award path + client HUD packet.
+	int lua_sam_grant_gold(lua_State* Ls)
+	{
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const int amount = (int)luaL_checkinteger(Ls, 2);
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_grant_gold refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !stats[player] )
+		{ SAM_ERROR("LUA", "sam_grant_gold: invalid player index " + std::to_string(player) + "."); lua_pushboolean(Ls, 0); return 1; }
+		stats[player]->GOLD += amount;
+		if ( stats[player]->GOLD < 0 ) { stats[player]->GOLD = 0; }
+		if ( multiplayer == SERVER && player > 0 && !players[player]->isLocalPlayer() )
+		{
+			strcpy((char*)net_packet->data, "GOLD");
+			SDLNet_Write32(stats[player]->GOLD, &net_packet->data[4]);
+			net_packet->address.host = net_clients[player - 1].host;
+			net_packet->address.port = net_clients[player - 1].port;
+			net_packet->len = 8;
+			sendPacketSafe(net_sock, -1, net_packet, player - 1);
+		}
+		SAM_INFO("LUA", "Granted " + std::to_string(amount) + " gold to player " + std::to_string(player));
+		lua_pushboolean(Ls, 1);
+		return 1;
+	}
+
+	// sam_apply_effect(player, "EFFECT", ticks) — apply a status effect for N ticks
+	// (50 ticks == 1s). setEffect auto-syncs the client. Returns false if immune.
+	int lua_sam_apply_effect(lua_State* Ls)
+	{
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const char* nameC = luaL_checkstring(Ls, 2);
+		const int ticks = (int)luaL_checkinteger(Ls, 3);
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_apply_effect refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity )
+		{ SAM_ERROR("LUA", "sam_apply_effect: invalid player index " + std::to_string(player) + "."); lua_pushboolean(Ls, 0); return 1; }
+		const int eff = samEffectNameToId(nameC);
+		if ( eff < 0 ) { SAM_ERROR("LUA", std::string("sam_apply_effect: unknown effect '") + (nameC ? nameC : "") + "'."); lua_pushboolean(Ls, 0); return 1; }
+		const bool ok = players[player]->entity->setEffect(eff, true, ticks, true);
+		SAM_INFO("LUA", std::string("Applied effect ") + (nameC ? nameC : "") + " to player " + std::to_string(player) + (ok ? "" : " (refused/immune)"));
+		lua_pushboolean(Ls, ok ? 1 : 0);
+		return 1;
+	}
+
+	// sam_remove_effect(player, "EFFECT") — clear a status effect (host-authoritative).
+	int lua_sam_remove_effect(lua_State* Ls)
+	{
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const char* nameC = luaL_checkstring(Ls, 2);
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_remove_effect refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity )
+		{ SAM_ERROR("LUA", "sam_remove_effect: invalid player index " + std::to_string(player) + "."); lua_pushboolean(Ls, 0); return 1; }
+		const int eff = samEffectNameToId(nameC);
+		if ( eff < 0 ) { SAM_ERROR("LUA", std::string("sam_remove_effect: unknown effect '") + (nameC ? nameC : "") + "'."); lua_pushboolean(Ls, 0); return 1; }
+		players[player]->entity->setEffect(eff, false, 0, true);
+		SAM_INFO("LUA", std::string("Removed effect ") + (nameC ? nameC : "") + " from player " + std::to_string(player));
+		lua_pushboolean(Ls, 1);
+		return 1;
+	}
+
+	// sam_get_stat(player, "STAT") -> number. Host-authoritative read.
+	int lua_sam_get_stat(lua_State* Ls)
+	{
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const char* nameC = luaL_checkstring(Ls, 2);
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_get_stat refused: host only."); lua_pushinteger(Ls, 0); return 1; }
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !stats[player] )
+		{ SAM_ERROR("LUA", "sam_get_stat: invalid player index " + std::to_string(player) + "."); lua_pushinteger(Ls, 0); return 1; }
+		const std::string n = samUpper(nameC);
+		Stat* s = stats[player];
+		long long v = 0;
+		if      ( n == "STR" )   { v = s->STR; }
+		else if ( n == "DEX" )   { v = s->DEX; }
+		else if ( n == "CON" )   { v = s->CON; }
+		else if ( n == "INT" )   { v = s->INT; }
+		else if ( n == "PER" )   { v = s->PER; }
+		else if ( n == "CHR" )   { v = s->CHR; }
+		else if ( n == "HP" )    { v = s->HP; }
+		else if ( n == "MAXHP" ) { v = s->MAXHP; }
+		else if ( n == "MP" )    { v = s->MP; }
+		else if ( n == "MAXMP" ) { v = s->MAXMP; }
+		else if ( n == "GOLD" )  { v = s->GOLD; }
+		else if ( n == "LEVEL" || n == "LVL" ) { v = s->LVL; }
+		else if ( n == "EXP" )   { v = s->EXP; }
+		else { SAM_ERROR("LUA", std::string("sam_get_stat: unknown stat '") + (nameC ? nameC : "") + "'."); lua_pushinteger(Ls, 0); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)v);
+		return 1;
+	}
+
+	// sam_set_stat(player, "STAT", value) — bounded set (never HP>MAXHP etc.).
+	int lua_sam_set_stat(lua_State* Ls)
+	{
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const char* nameC = luaL_checkstring(Ls, 2);
+		const int value = (int)luaL_checkinteger(Ls, 3);
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_set_stat refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !stats[player] )
+		{ SAM_ERROR("LUA", "sam_set_stat: invalid player index " + std::to_string(player) + "."); lua_pushboolean(Ls, 0); return 1; }
+		const std::string n = samUpper(nameC);
+		Stat* s = stats[player];
+		Entity* e = players[player]->entity;
+		if      ( n == "HP" )    { if ( e ) { e->setHP(value); } else { s->HP = samClampInt(value, 0, s->MAXHP); } }
+		else if ( n == "MP" )    { if ( e ) { e->setMP(value); } else { s->MP = samClampInt(value, 0, s->MAXMP); } }
+		else if ( n == "MAXHP" ) { s->MAXHP = (value < 1 ? 1 : value); if ( s->HP > s->MAXHP ) { s->HP = s->MAXHP; } }
+		else if ( n == "MAXMP" ) { s->MAXMP = (value < 0 ? 0 : value); if ( s->MP > s->MAXMP ) { s->MP = s->MAXMP; } }
+		else if ( n == "STR" )   { s->STR = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
+		else if ( n == "DEX" )   { s->DEX = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
+		else if ( n == "CON" )   { s->CON = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
+		else if ( n == "INT" )   { s->INT = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
+		else if ( n == "PER" )   { s->PER = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
+		else if ( n == "CHR" )   { s->CHR = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
+		else if ( n == "GOLD" )  { s->GOLD = (value < 0 ? 0 : value); }
+		else if ( n == "LEVEL" || n == "LVL" ) { s->LVL = samClampInt(value, 1, 255); }
+		else if ( n == "EXP" )   { s->EXP = samClampInt(value, 0, 99); }
+		else { SAM_ERROR("LUA", std::string("sam_set_stat: unknown stat '") + (nameC ? nameC : "") + "'."); lua_pushboolean(Ls, 0); return 1; }
+		SAM_INFO("LUA", std::string("Set stat ") + n + " = " + std::to_string(value) + " on player " + std::to_string(player));
+		lua_pushboolean(Ls, 1);
+		return 1;
+	}
+
+	// sam_get_floor() -> number (0-based current dungeon level).
+	int lua_sam_get_floor(lua_State* Ls)
+	{
+		lua_pushinteger(Ls, (lua_Integer)currentlevel);
+		return 1;
+	}
+
+	// sam_spawn_item(x, y, "ITEM_NAME") — spawn a ground item at map tile (x,y).
+	int lua_sam_spawn_item(lua_State* Ls)
+	{
+		const int x = (int)luaL_checkinteger(Ls, 1);
+		const int y = (int)luaL_checkinteger(Ls, 2);
+		const char* nameC = luaL_checkstring(Ls, 3);
+		const std::string itemName = nameC ? nameC : "";
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_spawn_item refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		std::string lower = itemName;
+		for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
+		auto it = ItemTooltips.itemNameStringToItemID.find(lower);
+		if ( it == ItemTooltips.itemNameStringToItemID.end() )
+		{ SAM_ERROR("LUA", "sam_spawn_item: unknown item type '" + itemName + "'."); lua_pushboolean(Ls, 0); return 1; }
+		Entity* e = spawnGroundItem(static_cast<ItemType>(it->second), EXCELLENT, 0, 1, x, y);
+		if ( !e ) { SAM_ERROR("LUA", "sam_spawn_item: invalid tile (" + std::to_string(x) + "," + std::to_string(y) + ")."); lua_pushboolean(Ls, 0); return 1; }
+		SAM_INFO("LUA", "Spawned item " + itemName + " at (" + std::to_string(x) + "," + std::to_string(y) + ")");
+		lua_pushboolean(Ls, 1);
+		return 1;
+	}
+
+	// sam_message(player, "text") — show a line in the player's message log.
+	int lua_sam_message(lua_State* Ls)
+	{
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const char* text = luaL_checkstring(Ls, 2);
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_message refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		if ( player < 0 || player >= MAXPLAYERS )
+		{ SAM_ERROR("LUA", "sam_message: invalid player index " + std::to_string(player) + "."); lua_pushboolean(Ls, 0); return 1; }
+		messagePlayer(player, MESSAGE_MISC, "%s", text ? text : "");
+		lua_pushboolean(Ls, 1);
+		return 1;
+	}
+
+	// sam_play_sound(soundId[, vol]) — play a sound for all connected players.
+	int lua_sam_play_sound(lua_State* Ls)
+	{
+		const int soundId = (int)luaL_checkinteger(Ls, 1);
+		int vol = 128;
+		if ( lua_gettop(Ls) >= 2 && !lua_isnoneornil(Ls, 2) ) { vol = (int)luaL_checkinteger(Ls, 2); }
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_play_sound refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		if ( soundId < 0 || (Uint32)soundId >= numsounds )
+		{ SAM_ERROR("LUA", "sam_play_sound: sound id " + std::to_string(soundId) + " out of range (0.." + std::to_string(numsounds) + ")."); lua_pushboolean(Ls, 0); return 1; }
+		vol = samClampInt(vol, 0, 255);
+		for ( int i = 0; i < MAXPLAYERS; ++i )
+		{
+			if ( players[i] && !client_disconnected[i] )
+			{
+				playSoundPlayer(i, (Uint16)soundId, (Uint8)vol);
+			}
+		}
+		lua_pushboolean(Ls, 1);
+		return 1;
+	}
+
+	// sam_get_nearby_entities(player, radiusTiles) -> { uid, uid, ... } (max 32).
+	// Returns creature UIDs only; never a raw pointer.
+	int lua_sam_get_nearby_entities(lua_State* Ls)
+	{
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const double radiusTiles = (double)luaL_checknumber(Ls, 2);
+		lua_newtable(Ls);
+		if ( multiplayer == CLIENT ) { return 1; }
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity || !map.entities ) { return 1; }
+		Entity* pe = players[player]->entity;
+		const double thresholdPx = radiusTiles * 16.0;
+		int idx = 1;
+		for ( node_t* node = map.entities->first; node != nullptr; node = node->next )
+		{
+			Entity* ent = (Entity*)node->element;
+			if ( !ent || ent == pe ) { continue; }
+			if ( !(ent->behavior == &actMonster || ent->behavior == &actPlayer) ) { continue; }
+			if ( entityDist(pe, ent) <= thresholdPx )
+			{
+				lua_pushinteger(Ls, (lua_Integer)ent->getUID());
+				lua_rawseti(Ls, -2, idx++);
+				if ( idx > 32 ) { break; }
+			}
+		}
+		return 1;
+	}
 #endif // SAM_LUA_HAVE_BARONY
 
 	int lua_panic(lua_State* Ls)
@@ -329,9 +572,29 @@ namespace
 		lua_setglobal(L, "sam_log");
 
 #ifdef SAM_LUA_HAVE_BARONY
-		// Host binding that actually affects the game (engine build only).
+		// Host bindings that actually affect the game (engine build only).
 		lua_pushcfunction(L, lua_sam_grant_item);
 		lua_setglobal(L, "sam_grant_item");
+		lua_pushcfunction(L, lua_sam_grant_gold);
+		lua_setglobal(L, "sam_grant_gold");
+		lua_pushcfunction(L, lua_sam_apply_effect);
+		lua_setglobal(L, "sam_apply_effect");
+		lua_pushcfunction(L, lua_sam_remove_effect);
+		lua_setglobal(L, "sam_remove_effect");
+		lua_pushcfunction(L, lua_sam_get_stat);
+		lua_setglobal(L, "sam_get_stat");
+		lua_pushcfunction(L, lua_sam_set_stat);
+		lua_setglobal(L, "sam_set_stat");
+		lua_pushcfunction(L, lua_sam_get_floor);
+		lua_setglobal(L, "sam_get_floor");
+		lua_pushcfunction(L, lua_sam_spawn_item);
+		lua_setglobal(L, "sam_spawn_item");
+		lua_pushcfunction(L, lua_sam_message);
+		lua_setglobal(L, "sam_message");
+		lua_pushcfunction(L, lua_sam_play_sound);
+		lua_setglobal(L, "sam_play_sound");
+		lua_pushcfunction(L, lua_sam_get_nearby_entities);
+		lua_setglobal(L, "sam_get_nearby_entities");
 #endif
 	}
 

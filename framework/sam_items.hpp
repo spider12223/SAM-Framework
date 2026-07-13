@@ -80,4 +80,10 @@ public:
 
 	// Reverse lookup: runtime slot id for a "namespace:item" id string, or -1.
 	static int itemIdForIdString(const std::string& idString);
+
+	// Absolute, Image::get-ready path to a custom item's inventory icon PNG, or ""
+	// if the slot isn't a registered custom item / has no icon. The inventory
+	// renderer calls this for type >= SAM_ITEM_ID_BASE so a custom slot serves its
+	// own icon directly, independent of the vanilla images[]/appearance indexing.
+	static std::string getIconPath(int itemId);
 };

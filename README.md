@@ -61,7 +61,7 @@ Every dropdown in the tool is generated from the [schemas](schemas/) at runtime,
 
 ---
 
-## Scripting — Lua, JavaScript & TypeScript (v0.4.0)
+## Scripting — Lua, JavaScript & TypeScript (v0.5.0)
 
 **JSON defines what your content *is*. A script defines how it *behaves*.**
 
@@ -106,16 +106,38 @@ end
 
 ### Hooks & API
 
+**11 gameplay hooks and 12 host API functions (v0.5.0)** — every hook fires in Lua, JavaScript and TypeScript alike, host-authoritative (server/singleplayer only).
+
 | Hook | Fires when | Event fields |
 |------|-----------|--------------|
-| `player.on_level_up` | a player gains a level (host-side) | `player`, `level`, `amount` (new level), `stats` |
-
-*(more hooks coming — `on_hit`, `on_death`, `on_equip`, …)*
+| `player.on_level_up` | a player gains a level | `player`, `level`, `amount`, `stats` |
+| `player.on_hit` | a player's melee weapon hits an entity | `player`, `target_uid`, `target_type`, `damage`, `weapon_type`, `lethal` |
+| `player.on_kill` | a player's melee blow kills an entity | `player`, `target_uid`, `target_type`, `was_lethal` |
+| `player.on_damage_taken` | a player takes damage (any source) | `player`, `damage`, `hp`, `maxhp`, `lethal`, `source_uid`, `source_type` |
+| `player.on_death` | a player dies | `player`, `killer_type`, `killer_uid`, `killer_monster`, `obituary` |
+| `player.on_equip` | a player equips an item | `player`, `item_type`, `slot` |
+| `player.on_unequip` | a player unequips an item | `player`, `item_type`, `item_count`, `slot` |
+| `player.on_item_use` | a player uses a consumable (potion / scroll / food) | `player`, `item_type`, `item_count`, `category` |
+| `player.on_spell_cast` | a player casts a spell | `player`, `spell_id`, `spell_name`, `target_uid` |
+| `player.on_gold_collected` | a player picks up gold | `player`, `amount`, `total_gold` |
+| `player.on_floor_change` | a player descends to a new floor | `player`, `old_floor`, `new_floor` |
 
 | API function | What it does |
 |--------------|--------------|
-| `sam_log(msg)` | write a line to `sam_log.txt` (string only) |
-| `sam_grant_item(player, "ITEM_NAME")` | give a vanilla item to a player (host-authoritative) |
+| `sam_log(msg)` | write a line to `sam_log.txt` |
+| `sam_message(player, text)` | show a message in the player's in-game log |
+| `sam_grant_item(player, "ITEM_NAME")` | give a vanilla item to a player |
+| `sam_grant_gold(player, amount)` | give gold to a player |
+| `sam_spawn_item(x, y, "ITEM_NAME")` | spawn a ground item at a map tile |
+| `sam_get_stat(player, "STAT")` → number | read `STR`/`DEX`/`CON`/`INT`/`PER`/`CHR`/`HP`/`MAXHP`/`MP`/`MAXMP`/`GOLD`/`LEVEL`/`EXP` |
+| `sam_set_stat(player, "STAT", value)` | set a stat (bounded — never exceeds max, etc.) |
+| `sam_apply_effect(player, "EFFECT", ticks)` | apply a status effect (`LEVITATING`, `INVISIBLE`, `POISONED`, …) for N ticks (50/sec) |
+| `sam_remove_effect(player, "EFFECT")` | clear a status effect |
+| `sam_get_floor()` → number | current dungeon floor (0-based) |
+| `sam_play_sound(soundId [, vol])` | play a sound effect for all players |
+| `sam_get_nearby_entities(player, radius)` → array | UIDs of creatures within `radius` tiles (max 32) |
+
+All state-changing APIs are host-authoritative and validate their inputs; a bad call is a logged no-op, never a crash.
 
 ### Safety sandbox (all three runtimes)
 
