@@ -11,8 +11,10 @@
 	custom range. A custom item's `type` is simply its 5000+ slot, so every vanilla
 	`items[item->type]` access resolves correctly once it's registered.
 
-	Models/icons are NOT loaded yet (that is a post-launch feature). Each custom
-	item borrows a category-appropriate vanilla item's model + inventory icon as a
+	Custom inventory ICONS are loaded from the mod folder at runtime: the icon PNG's
+	absolute path is written into items[id].images, which the inventory UI draws via
+	Image::get — the same path class portraits use. Custom 3D MODELS are not loaded
+	yet; a custom item borrows a category-appropriate vanilla item's model as a
 	placeholder, so it renders safely if ever spawned.
 
 	Unlike the class loader, this whole file compiles into both the game and the
@@ -37,6 +39,7 @@ struct SAMItemDef
 	std::string id;                 // "namespace:item"
 	int numericId = 0;              // assigned runtime slot (>= SAM_ITEM_ID_BASE)
 	std::string modNamespace;
+	std::string modPath;            // absolute mod folder (used to resolve the icon PNG)
 
 	std::string nameIdentified;
 	std::string nameUnidentified;
@@ -46,9 +49,9 @@ struct SAMItemDef
 	int goldValue = 0;
 	int level = -1;                 // -1 = excluded from random generation
 
-	std::string model;              // path (not loaded yet — placeholder used)
-	std::string modelFp;
-	std::string icon;
+	std::string model;              // path (PLANNED — not loaded yet, placeholder used)
+	std::string modelFp;            // path (PLANNED — not loaded yet)
+	std::string icon;               // mod-relative PNG path — loaded into the inventory icon
 
 	std::map<std::string, int> attributes;
 	std::string onHitEffect;

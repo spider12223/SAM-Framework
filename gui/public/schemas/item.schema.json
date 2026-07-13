@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://sam-framework.dev/schemas/item.schema.json",
   "title": "S.A.M Item / Weapon",
-  "description": "Defines a custom item or weapon. S.A.M registers it into the items[] table at a reserved runtime slot (>=5000) and wires up its models, names, category and slot.",
+  "description": "Defines a custom item or weapon. S.A.M registers it into the items[] table at a reserved runtime slot (>=5000) and wires up its names, category, slot, weight, value, level, attributes and 2D inventory icon. Custom 3D models and on-hit effects are PLANNED and not yet loaded — see each field's note.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -83,15 +83,15 @@
     },
     "model": {
       "type": "string",
-      "description": "Path (relative to the mod folder) to the third-person/world .vox model other players see."
+      "description": "PLANNED — not yet loaded by the framework. Path (relative to the mod folder) to the third-person/world .vox model. Custom items currently use a placeholder model cloned from a similar vanilla item; setting this has no visual effect yet."
     },
     "model_fp": {
       "type": "string",
-      "description": "Path to the first-person .vox model the wielder sees. If omitted, S.A.M falls back to the world model."
+      "description": "PLANNED — not yet loaded by the framework. Path to the first-person .vox model the wielder sees. No visual effect yet (see 'model')."
     },
     "icon": {
       "type": "string",
-      "description": "Path to the 2D inventory icon image for the item."
+      "description": "Path (relative to the mod folder) to a PNG used as the item's 2D inventory/hotbar icon, e.g. 'items/shadowblade.png'. Loaded at runtime and drawn like the class-select portrait. If the file is missing, a placeholder icon cloned from a similar vanilla item is used. (Only the 2D icon is loaded — the 3D 'model'/'model_fp' are still planned.)"
     },
     "attributes": {
       "type": "object",
@@ -103,22 +103,22 @@
     },
     "on_hit_effect": {
       "type": "string",
-      "description": "Status effect applied on a successful hit (e.g. an EFF_ effect name from stat.hpp), used by the effect/plugin system."
+      "description": "PLANNED — requires the S.A.M effect/plugin system, which is not yet implemented. Parsed but has no runtime effect. Status effect to apply on a successful hit (e.g. an EFF_ effect name from stat.hpp)."
     },
     "on_hit_chance": {
       "type": "number",
       "minimum": 0,
       "maximum": 1,
-      "description": "Probability (0.0-1.0) that on_hit_effect triggers on a hit."
+      "description": "PLANNED — no runtime effect yet (see 'on_hit_effect'). Probability (0.0-1.0) that on_hit_effect triggers on a hit."
     },
     "stackable": {
       "type": "boolean",
       "default": false,
-      "description": "Whether multiple copies stack into one inventory slot."
+      "description": "PLANNED — parsed but not yet applied at runtime. Whether multiple copies stack into one inventory slot."
     },
     "magic_level": {
       "type": "integer",
-      "description": "Magic/enchantment level of the item (affects value and behavior)."
+      "description": "PLANNED — parsed but not yet applied at runtime. Magic/enchantment level of the item."
     }
   },
   "examples": [

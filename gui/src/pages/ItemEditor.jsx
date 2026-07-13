@@ -108,7 +108,7 @@ export default function ItemEditor() {
         <div
           className="sam-panel flex items-center justify-center shrink-0"
           style={{ width: 84, height: 84, fontSize: '2.2rem' }}
-          title="Item emblem (post-launch: custom art)"
+          title="Item emblem (custom item art is planned — not yet loaded)"
           aria-hidden
         >
           ⚔
@@ -174,18 +174,23 @@ export default function ItemEditor() {
         </Panel>
 
         <Panel title="Appearance">
+          <div className="mb-3 text-xs" style={{ color: '#9dc76a' }}>
+            ✓ The <span className="sam-mono">Inventory Icon</span> loads in-game — point it at a PNG
+            in your mod folder. The 3D <span className="sam-mono">World Model</span> fields are still
+            PLANNED (not yet loaded — the game shows a placeholder model for now).
+          </div>
           <div className="space-y-3">
             <Field
               label="World Model"
-              hint="custom .vox models are post-launch — the game uses a placeholder for now"
+              hint="PLANNED — not yet loaded; items use a placeholder model for now"
             >
               <TextInput value={model} onChange={setModel} placeholder="models/shadowblade.vox" />
             </Field>
-            <Field label="First-Person Model" hint="falls back to the world model if omitted">
+            <Field label="First-Person Model" hint="PLANNED — not yet loaded">
               <TextInput value={modelFp} onChange={setModelFp} placeholder="models/shadowblade_fp.vox" />
             </Field>
-            <Field label="Inventory Icon">
-              <TextInput value={icon} onChange={setIcon} placeholder="icons/shadowblade.png" />
+            <Field label="Inventory Icon" hint="Loaded at runtime — path to a PNG in your mod folder (e.g. items/shadowblade.png)">
+              <TextInput value={icon} onChange={setIcon} placeholder="items/shadowblade.png" />
             </Field>
           </div>
         </Panel>

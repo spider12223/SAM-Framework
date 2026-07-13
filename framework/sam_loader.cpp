@@ -2,8 +2,9 @@
 
 	S.A.M Framework (Support All Mods)
 	File: sam_loader.cpp
-	Desc: implementation of the S.A.M core loader (scanner + summary skeleton).
-	      Class and item registration are intentionally NOT implemented here yet.
+	Desc: implementation of the S.A.M core loader. Drives the workshop scan, then
+	      the class / item / monster loaders and the data patcher, and prints a
+	      per-mod + final summary.
 
 -------------------------------------------------------------------------------*/
 
@@ -16,10 +17,12 @@
 #include "sam_patcher.hpp" // layered data patches — game build only (needs PhysFS + outputdir)
 #include "sam_monsters.hpp"// custom monster overlay — game build only (needs PhysFS + outputdir)
 #include "sam_backup.hpp"  // daily save backup — game build only (needs outputdir + fs)
+#include "sam_lua_runtime.hpp" // Lua behavior scripting — game build only
 #endif
 #include "sam_logger.hpp"
 
 #include <string>
+#include <fstream>
 
 bool SAMLoader::loaded = false;
 
@@ -37,6 +40,11 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 	SAMItems::clear();
 #ifndef EDITOR
 	SAMSync::clear(); // drop any stale fingerprint state from a previous lobby
+
+	// Fresh sandboxed Lua VM for this load cycle — drops any behavior scripts
+	// registered on a previous Play, mirroring the class/item registry rebuild.
+	SAMLua::shutdown();
+	SAMLua::init();
 
 	// Apply layered data patches now — after scanning manifests, before we
 	// register classes/items, and (crucially) before Barony's initGameDatafiles
@@ -78,6 +86,39 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 		// Register the mod's classes and items into the runtime registries.
 		SAMClasses::loadFromManifest(m);
 		SAMItems::loadFromManifest(m);
+
+#ifndef EDITOR
+		// S.A.M Lua: auto-load a behavior script sitting next to a class JSON.
+		// "classes/assassin.json" -> "classes/assassin.lua" in the same mod folder.
+		for ( const std::string& classRel : m.classes )
+		{
+			std::string luaRel = classRel;
+			const std::string::size_type ext = luaRel.rfind(".json");
+			if ( ext != std::string::npos ) { luaRel = luaRel.substr(0, ext) + ".lua"; }
+			else { luaRel += ".lua"; }
+
+			const std::string luaPath = m.modPath + "/" + luaRel;
+			std::ifstream probe(luaPath.c_str());
+			if ( !probe.good() ) { continue; } // no sibling .lua — perfectly fine
+			probe.close();
+
+			if ( SAMLua::loadScript(luaPath) )
+			{
+				// Build a readable "<namespace>:<basename>" id + bare filename for the log.
+				std::string base = classRel;
+				std::string::size_type slash = base.find_last_of("/\\");
+				if ( slash != std::string::npos ) { base = base.substr(slash + 1); }
+				const std::string::size_type bdot = base.rfind('.');
+				if ( bdot != std::string::npos ) { base = base.substr(0, bdot); }
+
+				std::string luaFile = luaRel;
+				slash = luaFile.find_last_of("/\\");
+				if ( slash != std::string::npos ) { luaFile = luaFile.substr(slash + 1); }
+
+				SAM_INFO("LUA", "Loaded script: " + luaFile + " for [" + m.ns + ":" + base + "]");
+			}
+		}
+#endif
 	}
 
 	loaded = true;

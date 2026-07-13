@@ -61,6 +61,58 @@ Every dropdown in the tool is generated from the [schemas](schemas/) at runtime,
 
 ---
 
+## Lua Scripting (v0.3.0)
+
+**JSON defines what your content *is*. Lua defines how it *behaves*.**
+
+Since v0.3.0, S.A.M embeds a sandboxed **Lua 5.4** runtime. Drop a `.lua` file next to any class JSON and S.A.M loads it automatically — no C++, no compiler, just Lua. A coder can add behavior; a beginner can ignore Lua entirely and everything still works.
+
+```
+mods/my_mod/
+  classes/assassin.json     ← stats, skills, starting gear   (WHAT it is)
+  classes/assassin.lua      ← react to game events           (HOW it behaves)
+```
+
+### Writing a behavior script
+
+Define an `on_event(event)` function. S.A.M calls it with a copied, primitive-only event table (never engine pointers):
+
+```lua
+function on_event(event)
+  if event.name == "player.on_level_up" then
+    sam_log("Leveled up to " .. tostring(event.amount))
+    sam_grant_item(event.player, "IRON_DAGGER")
+  end
+end
+```
+
+### Hooks & API
+
+| Hook | Fires when | Event fields |
+|------|-----------|--------------|
+| `player.on_level_up` | a player gains a level (host-side) | `player`, `level`, `amount` (new level), `stats` |
+
+*(more hooks coming — `on_hit`, `on_death`, `on_equip`, …)*
+
+| API function | What it does |
+|--------------|--------------|
+| `sam_log(msg)` | write a line to `sam_log.txt` (string only) |
+| `sam_grant_item(player, "ITEM_NAME")` | give a vanilla item to a player (host-authoritative) |
+
+### Safety sandbox
+
+Every script runs locked-down so a broken or malicious mod can't take down the game:
+
+- **10 MB** memory cap per VM; **500,000**-instruction budget per callback, enforced by a watchdog every 1,000 instructions — an infinite loop is killed in milliseconds.
+- `os`, `io`, `dofile`, `loadfile`, `require` are stripped.
+- A script error disables **only that script** — it never crashes the host.
+- Lua only ever receives **copied primitives** (ints, strings, UIDs), never a raw `Entity`/`Item` pointer — so a freed game object can't cause a use-after-free.
+- Gameplay hooks run **host-authoritative only** (server/singleplayer), so multiplayer stays in sync.
+
+A complete working script is in [`examples/lua/assassin.lua`](examples/lua/assassin.lua).
+
+---
+
 ## Make & publish a mod
 
 A S.A.M mod is just a folder of JSON (plus optional portrait/model images):

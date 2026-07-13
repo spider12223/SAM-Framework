@@ -107,7 +107,7 @@
     },
     "plugins": {
       "type": "array",
-      "description": "Relative paths to compiled plugin .dll files (advanced; loaded by the S.A.M plugin system). Most mods leave this empty.",
+      "description": "PLANNED — the S.A.M plugin system is not yet implemented; declared .dll files are counted but NOT loaded. Leave this empty for now. (Relative paths to compiled plugin .dll files.)",
       "items": {
         "type": "string",
         "pattern": "\\.dll$",

@@ -63,6 +63,18 @@ static std::string joinPath(const std::string& dir, const std::string& file)
 	return (back == '/' || back == '\\') ? (dir + file) : (dir + "/" + file);
 }
 
+static std::string toForwardSlashes(std::string s)
+{
+	for ( char& c : s ) { if ( c == '\\' ) { c = '/'; } }
+	return s;
+}
+
+static bool fileExists(const std::string& p)
+{
+	std::ifstream f(p.c_str(), std::ios::binary);
+	return f.good();
+}
+
 // Valid enum-name lists (for validation + "did you mean?" suggestions). Kept in
 // step with categoryFromName/slotFromName below and with item.schema.json.
 static const std::vector<std::string>& validCategoryNames()
@@ -198,6 +210,30 @@ static bool registerItem(SAMItemDef def)
 	slot.variations = 1;
 	deepCopyImages(slot.images, items[tmpl].images);
 
+	// Custom inventory icon. The modern inventory UI draws items[type].images[0]'s
+	// PATH STRING via Image::get (which resolves an absolute path directly, exactly
+	// like the class-select portrait) — it does NOT read items[].surfaces. So point
+	// image node 0 at the mod's PNG. deepCopyImages allocates a 64-byte buffer that
+	// is too small for an absolute path, so free + re-malloc it to fit. If the file
+	// is missing we keep the placeholder (cloned above), never crash.
+	if ( !def.icon.empty() )
+	{
+		const std::string abs = toForwardSlashes(joinPath(def.modPath, def.icon));
+		if ( fileExists(abs) && slot.images.first )
+		{
+			string_t* s = static_cast<string_t*>(slot.images.first->element);
+			free(s->data);
+			s->data = static_cast<char*>(malloc(abs.size() + 1));
+			memset(s->data, 0, abs.size() + 1);
+			stringCopy(s->data, abs.c_str(), abs.size(), abs.size());
+			SAM_INFO(MOD, "Item [" + def.id + "] custom inventory icon -> " + abs);
+		}
+		else
+		{
+			SAM_WARN(MOD, "Item [" + def.id + "] icon not found (using placeholder): " + abs);
+		}
+	}
+
 	// Metadata from the JSON.
 	slot.setIdentifiedName(def.nameIdentified);
 	slot.setUnidentifiedName(def.nameUnidentified.empty() ? def.nameIdentified : def.nameUnidentified);
@@ -278,6 +314,7 @@ void SAMItems::loadFromManifest(const SAMModManifest& manifest)
 		def.nameIdentified = getStr("name_identified");
 		def.category = getStr("category");
 		def.modNamespace = manifest.ns;
+		def.modPath = manifest.modPath;
 
 		if ( def.id.empty() )
 		{

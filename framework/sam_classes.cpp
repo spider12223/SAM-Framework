@@ -581,16 +581,41 @@ void SAMClasses::applyLoadout(int player)
 	for ( const SAMStartingItem& si : def->startingItems )
 	{
 		ItemType type;
-		if ( !itemTypeFromName(si.type, type) )
+		const bool isCustomRef = si.type.find(':') != std::string::npos;
+		bool resolved = false;
+		if ( isCustomRef )
 		{
-			SAM_ERROR(MOD, "class [" + def->id + "] references item '" + si.type
-				+ "' which does not exist (custom items are not loaded yet) — skipping.");
+			// "namespace:item" — resolve to the runtime slot (>= SAM_ITEM_ID_BASE)
+			// that SAMItems registered this custom item into. Custom items are
+			// registered at mod-load, which is before any game starts, so the
+			// lookup is populated by the time a class grants its loadout.
+			const int customId = SAMItems::itemIdForIdString(si.type);
+			if ( customId >= 0 ) { type = static_cast<ItemType>(customId); resolved = true; }
+		}
+		else
+		{
+			resolved = itemTypeFromName(si.type, type);
+		}
+		if ( !resolved )
+		{
+			SAM_ERROR(MOD, "class [" + def->id + "] references item '" + si.type + "' — "
+				+ (isCustomRef ? "custom item not registered (is that mod loaded?)"
+				               : "not a known item type") + " — skipping.");
 			continue;
 		}
 		const Status status = statusFromName(si.status);
 		Item* item = newItem(type, status, static_cast<Sint16>(si.beatitude),
 			static_cast<Sint16>(si.count), static_cast<Uint32>(si.appearance), si.identified, nullptr);
 		if ( !item ) { continue; }
+		if ( isCustomRef )
+		{
+			SAM_INFO(MOD, "class [" + def->id + "] granted CUSTOM starting item '" + si.type
+				+ "' (runtime slot " + std::to_string(static_cast<int>(type)) + ").");
+		}
+		else
+		{
+			SAM_DEBUG(MOD, "class [" + def->id + "] granted starting item '" + si.type + "'.");
+		}
 
 		if ( isLocalPlayer )
 		{

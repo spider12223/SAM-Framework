@@ -4,8 +4,8 @@
 	File: sam_loader.hpp
 	Desc: the core S.A.M entry point. Barony calls SAMLoader::load() from inside
 	      Mods::loadMods() (after mod paths are mounted) and SAMLoader::unload()
-	      from Mods::unloadMods(). load() drives the workshop scan and, later,
-	      the class/item loaders; for now it is the scanner + summary skeleton.
+	      from Mods::unloadMods(). load() drives the workshop scan, then the
+	      class/item/monster loaders and the data patcher.
 
 	Takes the mounted-paths list as a parameter (pass Mods::mountedFilepaths) so
 	this framework stays decoupled from Barony's internals.
