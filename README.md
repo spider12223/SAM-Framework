@@ -132,3 +132,14 @@ workshop/      Steam Workshop packaging files
 ## License
 
 S.A.M's own code, schemas, GUI, and docs are released under the [MIT License](LICENSE). Barony is © Turning Wheel LLC; you must own it to use S.A.M.
+
+## License & Attribution
+
+S.A.M Framework is built on Barony's open source release.
+Barony is licensed under the BSD 2-Clause License.
+Copyright (c) 2013-2020, Turning Wheel LLC
+
+S.A.M Framework code is original work by spider12223, written with AI assistance. The framework source is available at:
+https://github.com/spider12223/SAM-Framework
+
+When S.A.M is distributed as a patched binary, the BSD 2-Clause copyright notice above is reproduced (as that license requires). Full third-party license texts for Barony and its bundled libraries (Dear ImGui, SDL, RapidJSON) are reproduced in [NOTICE.txt](NOTICE.txt).
