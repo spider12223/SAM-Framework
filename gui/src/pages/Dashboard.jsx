@@ -12,6 +12,10 @@ import { Panel, GoldButton } from '@/components/ui.jsx';
 /** The framework's own version (mods declare their own framework_min_version). */
 const SAM_FRAMEWORK_VERSION = '0.1.0';
 
+/** Where players get S.A.M itself (the framework is a dependency, not a mod). */
+const WORKSHOP_URL = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472';
+const INSTALLER_URL = 'https://github.com/spider12223/SAM-Framework/releases/latest';
+
 const TRAVELS = [
   { to: '/class-editor', icon: '🛡', label: 'Class Editor', desc: 'Forge a playable class — attributes, skills, starting gear.' },
   { to: '/item-editor', icon: '⚔', label: 'Item Editor', desc: 'Define a custom item — category, slot, stats and effects.' },
@@ -40,6 +44,29 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-4 max-w-7xl mx-auto">
+      {/* ------------------------------------------------- get S.A.M banner */}
+      <Panel title="Get S.A.M Framework">
+        <p className="m-0" style={{ color: 'var(--color-parchment)' }}>
+          <strong style={{ color: 'var(--color-gold)' }}>S.A.M is the engine your mods run on.</strong>{' '}
+          Players install it once — then every mod built with S.A.M just works. It's a dependency, not a
+          playable mod on its own.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-3">
+          <a className="sam-btn" href={WORKSHOP_URL} target="_blank" rel="noreferrer">🎮 Steam Workshop</a>
+          <a className="sam-btn" href={INSTALLER_URL} target="_blank" rel="noreferrer">⬇ Download Installer</a>
+        </div>
+        <div className="mt-3 sam-well px-4 py-3">
+          <div className="sam-label">Building a mod? Tell your players where to get S.A.M:</div>
+          <div className="mt-1 text-sm" style={{ color: 'var(--color-parchment)' }}>
+            Subscribe on{' '}
+            <a href={WORKSHOP_URL} target="_blank" rel="noreferrer" style={{ color: 'var(--color-gold)' }}>Steam Workshop</a>{' '}
+            <span style={{ color: '#6b5a35' }}>or</span> run the{' '}
+            <a href={INSTALLER_URL} target="_blank" rel="noreferrer" style={{ color: 'var(--color-gold)' }}>installer from GitHub Releases</a>,
+            then enable your mod in Barony's <span className="sam-label">Mods</span> menu.
+          </div>
+        </div>
+      </Panel>
+
       {/* ------------------------------------------------------- welcome */}
       <Panel title="Welcome, Modder">
         <p className="m-0" style={{ color: 'var(--color-parchment)' }}>

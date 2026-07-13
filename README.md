@@ -3,9 +3,22 @@
 # S.A.M Framework
 ### Support All Mods — a JSON modding framework for [Barony](https://store.steampowered.com/app/371970/Barony/)
 
-**[🛠 Open the Mod Builder](https://spider12223.github.io/SAM-Framework/)** · **[📜 Schema Reference](https://spider12223.github.io/SAM-Framework/docs/schema-reference.html)** · **[⬇ Releases](https://github.com/spider12223/SAM-Framework/releases)**
+**[🎮 Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472)** · **[⬇ Download Installer](https://github.com/spider12223/SAM-Framework/releases/latest)** · **[🛠 Mod Builder](https://spider12223.github.io/SAM-Framework/)** · **[📜 Schema Reference](https://spider12223.github.io/SAM-Framework/docs/schema-reference.html)**
 
 </div>
+
+---
+
+## Quick Install
+
+**Playing a S.A.M mod?** Get the framework in four steps:
+
+1. **[Subscribe on Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472)** — so Steam pulls S.A.M in for mods that require it.
+2. **[Download the installer](https://github.com/spider12223/SAM-Framework/releases/latest)** from GitHub Releases (`SAM_Framework_Installer_v0.2.0.exe`).
+3. **Run it once** — it auto-detects your Barony install, backs up your original `barony.exe`, and installs S.A.M. Nothing is deleted.
+4. **Launch Barony** — enable mods in the **Mods** menu. A `sam_log.txt` in your Barony folder confirms S.A.M is running.
+
+> Direct download: **[SAM_Framework_Installer_v0.2.0.exe](https://github.com/spider12223/SAM-Framework/releases/download/v0.2.0/SAM_Framework_Installer_v0.2.0.exe)** &nbsp;·&nbsp; To revert to vanilla, rename `barony_vanilla.exe` back to `barony.exe`.
 
 ---
 
