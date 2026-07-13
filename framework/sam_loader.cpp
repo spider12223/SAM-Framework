@@ -18,11 +18,17 @@
 #include "sam_monsters.hpp"// custom monster overlay — game build only (needs PhysFS + outputdir)
 #include "sam_backup.hpp"  // daily save backup — game build only (needs outputdir + fs)
 #include "sam_lua_runtime.hpp" // Lua behavior scripting — game build only
+#include "sam_js_runtime.hpp"  // JavaScript + TypeScript scripting — game build only
+#include "files.hpp"           // outputdir — TS cache / compiler location
 #endif
 #include "sam_logger.hpp"
 
 #include <string>
 #include <fstream>
+#ifndef EDITOR
+#include <filesystem>
+#include <system_error>
+#endif
 
 bool SAMLoader::loaded = false;
 
@@ -45,6 +51,25 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 	// registered on a previous Play, mirroring the class/item registry rebuild.
 	SAMLua::shutdown();
 	SAMLua::init();
+
+	// Fresh sandboxed JavaScript/TypeScript runtime for this load cycle too.
+	SAMJs::shutdown();
+	SAMJs::init();
+
+	// TypeScript transpile cache + the vendored compiler live next to the game
+	// output dir (where sam_log.txt / sam_patch_overlay already are), NEVER in the
+	// read-only mod folders. Cache = <outputdir>/sam_ts_cache, compiler =
+	// <outputdir>/typescript.js (shipped alongside barony.exe).
+	auto samJoinOut = [](const std::string& sub) -> std::string {
+		std::string d = outputdir;
+		if ( d.empty() ) { return sub; }
+		const char b = d.back();
+		return (b == '/' || b == '\\') ? (d + sub) : (d + "/" + sub);
+	};
+	const std::string tsCacheDir = samJoinOut("sam_ts_cache");
+	const std::string tsCompilerPath = samJoinOut("typescript.js");
+	std::error_code samTsEc;
+	std::filesystem::create_directories(tsCacheDir, samTsEc);
 
 	// Apply layered data patches now — after scanning manifests, before we
 	// register classes/items, and (crucially) before Barony's initGameDatafiles
@@ -88,38 +113,57 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 		SAMItems::loadFromManifest(m);
 
 #ifndef EDITOR
-		// S.A.M Lua: auto-load a behavior script sitting next to a class JSON.
-		// "classes/assassin.json" -> "classes/assassin.lua" in the same mod folder.
+		// S.A.M scripting: auto-load behavior scripts sitting next to a class JSON.
+		// For "classes/assassin.json" we look for classes/assassin.{ts,js,lua} in the
+		// same mod folder and load ALL that exist (detection order ts -> js -> lua;
+		// each loaded script receives every event). A .ts is transpiled to JS once
+		// (cached), then run through the same sandboxed QuickJS as a .js script.
 		for ( const std::string& classRel : m.classes )
 		{
-			std::string luaRel = classRel;
-			const std::string::size_type ext = luaRel.rfind(".json");
-			if ( ext != std::string::npos ) { luaRel = luaRel.substr(0, ext) + ".lua"; }
-			else { luaRel += ".lua"; }
+			// Shared base name: strip the ".json" extension.
+			std::string base = classRel;
+			const std::string::size_type ext = base.rfind(".json");
+			if ( ext != std::string::npos ) { base = base.substr(0, ext); }
 
-			const std::string luaPath = m.modPath + "/" + luaRel;
-			std::ifstream probe(luaPath.c_str());
-			if ( !probe.good() ) { continue; } // no sibling .lua — perfectly fine
-			probe.close();
+			// Readable "<namespace>:<basename>" id for the log lines.
+			std::string idBase = base;
+			const std::string::size_type idSlash = idBase.find_last_of("/\\");
+			if ( idSlash != std::string::npos ) { idBase = idBase.substr(idSlash + 1); }
+			const std::string classId = m.ns + ":" + idBase;
 
-			if ( SAMLua::loadScript(luaPath) )
+			auto samExists = [](const std::string& p) { std::ifstream f(p.c_str()); return f.good(); };
+			auto samFileName = [](const std::string& p) -> std::string {
+				const std::string::size_type s = p.find_last_of("/\\");
+				return (s != std::string::npos) ? p.substr(s + 1) : p;
+			};
+
+			// TypeScript (transpiled to JS, cached under <outputdir>/sam_ts_cache).
+			const std::string tsPath = m.modPath + "/" + base + ".ts";
+			if ( samExists(tsPath) && SAMJs::loadScriptTS(tsPath, tsCacheDir, tsCompilerPath) )
 			{
-				// Build a readable "<namespace>:<basename>" id + bare filename for the log.
-				std::string base = classRel;
-				std::string::size_type slash = base.find_last_of("/\\");
-				if ( slash != std::string::npos ) { base = base.substr(slash + 1); }
-				const std::string::size_type bdot = base.rfind('.');
-				if ( bdot != std::string::npos ) { base = base.substr(0, bdot); }
-
-				std::string luaFile = luaRel;
-				slash = luaFile.find_last_of("/\\");
-				if ( slash != std::string::npos ) { luaFile = luaFile.substr(slash + 1); }
-
-				SAM_INFO("LUA", "Loaded script: " + luaFile + " for [" + m.ns + ":" + base + "]");
+				SAM_INFO("JS", "Loaded script: " + samFileName(tsPath) + " (TypeScript) for [" + classId + "]");
+			}
+			// JavaScript.
+			const std::string jsPath = m.modPath + "/" + base + ".js";
+			if ( samExists(jsPath) && SAMJs::loadScriptJS(jsPath) )
+			{
+				SAM_INFO("JS", "Loaded script: " + samFileName(jsPath) + " (JavaScript) for [" + classId + "]");
+			}
+			// Lua.
+			const std::string luaPath = m.modPath + "/" + base + ".lua";
+			if ( samExists(luaPath) && SAMLua::loadScript(luaPath) )
+			{
+				SAM_INFO("LUA", "Loaded script: " + samFileName(luaPath) + " (Lua) for [" + classId + "]");
 			}
 		}
 #endif
 	}
+
+#ifndef EDITOR
+	// All scripts loaded — free the ~9MB TypeScript compiler + its runtime so it
+	// is not resident during gameplay (lazily recreated if a later load needs it).
+	SAMJs::releaseTranspiler();
+#endif
 
 	loaded = true;
 
@@ -165,6 +209,8 @@ void SAMLoader::unload()
 	SAMSync::clear();
 	SAMPatcher::clear();  // unmount + wipe the generated patch overlay
 	SAMMonsters::clear(); // unmount + wipe the generated monster overlay
+	SAMLua::shutdown();   // drop the Lua behavior VM
+	SAMJs::shutdown();    // drop the JS/TS behavior VM (+ any transpile runtime)
 #endif
 	loaded = false;
 }

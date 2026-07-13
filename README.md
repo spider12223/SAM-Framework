@@ -61,23 +61,41 @@ Every dropdown in the tool is generated from the [schemas](schemas/) at runtime,
 
 ---
 
-## Lua Scripting (v0.3.0)
+## Scripting — Lua, JavaScript & TypeScript (v0.4.0)
 
-**JSON defines what your content *is*. Lua defines how it *behaves*.**
+**JSON defines what your content *is*. A script defines how it *behaves*.**
 
-Since v0.3.0, S.A.M embeds a sandboxed **Lua 5.4** runtime. Drop a `.lua` file next to any class JSON and S.A.M loads it automatically — no C++, no compiler, just Lua. A coder can add behavior; a beginner can ignore Lua entirely and everything still works.
+S.A.M embeds three sandboxed scripting runtimes and picks by file extension — write in whichever you know. Drop a `.lua`, `.js`, or `.ts` file next to any class JSON and S.A.M loads it automatically; no C++, no compiler, no build step. **All matching scripts load, and all receive every event** — one class can even mix languages. Beginners can ignore scripting entirely and everything still works.
+
+| Language | Runtime | Since |
+|---|---|---|
+| **Lua 5.4** | vendored Lua | v0.3.0 |
+| **JavaScript** | quickjs-ng | v0.4.0 |
+| **TypeScript** | quickjs-ng + `typescript` | v0.4.0 — transpiled to JS once at load, cached by content hash |
 
 ```
 mods/my_mod/
   classes/assassin.json     ← stats, skills, starting gear   (WHAT it is)
-  classes/assassin.lua      ← react to game events           (HOW it behaves)
+  classes/assassin.ts       ← behavior in TypeScript   ┐
+  classes/assassin.js       ← behavior in JavaScript   ├ any / all of these
+  classes/assassin.lua      ← behavior in Lua          ┘
 ```
 
 ### Writing a behavior script
 
-Define an `on_event(event)` function. S.A.M calls it with a copied, primitive-only event table (never engine pointers):
+Define an `on_event(event)` function. S.A.M calls it with a copied, primitive-only event (never engine pointers). Same shape in every language:
 
+```ts
+// TypeScript
+function on_event(event: { name: string; player: number; amount: number }): void {
+  if (event.name === "player.on_level_up") {
+    sam_log("Leveled up to " + event.amount);
+    sam_grant_item(event.player, "IRON_DAGGER");
+  }
+}
+```
 ```lua
+-- Lua
 function on_event(event)
   if event.name == "player.on_level_up" then
     sam_log("Leveled up to " .. tostring(event.amount))
@@ -99,17 +117,17 @@ end
 | `sam_log(msg)` | write a line to `sam_log.txt` (string only) |
 | `sam_grant_item(player, "ITEM_NAME")` | give a vanilla item to a player (host-authoritative) |
 
-### Safety sandbox
+### Safety sandbox (all three runtimes)
 
 Every script runs locked-down so a broken or malicious mod can't take down the game:
 
-- **10 MB** memory cap per VM; **500,000**-instruction budget per callback, enforced by a watchdog every 1,000 instructions — an infinite loop is killed in milliseconds.
-- `os`, `io`, `dofile`, `loadfile`, `require` are stripped.
+- **10 MB** memory cap per VM; a per-callback instruction/time budget with a watchdog — an infinite loop is killed in milliseconds (on JS the kill is even uncatchable by the script).
+- No filesystem / network / OS: Lua has `os`/`io`/`dofile`/`loadfile`/`require` stripped; the JS/TS engine never links quickjs-libc, so there is no `fs`/`require`/`fetch`/`process`.
 - A script error disables **only that script** — it never crashes the host.
-- Lua only ever receives **copied primitives** (ints, strings, UIDs), never a raw `Entity`/`Item` pointer — so a freed game object can't cause a use-after-free.
+- Scripts only ever receive **copied primitives** (ints, strings, UIDs), never a raw `Entity`/`Item` pointer — so a freed game object can't cause a use-after-free.
 - Gameplay hooks run **host-authoritative only** (server/singleplayer), so multiplayer stays in sync.
 
-A complete working script is in [`examples/lua/assassin.lua`](examples/lua/assassin.lua).
+Working examples: [`examples/lua/assassin.lua`](examples/lua/assassin.lua) · [`examples/js/assassin.js`](examples/js/assassin.js) · [`examples/typescript/assassin.ts`](examples/typescript/assassin.ts).
 
 ---
 
