@@ -14,11 +14,11 @@
 **Playing a S.A.M mod?** Get the framework in four steps:
 
 1. **[Subscribe on Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472)** — so Steam pulls S.A.M in for mods that require it.
-2. **[Download the installer](https://github.com/spider12223/SAM-Framework/releases/latest)** from GitHub Releases (`SAM_Framework_Installer_v0.4.0.exe`).
+2. **[Download the installer](https://github.com/spider12223/SAM-Framework/releases/latest)** from GitHub Releases (`SAM_Framework_Installer_v0.8.0.exe`).
 3. **Run it once** — it auto-detects your Barony install, backs up your original `barony.exe`, and installs S.A.M (`barony.exe` + `typescript.js`, the compiler for TypeScript mod scripts). Nothing is deleted.
 4. **Launch Barony** — enable mods in the **Mods** menu. A `sam_log.txt` in your Barony folder confirms S.A.M is running.
 
-> Direct download: **[SAM_Framework_Installer_v0.4.0.exe](https://github.com/spider12223/SAM-Framework/releases/download/v0.4.0/SAM_Framework_Installer_v0.4.0.exe)** &nbsp;·&nbsp; To revert to vanilla, rename `barony_vanilla.exe` back to `barony.exe`.
+> Direct download: **[SAM_Framework_Installer_v0.8.0.exe](https://github.com/spider12223/SAM-Framework/releases/download/v0.8.0/SAM_Framework_Installer_v0.8.0.exe)** &nbsp;·&nbsp; To revert to vanilla, rename `barony_vanilla.exe` back to `barony.exe`.
 
 ---
 
