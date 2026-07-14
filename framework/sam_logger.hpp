@@ -23,7 +23,7 @@
 #include <mutex>
 
 // S.A.M framework version — stamped into the session banner in the log file.
-#define SAM_FRAMEWORK_VERSION "0.5.0"
+#define SAM_FRAMEWORK_VERSION "0.6.0"
 
 // NOTE: members are CamelCase on purpose. Barony's src/game.hpp does
 // `#define DEBUG 1` and <windows.h> (wingdi.h) does `#define ERROR 0`, so

@@ -139,19 +139,19 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 
 			// TypeScript (transpiled to JS, cached under <outputdir>/sam_ts_cache).
 			const std::string tsPath = m.modPath + "/" + base + ".ts";
-			if ( samExists(tsPath) && SAMJs::loadScriptTS(tsPath, tsCacheDir, tsCompilerPath) )
+			if ( samExists(tsPath) && SAMJs::loadScriptTS(tsPath, tsCacheDir, tsCompilerPath, m.ns) )
 			{
 				SAM_INFO("JS", "Loaded script: " + samFileName(tsPath) + " (TypeScript) for [" + classId + "]");
 			}
 			// JavaScript.
 			const std::string jsPath = m.modPath + "/" + base + ".js";
-			if ( samExists(jsPath) && SAMJs::loadScriptJS(jsPath) )
+			if ( samExists(jsPath) && SAMJs::loadScriptJS(jsPath, m.ns) )
 			{
 				SAM_INFO("JS", "Loaded script: " + samFileName(jsPath) + " (JavaScript) for [" + classId + "]");
 			}
 			// Lua.
 			const std::string luaPath = m.modPath + "/" + base + ".lua";
-			if ( samExists(luaPath) && SAMLua::loadScript(luaPath) )
+			if ( samExists(luaPath) && SAMLua::loadScript(luaPath, m.ns) )
 			{
 				SAM_INFO("LUA", "Loaded script: " + samFileName(luaPath) + " (Lua) for [" + classId + "]");
 			}

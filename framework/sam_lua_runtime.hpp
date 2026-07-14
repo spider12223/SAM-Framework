@@ -63,13 +63,27 @@ namespace SAMLua
 	// the script is simply not enabled — the host is never harmed. Returns true
 	// if the script loaded and ran to completion (regardless of whether it
 	// defined on_event).
-	bool loadScript(const std::string& path);
+	bool loadScript(const std::string& path, const std::string& modNamespace = "");
 
 	// Call every enabled script's on_event(event) with a fresh Lua table built
 	// from `ev`. A script that errors (or blows its instruction/memory budget)
 	// is disabled; the others still run. Returns the number of scripts the event
 	// was successfully delivered to.
 	int dispatchEvent(const Event& ev);
+
+	// Advance + fire any due per-script timers (Part 4). Call once per game tick,
+	// host-authoritative only.
+	void tickTimers();
+
+	// Drop all pending timers (call on a new game so a prior run's timers don't leak
+	// into the next). Safe before init.
+	void resetTimers();
+
+	// Part 5 session kill counter (Barony has no per-player one). noteKill is called
+	// from the on_kill hook; resetKills on a new game; getKills backs sam_get_kills.
+	void noteKill(int player);
+	long long getKills(int player);
+	void resetKills();
 
 	// Tear down the VM and release all script references.
 	void shutdown();

@@ -61,7 +61,7 @@ Every dropdown in the tool is generated from the [schemas](schemas/) at runtime,
 
 ---
 
-## Scripting — Lua, JavaScript & TypeScript (v0.5.0)
+## Scripting — Lua, JavaScript & TypeScript (v0.6.0)
 
 **JSON defines what your content *is*. A script defines how it *behaves*.**
 
@@ -106,7 +106,7 @@ end
 
 ### Hooks & API
 
-**11 gameplay hooks and 12 host API functions (v0.5.0)** — every hook fires in Lua, JavaScript and TypeScript alike, host-authoritative (server/singleplayer only).
+**41 gameplay hooks and 26 host API functions** — every hook fires in Lua, JavaScript and TypeScript alike, host-authoritative (server/singleplayer only). The tables below are the v0.3–v0.5 core; **[New in v0.6.0](#new-in-v060)** adds 30 hooks and 14 host APIs (timers, persistent data, custom cross-runtime hooks, player queries).
 
 | Hook | Fires when | Event fields |
 |------|-----------|--------------|
@@ -136,6 +136,115 @@ end
 | `sam_get_floor()` → number | current dungeon floor (0-based) |
 | `sam_play_sound(soundId [, vol])` | play a sound effect for all players |
 | `sam_get_nearby_entities(player, radius)` → array | UIDs of creatures within `radius` tiles (max 32) |
+
+<a id="new-in-v060"></a>
+
+### New in v0.6.0 — 30 hooks + 14 APIs
+
+**30 new gameplay hooks**, grouped by area (all fire in Lua/JS/TS, host-authoritative):
+
+**Combat**
+| Hook | Fires when | Event fields |
+|------|-----------|--------------|
+| `player.on_attack_start` | a player starts an attack swing (any weapon) | `player`, `weapon_type`, `target_uid` |
+| `player.on_block` | a player fully blocks a hit with a shield | `player`, `attacker_uid`, `attacker_type`, `damage_blocked` |
+| `player.on_miss` | a player's melee swing connects with nothing | `player`, `target_uid`, `weapon_type` |
+| `player.on_bleed_tick` | bleeding ticks damage on a player | `player`, `damage`, `stacks_remaining` |
+| `player.on_poison_tick` | poison ticks damage on a player | `player`, `damage`, `stacks_remaining` |
+
+**Items & inventory**
+| Hook | Fires when | Event fields |
+|------|-----------|--------------|
+| `player.on_item_identified` | a player identifies an item | `player`, `item_type`, `item_name` |
+| `player.on_item_dropped` | a player drops an item | `player`, `item_type`, `floor_x`, `floor_y` |
+| `player.on_item_broken` | a player's equipped item breaks | `player`, `item_type`, `slot` |
+| `player.on_chest_opened` | a player opens a chest | `player`, `chest_uid`, `floor_x`, `floor_y` |
+| `player.on_shop_entered` | a player opens trade with a shopkeeper | `player`, `shopkeeper_uid` |
+| `player.on_item_bought` | a player buys from a shop | `player`, `item_type`, `gold_spent` |
+| `player.on_item_sold` | a player sells to a shop | `player`, `item_type`, `gold_received` |
+
+**Magic & effects**
+| Hook | Fires when | Event fields |
+|------|-----------|--------------|
+| `player.on_spell_learned` | a player learns a spell | `player`, `spell_id`, `spell_name` |
+| `player.on_spell_failed` | a cast fizzles / is blocked | `player`, `spell_id`, `spell_name`, `reason` |
+| `player.on_effect_applied` | a status effect is newly applied | `player`, `effect_name`, `duration_ticks` |
+| `player.on_effect_removed` | a status effect ends (cleared or expired) | `player`, `effect_name` *(+`effect` id on expiry)* |
+
+**World & exploration**
+| Hook | Fires when | Event fields |
+|------|-----------|--------------|
+| `world.on_trap_triggered` | an arrow/spike/magic trap fires | `trap_type`, `player`, `floor_x`, `floor_y`, `damage`\|`spell` |
+| `world.on_monster_spawned` | a monster is summoned at runtime | `monster_uid`, `monster_type`, `monster_name`, `floor_x`, `floor_y`, `floor` |
+| `world.on_chest_found` | a player first comes near a chest | `player`, `chest_uid`, `floor_x`, `floor_y` |
+| `world.on_boulder_triggered` | a boulder trap launches | `floor_x`, `floor_y` |
+
+**Player state**
+| Hook | Fires when | Event fields |
+|------|-----------|--------------|
+| `player.on_hunger_change` | hunger crosses a tier edge | `player`, `hunger`, `hunger_level`, `old_hunger_level` |
+| `player.on_xp_gained` | a player gains XP from a kill | `player`, `amount`, `source_type`, `new_total`, `monster_type` |
+| `player.on_proficiency_increased` | a skill rank goes up | `player`, `proficiency`, `proficiency_name`, `old_rank`, `new_rank` |
+| `player.on_status_effect_tick` | active effect ticks *(throttled to 1/sec)* | `player`, `effect`, `effect_name`, `ticks_remaining` |
+
+**Multiplayer & lifecycle**
+| Hook | Fires when | Event fields |
+|------|-----------|--------------|
+| `player.on_player_joined` | a client joins the lobby | `player_index`, `player_name`, `class_id`, `race` |
+| `player.on_player_left` | a client disconnects / times out | `player_index`, `player_name` |
+| `player.on_player_revived` | a downed player is revived on a new floor | `player`, `revived_by`, `floor`, `revive_type` |
+| `game.on_level_entered` | a floor finishes loading | `player`, `floor`, `level_name` |
+| `game.on_game_start` | a new game begins | `player`, `class_id`, `class_name`, `race`, `race_name` |
+| `game.on_game_end` | the game is won or the party wipes | `player`, `won`, `floor_reached`, `kills`, `time_played` |
+
+**14 new host API functions:**
+
+*Persistent mod data* — a per-mod key/value store on disk (`savegames/sam_mod_data/<namespace>/`), survives restarts:
+| API function | What it does |
+|--------------|--------------|
+| `sam_save_data(key, value)` | persist a value (number, string, or table/object) for your mod |
+| `sam_load_data(key)` → value | read it back (`nil`/`null` if unset) |
+| `sam_delete_data(key)` | remove a key |
+
+*Timers* — schedule callbacks by game tick (50/sec), host-only:
+| API function | What it does |
+|--------------|--------------|
+| `sam_set_timer(id, delay_ticks, fn)` | run `fn` once after `delay_ticks` |
+| `sam_set_repeating_timer(id, interval_ticks, fn)` | run `fn` every `interval_ticks` until cancelled |
+| `sam_cancel_timer(id)` | cancel a pending timer by id |
+
+*Custom hooks* — define your own events, delivered **cross-runtime** (Lua↔JS↔TS) to every loaded mod, so mods can talk to each other:
+| API function | What it does |
+|--------------|--------------|
+| `sam_register_hook("namespace:name")` | declare a namespaced custom hook |
+| `sam_fire_hook("namespace:name", event)` → count | fire it; returns how many scripts received it |
+
+*Player queries*:
+| API function | What it does |
+|--------------|--------------|
+| `sam_get_class(player)` → string | class name (vanilla **or** custom) |
+| `sam_get_kills(player)` → number | kills this session |
+| `sam_get_time_played()` → number | ticks since the run started (50/sec) |
+| `sam_get_equipped_item(player, slot)` → string | item in `weapon`/`shield`/`helmet`/`armor`/`gloves`/`boots`/`ring`/`amulet`/`cloak`/`mask` (`nil` if empty) |
+| `sam_get_inventory_count(player, "ITEM")` → number | how many of an item the player holds |
+| `sam_has_effect(player, "EFFECT")` → bool | whether a status effect is active |
+
+```lua
+-- v0.6.0 in action: persist a counter, run a timer, react to a new hook
+function on_event(event)
+  if event.name == "player.on_kill" then
+    local kills = (sam_load_data("kills") or 0) + 1
+    sam_save_data("kills", kills)                      -- survives restarts
+    if kills == 10 then
+      sam_register_hook("mymod:rampage")
+      sam_fire_hook("mymod:rampage", { player = event.player })   -- any mod can listen
+      sam_set_timer("cooldown", 250, function()        -- fire once in 5s
+        sam_message(event.player, "Rampage over.")
+      end)
+    end
+  end
+end
+```
 
 All state-changing APIs are host-authoritative and validate their inputs; a bad call is a logged no-op, never a crash.
 

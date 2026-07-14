@@ -60,13 +60,13 @@ namespace SAMJs
 
 	// Load + run a JavaScript script (defines a global on_event(event)). Runs in
 	// the hardened per-script sandbox. Returns true if it loaded and ran.
-	bool loadScriptJS(const std::string& path);
+	bool loadScriptJS(const std::string& path, const std::string& modNamespace = "");
 
 	// Load a TypeScript script: transpile .ts -> .js (cached), then load the JS.
 	// cacheDir is where compiled .js is written (must be a writable real-FS dir,
 	// NOT the read-only mod folder). tsCompilerJsPath points at the vendored
 	// typescript.js. Returns true if it transpiled + loaded.
-	bool loadScriptTS(const std::string& path, const std::string& cacheDir, const std::string& tsCompilerJsPath);
+	bool loadScriptTS(const std::string& path, const std::string& cacheDir, const std::string& tsCompilerJsPath, const std::string& modNamespace = "");
 
 	// Call every enabled script's on_event(event) with a fresh JS object built
 	// from `ev`. A script that errors / blows its budget is disabled; others run.
@@ -74,6 +74,13 @@ namespace SAMJs
 	int dispatchEvent(const Event& ev);
 
 	// Tear down the runtime and release all script references.
+	// Advance + fire due per-script timers (Part 4). Call once per game tick, host only.
+	void tickTimers();
+
+	// Drop all pending timers (call on a new game so a prior run's timers don't leak
+	// into the next). Safe before init.
+	void resetTimers();
+
 	void shutdown();
 
 	// Free the privileged TypeScript transpile runtime (and its ~9MB compiler).

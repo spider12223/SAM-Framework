@@ -28,6 +28,7 @@
 #endif
 
 #include "sam_lua_runtime.hpp"
+#include "sam_js_runtime.hpp"  // Part 2: sam_fire_hook cross-dispatches to JS scripts too
 #include "sam_logger.hpp"
 
 extern "C" {
@@ -40,6 +41,9 @@ extern "C" {
 #include <cstring>
 #include <string>
 #include <vector>
+#include <fstream>
+#include <filesystem>
+#include "nlohmann/json.hpp"
 
 // When compiled INSIDE the Barony engine (its headers are on the include path),
 // enable host functions that actually AFFECT the game (sam_grant_item). In the
@@ -58,6 +62,8 @@ extern "C" {
 #	include "monster.hpp"   // actMonster, Monster enum
 #	include "collision.hpp" // entityDist
 #	include "engine/audio/sound.hpp" // playSoundPlayer, numsounds
+#	include "files.hpp"     // outputdir (savegames base dir for persistent mod data)
+#	include "sam_items.hpp" // SAMItems::itemIdForIdString (custom item names in queries)
 #	include <cctype>
 #endif
 
@@ -86,15 +92,39 @@ namespace
 		bool      tripped  = false;  // set true when the watchdog fired
 	};
 	HookState g_hook;
+	int g_callDepth = 0; // reentrancy depth for protectedCall (nesting-aware watchdog)
 
 	// One loaded behavior script.
 	struct Script
 	{
 		std::string path;
+		std::string ns;               // owning mod namespace (per-mod data / custom hooks / timers)
 		int  callbackRef = LUA_NOREF; // registry ref to its on_event function
 		bool enabled     = false;
 	};
 	std::vector<Script> g_scripts;
+
+	// Namespace of the script currently executing — set around every callback and
+	// top-level load so host APIs (sam_save_data, custom hooks, timers) can attribute
+	// a call to the mod that made it.
+	std::string g_currentNs;
+
+	// Part 4 timers — per-script, keyed by (ns,id). Ticked once per game tick (host).
+	struct Timer
+	{
+		std::string id;
+		std::string ns;
+		int  callbackRef = LUA_NOREF;
+		long long remaining = 0; // ticks until next fire
+		long long interval  = 0; // repeat interval (0 = one-shot)
+		bool repeating = false;
+	};
+	std::vector<Timer> g_timers;
+
+	// Part 2 custom hooks — registered names (docs/tracking) + a recursion guard so a
+	// script that fires a hook which re-fires cannot loop forever.
+	std::vector<std::string> g_customHooks;
+	int g_fireDepth = 0;
 
 	// ---- custom allocator (memory cap) ----------------------------------------
 
@@ -169,9 +199,15 @@ namespace
 	// The callable + its `nargs` args must already be on the stack.
 	bool protectedCall(int nargs, int nresults, const std::string& what)
 	{
-		armWatchdog();
+		// Nesting-aware: only the OUTERMOST call arms/disarms the watchdog, so the
+		// instruction budget spans a whole reentrant tree (e.g. sam_fire_hook inside an
+		// on_event) instead of a nested call silently clearing the outer watchdog.
+		const bool outerCall = ( g_callDepth == 0 );
+		if ( outerCall ) { armWatchdog(); }
+		++g_callDepth;
 		const int rc = lua_pcall(L, nargs, nresults, 0);
-		disarmWatchdog();
+		--g_callDepth;
+		if ( outerCall ) { disarmWatchdog(); }
 
 		if ( rc != LUA_OK )
 		{
@@ -514,7 +550,335 @@ namespace
 		}
 		return 1;
 	}
+
+	// ---- expanded player queries (Part 5) --------------------------------------
+
+	int g_samSessionKills[MAXPLAYERS] = { 0 }; // SAM-tracked (Barony has no per-player counter)
+
+	std::string samItemName(int type)
+	{
+		for ( const auto& kv : ItemTooltips.itemNameStringToItemID )
+		{
+			if ( kv.second == type ) { std::string n = kv.first; for ( char& c : n ) { c = (char)std::toupper((unsigned char)c); } return n; }
+		}
+		if ( type >= 0 && type < NUM_ITEM_SLOTS ) { return std::string(items[type].getIdentifiedName()); }
+		return "";
+	}
+
+	Item* samEquippedSlot(int player, const std::string& slot)
+	{
+		Stat* s = stats[player];
+		if ( slot == "WEAPON" )                          { return s->weapon; }
+		if ( slot == "SHIELD" )                          { return s->shield; }
+		if ( slot == "HELMET" )                          { return s->helmet; }
+		if ( slot == "ARMOR" || slot == "BREASTPLATE" )  { return s->breastplate; }
+		if ( slot == "GLOVES" )                          { return s->gloves; }
+		if ( slot == "BOOTS" || slot == "SHOES" )        { return s->shoes; }
+		if ( slot == "RING" )                            { return s->ring; }
+		if ( slot == "AMULET" )                          { return s->amulet; }
+		if ( slot == "CLOAK" )                           { return s->cloak; }
+		if ( slot == "MASK" )                            { return s->mask; }
+		return nullptr;
+	}
+
+	int lua_sam_get_equipped_item(lua_State* Ls)
+	{
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const char* slotC = luaL_checkstring(Ls, 2);
+		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { lua_pushnil(Ls); return 1; }
+		Item* it = samEquippedSlot(player, samUpper(slotC));
+		if ( !it ) { lua_pushnil(Ls); return 1; }
+		lua_pushstring(Ls, samItemName((int)it->type).c_str());
+		return 1;
+	}
+
+	int lua_sam_get_inventory_count(lua_State* Ls)
+	{
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const char* nameC = luaL_checkstring(Ls, 2);
+		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { lua_pushinteger(Ls, 0); return 1; }
+		std::string lower = nameC ? nameC : "";
+		for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
+		int wantType = -1;
+		auto mit = ItemTooltips.itemNameStringToItemID.find(lower);
+		if ( mit != ItemTooltips.itemNameStringToItemID.end() ) { wantType = mit->second; }
+		else { const int cid = SAMItems::itemIdForIdString(nameC ? nameC : ""); if ( cid >= 0 ) { wantType = cid; } }
+		if ( wantType < 0 ) { lua_pushinteger(Ls, 0); return 1; }
+		long long total = 0;
+		for ( node_t* node = stats[player]->inventory.first; node != nullptr; node = node->next )
+		{
+			Item* it = (Item*)node->element;
+			if ( it && (int)it->type == wantType ) { total += it->count; }
+		}
+		lua_pushinteger(Ls, (lua_Integer)total);
+		return 1;
+	}
+
+	int lua_sam_has_effect(lua_State* Ls)
+	{
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const char* nameC = luaL_checkstring(Ls, 2);
+		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { lua_pushboolean(Ls, 0); return 1; }
+		const int eff = samEffectNameToId(nameC);
+		if ( eff < 0 ) { SAM_WARN("LUA", std::string("sam_has_effect: unknown effect '") + (nameC ? nameC : "") + "'."); lua_pushboolean(Ls, 0); return 1; }
+		lua_pushboolean(Ls, stats[player]->getEffectActive(eff) != 0 ? 1 : 0);
+		return 1;
+	}
+
+	int lua_sam_get_class(lua_State* Ls)
+	{
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		if ( player < 0 || player >= MAXPLAYERS ) { lua_pushnil(Ls); return 1; }
+		lua_pushstring(Ls, playerClassLangEntry(client_classes[player], player));
+		return 1;
+	}
+
+	int lua_sam_get_kills(lua_State* Ls)
+	{
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		lua_pushinteger(Ls, (lua_Integer)((player >= 0 && player < MAXPLAYERS) ? g_samSessionKills[player] : 0));
+		return 1;
+	}
+
+	int lua_sam_get_time_played(lua_State* Ls)
+	{
+		lua_pushinteger(Ls, (lua_Integer)ticks);
+		return 1;
+	}
 #endif // SAM_LUA_HAVE_BARONY
+
+	// ---- persistent per-mod data (Part 3) --------------------------------------
+	// JSON under <savegames>/sam_mod_data/<namespace>/<key>.json. Namespace comes
+	// from the currently-executing script (g_currentNs).
+
+	std::string samSanitize(const std::string& s)
+	{
+		std::string o;
+		for ( char c : s ) { o += ( c == '/' || c == '\\' || c == ':' || c == '.' ) ? '_' : c; }
+		return o.empty() ? std::string("_") : o;
+	}
+
+	std::string samModDataFile(const std::string& ns, const std::string& key)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		const std::string base = std::string(outputdir) + "/savegames/sam_mod_data";
+#else
+		const std::string base = "./sam_mod_data";
+#endif
+		return base + "/" + samSanitize(ns) + "/" + samSanitize(key) + ".json";
+	}
+
+	nlohmann::json luaToJson(lua_State* Ls, int idx, int depth)
+	{
+		if ( depth > 32 ) { return nullptr; }
+		idx = lua_absindex(Ls, idx);
+		switch ( lua_type(Ls, idx) )
+		{
+			case LUA_TBOOLEAN: return (bool)lua_toboolean(Ls, idx);
+			case LUA_TNUMBER:
+				if ( lua_isinteger(Ls, idx) ) { return (long long)lua_tointeger(Ls, idx); }
+				return (double)lua_tonumber(Ls, idx);
+			case LUA_TSTRING: return std::string(lua_tostring(Ls, idx));
+			case LUA_TTABLE:
+			{
+				if ( lua_rawlen(Ls, idx) > 0 ) // sequence -> JSON array
+				{
+					nlohmann::json arr = nlohmann::json::array();
+					const int n = (int)lua_rawlen(Ls, idx);
+					for ( int i = 1; i <= n; ++i )
+					{
+						lua_rawgeti(Ls, idx, i);
+						arr.push_back(luaToJson(Ls, -1, depth + 1));
+						lua_pop(Ls, 1);
+					}
+					return arr;
+				}
+				nlohmann::json obj = nlohmann::json::object(); // map -> JSON object
+				lua_pushnil(Ls);
+				while ( lua_next(Ls, idx) != 0 )
+				{
+					std::string k;
+					if ( lua_type(Ls, -2) == LUA_TSTRING ) { k = lua_tostring(Ls, -2); }
+					else if ( lua_type(Ls, -2) == LUA_TNUMBER ) { k = std::to_string((long long)lua_tointeger(Ls, -2)); }
+					if ( !k.empty() ) { obj[k] = luaToJson(Ls, -1, depth + 1); }
+					lua_pop(Ls, 1);
+				}
+				return obj;
+			}
+			default: return nullptr;
+		}
+	}
+
+	void jsonToLua(lua_State* Ls, const nlohmann::json& j)
+	{
+		if ( j.is_boolean() )                                    { lua_pushboolean(Ls, j.get<bool>() ? 1 : 0); }
+		else if ( j.is_number_integer() || j.is_number_unsigned() ) { lua_pushinteger(Ls, (lua_Integer)j.get<long long>()); }
+		else if ( j.is_number() )                               { lua_pushnumber(Ls, j.get<double>()); }
+		else if ( j.is_string() )                               { lua_pushstring(Ls, j.get<std::string>().c_str()); }
+		else if ( j.is_array() )
+		{
+			lua_createtable(Ls, (int)j.size(), 0);
+			int i = 1;
+			for ( const auto& el : j ) { jsonToLua(Ls, el); lua_rawseti(Ls, -2, i++); }
+		}
+		else if ( j.is_object() )
+		{
+			lua_createtable(Ls, 0, (int)j.size());
+			for ( auto it = j.begin(); it != j.end(); ++it ) { jsonToLua(Ls, it.value()); lua_setfield(Ls, -2, it.key().c_str()); }
+		}
+		else { lua_pushnil(Ls); }
+	}
+
+	// sam_save_data(key, value) — persist a value for the calling mod.
+	int lua_sam_save_data(lua_State* Ls)
+	{
+		const char* keyC = luaL_checkstring(Ls, 1);
+		const std::string key = keyC ? keyC : "";
+		if ( g_currentNs.empty() ) { SAM_WARN("LUA", "sam_save_data: no owning mod namespace — ignored."); lua_pushboolean(Ls, 0); return 1; }
+		nlohmann::json j = luaToJson(Ls, 2, 0);
+		const std::string path = samModDataFile(g_currentNs, key);
+		try
+		{
+			std::error_code ec;
+			std::filesystem::create_directories(std::filesystem::path(path).parent_path(), ec);
+			std::ofstream f(path, std::ios::binary | std::ios::trunc);
+			if ( !f.is_open() ) { SAM_ERROR("LUA", "sam_save_data: cannot write " + path); lua_pushboolean(Ls, 0); return 1; }
+			f << j.dump();
+		}
+		catch ( ... ) { SAM_ERROR("LUA", "sam_save_data: failed writing key '" + key + "'."); lua_pushboolean(Ls, 0); return 1; }
+		SAM_INFO("SAM", "Saved data key '" + key + "' for [" + g_currentNs + "]");
+		lua_pushboolean(Ls, 1);
+		return 1;
+	}
+
+	// sam_load_data(key) -> value or nil.
+	int lua_sam_load_data(lua_State* Ls)
+	{
+		const char* keyC = luaL_checkstring(Ls, 1);
+		const std::string key = keyC ? keyC : "";
+		if ( g_currentNs.empty() ) { lua_pushnil(Ls); return 1; }
+		std::ifstream f(samModDataFile(g_currentNs, key), std::ios::binary);
+		if ( !f.is_open() ) { lua_pushnil(Ls); return 1; }
+		const std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+		nlohmann::json j = nlohmann::json::parse(text, nullptr, false);
+		if ( j.is_discarded() ) { SAM_WARN("LUA", "sam_load_data: corrupt data for key '" + key + "' — nil."); lua_pushnil(Ls); return 1; }
+		jsonToLua(Ls, j);
+		SAM_INFO("SAM", "Loaded data key '" + key + "' for [" + g_currentNs + "]");
+		return 1;
+	}
+
+	// sam_delete_data(key).
+	int lua_sam_delete_data(lua_State* Ls)
+	{
+		const char* keyC = luaL_checkstring(Ls, 1);
+		const std::string key = keyC ? keyC : "";
+		if ( g_currentNs.empty() ) { lua_pushboolean(Ls, 0); return 1; }
+		std::error_code ec;
+		const bool removed = std::filesystem::remove(std::filesystem::path(samModDataFile(g_currentNs, key)), ec);
+		SAM_INFO("SAM", "Deleted data key '" + key + "' for [" + g_currentNs + "]" + (removed ? "" : " (was absent)"));
+		lua_pushboolean(Ls, 1);
+		return 1;
+	}
+
+	// ---- timers (Part 4) -------------------------------------------------------
+
+	void samRemoveTimer(const std::string& ns, const std::string& id)
+	{
+		for ( size_t i = 0; i < g_timers.size(); ++i )
+		{
+			if ( g_timers[i].ns == ns && g_timers[i].id == id )
+			{
+				if ( L && g_timers[i].callbackRef != LUA_NOREF ) { luaL_unref(L, LUA_REGISTRYINDEX, g_timers[i].callbackRef); }
+				g_timers.erase(g_timers.begin() + i);
+				return;
+			}
+		}
+	}
+
+	int samSetTimerImpl(lua_State* Ls, bool repeating)
+	{
+		const char* idC = luaL_checkstring(Ls, 1);
+		const long long ticks = (long long)luaL_checkinteger(Ls, 2);
+		luaL_checktype(Ls, 3, LUA_TFUNCTION);
+		const std::string id = idC ? idC : "";
+		samRemoveTimer(g_currentNs, id);          // replace an existing timer with the same id
+		lua_pushvalue(Ls, 3);                      // dup the callback to the top
+		const int ref = luaL_ref(Ls, LUA_REGISTRYINDEX); // pops it, stores a registry ref
+		Timer t;
+		t.id = id; t.ns = g_currentNs; t.callbackRef = ref;
+		t.remaining = ticks < 1 ? 1 : ticks;
+		t.interval  = repeating ? (ticks < 1 ? 1 : ticks) : 0;
+		t.repeating = repeating;
+		g_timers.push_back(t);
+		SAM_INFO("SAM", std::string("Timer '") + id + "' set for " + std::to_string(ticks) + " ticks" + (repeating ? " (repeating)" : ""));
+		return 0;
+	}
+
+	int lua_sam_set_timer(lua_State* Ls)           { return samSetTimerImpl(Ls, false); }
+	int lua_sam_set_repeating_timer(lua_State* Ls) { return samSetTimerImpl(Ls, true); }
+
+	int lua_sam_cancel_timer(lua_State* Ls)
+	{
+		const char* idC = luaL_checkstring(Ls, 1);
+		samRemoveTimer(g_currentNs, idC ? idC : "");
+		return 0;
+	}
+
+	// ---- custom hooks (Part 2) -------------------------------------------------
+
+	int lua_sam_register_hook(lua_State* Ls)
+	{
+		const char* nameC = luaL_checkstring(Ls, 1);
+		const std::string name = nameC ? nameC : "";
+		if ( name.find(':') == std::string::npos )
+		{
+			SAM_WARN("LUA", "sam_register_hook: name '" + name + "' must be namespaced (\"namespace:hook_name\").");
+			return 0;
+		}
+		g_customHooks.push_back(name);
+		SAM_INFO("LUA", "Registered custom hook: " + name);
+		return 0;
+	}
+
+	// sam_fire_hook("ns:name", event_table) — dispatch a custom event to ALL Lua + JS
+	// scripts (cross-runtime), host-authoritative. Only primitive fields cross over.
+	int lua_sam_fire_hook(lua_State* Ls)
+	{
+		const char* nameC = luaL_checkstring(Ls, 1);
+		const std::string name = nameC ? nameC : "";
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_fire_hook refused: host only."); return 0; }
+#endif
+		if ( g_fireDepth >= 8 ) { SAM_WARN("LUA", "sam_fire_hook: recursion too deep — '" + name + "' not fired."); return 0; }
+
+		SAMLua::Event ev;   ev.setName(name);
+		SAMJs::Event  jsev; jsev.setName(name);
+		if ( lua_type(Ls, 2) == LUA_TTABLE )
+		{
+			lua_pushnil(Ls);
+			while ( lua_next(Ls, 2) != 0 )
+			{
+				if ( lua_type(Ls, -2) == LUA_TSTRING )
+				{
+					const std::string k = lua_tostring(Ls, -2);
+					const int vt = lua_type(Ls, -1);
+					if ( vt == LUA_TNUMBER )       { const long long n = lua_isinteger(Ls, -1) ? (long long)lua_tointeger(Ls, -1) : (long long)lua_tonumber(Ls, -1); ev.i(k, n); jsev.i(k, n); }
+					else if ( vt == LUA_TBOOLEAN ) { const long long b = lua_toboolean(Ls, -1) ? 1 : 0; ev.i(k, b); jsev.i(k, b); }
+					else if ( vt == LUA_TSTRING )  { const std::string v = lua_tostring(Ls, -1); ev.s(k, v); jsev.s(k, v); }
+				}
+				lua_pop(Ls, 1);
+			}
+		}
+
+		++g_fireDepth;
+		const std::string savedNs = g_currentNs;
+		const int n = SAMLua::dispatchEvent(ev) + SAMJs::dispatchEvent(jsev);
+		g_currentNs = savedNs; // the nested dispatch cleared g_currentNs; restore the firer's
+		--g_fireDepth;
+		SAM_INFO("SAM", "Fired custom hook: " + name + " to " + std::to_string(n) + " script(s)");
+		lua_pushinteger(Ls, (lua_Integer)n); // return the count of scripts reached
+		return 1;
+	}
 
 	int lua_panic(lua_State* Ls)
 	{
@@ -571,6 +935,28 @@ namespace
 		lua_pushcfunction(L, lua_sam_log);
 		lua_setglobal(L, "sam_log");
 
+		// Persistent per-mod data (Part 3) — available in every build.
+		lua_pushcfunction(L, lua_sam_save_data);
+		lua_setglobal(L, "sam_save_data");
+		lua_pushcfunction(L, lua_sam_load_data);
+		lua_setglobal(L, "sam_load_data");
+		lua_pushcfunction(L, lua_sam_delete_data);
+		lua_setglobal(L, "sam_delete_data");
+
+		// Timers (Part 4).
+		lua_pushcfunction(L, lua_sam_set_timer);
+		lua_setglobal(L, "sam_set_timer");
+		lua_pushcfunction(L, lua_sam_set_repeating_timer);
+		lua_setglobal(L, "sam_set_repeating_timer");
+		lua_pushcfunction(L, lua_sam_cancel_timer);
+		lua_setglobal(L, "sam_cancel_timer");
+
+		// Custom hooks (Part 2).
+		lua_pushcfunction(L, lua_sam_register_hook);
+		lua_setglobal(L, "sam_register_hook");
+		lua_pushcfunction(L, lua_sam_fire_hook);
+		lua_setglobal(L, "sam_fire_hook");
+
 #ifdef SAM_LUA_HAVE_BARONY
 		// Host bindings that actually affect the game (engine build only).
 		lua_pushcfunction(L, lua_sam_grant_item);
@@ -595,6 +981,20 @@ namespace
 		lua_setglobal(L, "sam_play_sound");
 		lua_pushcfunction(L, lua_sam_get_nearby_entities);
 		lua_setglobal(L, "sam_get_nearby_entities");
+
+		// Expanded player queries (Part 5).
+		lua_pushcfunction(L, lua_sam_get_equipped_item);
+		lua_setglobal(L, "sam_get_equipped_item");
+		lua_pushcfunction(L, lua_sam_get_inventory_count);
+		lua_setglobal(L, "sam_get_inventory_count");
+		lua_pushcfunction(L, lua_sam_has_effect);
+		lua_setglobal(L, "sam_has_effect");
+		lua_pushcfunction(L, lua_sam_get_class);
+		lua_setglobal(L, "sam_get_class");
+		lua_pushcfunction(L, lua_sam_get_kills);
+		lua_setglobal(L, "sam_get_kills");
+		lua_pushcfunction(L, lua_sam_get_time_played);
+		lua_setglobal(L, "sam_get_time_played");
 #endif
 	}
 
@@ -658,7 +1058,7 @@ namespace SAMLua
 		return true;
 	}
 
-	bool loadScript(const std::string& path)
+	bool loadScript(const std::string& path, const std::string& modNamespace)
 	{
 		if ( !L )
 		{
@@ -677,8 +1077,12 @@ namespace SAMLua
 		}
 
 		// Run the chunk under the sandbox. This is where a top-level infinite
-		// loop or error would occur — the watchdog / pcall contain it.
-		if ( !protectedCall(0, 0, "load " + path) )
+		// loop or error would occur — the watchdog / pcall contain it. The namespace
+		// is live during load so a script may sam_load_data() at startup.
+		g_currentNs = modNamespace;
+		const bool ranOk = protectedCall(0, 0, "load " + path);
+		g_currentNs.clear();
+		if ( !ranOk )
 		{
 			SAM_WARN("LUA", "Script '" + path + "' disabled (it failed while running).");
 			return false;
@@ -690,13 +1094,13 @@ namespace SAMLua
 		{
 			lua_pop(L, 1);
 			SAM_WARN("LUA", "Script '" + path + "' loaded but defines no on_event(event) — no handler registered.");
-			Script s; s.path = path; s.callbackRef = LUA_NOREF; s.enabled = false;
+			Script s; s.path = path; s.ns = modNamespace; s.callbackRef = LUA_NOREF; s.enabled = false;
 			g_scripts.push_back(s);
 			return true;
 		}
 
 		const int ref = luaL_ref(L, LUA_REGISTRYINDEX); // pops the function, stores a ref
-		Script s; s.path = path; s.callbackRef = ref; s.enabled = true;
+		Script s; s.path = path; s.ns = modNamespace; s.callbackRef = ref; s.enabled = true;
 		g_scripts.push_back(s);
 
 		// Clear the global so the next script can't accidentally inherit this
@@ -712,11 +1116,24 @@ namespace SAMLua
 	{
 		if ( !L )
 		{
-			SAM_ERROR("LUA", "dispatchEvent('" + ev.name + "') called before init().");
+			// Expected during the pre-mod main-menu/char-select carousel, which equips
+			// preview loadouts before mods load. The guard drops the event harmlessly;
+			// log it ONCE at info level instead of spamming ERROR on every equip.
+			static bool warnedBeforeInit = false;
+			if ( !warnedBeforeInit )
+			{
+				warnedBeforeInit = true;
+				SAM_INFO("LUA", "dispatchEvent('" + ev.name + "') before init() — ignored (pre-mod menu; suppressing further notices).");
+			}
 			return 0;
 		}
 
 		int delivered = 0;
+		// Preserve the caller's namespace. dispatchEvent can RE-ENTER: a script's on_event
+		// may call a host API (sam_apply_effect, sam_fire_hook, ...) that fires another hook,
+		// nesting a dispatch inside this one. Restoring (not clearing) g_currentNs keeps the
+		// outer script's namespace intact so a later sam_save_data still knows its mod.
+		const std::string savedNs = g_currentNs;
 		for ( auto& s : g_scripts )
 		{
 			if ( !s.enabled || s.callbackRef == LUA_NOREF )
@@ -727,7 +1144,10 @@ namespace SAMLua
 			lua_rawgeti(L, LUA_REGISTRYINDEX, s.callbackRef); // push on_event
 			pushEventTable(ev);                                // push event table arg
 
-			if ( protectedCall(1, 0, "on_event('" + ev.name + "') in " + s.path) )
+			g_currentNs = s.ns;
+			const bool ok = protectedCall(1, 0, "on_event('" + ev.name + "') in " + s.path);
+			g_currentNs = savedNs;
+			if ( ok )
 			{
 				++delivered;
 			}
@@ -743,12 +1163,63 @@ namespace SAMLua
 		return delivered;
 	}
 
+	void tickTimers()
+	{
+		if ( !L || g_timers.empty() ) { return; }
+		struct Due { std::string ns; int ref; bool oneShot; };
+		std::vector<Due> due;
+		for ( size_t i = 0; i < g_timers.size(); )
+		{
+			Timer& t = g_timers[i];
+			if ( --t.remaining > 0 ) { ++i; continue; }
+			if ( t.repeating )
+			{
+				due.push_back({ t.ns, t.callbackRef, false });
+				t.remaining = t.interval > 0 ? t.interval : 1;
+				++i;
+			}
+			else
+			{
+				due.push_back({ t.ns, t.callbackRef, true }); // ownership transfers to `due`
+				g_timers.erase(g_timers.begin() + i);
+			}
+		}
+		const std::string savedNs = g_currentNs; // restore (not clear) for re-entrant safety
+		for ( const Due& d : due )
+		{
+			lua_rawgeti(L, LUA_REGISTRYINDEX, d.ref);
+			g_currentNs = d.ns;
+			protectedCall(0, 0, "timer callback");
+			g_currentNs = savedNs;
+			if ( d.oneShot ) { luaL_unref(L, LUA_REGISTRYINDEX, d.ref); }
+		}
+	}
+
+	// Drop every pending timer (used on a new game so a prior run's timers don't
+	// carry over). Safe to call whether or not the VM is initialized.
+	void resetTimers()
+	{
+		if ( L )
+		{
+			for ( auto& t : g_timers )
+			{
+				if ( t.callbackRef != LUA_NOREF ) { luaL_unref(L, LUA_REGISTRYINDEX, t.callbackRef); }
+			}
+		}
+		g_timers.clear();
+	}
+
 	void shutdown()
 	{
 		if ( !L )
 		{
 			return;
 		}
+		for ( auto& t : g_timers )
+		{
+			if ( t.callbackRef != LUA_NOREF ) { luaL_unref(L, LUA_REGISTRYINDEX, t.callbackRef); }
+		}
+		g_timers.clear();
 		for ( auto& s : g_scripts )
 		{
 			if ( s.callbackRef != LUA_NOREF )
@@ -777,6 +1248,29 @@ namespace SAMLua
 	std::size_t memoryUsedBytes() { return g_alloc.used; }
 	std::size_t memoryPeakBytes() { return g_alloc.peak; }
 	bool isInitialized() { return L != nullptr; }
+
+	void noteKill(int player)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( player >= 0 && player < MAXPLAYERS ) { ++g_samSessionKills[player]; }
+#else
+		(void)player;
+#endif
+	}
+	long long getKills(int player)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		return ( player >= 0 && player < MAXPLAYERS ) ? (long long)g_samSessionKills[player] : 0;
+#else
+		(void)player; return 0;
+#endif
+	}
+	void resetKills()
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		for ( int i = 0; i < MAXPLAYERS; ++i ) { g_samSessionKills[i] = 0; }
+#endif
+	}
 
 	bool getGlobalInt(const std::string& name, long long& out)
 	{
