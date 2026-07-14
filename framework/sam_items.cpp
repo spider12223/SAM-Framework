@@ -37,6 +37,20 @@ static const char* MOD = "ITEMS";
 static std::map<int, SAMItemDef> s_registry;
 static int s_nextItemId = SAM_ITEM_ID_BASE;
 
+// v0.7.0 Feature 5: sam_patch_item snapshots. items[id] is a live, persistent table
+// (unlike class/monster stats, which are recomputed each construction), so a patch
+// must capture the slot's originals and restore them on unload. Keyed by slot id;
+// captured insert-if-absent so repeated patches never overwrite the true original.
+struct SAMItemSaved
+{
+	int weight = 0, gold_value = 0, level = 0;
+	Category category = WEAPON;
+	ItemEquippableSlot item_slot = NO_EQUIP;
+	std::string tooltip, nameId, nameUnid;
+	std::map<std::string, Sint32> attributes;
+};
+static std::map<int, SAMItemSaved> s_itemPatches;
+
 /*-------------------------------------------------------------------------------
 	Local helpers
 -------------------------------------------------------------------------------*/
@@ -387,6 +401,27 @@ void SAMItems::loadFromManifest(const SAMModManifest& manifest)
 
 void SAMItems::clear()
 {
+	// v0.7.0 Feature 5: revert every sam_patch_item override to its captured original
+	// FIRST (restores vanilla items[] fields before any custom-slot teardown below).
+	for ( const auto& kv : s_itemPatches )
+	{
+		const int id = kv.first;
+		if ( id >= 0 && id < NUM_ITEM_SLOTS )
+		{
+			const SAMItemSaved& s = kv.second;
+			items[id].weight = s.weight;
+			items[id].gold_value = s.gold_value;
+			items[id].level = s.level;
+			items[id].category = s.category;
+			items[id].item_slot = s.item_slot;
+			items[id].tooltip = s.tooltip;
+			items[id].setIdentifiedName(s.nameId);
+			items[id].setUnidentifiedName(s.nameUnid);
+			items[id].attributes = s.attributes;
+		}
+	}
+	s_itemPatches.clear();
+
 	// Free the image lists we allocated for custom slots, and reset those slots so
 	// nothing lingers or gets picked up by a later lookup.
 	for ( const auto& kv : s_registry )
@@ -410,6 +445,47 @@ void SAMItems::clear()
 int SAMItems::count()
 {
 	return static_cast<int>(s_registry.size());
+}
+
+bool SAMItems::patchItem(int id, const SAMItemPatch& p)
+{
+	if ( id < 0 || id >= NUM_ITEM_SLOTS )
+	{
+		SAM_ERROR(MOD, "sam_patch_item: item slot out of range: " + std::to_string(id));
+		return false;
+	}
+	ItemGeneric& slot = items[id];
+
+	// Snapshot the originals the FIRST time this slot is patched (insert-if-absent),
+	// so a second patch to the same slot never captures an already-patched value.
+	if ( s_itemPatches.find(id) == s_itemPatches.end() )
+	{
+		SAMItemSaved s;
+		s.weight = slot.weight;
+		s.gold_value = slot.gold_value;
+		s.level = slot.level;
+		s.category = slot.category;
+		s.item_slot = slot.item_slot;
+		s.tooltip = slot.tooltip;
+		s.nameId = slot.getIdentifiedName();
+		s.nameUnid = slot.getUnidentifiedName();
+		s.attributes = slot.attributes;
+		s_itemPatches[id] = s;
+	}
+
+	if ( p.hasWeight )   { slot.weight = p.weight; }
+	if ( p.hasValue )    { slot.gold_value = p.value; }
+	if ( p.hasLevel )    { slot.level = p.level; }
+	if ( p.hasCategory ) { slot.category = categoryFromName(p.category); }
+	if ( p.hasSlot )     { slot.item_slot = slotFromName(p.slot); }
+	if ( p.hasTooltip )  { slot.tooltip = p.tooltip; }
+	if ( p.hasNameId )   { slot.setIdentifiedName(p.nameIdentified); }
+	if ( p.hasNameUnid ) { slot.setUnidentifiedName(p.nameUnidentified); }
+	for ( const auto& kv : p.attributes ) { slot.attributes[kv.first] = (Sint32)kv.second; } // MERGE
+
+	SAM_INFO(MOD, "Patched item slot " + std::to_string(id) + " ("
+		+ std::to_string(p.attributes.size()) + " attribute override(s))");
+	return true;
 }
 
 const SAMItemDef* SAMItems::getItem(int itemId)

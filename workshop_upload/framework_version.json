@@ -1,8 +1,9 @@
 {
   "name": "S.A.M Framework",
-  "version": "0.2.0",
+  "version": "0.7.0",
+  "barony_target": "5.0.2",
   "author": "spider12223",
   "github": "https://github.com/spider12223/SAM-Framework",
   "gui_tool": "https://spider12223.github.io/SAM-Framework/",
-  "description": "Support All Mods — Barony modding framework"
+  "description": "Support All Mods — Barony modding framework (JSON content + Lua/JS/TS behavior scripting)"
 }

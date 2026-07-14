@@ -41,6 +41,7 @@ extern "C" {
 #include <cstring>
 #include <string>
 #include <vector>
+#include <map>
 #include <fstream>
 #include <filesystem>
 #include "nlohmann/json.hpp"
@@ -64,6 +65,8 @@ extern "C" {
 #	include "engine/audio/sound.hpp" // playSoundPlayer, numsounds
 #	include "files.hpp"     // outputdir (savegames base dir for persistent mod data)
 #	include "sam_items.hpp" // SAMItems::itemIdForIdString (custom item names in queries)
+#	include "sam_classes.hpp" // v0.7.0 F5: SAMClasses::patchClass / addClassPassive
+#	include "sam_monster_patches.hpp" // v0.7.0 F5: SAMMonsterPatch::set
 #	include <cctype>
 #endif
 
@@ -100,6 +103,7 @@ namespace
 		std::string path;
 		std::string ns;               // owning mod namespace (per-mod data / custom hooks / timers)
 		int  callbackRef = LUA_NOREF; // registry ref to its on_event function
+		int  tickRef     = LUA_NOREF; // registry ref to its on_tick function (v0.7.0), or NOREF
 		bool enabled     = false;
 	};
 	std::vector<Script> g_scripts;
@@ -125,6 +129,19 @@ namespace
 	// script that fires a hook which re-fires cannot loop forever.
 	std::vector<std::string> g_customHooks;
 	int g_fireDepth = 0;
+
+	// v0.7.0 Feature 2 — damage interception. The host (Entity::modHP) opens a window
+	// around the on_before_damage dispatch; sam_modify_damage (either runtime) writes
+	// the replacement value here, which the host reads back and applies. Shared so the
+	// JS runtime and entity.cpp both reach the same latch through SAMLua.
+	bool      g_bdActive = false;
+	int       g_bdPlayer = -1;
+	long long g_bdValue  = 0;
+
+	// v0.7.0 Feature 4 — per-monster scratch data (boss phases etc.). Keyed by monster
+	// UID then key; values are JSON strings (same marshaling as sam_save_data). In-memory,
+	// cleared on runtime shutdown. Shared so the JS runtime reaches it through SAMLua.
+	std::map<unsigned, std::map<std::string, std::string>> g_monsterData;
 
 	// ---- custom allocator (memory cap) ----------------------------------------
 
@@ -239,6 +256,7 @@ namespace
 	// else. (A real build would add more sam.* helpers, all primitive-only.)
 	int lua_sam_log(lua_State* Ls)
 	{
+		SAMLogger::noteApiCall();
 		const char* msg = luaL_checkstring(Ls, 1);
 		SAM_INFO("SCRIPT", msg ? msg : "");
 		return 0;
@@ -252,6 +270,7 @@ namespace
 	// authoritative host only (multiplayer != CLIENT). Returns a boolean.
 	int lua_sam_grant_item(lua_State* Ls)
 	{
+		SAMLogger::noteApiCall();
 		const int player = (int)luaL_checkinteger(Ls, 1);
 		const char* nameC = luaL_checkstring(Ls, 2);
 		const std::string itemName = nameC ? nameC : "";
@@ -348,6 +367,7 @@ namespace
 	// mirroring the vanilla actgold award path + client HUD packet.
 	int lua_sam_grant_gold(lua_State* Ls)
 	{
+		SAMLogger::noteApiCall();
 		const int player = (int)luaL_checkinteger(Ls, 1);
 		const int amount = (int)luaL_checkinteger(Ls, 2);
 		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_grant_gold refused: host only."); lua_pushboolean(Ls, 0); return 1; }
@@ -373,6 +393,7 @@ namespace
 	// (50 ticks == 1s). setEffect auto-syncs the client. Returns false if immune.
 	int lua_sam_apply_effect(lua_State* Ls)
 	{
+		SAMLogger::noteApiCall();
 		const int player = (int)luaL_checkinteger(Ls, 1);
 		const char* nameC = luaL_checkstring(Ls, 2);
 		const int ticks = (int)luaL_checkinteger(Ls, 3);
@@ -390,6 +411,7 @@ namespace
 	// sam_remove_effect(player, "EFFECT") — clear a status effect (host-authoritative).
 	int lua_sam_remove_effect(lua_State* Ls)
 	{
+		SAMLogger::noteApiCall();
 		const int player = (int)luaL_checkinteger(Ls, 1);
 		const char* nameC = luaL_checkstring(Ls, 2);
 		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_remove_effect refused: host only."); lua_pushboolean(Ls, 0); return 1; }
@@ -406,6 +428,7 @@ namespace
 	// sam_get_stat(player, "STAT") -> number. Host-authoritative read.
 	int lua_sam_get_stat(lua_State* Ls)
 	{
+		SAMLogger::noteApiCall();
 		const int player = (int)luaL_checkinteger(Ls, 1);
 		const char* nameC = luaL_checkstring(Ls, 2);
 		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_get_stat refused: host only."); lua_pushinteger(Ls, 0); return 1; }
@@ -435,6 +458,7 @@ namespace
 	// sam_set_stat(player, "STAT", value) — bounded set (never HP>MAXHP etc.).
 	int lua_sam_set_stat(lua_State* Ls)
 	{
+		SAMLogger::noteApiCall();
 		const int player = (int)luaL_checkinteger(Ls, 1);
 		const char* nameC = luaL_checkstring(Ls, 2);
 		const int value = (int)luaL_checkinteger(Ls, 3);
@@ -466,6 +490,7 @@ namespace
 	// sam_get_floor() -> number (0-based current dungeon level).
 	int lua_sam_get_floor(lua_State* Ls)
 	{
+		SAMLogger::noteApiCall();
 		lua_pushinteger(Ls, (lua_Integer)currentlevel);
 		return 1;
 	}
@@ -473,6 +498,7 @@ namespace
 	// sam_spawn_item(x, y, "ITEM_NAME") — spawn a ground item at map tile (x,y).
 	int lua_sam_spawn_item(lua_State* Ls)
 	{
+		SAMLogger::noteApiCall();
 		const int x = (int)luaL_checkinteger(Ls, 1);
 		const int y = (int)luaL_checkinteger(Ls, 2);
 		const char* nameC = luaL_checkstring(Ls, 3);
@@ -493,6 +519,7 @@ namespace
 	// sam_message(player, "text") — show a line in the player's message log.
 	int lua_sam_message(lua_State* Ls)
 	{
+		SAMLogger::noteApiCall();
 		const int player = (int)luaL_checkinteger(Ls, 1);
 		const char* text = luaL_checkstring(Ls, 2);
 		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_message refused: host only."); lua_pushboolean(Ls, 0); return 1; }
@@ -506,6 +533,7 @@ namespace
 	// sam_play_sound(soundId[, vol]) — play a sound for all connected players.
 	int lua_sam_play_sound(lua_State* Ls)
 	{
+		SAMLogger::noteApiCall();
 		const int soundId = (int)luaL_checkinteger(Ls, 1);
 		int vol = 128;
 		if ( lua_gettop(Ls) >= 2 && !lua_isnoneornil(Ls, 2) ) { vol = (int)luaL_checkinteger(Ls, 2); }
@@ -528,6 +556,7 @@ namespace
 	// Returns creature UIDs only; never a raw pointer.
 	int lua_sam_get_nearby_entities(lua_State* Ls)
 	{
+		SAMLogger::noteApiCall();
 		const int player = (int)luaL_checkinteger(Ls, 1);
 		const double radiusTiles = (double)luaL_checknumber(Ls, 2);
 		lua_newtable(Ls);
@@ -583,6 +612,7 @@ namespace
 
 	int lua_sam_get_equipped_item(lua_State* Ls)
 	{
+		SAMLogger::noteApiCall();
 		const int player = (int)luaL_checkinteger(Ls, 1);
 		const char* slotC = luaL_checkstring(Ls, 2);
 		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { lua_pushnil(Ls); return 1; }
@@ -594,6 +624,7 @@ namespace
 
 	int lua_sam_get_inventory_count(lua_State* Ls)
 	{
+		SAMLogger::noteApiCall();
 		const int player = (int)luaL_checkinteger(Ls, 1);
 		const char* nameC = luaL_checkstring(Ls, 2);
 		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { lua_pushinteger(Ls, 0); return 1; }
@@ -616,6 +647,7 @@ namespace
 
 	int lua_sam_has_effect(lua_State* Ls)
 	{
+		SAMLogger::noteApiCall();
 		const int player = (int)luaL_checkinteger(Ls, 1);
 		const char* nameC = luaL_checkstring(Ls, 2);
 		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { lua_pushboolean(Ls, 0); return 1; }
@@ -627,6 +659,7 @@ namespace
 
 	int lua_sam_get_class(lua_State* Ls)
 	{
+		SAMLogger::noteApiCall();
 		const int player = (int)luaL_checkinteger(Ls, 1);
 		if ( player < 0 || player >= MAXPLAYERS ) { lua_pushnil(Ls); return 1; }
 		lua_pushstring(Ls, playerClassLangEntry(client_classes[player], player));
@@ -635,6 +668,7 @@ namespace
 
 	int lua_sam_get_kills(lua_State* Ls)
 	{
+		SAMLogger::noteApiCall();
 		const int player = (int)luaL_checkinteger(Ls, 1);
 		lua_pushinteger(Ls, (lua_Integer)((player >= 0 && player < MAXPLAYERS) ? g_samSessionKills[player] : 0));
 		return 1;
@@ -642,6 +676,7 @@ namespace
 
 	int lua_sam_get_time_played(lua_State* Ls)
 	{
+		SAMLogger::noteApiCall();
 		lua_pushinteger(Ls, (lua_Integer)ticks);
 		return 1;
 	}
@@ -732,6 +767,7 @@ namespace
 	// sam_save_data(key, value) — persist a value for the calling mod.
 	int lua_sam_save_data(lua_State* Ls)
 	{
+		SAMLogger::noteApiCall();
 		const char* keyC = luaL_checkstring(Ls, 1);
 		const std::string key = keyC ? keyC : "";
 		if ( g_currentNs.empty() ) { SAM_WARN("LUA", "sam_save_data: no owning mod namespace — ignored."); lua_pushboolean(Ls, 0); return 1; }
@@ -754,6 +790,7 @@ namespace
 	// sam_load_data(key) -> value or nil.
 	int lua_sam_load_data(lua_State* Ls)
 	{
+		SAMLogger::noteApiCall();
 		const char* keyC = luaL_checkstring(Ls, 1);
 		const std::string key = keyC ? keyC : "";
 		if ( g_currentNs.empty() ) { lua_pushnil(Ls); return 1; }
@@ -770,6 +807,7 @@ namespace
 	// sam_delete_data(key).
 	int lua_sam_delete_data(lua_State* Ls)
 	{
+		SAMLogger::noteApiCall();
 		const char* keyC = luaL_checkstring(Ls, 1);
 		const std::string key = keyC ? keyC : "";
 		if ( g_currentNs.empty() ) { lua_pushboolean(Ls, 0); return 1; }
@@ -819,6 +857,7 @@ namespace
 
 	int lua_sam_cancel_timer(lua_State* Ls)
 	{
+		SAMLogger::noteApiCall();
 		const char* idC = luaL_checkstring(Ls, 1);
 		samRemoveTimer(g_currentNs, idC ? idC : "");
 		return 0;
@@ -828,6 +867,7 @@ namespace
 
 	int lua_sam_register_hook(lua_State* Ls)
 	{
+		SAMLogger::noteApiCall();
 		const char* nameC = luaL_checkstring(Ls, 1);
 		const std::string name = nameC ? nameC : "";
 		if ( name.find(':') == std::string::npos )
@@ -844,6 +884,7 @@ namespace
 	// scripts (cross-runtime), host-authoritative. Only primitive fields cross over.
 	int lua_sam_fire_hook(lua_State* Ls)
 	{
+		SAMLogger::noteApiCall();
 		const char* nameC = luaL_checkstring(Ls, 1);
 		const std::string name = nameC ? nameC : "";
 #ifdef SAM_LUA_HAVE_BARONY
@@ -878,6 +919,458 @@ namespace
 		SAM_INFO("SAM", "Fired custom hook: " + name + " to " + std::to_string(n) + " script(s)");
 		lua_pushinteger(Ls, (lua_Integer)n); // return the count of scripts reached
 		return 1;
+	}
+
+	// v0.7.0 Feature 2: sam_modify_damage(player, new_value) — rewrite the incoming
+	// damage from inside an on_before_damage callback (clamped to >= 0 by the latch).
+	int lua_sam_modify_damage(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const long long v = (long long)luaL_checkinteger(Ls, 2);
+		if ( !SAMLua::beforeDamageActive() )
+		{
+			SAM_WARN("LUA", "sam_modify_damage: only valid inside an on_before_damage callback — ignored.");
+			return 0;
+		}
+		SAMLua::beforeDamageModify(player, v);
+		return 0;
+	}
+
+	// v0.7.0 Feature 2: sam_deal_damage(entity_uid, amount) — deal `amount` damage to
+	// any entity by UID (host-only, UID-only, existence-validated). Positive = damage.
+	int lua_sam_deal_damage(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const int amount = (int)luaL_checkinteger(Ls, 2);
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_deal_damage refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		Entity* e = uidToEntity((Uint32)uid);
+		if ( !e ) { SAM_WARN("LUA", "sam_deal_damage: no entity with uid " + std::to_string(uid) + "."); lua_pushboolean(Ls, 0); return 1; }
+		const int dmg = ( amount < 0 ) ? amount : -amount; // positive request => negative modHP
+		e->modHP(dmg);
+		SAM_INFO("SAM", "sam_deal_damage: " + std::to_string(-dmg) + " damage to uid " + std::to_string(uid));
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)uid; (void)amount;
+		lua_pushboolean(Ls, 0);
+		return 1;
+#endif
+	}
+
+	// v0.7.0 Feature 3: sam_is_key_held(key_name) -> boolean.
+	int lua_sam_is_key_held(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* nameC = luaL_checkstring(Ls, 1);
+		lua_pushboolean(Ls, SAMLua::isKeyHeld(nameC ? nameC : "") ? 1 : 0);
+		return 1;
+	}
+
+	// ---- v0.7.0 Feature 4: monster / NPC scripting (UID-based) -----------------
+#ifdef SAM_LUA_HAVE_BARONY
+	// Resolve a UID to a monster Entity* (behavior==actMonster + has stats), else nullptr.
+	Entity* samResolveMonster(long long uid)
+	{
+		Entity* e = uidToEntity((Sint32)uid);
+		if ( !e || e->behavior != &actMonster || !e->getStats() ) { return nullptr; }
+		return e;
+	}
+
+	// Map a monster-type name (case-insensitive) to its Monster enum, or -1. The engine's
+	// monstertypename[] entries are all lowercase, so lowercase the input first.
+	int samMonsterNameToId(const char* nameIn)
+	{
+		std::string want = nameIn ? nameIn : "";
+		for ( char& c : want ) { c = (char)std::tolower((unsigned char)c); }
+		for ( int i = 0; i < NUMMONSTERS; ++i ) { if ( want == monstertypename[i] ) { return i; } }
+		return -1;
+	}
+#endif
+
+	int lua_sam_get_monster_stat(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const char* nameC = luaL_checkstring(Ls, 2);
+#ifdef SAM_LUA_HAVE_BARONY
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { SAM_WARN("LUA", "sam_get_monster_stat: no monster uid " + std::to_string(uid)); lua_pushinteger(Ls, 0); return 1; }
+		Stat* s = e->getStats();
+		const std::string n = samUpper(nameC);
+		long long v = 0;
+		if      ( n == "STR" ) { v = s->STR; }
+		else if ( n == "DEX" || n == "SPEED" ) { v = s->DEX; } // no speed field; DEX drives movement
+		else if ( n == "CON" ) { v = s->CON; }
+		else if ( n == "INT" ) { v = s->INT; }
+		else if ( n == "PER" ) { v = s->PER; }
+		else if ( n == "CHR" ) { v = s->CHR; }
+		else if ( n == "HP" )  { v = s->HP; }
+		else if ( n == "MAXHP" ) { v = s->MAXHP; }
+		else if ( n == "MP" )  { v = s->MP; }
+		else if ( n == "MAXMP" ) { v = s->MAXMP; }
+		else if ( n == "LEVEL" || n == "LVL" ) { v = s->LVL; }
+		else { SAM_WARN("LUA", std::string("sam_get_monster_stat: unknown stat '") + (nameC ? nameC : "") + "'"); }
+		lua_pushinteger(Ls, (lua_Integer)v);
+		return 1;
+#else
+		(void)uid; (void)nameC; lua_pushinteger(Ls, 0); return 1;
+#endif
+	}
+
+	int lua_sam_set_monster_stat(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const char* nameC = luaL_checkstring(Ls, 2);
+		const int value = (int)luaL_checkinteger(Ls, 3);
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_set_monster_stat refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { SAM_WARN("LUA", "sam_set_monster_stat: no monster uid " + std::to_string(uid)); lua_pushboolean(Ls, 0); return 1; }
+		Stat* s = e->getStats();
+		const std::string n = samUpper(nameC);
+		if      ( n == "HP" )    { e->setHP(value); }
+		else if ( n == "MAXHP" ) { s->MAXHP = (value < 1 ? 1 : value); if ( s->HP > s->MAXHP ) { s->HP = s->MAXHP; } }
+		else if ( n == "MP" )    { e->setMP(value); }
+		else if ( n == "MAXMP" ) { s->MAXMP = (value < 0 ? 0 : value); if ( s->MP > s->MAXMP ) { s->MP = s->MAXMP; } }
+		else if ( n == "STR" )   { s->STR = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
+		else if ( n == "DEX" || n == "SPEED" ) { s->DEX = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
+		else if ( n == "CON" )   { s->CON = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
+		else if ( n == "INT" )   { s->INT = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
+		else if ( n == "PER" )   { s->PER = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
+		else if ( n == "CHR" )   { s->CHR = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
+		else if ( n == "LEVEL" || n == "LVL" ) { s->LVL = samClampInt(value, 1, 255); }
+		else { SAM_WARN("LUA", std::string("sam_set_monster_stat: unknown stat '") + (nameC ? nameC : "") + "'"); lua_pushboolean(Ls, 0); return 1; }
+		SAM_INFO("SAM", "sam_set_monster_stat: " + n + "=" + std::to_string(value) + " on uid " + std::to_string(uid));
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)uid; (void)nameC; (void)value; lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	int lua_sam_apply_monster_effect(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const char* nameC = luaL_checkstring(Ls, 2);
+		const int ticks = (int)luaL_checkinteger(Ls, 3);
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_apply_monster_effect refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { SAM_WARN("LUA", "sam_apply_monster_effect: no monster uid " + std::to_string(uid)); lua_pushboolean(Ls, 0); return 1; }
+		const int eff = samEffectNameToId(nameC);
+		if ( eff < 0 ) { SAM_WARN("LUA", std::string("sam_apply_monster_effect: unknown effect '") + (nameC ? nameC : "") + "'"); lua_pushboolean(Ls, 0); return 1; }
+		const bool ok = e->setEffect(eff, true, ticks, true);
+		SAM_INFO("SAM", std::string("sam_apply_monster_effect: ") + (nameC ? nameC : "") + " to uid " + std::to_string(uid) + (ok ? "" : " (immune)"));
+		lua_pushboolean(Ls, ok ? 1 : 0);
+		return 1;
+#else
+		(void)uid; (void)nameC; (void)ticks; lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	int lua_sam_kill_monster(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_kill_monster refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { SAM_WARN("LUA", "sam_kill_monster: no monster uid " + std::to_string(uid)); lua_pushboolean(Ls, 0); return 1; }
+		e->setHP(0); // actMonster runs death + drops on its next tick; fires on_monster_died
+		SAM_INFO("SAM", "sam_kill_monster: uid " + std::to_string(uid));
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)uid; lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	int lua_sam_spawn_monsters(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long nearUid = (long long)luaL_checkinteger(Ls, 1);
+		const char* typeC = luaL_checkstring(Ls, 2);
+		int count = (int)luaL_checkinteger(Ls, 3);
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_spawn_monsters refused: host only."); lua_pushinteger(Ls, 0); return 1; }
+		Entity* anchor = uidToEntity((Sint32)nearUid);
+		if ( !anchor ) { SAM_WARN("LUA", "sam_spawn_monsters: no anchor entity uid " + std::to_string(nearUid)); lua_pushinteger(Ls, 0); return 1; }
+		const int mtype = samMonsterNameToId(typeC);
+		if ( mtype < 0 ) { SAM_WARN("LUA", std::string("sam_spawn_monsters: unknown monster type '") + (typeC ? typeC : "") + "'"); lua_pushinteger(Ls, 0); return 1; }
+		if ( count < 1 ) { count = 1; }
+		if ( count > 8 ) { count = 8; } // hard cap per spec
+		int spawned = 0;
+		for ( int i = 0; i < count; ++i )
+		{
+			Entity* m = summonMonster((Monster)mtype, anchor->x, anchor->y); // finds a free adjacent tile itself
+			if ( m ) { ++spawned; }
+		}
+		SAM_INFO("SAM", "sam_spawn_monsters: " + std::to_string(spawned) + "x " + (typeC ? typeC : "") + " near uid " + std::to_string(nearUid));
+		lua_pushinteger(Ls, spawned);
+		return 1;
+#else
+		(void)nearUid; (void)typeC; (void)count; lua_pushinteger(Ls, 0); return 1;
+#endif
+	}
+
+	int lua_sam_get_monster_target(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		int idx = -1;
+		if ( Entity* e = samResolveMonster(uid) )
+		{
+			Entity* t = uidToEntity((Sint32)e->monsterTarget);
+			if ( t && t->behavior == &actPlayer ) { idx = t->skill[2]; }
+		}
+		lua_pushinteger(Ls, idx);
+		return 1;
+#else
+		(void)uid; lua_pushinteger(Ls, -1); return 1;
+#endif
+	}
+
+	int lua_sam_set_monster_target(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const int player = (int)luaL_checkinteger(Ls, 2);
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_set_monster_target refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { SAM_WARN("LUA", "sam_set_monster_target: no monster uid " + std::to_string(uid)); lua_pushboolean(Ls, 0); return 1; }
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity )
+		{ SAM_WARN("LUA", "sam_set_monster_target: invalid player " + std::to_string(player)); lua_pushboolean(Ls, 0); return 1; }
+		e->monsterAcquireAttackTarget(*players[player]->entity, MONSTER_STATE_PATH);
+		SAM_INFO("SAM", "sam_set_monster_target: uid " + std::to_string(uid) + " -> player " + std::to_string(player));
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)uid; (void)player; lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_get_monster_data(uid, key) -> value (nil if unset). Per-monster scratch store.
+	int lua_sam_get_monster_data(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const char* keyC = luaL_checkstring(Ls, 2);
+		const std::string js = SAMLua::monsterDataGet((unsigned)(Sint32)uid, keyC ? keyC : "");
+		if ( js.empty() ) { lua_pushnil(Ls); return 1; }
+		nlohmann::json j = nlohmann::json::parse(js, nullptr, false);
+		if ( j.is_discarded() ) { lua_pushnil(Ls); return 1; }
+		jsonToLua(Ls, j);
+		return 1;
+	}
+
+	// sam_set_monster_data(uid, key, value) — store any primitive/table for a monster.
+	int lua_sam_set_monster_data(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const char* keyC = luaL_checkstring(Ls, 2);
+		nlohmann::json j = luaToJson(Ls, 3, 0);
+		SAMLua::monsterDataSet((unsigned)(Sint32)uid, keyC ? keyC : "", j.dump());
+		return 0;
+	}
+
+	// ---- v0.7.0 Feature 5: modify existing content (patch class/item/monster) -----
+#ifdef SAM_LUA_HAVE_BARONY
+	// Resolve arg `idx` (integer classnum or "namespace:class" string) -> class id, or -1.
+	int samResolveClassArg(lua_State* Ls, int idx)
+	{
+		if ( lua_isnumber(Ls, idx) )
+		{
+			const int n = (int)lua_tointeger(Ls, idx);
+			if ( (n >= 0 && n < NUMCLASSES) || (n >= SAM_CLASS_ID_BASE && SAMClasses::getClass(n)) ) { return n; }
+			return -1;
+		}
+		if ( lua_isstring(Ls, idx) ) { return SAMClasses::classIdForIdString(lua_tostring(Ls, idx)); }
+		return -1;
+	}
+	// Resolve arg `idx` (integer id, vanilla item name, or "ns:item") -> item slot, or -1.
+	int samResolveItemArg(lua_State* Ls, int idx)
+	{
+		if ( lua_isnumber(Ls, idx) ) { return (int)lua_tointeger(Ls, idx); }
+		if ( lua_isstring(Ls, idx) )
+		{
+			std::string lower = lua_tostring(Ls, idx);
+			for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
+			auto it = ItemTooltips.itemNameStringToItemID.find(lower);
+			if ( it != ItemTooltips.itemNameStringToItemID.end() ) { return it->second; }
+			return SAMItems::itemIdForIdString(lua_tostring(Ls, idx));
+		}
+		return -1;
+	}
+	// Resolve arg `idx` (integer EFF_ id or effect name) -> effect id, or -1.
+	int samResolvePassiveArg(lua_State* Ls, int idx)
+	{
+		if ( lua_isnumber(Ls, idx) ) { return (int)lua_tointeger(Ls, idx); }
+		if ( lua_isstring(Ls, idx) ) { return samEffectNameToId(lua_tostring(Ls, idx)); }
+		return -1;
+	}
+#endif
+
+	int lua_sam_patch_class(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_LUA_HAVE_BARONY
+		const int classnum = samResolveClassArg(Ls, 1);
+		if ( classnum < 0 ) { SAM_ERROR("LUA", "sam_patch_class: unknown class."); lua_pushboolean(Ls, 0); return 1; }
+		SAMClassStatPatch patch;
+		if ( lua_istable(Ls, 2) )
+		{
+			lua_pushnil(Ls);
+			while ( lua_next(Ls, 2) != 0 )
+			{
+				if ( lua_type(Ls, -2) == LUA_TSTRING )
+				{
+					const std::string uk = samUpper(lua_tostring(Ls, -2));
+					if ( uk == "SKILLS" && lua_istable(Ls, -1) )
+					{
+						const int sIdx = lua_gettop(Ls);
+						lua_pushnil(Ls);
+						while ( lua_next(Ls, sIdx) != 0 )
+						{
+							if ( lua_type(Ls, -2) == LUA_TSTRING ) { patch.skills[lua_tostring(Ls, -2)] = (int)lua_tointeger(Ls, -1); }
+							lua_pop(Ls, 1);
+						}
+					}
+					else if ( lua_isnumber(Ls, -1) ) { patch.stats[uk] = (int)lua_tointeger(Ls, -1); }
+				}
+				lua_pop(Ls, 1);
+			}
+		}
+		lua_pushboolean(Ls, SAMClasses::patchClass(classnum, patch) ? 1 : 0);
+		return 1;
+#else
+		lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	int lua_sam_unpatch_class(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_LUA_HAVE_BARONY
+		const int classnum = samResolveClassArg(Ls, 1);
+		if ( classnum < 0 ) { lua_pushboolean(Ls, 0); return 1; }
+		SAMClasses::unpatchClass(classnum);
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	int lua_sam_patch_item(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_LUA_HAVE_BARONY
+		const int id = samResolveItemArg(Ls, 1);
+		if ( id < 0 ) { SAM_ERROR("LUA", "sam_patch_item: unknown item."); lua_pushboolean(Ls, 0); return 1; }
+		SAMItemPatch patch;
+		if ( lua_istable(Ls, 2) )
+		{
+			lua_pushnil(Ls);
+			while ( lua_next(Ls, 2) != 0 )
+			{
+				if ( lua_type(Ls, -2) == LUA_TSTRING )
+				{
+					const std::string uk = samUpper(lua_tostring(Ls, -2));
+					if ( uk == "ATTRIBUTES" && lua_istable(Ls, -1) )
+					{
+						const int aIdx = lua_gettop(Ls);
+						lua_pushnil(Ls);
+						while ( lua_next(Ls, aIdx) != 0 )
+						{
+							if ( lua_type(Ls, -2) == LUA_TSTRING ) { patch.attributes[lua_tostring(Ls, -2)] = (int)lua_tointeger(Ls, -1); }
+							lua_pop(Ls, 1);
+						}
+					}
+					else if ( uk == "WEIGHT" ) { patch.hasWeight = true; patch.weight = (int)lua_tointeger(Ls, -1); }
+					else if ( uk == "VALUE" || uk == "GOLD_VALUE" ) { patch.hasValue = true; patch.value = (int)lua_tointeger(Ls, -1); }
+					else if ( uk == "LEVEL" ) { patch.hasLevel = true; patch.level = (int)lua_tointeger(Ls, -1); }
+					else if ( uk == "CATEGORY" && lua_isstring(Ls, -1) ) { patch.hasCategory = true; patch.category = samUpper(lua_tostring(Ls, -1)); }
+					else if ( uk == "SLOT" && lua_isstring(Ls, -1) ) { patch.hasSlot = true; patch.slot = lua_tostring(Ls, -1); }
+					else if ( uk == "TOOLTIP" && lua_isstring(Ls, -1) ) { patch.hasTooltip = true; patch.tooltip = lua_tostring(Ls, -1); }
+					else if ( ( uk == "NAME_IDENTIFIED" || uk == "NAME" ) && lua_isstring(Ls, -1) ) { patch.hasNameId = true; patch.nameIdentified = lua_tostring(Ls, -1); }
+					else if ( uk == "NAME_UNIDENTIFIED" && lua_isstring(Ls, -1) ) { patch.hasNameUnid = true; patch.nameUnidentified = lua_tostring(Ls, -1); }
+				}
+				lua_pop(Ls, 1);
+			}
+		}
+		lua_pushboolean(Ls, SAMItems::patchItem(id, patch) ? 1 : 0);
+		return 1;
+#else
+		lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	int lua_sam_patch_monster(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_patch_monster refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		int mtype = -1;
+		if ( lua_isnumber(Ls, 1) ) { mtype = (int)lua_tointeger(Ls, 1); }
+		else if ( lua_isstring(Ls, 1) ) { mtype = samMonsterNameToId(lua_tostring(Ls, 1)); }
+		if ( mtype <= 0 || mtype >= NUMMONSTERS ) { SAM_ERROR("LUA", "sam_patch_monster: unknown monster type."); lua_pushboolean(Ls, 0); return 1; }
+		int applied = 0;
+		if ( lua_istable(Ls, 2) )
+		{
+			lua_pushnil(Ls);
+			while ( lua_next(Ls, 2) != 0 )
+			{
+				if ( lua_type(Ls, -2) == LUA_TSTRING && lua_isnumber(Ls, -1) )
+				{
+					const std::string uk = samUpper(lua_tostring(Ls, -2));
+					if ( SAMMonsterPatch::set(mtype, uk, (int)lua_tointeger(Ls, -1)) ) { ++applied; }
+				}
+				lua_pop(Ls, 1);
+			}
+		}
+		SAM_INFO("SAM", "sam_patch_monster: type " + std::to_string(mtype) + " (" + std::to_string(applied) + " field override(s))");
+		lua_pushboolean(Ls, applied > 0 ? 1 : 0);
+		return 1;
+#else
+		lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	int lua_sam_add_class_passive(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_LUA_HAVE_BARONY
+		const int classnum = samResolveClassArg(Ls, 1);
+		const int eff = samResolvePassiveArg(Ls, 2);
+		if ( classnum < 0 ) { SAM_ERROR("LUA", "sam_add_class_passive: unknown class."); lua_pushboolean(Ls, 0); return 1; }
+		if ( eff < 0 || eff >= NUMEFFECTS ) { SAM_ERROR("LUA", "sam_add_class_passive: unknown effect."); lua_pushboolean(Ls, 0); return 1; }
+		lua_pushboolean(Ls, SAMClasses::addClassPassive(classnum, eff) ? 1 : 0);
+		return 1;
+#else
+		lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	int lua_sam_remove_class_passive(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_LUA_HAVE_BARONY
+		const int classnum = samResolveClassArg(Ls, 1);
+		const int eff = samResolvePassiveArg(Ls, 2);
+		if ( classnum < 0 || eff < 0 ) { lua_pushboolean(Ls, 0); return 1; }
+		lua_pushboolean(Ls, SAMClasses::removeClassPassive(classnum, eff) ? 1 : 0);
+		return 1;
+#else
+		lua_pushboolean(Ls, 0); return 1;
+#endif
 	}
 
 	int lua_panic(lua_State* Ls)
@@ -956,6 +1449,28 @@ namespace
 		lua_setglobal(L, "sam_register_hook");
 		lua_pushcfunction(L, lua_sam_fire_hook);
 		lua_setglobal(L, "sam_fire_hook");
+		lua_pushcfunction(L, lua_sam_modify_damage);
+		lua_setglobal(L, "sam_modify_damage");
+		lua_pushcfunction(L, lua_sam_deal_damage);
+		lua_setglobal(L, "sam_deal_damage");
+		lua_pushcfunction(L, lua_sam_is_key_held);
+		lua_setglobal(L, "sam_is_key_held");
+		lua_pushcfunction(L, lua_sam_get_monster_stat);    lua_setglobal(L, "sam_get_monster_stat");
+		lua_pushcfunction(L, lua_sam_set_monster_stat);    lua_setglobal(L, "sam_set_monster_stat");
+		lua_pushcfunction(L, lua_sam_apply_monster_effect); lua_setglobal(L, "sam_apply_monster_effect");
+		lua_pushcfunction(L, lua_sam_kill_monster);        lua_setglobal(L, "sam_kill_monster");
+		lua_pushcfunction(L, lua_sam_spawn_monsters);      lua_setglobal(L, "sam_spawn_monsters");
+		lua_pushcfunction(L, lua_sam_get_monster_target);  lua_setglobal(L, "sam_get_monster_target");
+		lua_pushcfunction(L, lua_sam_set_monster_target);  lua_setglobal(L, "sam_set_monster_target");
+		lua_pushcfunction(L, lua_sam_get_monster_data);    lua_setglobal(L, "sam_get_monster_data");
+		lua_pushcfunction(L, lua_sam_set_monster_data);    lua_setglobal(L, "sam_set_monster_data");
+		// v0.7.0 Feature 5: modify existing content (revert on unload)
+		lua_pushcfunction(L, lua_sam_patch_class);         lua_setglobal(L, "sam_patch_class");
+		lua_pushcfunction(L, lua_sam_unpatch_class);       lua_setglobal(L, "sam_unpatch_class");
+		lua_pushcfunction(L, lua_sam_patch_item);          lua_setglobal(L, "sam_patch_item");
+		lua_pushcfunction(L, lua_sam_patch_monster);       lua_setglobal(L, "sam_patch_monster");
+		lua_pushcfunction(L, lua_sam_add_class_passive);   lua_setglobal(L, "sam_add_class_passive");
+		lua_pushcfunction(L, lua_sam_remove_class_passive); lua_setglobal(L, "sam_remove_class_passive");
 
 #ifdef SAM_LUA_HAVE_BARONY
 		// Host bindings that actually affect the game (engine build only).
@@ -1088,27 +1603,37 @@ namespace SAMLua
 			return false;
 		}
 
-		// Capture its on_event handler, if it defined one.
+		// Capture its on_event and/or on_tick handlers (a script may define either
+		// or both). on_tick (v0.7.0) fires every game tick.
 		lua_getglobal(L, "on_event");
-		if ( !lua_isfunction(L, -1) )
-		{
-			lua_pop(L, 1);
-			SAM_WARN("LUA", "Script '" + path + "' loaded but defines no on_event(event) — no handler registered.");
-			Script s; s.path = path; s.ns = modNamespace; s.callbackRef = LUA_NOREF; s.enabled = false;
-			g_scripts.push_back(s);
-			return true;
-		}
+		int eventRef = LUA_NOREF;
+		if ( lua_isfunction(L, -1) ) { eventRef = luaL_ref(L, LUA_REGISTRYINDEX); } // pops it
+		else { lua_pop(L, 1); }
 
-		const int ref = luaL_ref(L, LUA_REGISTRYINDEX); // pops the function, stores a ref
-		Script s; s.path = path; s.ns = modNamespace; s.callbackRef = ref; s.enabled = true;
+		lua_getglobal(L, "on_tick");
+		int tickRef = LUA_NOREF;
+		if ( lua_isfunction(L, -1) ) { tickRef = luaL_ref(L, LUA_REGISTRYINDEX); }
+		else { lua_pop(L, 1); }
+
+		// Clear the globals so the next script can't inherit this one's handlers.
+		lua_pushnil(L); lua_setglobal(L, "on_event");
+		lua_pushnil(L); lua_setglobal(L, "on_tick");
+
+		Script s; s.path = path; s.ns = modNamespace;
+		s.callbackRef = eventRef; s.tickRef = tickRef;
+		s.enabled = ( eventRef != LUA_NOREF || tickRef != LUA_NOREF );
 		g_scripts.push_back(s);
 
-		// Clear the global so the next script can't accidentally inherit this
-		// script's on_event.
-		lua_pushnil(L);
-		lua_setglobal(L, "on_event");
-
-		SAM_INFO("LUA", "Loaded script '" + path + "' (on_event registered).");
+		if ( !s.enabled )
+		{
+			SAM_WARN("LUA", "Script '" + path + "' loaded but defines neither on_event(event) nor on_tick(event).");
+		}
+		else
+		{
+			std::string handlers = (eventRef != LUA_NOREF) ? "on_event" : "";
+			if ( tickRef != LUA_NOREF ) { handlers += (handlers.empty() ? "" : " + ") + std::string("on_tick"); }
+			SAM_INFO("LUA", "Loaded script '" + path + "' (" + handlers + " registered).");
+		}
 		return true;
 	}
 
@@ -1155,13 +1680,141 @@ namespace SAMLua
 			{
 				// Error isolation: disable ONLY this script; the rest keep running.
 				s.enabled = false;
+				SAMLogger::noteScriptError();
 				SAM_WARN("LUA", "Script '" + s.path + "' disabled after an on_event error.");
 			}
 		}
 
+		SAMLogger::noteHookFired(delivered); // count + open the GAMEPLAY section on the first hook
 		SAM_INFO("LUA", "Dispatched '" + ev.name + "' to " + std::to_string(delivered) + " script(s).");
 		return delivered;
 	}
+
+	// v0.7.0: fire on_tick(event) for every script that defines it, once per game tick
+	// (host-only). Deliberately SILENT — no per-tick log line, no hook count — since this
+	// runs ~50x/sec. Only scripts with an on_tick are touched; errors disable just that one.
+	void dispatchTick(long long tickCount)
+	{
+		if ( !L ) { return; }
+		const std::string savedNs = g_currentNs;
+		for ( auto& s : g_scripts )
+		{
+			if ( !s.enabled || s.tickRef == LUA_NOREF ) { continue; }
+			lua_rawgeti(L, LUA_REGISTRYINDEX, s.tickRef); // push on_tick
+			lua_newtable(L);
+			lua_pushinteger(L, (lua_Integer)tickCount); lua_setfield(L, -2, "tick_count");
+			lua_pushinteger(L, 1);                        lua_setfield(L, -2, "delta_ticks");
+			g_currentNs = s.ns;
+			const bool ok = protectedCall(1, 0, "on_tick in " + s.path);
+			g_currentNs = savedNs;
+			if ( !ok )
+			{
+				s.enabled = false;
+				SAMLogger::noteScriptError();
+				SAM_WARN("LUA", "Script '" + s.path + "' disabled after an on_tick error.");
+			}
+		}
+	}
+
+	// v0.7.0 Feature 2 — damage-interception latch. The host brackets the
+	// on_before_damage dispatch with begin()/end(); scripts call modify() (via
+	// sam_modify_damage) in between. Shared by both runtimes + Entity::modHP.
+	void beforeDamageBegin(int player, long long damage)   { g_bdActive = true; g_bdPlayer = player; g_bdValue = damage; }
+	void beforeDamageModify(int player, long long newValue) { if ( g_bdActive && player == g_bdPlayer ) { g_bdValue = ( newValue < 0 ) ? 0 : newValue; } }
+	long long beforeDamageEnd()                             { g_bdActive = false; return g_bdValue; }
+	bool beforeDamageActive()                              { return g_bdActive; }
+
+	// ---- v0.7.0 Feature 3: input hooks ----------------------------------------
+#ifdef SAM_LUA_HAVE_BARONY
+	// Map a key name ("F", "a", "1", "F5") to its SDL keycode, or SDLK_UNKNOWN.
+	SDL_Keycode samKeyNameToKeycode(const std::string& name)
+	{
+		if ( name.empty() ) { return SDLK_UNKNOWN; }
+		if ( (name[0] == 'F' || name[0] == 'f') && name.size() >= 2 )
+		{
+			const int n = std::atoi(name.c_str() + 1);
+			if ( n >= 1 && n <= 12 ) { return (SDL_Keycode)(SDLK_F1 + (n - 1)); }
+			return SDLK_UNKNOWN;
+		}
+		if ( name.size() == 1 )
+		{
+			const char c = name[0];
+			if ( c >= 'A' && c <= 'Z' ) { return (SDL_Keycode)(SDLK_a + (c - 'A')); }
+			if ( c >= 'a' && c <= 'z' ) { return (SDL_Keycode)(SDLK_a + (c - 'a')); }
+			if ( c >= '0' && c <= '9' ) { return (SDL_Keycode)(SDLK_0 + (c - '0')); }
+		}
+		return SDLK_UNKNOWN;
+	}
+
+	// The supported keys (A-Z, 0-9, F1-F12) as (name, keycode), built once.
+	const std::vector<std::pair<std::string, SDL_Keycode>>& samKeyList()
+	{
+		static const std::vector<std::pair<std::string, SDL_Keycode>> keys = []() {
+			std::vector<std::pair<std::string, SDL_Keycode>> v;
+			for ( char c = 'A'; c <= 'Z'; ++c ) { v.push_back({ std::string(1, c), (SDL_Keycode)(SDLK_a + (c - 'A')) }); }
+			for ( char c = '0'; c <= '9'; ++c ) { v.push_back({ std::string(1, c), (SDL_Keycode)(SDLK_0 + (c - '0')) }); }
+			for ( int n = 1; n <= 12; ++n ) { v.push_back({ "F" + std::to_string(n), (SDL_Keycode)(SDLK_F1 + (n - 1)) }); }
+			return v;
+		}();
+		return keys;
+	}
+#endif
+
+	// Poll supported keys once per game tick and fire on_key_pressed / on_key_released
+	// on state transitions (host + gameplay only; the caller gates on !intro/!CLIENT).
+	// Single-fire per press — sam_is_key_held covers continuous checks.
+	void pollInput()
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( !L ) { return; }
+		static std::unordered_map<SDL_Keycode, bool> prev;
+		const int player = clientnum;
+		for ( const auto& kv : samKeyList() )
+		{
+			auto it = keystatus.find(kv.second);
+			const bool down = ( it != keystatus.end() && it->second );
+			const bool was  = prev[kv.second];
+			if ( down != was )
+			{
+				const char* evName = down ? "on_key_pressed" : "on_key_released";
+				SAMLua::Event ev; ev.setName(evName);
+				ev.i("player", player); ev.s("key_name", kv.first);
+				if ( down ) { ev.i("held", 0); }
+				SAMLua::dispatchEvent(ev);
+
+				SAMJs::Event jsev; jsev.setName(evName);
+				jsev.i("player", player); jsev.s("key_name", kv.first);
+				if ( down ) { jsev.i("held", 0); }
+				SAMJs::dispatchEvent(jsev);
+			}
+			prev[kv.second] = down;
+		}
+#endif
+	}
+
+	bool isKeyHeld(const std::string& name)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		const SDL_Keycode kc = samKeyNameToKeycode(name);
+		if ( kc == SDLK_UNKNOWN ) { return false; }
+		auto it = keystatus.find(kc);
+		return it != keystatus.end() && it->second;
+#else
+		(void)name; return false;
+#endif
+	}
+
+	// v0.7.0 Feature 4 — per-monster scratch-data accessors (JSON-string values), shared
+	// with the JS runtime and cleared on shutdown.
+	void monsterDataSet(unsigned uid, const std::string& key, const std::string& jsonValue) { g_monsterData[uid][key] = jsonValue; }
+	std::string monsterDataGet(unsigned uid, const std::string& key)
+	{
+		auto mit = g_monsterData.find(uid);
+		if ( mit == g_monsterData.end() ) { return std::string(); }
+		auto kit = mit->second.find(key);
+		return ( kit == mit->second.end() ) ? std::string() : kit->second;
+	}
+	void monsterDataClear() { g_monsterData.clear(); }
 
 	void tickTimers()
 	{
@@ -1220,6 +1873,7 @@ namespace SAMLua
 			if ( t.callbackRef != LUA_NOREF ) { luaL_unref(L, LUA_REGISTRYINDEX, t.callbackRef); }
 		}
 		g_timers.clear();
+		g_monsterData.clear(); // v0.7.0 F4: drop per-monster scratch data on teardown
 		for ( auto& s : g_scripts )
 		{
 			if ( s.callbackRef != LUA_NOREF )

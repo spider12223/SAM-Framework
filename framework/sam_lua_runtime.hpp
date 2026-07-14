@@ -71,6 +71,32 @@ namespace SAMLua
 	// was successfully delivered to.
 	int dispatchEvent(const Event& ev);
 
+	// v0.7.0: call on_tick(event) for every script that defines it, once per game
+	// tick (host-authoritative, silent — no per-tick logging). `tickCount` is the
+	// current per-game tick.
+	void dispatchTick(long long tickCount);
+
+	// v0.7.0 Feature 2 — damage interception. Entity::modHP brackets the
+	// on_before_damage dispatch with beforeDamageBegin/End; scripts rewrite the
+	// incoming value via beforeDamageModify (sam_modify_damage). One shared latch is
+	// used by both runtimes and the engine, so these live on SAMLua.
+	void beforeDamageBegin(int player, long long damage);
+	void beforeDamageModify(int player, long long newValue);
+	long long beforeDamageEnd();
+	bool beforeDamageActive();
+
+	// v0.7.0 Feature 3 — input hooks. pollInput() is called once per game tick (host +
+	// gameplay) to fire on_key_pressed / on_key_released on key-state transitions;
+	// isKeyHeld backs sam_is_key_held. Supported keys: A-Z, 0-9, F1-F12.
+	void pollInput();
+	bool isKeyHeld(const std::string& name);
+
+	// v0.7.0 Feature 4 — per-monster scratch data (JSON-string values), shared with the
+	// JS runtime through these accessors. Cleared on shutdown.
+	void monsterDataSet(unsigned uid, const std::string& key, const std::string& jsonValue);
+	std::string monsterDataGet(unsigned uid, const std::string& key);
+	void monsterDataClear();
+
 	// Advance + fire any due per-script timers (Part 4). Call once per game tick,
 	// host-authoritative only.
 	void tickTimers();

@@ -60,6 +60,22 @@ struct SAMItemDef
 	int magicLevel = 0;
 };
 
+// v0.7.0 Feature 5: a runtime override of an existing item slot's base fields. Only
+// the has-flagged fields are written; `attributes` are MERGED (existing vanilla keys
+// like ATK/AC survive). Originals are snapshotted on first patch and restored on unload.
+struct SAMItemPatch
+{
+	bool hasWeight = false;   int weight = 0;
+	bool hasValue = false;    int value = 0;
+	bool hasLevel = false;    int level = 0;
+	bool hasCategory = false; std::string category;   // Category enum name
+	bool hasSlot = false;     std::string slot;       // ItemEquippableSlot enum name
+	bool hasTooltip = false;  std::string tooltip;
+	bool hasNameId = false;   std::string nameIdentified;
+	bool hasNameUnid = false; std::string nameUnidentified;
+	std::map<std::string, int> attributes;            // merged into items[id].attributes
+};
+
 class SAMItems
 {
 public:
@@ -80,6 +96,11 @@ public:
 
 	// Reverse lookup: runtime slot id for a "namespace:item" id string, or -1.
 	static int itemIdForIdString(const std::string& idString);
+
+	// v0.7.0 Feature 5: override an existing item slot's base fields (vanilla or custom).
+	// Snapshots the slot's originals on the first patch; reverted by clear() on unload.
+	// Returns false if id is out of range [0, NUM_ITEM_SLOTS).
+	static bool patchItem(int id, const SAMItemPatch& patch);
 
 	// Absolute, Image::get-ready path to a custom item's inventory icon PNG, or ""
 	// if the slot isn't a registered custom item / has no icon. The inventory

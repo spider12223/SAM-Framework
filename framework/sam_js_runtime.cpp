@@ -62,6 +62,8 @@ extern "C" {
 #	include "engine/audio/sound.hpp" // playSoundPlayer, numsounds
 #	include "files.hpp"     // outputdir (savegames base dir for persistent mod data)
 #	include "sam_items.hpp" // SAMItems::itemIdForIdString (custom item names in queries)
+#	include "sam_classes.hpp" // v0.7.0 F5: SAMClasses::patchClass / addClassPassive
+#	include "sam_monster_patches.hpp" // v0.7.0 F5: SAMMonsterPatch::set
 #	include <cctype>
 #endif
 
@@ -77,6 +79,7 @@ namespace
 	{
 		JSContext* ctx = nullptr;
 		JSValue onEvent = JS_UNDEFINED; // owned ref, or JS_UNDEFINED
+		JSValue onTick  = JS_UNDEFINED; // owned ref to on_tick (v0.7.0), or JS_UNDEFINED
 		std::string path;
 		std::string ns;                 // owning mod namespace (per-mod data / custom hooks / timers)
 		bool enabled = false;
@@ -203,6 +206,7 @@ namespace
 	// ---- host functions exposed to scripts ------------------------------------
 	JSValue js_sam_log(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
+		SAMLogger::noteApiCall();
 		if ( argc >= 1 )
 		{
 			const char* s = JS_ToCString(ctx, argv[0]);
@@ -213,6 +217,7 @@ namespace
 
 	JSValue js_sam_grant_item(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
+		SAMLogger::noteApiCall();
 		int32_t player = -1;
 		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
 		std::string name;
@@ -293,6 +298,7 @@ namespace
 
 	JSValue js_sam_grant_gold(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
+		SAMLogger::noteApiCall();
 		int32_t player = -1, amount = 0;
 		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
 		if ( argc >= 2 ) { JS_ToInt32(ctx, &amount, argv[1]); }
@@ -316,6 +322,7 @@ namespace
 
 	JSValue js_sam_apply_effect(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
+		SAMLogger::noteApiCall();
 		int32_t player = -1, ticks = 0;
 		std::string name;
 		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
@@ -333,6 +340,7 @@ namespace
 
 	JSValue js_sam_remove_effect(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
+		SAMLogger::noteApiCall();
 		int32_t player = -1;
 		std::string name;
 		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
@@ -349,6 +357,7 @@ namespace
 
 	JSValue js_sam_get_stat(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
+		SAMLogger::noteApiCall();
 		int32_t player = -1;
 		std::string name;
 		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
@@ -378,6 +387,7 @@ namespace
 
 	JSValue js_sam_set_stat(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
+		SAMLogger::noteApiCall();
 		int32_t player = -1, value = 0;
 		std::string name;
 		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
@@ -409,11 +419,13 @@ namespace
 
 	JSValue js_sam_get_floor(JSContext* ctx, JSValueConst /*this_val*/, int /*argc*/, JSValueConst* /*argv*/)
 	{
+		SAMLogger::noteApiCall();
 		return JS_NewInt32(ctx, currentlevel);
 	}
 
 	JSValue js_sam_spawn_item(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
+		SAMLogger::noteApiCall();
 		int32_t x = 0, y = 0;
 		std::string name;
 		if ( argc >= 1 ) { JS_ToInt32(ctx, &x, argv[0]); }
@@ -433,6 +445,7 @@ namespace
 
 	JSValue js_sam_message(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
+		SAMLogger::noteApiCall();
 		int32_t player = -1;
 		std::string text;
 		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
@@ -446,6 +459,7 @@ namespace
 
 	JSValue js_sam_play_sound(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
+		SAMLogger::noteApiCall();
 		int32_t soundId = -1, vol = 128;
 		if ( argc >= 1 ) { JS_ToInt32(ctx, &soundId, argv[0]); }
 		if ( argc >= 2 && !JS_IsUndefined(argv[1]) ) { JS_ToInt32(ctx, &vol, argv[1]); }
@@ -465,6 +479,7 @@ namespace
 
 	JSValue js_sam_get_nearby_entities(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
+		SAMLogger::noteApiCall();
 		int32_t player = -1;
 		double radiusTiles = 0.0;
 		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
@@ -519,6 +534,7 @@ namespace
 
 	JSValue js_sam_get_equipped_item(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
+		SAMLogger::noteApiCall();
 		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
 		std::string slot; if ( argc >= 2 ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { slot = s; JS_FreeCString(ctx, s); } }
 		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return JS_NULL; }
@@ -530,6 +546,7 @@ namespace
 
 	JSValue js_sam_get_inventory_count(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
+		SAMLogger::noteApiCall();
 		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
 		std::string name; if ( argc >= 2 ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
 		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return JS_NewInt32(ctx, 0); }
@@ -550,6 +567,7 @@ namespace
 
 	JSValue js_sam_has_effect(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
+		SAMLogger::noteApiCall();
 		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
 		std::string name; if ( argc >= 2 ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
 		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return JS_NewBool(ctx, 0); }
@@ -560,6 +578,7 @@ namespace
 
 	JSValue js_sam_get_class(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
+		SAMLogger::noteApiCall();
 		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
 		if ( player < 0 || player >= MAXPLAYERS ) { return JS_NULL; }
 		return JS_NewString(ctx, playerClassLangEntry(client_classes[player], player));
@@ -567,12 +586,14 @@ namespace
 
 	JSValue js_sam_get_kills(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
+		SAMLogger::noteApiCall();
 		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
 		return JS_NewInt64(ctx, SAMLua::getKills(player)); // shared session counter
 	}
 
 	JSValue js_sam_get_time_played(JSContext* ctx, JSValueConst /*this_val*/, int /*argc*/, JSValueConst* /*argv*/)
 	{
+		SAMLogger::noteApiCall();
 		return JS_NewInt64(ctx, (int64_t)ticks);
 	}
 #endif // SAM_JS_HAVE_BARONY
@@ -600,6 +621,7 @@ namespace
 
 	JSValue js_sam_save_data(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
+		SAMLogger::noteApiCall();
 		if ( argc < 1 ) { return JS_NewBool(ctx, 0); }
 		const char* keyC = JS_ToCString(ctx, argv[0]);
 		const std::string key = keyC ? keyC : "";
@@ -630,6 +652,7 @@ namespace
 
 	JSValue js_sam_load_data(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
+		SAMLogger::noteApiCall();
 		if ( argc < 1 ) { return JS_UNDEFINED; }
 		const char* keyC = JS_ToCString(ctx, argv[0]);
 		const std::string key = keyC ? keyC : "";
@@ -646,6 +669,7 @@ namespace
 
 	JSValue js_sam_delete_data(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
+		SAMLogger::noteApiCall();
 		if ( argc < 1 ) { return JS_NewBool(ctx, 0); }
 		const char* keyC = JS_ToCString(ctx, argv[0]);
 		const std::string key = keyC ? keyC : "";
@@ -696,6 +720,7 @@ namespace
 
 	JSValue js_sam_cancel_timer(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
+		SAMLogger::noteApiCall();
 		if ( argc < 1 ) { return JS_UNDEFINED; }
 		const char* idC = JS_ToCString(ctx, argv[0]);
 		samRemoveJsTimer(g_currentNs, idC ? idC : "");
@@ -707,6 +732,7 @@ namespace
 
 	JSValue js_sam_register_hook(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
+		SAMLogger::noteApiCall();
 		if ( argc < 1 ) { return JS_UNDEFINED; }
 		const char* nameC = JS_ToCString(ctx, argv[0]);
 		const std::string name = nameC ? nameC : "";
@@ -725,6 +751,7 @@ namespace
 	// (cross-runtime), host-authoritative. Only primitive fields cross over.
 	JSValue js_sam_fire_hook(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
+		SAMLogger::noteApiCall();
 		if ( argc < 1 ) { return JS_UNDEFINED; }
 		const char* nameC = JS_ToCString(ctx, argv[0]);
 		const std::string name = nameC ? nameC : "";
@@ -767,6 +794,527 @@ namespace
 		return JS_NewInt32(ctx, n); // return the count of scripts reached
 	}
 
+	// v0.7.0 Feature 2: sam_modify_damage(player, new_value) — rewrite incoming damage
+	// from inside an on_before_damage callback (routes to the shared SAMLua latch).
+	JSValue js_sam_modify_damage(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_UNDEFINED; }
+		int32_t player = 0; JS_ToInt32(ctx, &player, argv[0]);
+		int64_t v = 0;      JS_ToInt64(ctx, &v, argv[1]);
+		if ( !SAMLua::beforeDamageActive() )
+		{
+			SAM_WARN("JS", "sam_modify_damage: only valid inside an on_before_damage callback — ignored.");
+			return JS_UNDEFINED;
+		}
+		SAMLua::beforeDamageModify(player, (long long)v);
+		return JS_UNDEFINED;
+	}
+
+	// v0.7.0 Feature 2: sam_deal_damage(entity_uid, amount) — deal damage to any entity
+	// by UID (host-only, UID-only, existence-validated). Positive amount = damage.
+	JSValue js_sam_deal_damage(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_FALSE; }
+		int64_t uid = 0;    JS_ToInt64(ctx, &uid, argv[0]);
+		int32_t amount = 0; JS_ToInt32(ctx, &amount, argv[1]);
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_deal_damage refused: host only."); return JS_FALSE; }
+		Entity* e = uidToEntity((Uint32)uid);
+		if ( !e ) { SAM_WARN("JS", "sam_deal_damage: no entity with uid " + std::to_string(uid) + "."); return JS_FALSE; }
+		const int dmg = ( amount < 0 ) ? amount : -amount;
+		e->modHP(dmg);
+		SAM_INFO("SAM", "sam_deal_damage: " + std::to_string(-dmg) + " damage to uid " + std::to_string(uid));
+		return JS_TRUE;
+#else
+		(void)uid; (void)amount;
+		return JS_FALSE;
+#endif
+	}
+
+	// v0.7.0 Feature 3: sam_is_key_held(key_name) -> boolean.
+	JSValue js_sam_is_key_held(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_FALSE; }
+		const char* nameC = JS_ToCString(ctx, argv[0]);
+		const bool held = SAMLua::isKeyHeld(nameC ? nameC : "");
+		if ( nameC ) { JS_FreeCString(ctx, nameC); }
+		return held ? JS_TRUE : JS_FALSE;
+	}
+
+	// ---- v0.7.0 Feature 4: monster / NPC scripting (UID-based) -----------------
+#ifdef SAM_JS_HAVE_BARONY
+	// Resolve a UID to a monster Entity* (behavior==actMonster + has stats), else nullptr.
+	Entity* samResolveMonster(long long uid)
+	{
+		Entity* e = uidToEntity((Sint32)uid);
+		if ( !e || e->behavior != &actMonster || !e->getStats() ) { return nullptr; }
+		return e;
+	}
+
+	// Map a monster-type name (case-insensitive) to its Monster enum, or -1. The engine's
+	// monstertypename[] entries are all lowercase, so lowercase the input first.
+	int samMonsterNameToId(const char* nameIn)
+	{
+		std::string want = nameIn ? nameIn : "";
+		for ( char& c : want ) { c = (char)std::tolower((unsigned char)c); }
+		for ( int i = 0; i < NUMMONSTERS; ++i ) { if ( want == monstertypename[i] ) { return i; } }
+		return -1;
+	}
+#endif
+
+	JSValue js_sam_get_monster_stat(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_NewInt32(ctx, 0); }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+		const char* nameC = JS_ToCString(ctx, argv[1]);
+#ifdef SAM_JS_HAVE_BARONY
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { SAM_WARN("JS", "sam_get_monster_stat: no monster uid " + std::to_string(uid)); if ( nameC ) { JS_FreeCString(ctx, nameC); } return JS_NewInt32(ctx, 0); }
+		Stat* s = e->getStats();
+		const std::string n = samUpper(nameC);
+		long long v = 0;
+		if      ( n == "STR" ) { v = s->STR; }
+		else if ( n == "DEX" || n == "SPEED" ) { v = s->DEX; } // no speed field; DEX drives movement
+		else if ( n == "CON" ) { v = s->CON; }
+		else if ( n == "INT" ) { v = s->INT; }
+		else if ( n == "PER" ) { v = s->PER; }
+		else if ( n == "CHR" ) { v = s->CHR; }
+		else if ( n == "HP" )  { v = s->HP; }
+		else if ( n == "MAXHP" ) { v = s->MAXHP; }
+		else if ( n == "MP" )  { v = s->MP; }
+		else if ( n == "MAXMP" ) { v = s->MAXMP; }
+		else if ( n == "LEVEL" || n == "LVL" ) { v = s->LVL; }
+		else { SAM_WARN("JS", std::string("sam_get_monster_stat: unknown stat '") + (nameC ? nameC : "") + "'"); }
+		if ( nameC ) { JS_FreeCString(ctx, nameC); }
+		return JS_NewInt64(ctx, v);
+#else
+		(void)uid; if ( nameC ) { JS_FreeCString(ctx, nameC); } return JS_NewInt32(ctx, 0);
+#endif
+	}
+
+	JSValue js_sam_set_monster_stat(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 3 ) { return JS_FALSE; }
+		int64_t uid = 0;    JS_ToInt64(ctx, &uid, argv[0]);
+		const char* nameC = JS_ToCString(ctx, argv[1]);
+		int32_t value = 0;  JS_ToInt32(ctx, &value, argv[2]);
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_set_monster_stat refused: host only."); if ( nameC ) { JS_FreeCString(ctx, nameC); } return JS_FALSE; }
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { SAM_WARN("JS", "sam_set_monster_stat: no monster uid " + std::to_string(uid)); if ( nameC ) { JS_FreeCString(ctx, nameC); } return JS_FALSE; }
+		Stat* s = e->getStats();
+		const std::string n = samUpper(nameC);
+		bool ok = true;
+		if      ( n == "HP" )    { e->setHP(value); }
+		else if ( n == "MAXHP" ) { s->MAXHP = (value < 1 ? 1 : value); if ( s->HP > s->MAXHP ) { s->HP = s->MAXHP; } }
+		else if ( n == "MP" )    { e->setMP(value); }
+		else if ( n == "MAXMP" ) { s->MAXMP = (value < 0 ? 0 : value); if ( s->MP > s->MAXMP ) { s->MP = s->MAXMP; } }
+		else if ( n == "STR" )   { s->STR = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
+		else if ( n == "DEX" || n == "SPEED" ) { s->DEX = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
+		else if ( n == "CON" )   { s->CON = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
+		else if ( n == "INT" )   { s->INT = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
+		else if ( n == "PER" )   { s->PER = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
+		else if ( n == "CHR" )   { s->CHR = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
+		else if ( n == "LEVEL" || n == "LVL" ) { s->LVL = samClampInt(value, 1, 255); }
+		else { SAM_WARN("JS", std::string("sam_set_monster_stat: unknown stat '") + (nameC ? nameC : "") + "'"); ok = false; }
+		if ( ok ) { SAM_INFO("SAM", "sam_set_monster_stat: " + n + "=" + std::to_string(value) + " on uid " + std::to_string(uid)); }
+		if ( nameC ) { JS_FreeCString(ctx, nameC); }
+		return ok ? JS_TRUE : JS_FALSE;
+#else
+		(void)uid; (void)value; if ( nameC ) { JS_FreeCString(ctx, nameC); } return JS_FALSE;
+#endif
+	}
+
+	JSValue js_sam_apply_monster_effect(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 3 ) { return JS_FALSE; }
+		int64_t uid = 0;    JS_ToInt64(ctx, &uid, argv[0]);
+		const char* nameC = JS_ToCString(ctx, argv[1]);
+		int32_t ticks = 0;  JS_ToInt32(ctx, &ticks, argv[2]);
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_apply_monster_effect refused: host only."); if ( nameC ) { JS_FreeCString(ctx, nameC); } return JS_FALSE; }
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { SAM_WARN("JS", "sam_apply_monster_effect: no monster uid " + std::to_string(uid)); if ( nameC ) { JS_FreeCString(ctx, nameC); } return JS_FALSE; }
+		const int eff = samEffectNameToId(nameC);
+		if ( eff < 0 ) { SAM_WARN("JS", std::string("sam_apply_monster_effect: unknown effect '") + (nameC ? nameC : "") + "'"); if ( nameC ) { JS_FreeCString(ctx, nameC); } return JS_FALSE; }
+		const bool ok = e->setEffect(eff, true, ticks, true);
+		SAM_INFO("SAM", std::string("sam_apply_monster_effect: ") + (nameC ? nameC : "") + " to uid " + std::to_string(uid) + (ok ? "" : " (immune)"));
+		if ( nameC ) { JS_FreeCString(ctx, nameC); }
+		return ok ? JS_TRUE : JS_FALSE;
+#else
+		(void)uid; (void)ticks; if ( nameC ) { JS_FreeCString(ctx, nameC); } return JS_FALSE;
+#endif
+	}
+
+	JSValue js_sam_kill_monster(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_FALSE; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_kill_monster refused: host only."); return JS_FALSE; }
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { SAM_WARN("JS", "sam_kill_monster: no monster uid " + std::to_string(uid)); return JS_FALSE; }
+		e->setHP(0); // actMonster runs death + drops on its next tick; fires on_monster_died
+		SAM_INFO("SAM", "sam_kill_monster: uid " + std::to_string(uid));
+		return JS_TRUE;
+#else
+		(void)uid; return JS_FALSE;
+#endif
+	}
+
+	JSValue js_sam_spawn_monsters(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 3 ) { return JS_NewInt32(ctx, 0); }
+		int64_t nearUid = 0; JS_ToInt64(ctx, &nearUid, argv[0]);
+		const char* typeC = JS_ToCString(ctx, argv[1]);
+		int32_t count = 0;   JS_ToInt32(ctx, &count, argv[2]);
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_spawn_monsters refused: host only."); if ( typeC ) { JS_FreeCString(ctx, typeC); } return JS_NewInt32(ctx, 0); }
+		Entity* anchor = uidToEntity((Sint32)nearUid);
+		if ( !anchor ) { SAM_WARN("JS", "sam_spawn_monsters: no anchor entity uid " + std::to_string(nearUid)); if ( typeC ) { JS_FreeCString(ctx, typeC); } return JS_NewInt32(ctx, 0); }
+		const int mtype = samMonsterNameToId(typeC);
+		if ( mtype < 0 ) { SAM_WARN("JS", std::string("sam_spawn_monsters: unknown monster type '") + (typeC ? typeC : "") + "'"); if ( typeC ) { JS_FreeCString(ctx, typeC); } return JS_NewInt32(ctx, 0); }
+		if ( count < 1 ) { count = 1; }
+		if ( count > 8 ) { count = 8; } // hard cap per spec
+		int spawned = 0;
+		for ( int i = 0; i < count; ++i )
+		{
+			Entity* m = summonMonster((Monster)mtype, anchor->x, anchor->y); // finds a free adjacent tile itself
+			if ( m ) { ++spawned; }
+		}
+		SAM_INFO("SAM", "sam_spawn_monsters: " + std::to_string(spawned) + "x " + (typeC ? typeC : "") + " near uid " + std::to_string(nearUid));
+		if ( typeC ) { JS_FreeCString(ctx, typeC); }
+		return JS_NewInt32(ctx, spawned);
+#else
+		(void)nearUid; (void)count; if ( typeC ) { JS_FreeCString(ctx, typeC); } return JS_NewInt32(ctx, 0);
+#endif
+	}
+
+	JSValue js_sam_get_monster_target(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_NewInt32(ctx, -1); }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+#ifdef SAM_JS_HAVE_BARONY
+		int idx = -1;
+		if ( Entity* e = samResolveMonster(uid) )
+		{
+			Entity* t = uidToEntity((Sint32)e->monsterTarget);
+			if ( t && t->behavior == &actPlayer ) { idx = t->skill[2]; }
+		}
+		return JS_NewInt32(ctx, idx);
+#else
+		(void)uid; return JS_NewInt32(ctx, -1);
+#endif
+	}
+
+	JSValue js_sam_set_monster_target(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_FALSE; }
+		int64_t uid = 0;    JS_ToInt64(ctx, &uid, argv[0]);
+		int32_t player = 0; JS_ToInt32(ctx, &player, argv[1]);
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_set_monster_target refused: host only."); return JS_FALSE; }
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { SAM_WARN("JS", "sam_set_monster_target: no monster uid " + std::to_string(uid)); return JS_FALSE; }
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity )
+		{ SAM_WARN("JS", "sam_set_monster_target: invalid player " + std::to_string(player)); return JS_FALSE; }
+		e->monsterAcquireAttackTarget(*players[player]->entity, MONSTER_STATE_PATH);
+		SAM_INFO("SAM", "sam_set_monster_target: uid " + std::to_string(uid) + " -> player " + std::to_string(player));
+		return JS_TRUE;
+#else
+		(void)uid; (void)player; return JS_FALSE;
+#endif
+	}
+
+	// sam_get_monster_data(uid, key) -> value (undefined if unset). Per-monster scratch store,
+	// shared with the Lua runtime via SAMLua::monsterDataGet.
+	JSValue js_sam_get_monster_data(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_UNDEFINED; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+		const char* keyC = JS_ToCString(ctx, argv[1]);
+		const std::string js = SAMLua::monsterDataGet((unsigned)(Sint32)uid, keyC ? keyC : "");
+		if ( keyC ) { JS_FreeCString(ctx, keyC); }
+		if ( js.empty() ) { return JS_UNDEFINED; }
+		JSValue v = JS_ParseJSON(ctx, js.c_str(), js.size(), "sam_monster_data");
+		if ( JS_IsException(v) ) { JS_FreeValue(ctx, v); return JS_UNDEFINED; }
+		return v;
+	}
+
+	// sam_set_monster_data(uid, key, value) — store any JSON-able value for a monster.
+	JSValue js_sam_set_monster_data(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 3 ) { return JS_FALSE; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+		const char* keyC = JS_ToCString(ctx, argv[1]);
+		const std::string key = keyC ? keyC : "";
+		if ( keyC ) { JS_FreeCString(ctx, keyC); }
+		JSValue jstr = JS_JSONStringify(ctx, argv[2], JS_UNDEFINED, JS_UNDEFINED);
+		std::string json = "null";
+		if ( !JS_IsException(jstr) && !JS_IsUndefined(jstr) )
+		{
+			const char* s = JS_ToCString(ctx, jstr);
+			if ( s ) { json = s; JS_FreeCString(ctx, s); }
+		}
+		JS_FreeValue(ctx, jstr);
+		SAMLua::monsterDataSet((unsigned)(Sint32)uid, key, json);
+		return JS_TRUE;
+	}
+
+	// ---- v0.7.0 Feature 5: modify existing content (patch class/item/monster) -----
+#ifdef SAM_JS_HAVE_BARONY
+	int samJsResolveClass(JSContext* ctx, JSValueConst v)
+	{
+		if ( JS_IsNumber(v) )
+		{
+			int32_t n = 0; JS_ToInt32(ctx, &n, v);
+			if ( (n >= 0 && n < NUMCLASSES) || (n >= SAM_CLASS_ID_BASE && SAMClasses::getClass(n)) ) { return n; }
+			return -1;
+		}
+		if ( JS_IsString(v) )
+		{
+			const char* s = JS_ToCString(ctx, v);
+			const int id = s ? SAMClasses::classIdForIdString(s) : -1;
+			if ( s ) { JS_FreeCString(ctx, s); }
+			return id;
+		}
+		return -1;
+	}
+	int samJsResolveItem(JSContext* ctx, JSValueConst v)
+	{
+		if ( JS_IsNumber(v) ) { int32_t n = 0; JS_ToInt32(ctx, &n, v); return n; }
+		if ( JS_IsString(v) )
+		{
+			const char* s = JS_ToCString(ctx, v);
+			int id = -1;
+			if ( s )
+			{
+				std::string lower = s;
+				for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
+				auto it = ItemTooltips.itemNameStringToItemID.find(lower);
+				id = (it != ItemTooltips.itemNameStringToItemID.end()) ? it->second : SAMItems::itemIdForIdString(s);
+				JS_FreeCString(ctx, s);
+			}
+			return id;
+		}
+		return -1;
+	}
+	int samJsResolvePassive(JSContext* ctx, JSValueConst v)
+	{
+		if ( JS_IsNumber(v) ) { int32_t n = 0; JS_ToInt32(ctx, &n, v); return n; }
+		if ( JS_IsString(v) )
+		{
+			const char* s = JS_ToCString(ctx, v);
+			const int id = s ? samEffectNameToId(s) : -1;
+			if ( s ) { JS_FreeCString(ctx, s); }
+			return id;
+		}
+		return -1;
+	}
+	bool samJsGetIntProp(JSContext* ctx, JSValueConst obj, const char* key, int& out)
+	{
+		JSValue v = JS_GetPropertyStr(ctx, obj, key);
+		bool ok = false;
+		if ( JS_IsNumber(v) ) { int32_t n = 0; JS_ToInt32(ctx, &n, v); out = n; ok = true; }
+		JS_FreeValue(ctx, v);
+		return ok;
+	}
+	bool samJsGetStrProp(JSContext* ctx, JSValueConst obj, const char* key, std::string& out)
+	{
+		JSValue v = JS_GetPropertyStr(ctx, obj, key);
+		bool ok = false;
+		if ( JS_IsString(v) ) { const char* s = JS_ToCString(ctx, v); if ( s ) { out = s; JS_FreeCString(ctx, s); ok = true; } }
+		JS_FreeValue(ctx, v);
+		return ok;
+	}
+#endif
+
+	JSValue js_sam_patch_class(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_FALSE; }
+#ifdef SAM_JS_HAVE_BARONY
+		const int classnum = samJsResolveClass(ctx, argv[0]);
+		if ( classnum < 0 ) { SAM_ERROR("JS", "sam_patch_class: unknown class."); return JS_FALSE; }
+		SAMClassStatPatch patch;
+		if ( argc >= 2 && JS_IsObject(argv[1]) )
+		{
+			JSPropertyEnum* tab = nullptr; uint32_t plen = 0;
+			if ( JS_GetOwnPropertyNames(ctx, &tab, &plen, argv[1], JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) == 0 )
+			{
+				for ( uint32_t i = 0; i < plen; ++i )
+				{
+					const char* keyC = JS_AtomToCString(ctx, tab[i].atom);
+					const std::string uk = samUpper(keyC ? keyC : "");
+					JSValue val = JS_GetProperty(ctx, argv[1], tab[i].atom);
+					if ( uk == "SKILLS" && JS_IsObject(val) )
+					{
+						JSPropertyEnum* st = nullptr; uint32_t sl = 0;
+						if ( JS_GetOwnPropertyNames(ctx, &st, &sl, val, JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) == 0 )
+						{
+							for ( uint32_t j = 0; j < sl; ++j )
+							{
+								const char* sk = JS_AtomToCString(ctx, st[j].atom);
+								JSValue sv = JS_GetProperty(ctx, val, st[j].atom);
+								if ( sk && JS_IsNumber(sv) ) { int32_t n = 0; JS_ToInt32(ctx, &n, sv); patch.skills[sk] = n; }
+								if ( sk ) { JS_FreeCString(ctx, sk); }
+								JS_FreeValue(ctx, sv);
+								JS_FreeAtom(ctx, st[j].atom);
+							}
+							js_free(ctx, st);
+						}
+					}
+					else if ( JS_IsNumber(val) ) { int32_t n = 0; JS_ToInt32(ctx, &n, val); patch.stats[uk] = n; }
+					if ( keyC ) { JS_FreeCString(ctx, keyC); }
+					JS_FreeValue(ctx, val);
+					JS_FreeAtom(ctx, tab[i].atom);
+				}
+				js_free(ctx, tab);
+			}
+		}
+		return SAMClasses::patchClass(classnum, patch) ? JS_TRUE : JS_FALSE;
+#else
+		return JS_FALSE;
+#endif
+	}
+
+	JSValue js_sam_unpatch_class(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_FALSE; }
+#ifdef SAM_JS_HAVE_BARONY
+		const int classnum = samJsResolveClass(ctx, argv[0]);
+		if ( classnum < 0 ) { return JS_FALSE; }
+		SAMClasses::unpatchClass(classnum);
+		return JS_TRUE;
+#else
+		return JS_FALSE;
+#endif
+	}
+
+	JSValue js_sam_patch_item(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_FALSE; }
+#ifdef SAM_JS_HAVE_BARONY
+		const int id = samJsResolveItem(ctx, argv[0]);
+		if ( id < 0 ) { SAM_ERROR("JS", "sam_patch_item: unknown item."); return JS_FALSE; }
+		SAMItemPatch patch;
+		if ( argc >= 2 && JS_IsObject(argv[1]) )
+		{
+			int iv; std::string sv;
+			if ( samJsGetIntProp(ctx, argv[1], "weight", iv) ) { patch.hasWeight = true; patch.weight = iv; }
+			if ( samJsGetIntProp(ctx, argv[1], "value", iv) ) { patch.hasValue = true; patch.value = iv; }
+			else if ( samJsGetIntProp(ctx, argv[1], "gold_value", iv) ) { patch.hasValue = true; patch.value = iv; }
+			if ( samJsGetIntProp(ctx, argv[1], "level", iv) ) { patch.hasLevel = true; patch.level = iv; }
+			if ( samJsGetStrProp(ctx, argv[1], "category", sv) ) { patch.hasCategory = true; patch.category = samUpper(sv.c_str()); }
+			if ( samJsGetStrProp(ctx, argv[1], "slot", sv) ) { patch.hasSlot = true; patch.slot = sv; }
+			if ( samJsGetStrProp(ctx, argv[1], "tooltip", sv) ) { patch.hasTooltip = true; patch.tooltip = sv; }
+			if ( samJsGetStrProp(ctx, argv[1], "name_identified", sv) ) { patch.hasNameId = true; patch.nameIdentified = sv; }
+			else if ( samJsGetStrProp(ctx, argv[1], "name", sv) ) { patch.hasNameId = true; patch.nameIdentified = sv; }
+			if ( samJsGetStrProp(ctx, argv[1], "name_unidentified", sv) ) { patch.hasNameUnid = true; patch.nameUnidentified = sv; }
+			JSValue attrs = JS_GetPropertyStr(ctx, argv[1], "attributes");
+			if ( JS_IsObject(attrs) )
+			{
+				JSPropertyEnum* tab = nullptr; uint32_t plen = 0;
+				if ( JS_GetOwnPropertyNames(ctx, &tab, &plen, attrs, JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) == 0 )
+				{
+					for ( uint32_t i = 0; i < plen; ++i )
+					{
+						const char* ak = JS_AtomToCString(ctx, tab[i].atom);
+						JSValue av = JS_GetProperty(ctx, attrs, tab[i].atom);
+						if ( ak && JS_IsNumber(av) ) { int32_t n = 0; JS_ToInt32(ctx, &n, av); patch.attributes[ak] = n; }
+						if ( ak ) { JS_FreeCString(ctx, ak); }
+						JS_FreeValue(ctx, av);
+						JS_FreeAtom(ctx, tab[i].atom);
+					}
+					js_free(ctx, tab);
+				}
+			}
+			JS_FreeValue(ctx, attrs);
+		}
+		return SAMItems::patchItem(id, patch) ? JS_TRUE : JS_FALSE;
+#else
+		return JS_FALSE;
+#endif
+	}
+
+	JSValue js_sam_patch_monster(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_FALSE; }
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_patch_monster refused: host only."); return JS_FALSE; }
+		int mtype = -1;
+		if ( JS_IsNumber(argv[0]) ) { int32_t n = 0; JS_ToInt32(ctx, &n, argv[0]); mtype = n; }
+		else if ( JS_IsString(argv[0]) ) { const char* s = JS_ToCString(ctx, argv[0]); if ( s ) { mtype = samMonsterNameToId(s); JS_FreeCString(ctx, s); } }
+		if ( mtype <= 0 || mtype >= NUMMONSTERS ) { SAM_ERROR("JS", "sam_patch_monster: unknown monster type."); return JS_FALSE; }
+		int applied = 0;
+		if ( argc >= 2 && JS_IsObject(argv[1]) )
+		{
+			JSPropertyEnum* tab = nullptr; uint32_t plen = 0;
+			if ( JS_GetOwnPropertyNames(ctx, &tab, &plen, argv[1], JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) == 0 )
+			{
+				for ( uint32_t i = 0; i < plen; ++i )
+				{
+					const char* keyC = JS_AtomToCString(ctx, tab[i].atom);
+					JSValue val = JS_GetProperty(ctx, argv[1], tab[i].atom);
+					if ( keyC && JS_IsNumber(val) ) { int32_t n = 0; JS_ToInt32(ctx, &n, val); if ( SAMMonsterPatch::set(mtype, samUpper(keyC), n) ) { ++applied; } }
+					if ( keyC ) { JS_FreeCString(ctx, keyC); }
+					JS_FreeValue(ctx, val);
+					JS_FreeAtom(ctx, tab[i].atom);
+				}
+				js_free(ctx, tab);
+			}
+		}
+		SAM_INFO("SAM", "sam_patch_monster: type " + std::to_string(mtype) + " (" + std::to_string(applied) + " field override(s))");
+		return applied > 0 ? JS_TRUE : JS_FALSE;
+#else
+		return JS_FALSE;
+#endif
+	}
+
+	JSValue js_sam_add_class_passive(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_FALSE; }
+#ifdef SAM_JS_HAVE_BARONY
+		const int classnum = samJsResolveClass(ctx, argv[0]);
+		const int eff = samJsResolvePassive(ctx, argv[1]);
+		if ( classnum < 0 ) { SAM_ERROR("JS", "sam_add_class_passive: unknown class."); return JS_FALSE; }
+		if ( eff < 0 || eff >= NUMEFFECTS ) { SAM_ERROR("JS", "sam_add_class_passive: unknown effect."); return JS_FALSE; }
+		return SAMClasses::addClassPassive(classnum, eff) ? JS_TRUE : JS_FALSE;
+#else
+		return JS_FALSE;
+#endif
+	}
+
+	JSValue js_sam_remove_class_passive(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_FALSE; }
+#ifdef SAM_JS_HAVE_BARONY
+		const int classnum = samJsResolveClass(ctx, argv[0]);
+		const int eff = samJsResolvePassive(ctx, argv[1]);
+		if ( classnum < 0 || eff < 0 ) { return JS_FALSE; }
+		return SAMClasses::removeClassPassive(classnum, eff) ? JS_TRUE : JS_FALSE;
+#else
+		return JS_FALSE;
+#endif
+	}
+
 	// ---- sandbox construction -------------------------------------------------
 	JSContext* newSandboxContext(JSRuntime* rt)
 	{
@@ -794,6 +1342,26 @@ namespace
 		JS_SetPropertyStr(ctx, g, "sam_cancel_timer", JS_NewCFunction(ctx, js_sam_cancel_timer, "sam_cancel_timer", 1));
 		JS_SetPropertyStr(ctx, g, "sam_register_hook", JS_NewCFunction(ctx, js_sam_register_hook, "sam_register_hook", 2));
 		JS_SetPropertyStr(ctx, g, "sam_fire_hook", JS_NewCFunction(ctx, js_sam_fire_hook, "sam_fire_hook", 2));
+		JS_SetPropertyStr(ctx, g, "sam_modify_damage", JS_NewCFunction(ctx, js_sam_modify_damage, "sam_modify_damage", 2));
+		JS_SetPropertyStr(ctx, g, "sam_deal_damage", JS_NewCFunction(ctx, js_sam_deal_damage, "sam_deal_damage", 2));
+		JS_SetPropertyStr(ctx, g, "sam_is_key_held", JS_NewCFunction(ctx, js_sam_is_key_held, "sam_is_key_held", 1));
+		// v0.7.0 Feature 4: monster / NPC scripting (UID-based, host-authoritative)
+		JS_SetPropertyStr(ctx, g, "sam_get_monster_stat", JS_NewCFunction(ctx, js_sam_get_monster_stat, "sam_get_monster_stat", 2));
+		JS_SetPropertyStr(ctx, g, "sam_set_monster_stat", JS_NewCFunction(ctx, js_sam_set_monster_stat, "sam_set_monster_stat", 3));
+		JS_SetPropertyStr(ctx, g, "sam_apply_monster_effect", JS_NewCFunction(ctx, js_sam_apply_monster_effect, "sam_apply_monster_effect", 3));
+		JS_SetPropertyStr(ctx, g, "sam_kill_monster", JS_NewCFunction(ctx, js_sam_kill_monster, "sam_kill_monster", 1));
+		JS_SetPropertyStr(ctx, g, "sam_spawn_monsters", JS_NewCFunction(ctx, js_sam_spawn_monsters, "sam_spawn_monsters", 3));
+		JS_SetPropertyStr(ctx, g, "sam_get_monster_target", JS_NewCFunction(ctx, js_sam_get_monster_target, "sam_get_monster_target", 1));
+		JS_SetPropertyStr(ctx, g, "sam_set_monster_target", JS_NewCFunction(ctx, js_sam_set_monster_target, "sam_set_monster_target", 2));
+		JS_SetPropertyStr(ctx, g, "sam_get_monster_data", JS_NewCFunction(ctx, js_sam_get_monster_data, "sam_get_monster_data", 2));
+		JS_SetPropertyStr(ctx, g, "sam_set_monster_data", JS_NewCFunction(ctx, js_sam_set_monster_data, "sam_set_monster_data", 3));
+		// v0.7.0 Feature 5: modify existing content (revert on unload)
+		JS_SetPropertyStr(ctx, g, "sam_patch_class", JS_NewCFunction(ctx, js_sam_patch_class, "sam_patch_class", 2));
+		JS_SetPropertyStr(ctx, g, "sam_unpatch_class", JS_NewCFunction(ctx, js_sam_unpatch_class, "sam_unpatch_class", 1));
+		JS_SetPropertyStr(ctx, g, "sam_patch_item", JS_NewCFunction(ctx, js_sam_patch_item, "sam_patch_item", 2));
+		JS_SetPropertyStr(ctx, g, "sam_patch_monster", JS_NewCFunction(ctx, js_sam_patch_monster, "sam_patch_monster", 2));
+		JS_SetPropertyStr(ctx, g, "sam_add_class_passive", JS_NewCFunction(ctx, js_sam_add_class_passive, "sam_add_class_passive", 2));
+		JS_SetPropertyStr(ctx, g, "sam_remove_class_passive", JS_NewCFunction(ctx, js_sam_remove_class_passive, "sam_remove_class_passive", 2));
 #ifdef SAM_JS_HAVE_BARONY
 		JS_SetPropertyStr(ctx, g, "sam_grant_gold", JS_NewCFunction(ctx, js_sam_grant_gold, "sam_grant_gold", 2));
 		JS_SetPropertyStr(ctx, g, "sam_apply_effect", JS_NewCFunction(ctx, js_sam_apply_effect, "sam_apply_effect", 3));
@@ -837,19 +1405,29 @@ namespace
 		JS_FreeValue(ctx, res);
 
 		JSValue g = JS_GetGlobalObject(ctx);
-		JSValue fn = JS_GetPropertyStr(ctx, g, "on_event");
+		JSValue fn     = JS_GetPropertyStr(ctx, g, "on_event");
+		JSValue tickFn = JS_GetPropertyStr(ctx, g, "on_tick"); // v0.7.0
 		JS_FreeValue(ctx, g);
-		if ( !JS_IsFunction(ctx, fn) )
-		{
-			JS_FreeValue(ctx, fn);
-			SAM_WARN("JS", "script '" + label + "' defines no on_event(event) — no handler registered.");
-			Script sc; sc.ctx = ctx; sc.onEvent = JS_UNDEFINED; sc.path = label; sc.ns = ns; sc.enabled = false;
-			g_scripts.push_back(sc);
-			return true;
-		}
-		Script sc; sc.ctx = ctx; sc.onEvent = fn; sc.path = label; sc.ns = ns; sc.enabled = true;
+
+		const bool hasEvent = JS_IsFunction(ctx, fn);
+		const bool hasTick  = JS_IsFunction(ctx, tickFn);
+		if ( !hasEvent ) { JS_FreeValue(ctx, fn);     fn = JS_UNDEFINED; }
+		if ( !hasTick )  { JS_FreeValue(ctx, tickFn); tickFn = JS_UNDEFINED; }
+
+		Script sc; sc.ctx = ctx; sc.onEvent = fn; sc.onTick = tickFn; sc.path = label; sc.ns = ns;
+		sc.enabled = ( hasEvent || hasTick );
 		g_scripts.push_back(sc);
-		SAM_INFO("JS", "Loaded script '" + label + "' (on_event registered).");
+
+		if ( !sc.enabled )
+		{
+			SAM_WARN("JS", "script '" + label + "' defines neither on_event(event) nor on_tick(event) — no handler registered.");
+		}
+		else
+		{
+			std::string handlers = hasEvent ? "on_event" : "";
+			if ( hasTick ) { handlers += (handlers.empty() ? "" : " + ") + std::string("on_tick"); }
+			SAM_INFO("JS", "Loaded script '" + label + "' (" + handlers + " registered).");
+		}
 		return true;
 	}
 
@@ -1011,6 +1589,7 @@ namespace SAMJs
 				SAM_ERROR("JS", "on_event error in '" + sc.path + "': " + exceptionToString(sc.ctx));
 				SAM_WARN("JS", "script '" + sc.path + "' disabled after an on_event error.");
 				sc.enabled = false;
+				SAMLogger::noteScriptError();
 			}
 			else
 			{
@@ -1018,8 +1597,38 @@ namespace SAMJs
 			}
 			JS_FreeValue(sc.ctx, ret);
 		}
+		SAMLogger::noteHookFired(delivered); // count + open the GAMEPLAY section on the first hook
 		SAM_INFO("JS", "Dispatched '" + ev.name + "' to " + std::to_string(delivered) + " script(s).");
 		return delivered;
+	}
+
+	// v0.7.0: fire on_tick(event) for every script defining it, once per game tick
+	// (host-only). Silent — no per-tick log, no hook count — since this runs ~50x/sec.
+	void dispatchTick(long long tickCount)
+	{
+		if ( !g_rt ) { return; }
+		const std::string savedNs = g_currentNs;
+		for ( auto& sc : g_scripts )
+		{
+			if ( !sc.enabled || JS_IsUndefined(sc.onTick) ) { continue; }
+			JSValue ev = JS_NewObject(sc.ctx);
+			JS_SetPropertyStr(sc.ctx, ev, "tick_count", JS_NewInt64(sc.ctx, tickCount));
+			JS_SetPropertyStr(sc.ctx, ev, "delta_ticks", JS_NewInt32(sc.ctx, 1));
+			JSValue argv[1] = { ev };
+			g_currentNs = sc.ns;
+			setDeadline(g_cfg.callbackBudgetMs);
+			JSValue ret = JS_Call(sc.ctx, sc.onTick, JS_UNDEFINED, 1, argv);
+			clearDeadline();
+			g_currentNs = savedNs;
+			JS_FreeValue(sc.ctx, ev);
+			if ( JS_IsException(ret) )
+			{
+				SAM_WARN("JS", "script '" + sc.path + "' disabled after an on_tick error.");
+				sc.enabled = false;
+				SAMLogger::noteScriptError();
+			}
+			JS_FreeValue(sc.ctx, ret);
+		}
 	}
 
 	void tickTimers()
@@ -1086,6 +1695,7 @@ namespace SAMJs
 			if ( sc.ctx )
 			{
 				JS_FreeValue(sc.ctx, sc.onEvent);
+				JS_FreeValue(sc.ctx, sc.onTick);
 				JS_FreeContext(sc.ctx);
 			}
 		}

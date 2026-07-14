@@ -73,6 +73,16 @@ struct SAMClassDef
 	std::string portraitPath;
 };
 
+// v0.7.0 Feature 5: a runtime override of a class's STARTING stats, applied at the
+// end of initClassStats (absolute values, not deltas). Only the keys present are
+// overridden. `stats` keys are stat names (STR/DEX/CON/INT/PER/CHR/HP/MAXHP/MP/
+// MAXMP/GOLD/LVL/EXP); `skills` keys are "PRO_X" proficiency names (0..100).
+struct SAMClassStatPatch
+{
+	std::map<std::string, int> stats;
+	std::map<std::string, int> skills;
+};
+
 class SAMClasses
 {
 public:
@@ -98,10 +108,27 @@ public:
 	// Used to recover the class id from a carousel button's name.
 	static int classIdForIdString(const std::string& idString);
 
+	// --- v0.7.0 Feature 5: modify existing content (revert on unload) ----------
+	// Override a class's STARTING stats. classnum is a vanilla id (0..NUMCLASSES-1)
+	// or a registered custom id (>= SAM_CLASS_ID_BASE). Absolute values; affects only
+	// characters created AFTER the call. Returns false if a custom id is unregistered.
+	// Range-validation of vanilla ids is the caller's job (done in the script binding).
+	static bool patchClass(int classnum, const SAMClassStatPatch& patch);
+	// Drop a single class's stat patch (the blanket clear() on unload also covers it).
+	static void unpatchClass(int classnum);
+	// Grant / remove a permanent status effect (EFF_* id) applied to characters of a
+	// class at creation. Returns false for an unregistered custom class / bad effect.
+	static bool addClassPassive(int classnum, int effectId);
+	static bool removeClassPassive(int classnum, int effectId);
+
 	// --- application into the running game (defined only in the game build) ---
 	// Apply attribute/skill deltas to a Stat (called from initClassStats). Does
 	// NOT clamp — the caller's unconditional clamp block still runs afterwards.
 	static void applyStats(int classnum, Stat* myStats);
+	// v0.7.0 F5: apply any sam_patch_class stat overrides (absolute) + sam_add_class_passive
+	// effects. Called from initClassStats after all deltas, before the HP/MP clamp.
+	static void applyStatOverrides(int classnum, Stat* myStats);
+	static void applyPassives(int classnum, Stat* myStats);
 	// Grant starting items (called from initClass items chain).
 	static void applyLoadout(int player);
 	// Grant starting spells (called from initClass spells chain).

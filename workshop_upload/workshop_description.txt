@@ -19,11 +19,11 @@
 
 [hr][/hr]
 
-[h1]Lua Scripting (v0.3.0)[/h1]
-[b]JSON defines what your content IS. Lua defines how it BEHAVES.[/b]
-Drop a .lua file next to any class or item JSON and SAM loads it automatically. Write on_event handlers to react to game events. No C++. No compiler. Just Lua.
-Available hooks: player.on_level_up (more coming)
-Available API: sam_log(), sam_grant_item()
+[h1]Behavior Scripting — Lua, JavaScript & TypeScript (v0.7.0)[/h1]
+[b]JSON defines what your content IS. Scripts define how it BEHAVES.[/b]
+Drop a .lua, .js or .ts file next to any class or item JSON and SAM loads it automatically (TypeScript is transpiled for you). Write on_event / on_tick handlers to react to the game. No C++. No compiler.
+Hooks (47+): combat (on_hit, on_kill, on_before_damage, on_damage_taken), lifecycle (level-up, death, floor change, game start), items & magic, input (on_key_pressed / on_key_released), a per-tick on_tick, monsters (on_monster_damaged / on_monster_died), and custom cross-mod hooks.
+Host APIs (44+): grant items/gold, apply effects, query & set stats, timers, persistent per-mod data, deal/modify damage, full UID-based monster scripting (spawn, kill, stat, effect, target, data), and runtime patching of existing classes/items/monsters (+ class passives) that auto-reverts on unload.
 
 [hr][/hr]
 
@@ -73,6 +73,6 @@ The repo contains the C++ framework sources, the browser Mod Builder (React), th
 
 [hr][/hr]
 
-[b]Version 0.3.0[/b] — Lua scripting: a sandboxed Lua 5.4 runtime with automatic .lua loading beside your JSON, the first behavior hook (player.on_level_up), and the sam_log() / sam_grant_item() API. Builds on v0.2.0 (layered patches, friendly errors, version compatibility, save backups, editor autocomplete, cross-mod dependencies, monster modding, and the full GUI editor suite).
+[b]Version 0.7.0[/b] — Scripting overhaul: real-time on_tick, damage interception (on_before_damage + sam_modify_damage / sam_deal_damage), keyboard input (on_key_pressed / released), full UID-based monster/NPC scripting (spawn, kill, stat, effect, target, per-monster data, on_monster_damaged / on_monster_died), runtime patching of existing classes/items/monsters + class passives (auto-reverting on unload), and a rewritten structured sam_log.txt. Sandboxed Lua 5.4 + JavaScript + TypeScript runtimes, ~47 hooks and ~44 host APIs — identical in all three languages. Builds on v0.2.0–v0.6.0 (layered patches, friendly errors, version compatibility, save backups, cross-mod dependencies, monster modding, timers, persistent per-mod data, custom cross-mod hooks, and the full GUI editor suite).
 
 [i]Barony (c) Turning Wheel LLC. S.A.M is an unofficial community framework, not affiliated with or endorsed by Turning Wheel LLC.[/i]

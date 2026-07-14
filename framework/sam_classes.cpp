@@ -27,6 +27,7 @@
 
 #include <fstream>
 #include <sstream>
+#include <set>
 
 #ifndef EDITOR
 #include "main.hpp"          // MAXPLAYERS, CLIENT, multiplayer
@@ -50,6 +51,11 @@ static const char* MOD = "CLASSES";
 -------------------------------------------------------------------------------*/
 static std::map<int, SAMClassDef> s_registry;
 static int s_nextClassId = SAM_CLASS_ID_BASE;
+
+// v0.7.0 Feature 5 overlays (game-decoupled storage — reverted in clear()). Keyed by
+// classnum so vanilla (0..25) and custom (>=1000) share one path.
+static std::map<int, SAMClassStatPatch> s_classPatches;
+static std::map<int, std::set<int>> s_classPassives;
 
 static bool readWholeFile(const std::string& path, std::string& out)
 {
@@ -296,6 +302,59 @@ void SAMClasses::clear()
 {
 	s_registry.clear();
 	s_nextClassId = SAM_CLASS_ID_BASE;
+	// v0.7.0 Feature 5: emptying the overlays fully reverts sam_patch_class + class
+	// passives (nothing vanilla is written at rest — initClassStats recomputes each
+	// creation, so subsequently created characters get vanilla stats again).
+	s_classPatches.clear();
+	s_classPassives.clear();
+}
+
+// --- v0.7.0 Feature 5: runtime class overrides (game-decoupled storage) ---------
+bool SAMClasses::patchClass(int classnum, const SAMClassStatPatch& patch)
+{
+	if ( classnum >= SAM_CLASS_ID_BASE && !getClass(classnum) )
+	{
+		SAM_WARN(MOD, "patchClass: no custom class registered for id " + std::to_string(classnum));
+		return false;
+	}
+	s_classPatches[classnum] = patch;
+	SAM_INFO(MOD, "Patched class " + std::to_string(classnum) + " ("
+		+ std::to_string(patch.stats.size()) + " stat override(s), "
+		+ std::to_string(patch.skills.size()) + " skill(s))");
+	return true;
+}
+
+void SAMClasses::unpatchClass(int classnum)
+{
+	if ( s_classPatches.erase(classnum) > 0 )
+	{
+		SAM_INFO(MOD, "Unpatched class " + std::to_string(classnum));
+	}
+}
+
+bool SAMClasses::addClassPassive(int classnum, int effectId)
+{
+	if ( classnum >= SAM_CLASS_ID_BASE && !getClass(classnum) )
+	{
+		SAM_WARN(MOD, "addClassPassive: no custom class registered for id " + std::to_string(classnum));
+		return false;
+	}
+	if ( effectId < 0 ) { return false; }
+	s_classPassives[classnum].insert(effectId);
+	SAM_INFO(MOD, "Added passive effect " + std::to_string(effectId) + " to class " + std::to_string(classnum));
+	return true;
+}
+
+bool SAMClasses::removeClassPassive(int classnum, int effectId)
+{
+	auto it = s_classPassives.find(classnum);
+	if ( it != s_classPassives.end() )
+	{
+		it->second.erase(effectId);
+		if ( it->second.empty() ) { s_classPassives.erase(it); }
+	}
+	SAM_INFO(MOD, "Removed passive effect " + std::to_string(effectId) + " from class " + std::to_string(classnum));
+	return true;
 }
 
 const SAMClassDef* SAMClasses::getClass(int classId)
@@ -563,6 +622,65 @@ void SAMClasses::applyStats(int classnum, Stat* stat)
 		+ std::to_string(def->skills.size()) + " skill(s).");
 	// NOTE: HP/MP clamping is intentionally left to initClassStats' unconditional
 	// clamp block (charclass.cpp ~635-690), which runs after this returns.
+}
+
+// v0.7.0 Feature 5: apply sam_patch_class ABSOLUTE stat overrides. Runs at the end of
+// initClassStats (after all vanilla/SAM/challenge-run deltas), so the override is the
+// final word; the caller's HP/MP clamp + OLDHP recompute still runs afterwards.
+void SAMClasses::applyStatOverrides(int classnum, Stat* stat)
+{
+	if ( !stat ) { return; }
+	auto it = s_classPatches.find(classnum);
+	if ( it == s_classPatches.end() ) { return; }
+	const SAMClassStatPatch& p = it->second;
+
+	auto clampI = [](int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); };
+	for ( const auto& kv : p.stats )
+	{
+		const std::string& k = kv.first;
+		const int v = kv.second;
+		if      ( k == "STR" ) { stat->STR = clampI(v, -128, MAX_PLAYER_STAT_VALUE); }
+		else if ( k == "DEX" ) { stat->DEX = clampI(v, -128, MAX_PLAYER_STAT_VALUE); }
+		else if ( k == "CON" ) { stat->CON = clampI(v, -128, MAX_PLAYER_STAT_VALUE); }
+		else if ( k == "INT" ) { stat->INT = clampI(v, -128, MAX_PLAYER_STAT_VALUE); }
+		else if ( k == "PER" ) { stat->PER = clampI(v, -128, MAX_PLAYER_STAT_VALUE); }
+		else if ( k == "CHR" ) { stat->CHR = clampI(v, -128, MAX_PLAYER_STAT_VALUE); }
+		else if ( k == "HP" )    { stat->HP = v; }              // clamped >=1 by caller
+		else if ( k == "MAXHP" ) { stat->MAXHP = (v < 1 ? 1 : v); }
+		else if ( k == "MP" )    { stat->MP = v; }
+		else if ( k == "MAXMP" ) { stat->MAXMP = (v < 0 ? 0 : v); }
+		else if ( k == "GOLD" )  { stat->GOLD = (v < 0 ? 0 : v); }
+		else if ( k == "LVL" || k == "LEVEL" ) { stat->LVL = clampI(v, 1, 255); }
+		else if ( k == "EXP" )   { stat->EXP = clampI(v, 0, 99); }
+		else { SAM_WARN(MOD, "sam_patch_class: unknown stat '" + k + "' — ignored."); }
+	}
+	for ( const auto& kv : p.skills )
+	{
+		const int pro = proIdFromName(kv.first);
+		if ( pro >= 0 ) { stat->setProficiency(pro, clampI(kv.second, 0, 100)); }
+		else { SAM_WARN(MOD, "sam_patch_class: unknown skill '" + kv.first + "' — ignored."); }
+	}
+	SAM_INFO(MOD, "Applied class override for id " + std::to_string(classnum) + " ("
+		+ std::to_string(p.stats.size()) + " stat(s), " + std::to_string(p.skills.size()) + " skill(s))");
+}
+
+// v0.7.0 Feature 5: grant a class's registered passive effects (EFF_* ids) to a Stat
+// at creation. Written straight onto the Stat's EFFECTS array with an indefinite (-1)
+// timer so it never expires; Entity may not exist yet, so Entity::setEffect is avoided.
+void SAMClasses::applyPassives(int classnum, Stat* stat)
+{
+	if ( !stat ) { return; }
+	auto it = s_classPassives.find(classnum);
+	if ( it == s_classPassives.end() ) { return; }
+	for ( int eff : it->second )
+	{
+		if ( eff >= 0 && eff < NUMEFFECTS )
+		{
+			stat->setEffectActive(eff, 1);
+			stat->EFFECTS_TIMERS[eff] = -1; // indefinite (positive timers decrement + expire)
+		}
+	}
+	SAM_INFO(MOD, "Applied " + std::to_string(it->second.size()) + " passive effect(s) to class " + std::to_string(classnum));
 }
 
 void SAMClasses::applyLoadout(int player)

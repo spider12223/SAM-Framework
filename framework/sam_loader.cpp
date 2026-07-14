@@ -12,6 +12,7 @@
 #include "sam_workshop.hpp"
 #include "sam_classes.hpp"
 #include "sam_items.hpp"
+#include "sam_monster_patches.hpp" // v0.7.0 F5 monster stat overrides — both builds
 #ifndef EDITOR
 #include "sam_sync.hpp"    // multiplayer sync — game build only (not in EDITOR_SOURCES)
 #include "sam_patcher.hpp" // layered data patches — game build only (needs PhysFS + outputdir)
@@ -35,6 +36,7 @@ bool SAMLoader::loaded = false;
 void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mountedPaths,
 	const std::string& baronyVersion)
 {
+	SAMLogger::beginModLoad(); // opens the MOD LOAD section + starts the load-time clock
 	SAM_INFO("CORE", "S.A.M initializing..." + (baronyVersion.empty() ? std::string() : (" (Barony " + baronyVersion + ")")));
 	SAM_INFO("CORE", "Scanning " + std::to_string(mountedPaths.size()) + " mounted mod path(s) for mod.json...");
 
@@ -44,6 +46,7 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 	// every Play, so appending would double-register).
 	SAMClasses::clear();
 	SAMItems::clear();
+	SAMMonsterPatch::clear(); // v0.7.0 F5: drop any prior monster stat overrides
 #ifndef EDITOR
 	SAMSync::clear(); // drop any stale fingerprint state from a previous lobby
 
@@ -173,20 +176,23 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 	}
 	else
 	{
-		std::string summary = "S.A.M load complete. " + std::to_string(mods.size()) + " mod(s) loaded, "
-			+ std::to_string(SAMClasses::count()) + " class(es) registered ("
-			+ std::to_string(totalClasses) + " declared), "
-			+ std::to_string(SAMItems::count()) + " item(s) registered ("
-			+ std::to_string(totalItems) + " declared), ";
+		SAMLoadStats st;
+		st.mods = (int)mods.size();
+		st.classesRegistered = (int)SAMClasses::count();
+		st.classesDeclared = (int)totalClasses;
+		st.itemsRegistered = (int)SAMItems::count();
+		st.itemsDeclared = (int)totalItems;
+		st.plugins = (int)totalPlugins;
 #ifndef EDITOR
-		summary += std::to_string(SAMPatcher::operationsApplied()) + " patch op(s) across "
-			+ std::to_string(SAMPatcher::filesPatched()) + " file(s), "
-			+ std::to_string(SAMMonsters::count()) + " monster(s) registered ("
-			+ std::to_string(totalMonsters) + " declared) across "
-			+ std::to_string(SAMMonsters::curveLevels()) + " spawn level(s), ";
+		st.monstersRegistered = (int)SAMMonsters::count();
+		st.monstersDeclared = (int)totalMonsters;
+		st.spawnLevels = (int)SAMMonsters::curveLevels();
+		st.patchOps = (int)SAMPatcher::operationsApplied();
+		st.patchFiles = (int)SAMPatcher::filesPatched();
+		st.scriptsLua = (int)SAMLua::scriptCount();
+		st.scriptsJs = (int)SAMJs::scriptCount();
 #endif
-		summary += std::to_string(totalPlugins) + " plugins declared.";
-		SAM_INFO("CORE", summary);
+		SAMLogger::logLoadSummary(st);
 
 #ifndef EDITOR
 		// Mods are active — take a once-per-day snapshot of the player's saves
@@ -203,8 +209,9 @@ void SAMLoader::unload()
 {
 	SAM_INFO("CORE", "S.A.M unloading — clearing mod + class + item + sync registries and patch/monster overlays.");
 	SAMWorkshop::clear();
-	SAMClasses::clear();
-	SAMItems::clear();
+	SAMClasses::clear();       // also reverts sam_patch_class + class passives (F5)
+	SAMItems::clear();         // also reverts sam_patch_item overrides (F5)
+	SAMMonsterPatch::clear();  // reverts sam_patch_monster overrides (F5)
 #ifndef EDITOR
 	SAMSync::clear();
 	SAMPatcher::clear();  // unmount + wipe the generated patch overlay
@@ -212,6 +219,7 @@ void SAMLoader::unload()
 	SAMLua::shutdown();   // drop the Lua behavior VM
 	SAMJs::shutdown();    // drop the JS/TS behavior VM (+ any transpile runtime)
 #endif
+	SAMLogger::logSessionSummary(); // SESSION SUMMARY block + closing box
 	loaded = false;
 }
 

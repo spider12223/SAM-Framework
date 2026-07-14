@@ -73,6 +73,10 @@ namespace SAMJs
 	// Returns the number of scripts the event reached.
 	int dispatchEvent(const Event& ev);
 
+	// v0.7.0: call on_tick(event) for every script that defines it, once per game
+	// tick (host-authoritative, silent — no per-tick logging).
+	void dispatchTick(long long tickCount);
+
 	// Tear down the runtime and release all script references.
 	// Advance + fire due per-script timers (Part 4). Call once per game tick, host only.
 	void tickTimers();
