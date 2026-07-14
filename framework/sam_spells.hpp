@@ -77,4 +77,26 @@ public:
 
 	// Look up a registered spell by its "namespace:spell" id string. null if none.
 	static const SAMSpellDef* getSpellByName(const std::string& namespacedId);
+
+	// --- Session 2: build the real in-engine spell (needs Barony magic.hpp) --------
+	// Construct the Barony spell_t (element tree) for a registered SAMSpellDef and
+	// register it into allGameSpells[def.numericId], plus populate ItemTooltips.spellItems
+	// so the spell is grantable, castable and shows in the spell UI with its name.
+	// Idempotent: a no-op if that id is already present in allGameSpells.
+	static void buildEngineSpell(const SAMSpellDef& def);
+	// Build the engine spell for every registered SAMSpellDef (idempotent). Re-invoked
+	// from setupSpells(), which wipes allGameSpells whenever it re-runs.
+	static void buildAllEngineSpells();
+	// Remove + free the SAM engine spells from allGameSpells + spellItems (revert on unload).
+	static void removeEngineSpells();
+
+	// Grant a registered custom spell ("namespace:spell") to a player's known spells (uses
+	// the engine addSpell now that the spell_t exists). Returns false if unknown/unbuilt or
+	// the grant was refused (already known / non-local player).
+	static bool grantCustomSpell(int player, const std::string& namespacedId);
+
+	// Absolute, Image::get-ready path to a custom spell's icon PNG (from the mod folder),
+	// or "" if the runtime id isn't a registered custom spell / has no icon / the file is
+	// missing. The spell-icon UI calls this for id >= SAM_SPELL_ID_BASE.
+	static std::string getIconPath(int spellId);
 };

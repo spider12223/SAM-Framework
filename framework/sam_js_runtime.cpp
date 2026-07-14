@@ -1335,11 +1335,8 @@ namespace
 		}
 		if ( spell.find(':') != std::string::npos )
 		{
-			const SAMSpellDef* cs = SAMSpells::getSpellByName(spell);
-			if ( !cs ) { SAM_ERROR("JS", "sam_grant_spell: unknown custom spell '" + spell + "'."); return JS_FALSE; }
-			SAM_INFO("SAM", "sam_grant_spell: custom spell '" + spell + "' (runtime id "
-				+ std::to_string(cs->numericId) + ") recognized — in-engine grant + casting arrive in a later session.");
-			return JS_TRUE;
+			// Custom spell — the engine spell_t is built at load, so grant it for real.
+			return SAMSpells::grantCustomSpell(player, spell) ? JS_TRUE : JS_FALSE;
 		}
 		std::string lower = spell;
 		for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }

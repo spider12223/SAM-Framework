@@ -783,12 +783,10 @@ void SAMClasses::applySpells(int player)
 		if ( id < 0 )
 		{
 			// Not a vanilla spell. If it's a registered CUSTOM spell ("namespace:spell"),
-			// recognize it and defer the grant — custom spells have no in-engine spell_t
-			// yet (that + casting arrive in a later session), so addSpell would assert.
-			if ( const SAMSpellDef* cs = SAMSpells::getSpellByName(sp) )
+			// grant it via the engine spell_t that SAMSpells built at load.
+			if ( SAMSpells::getSpellByName(sp) )
 			{
-				SAM_INFO(MOD, "class [" + def->id + "] starting spell '" + sp + "' -> runtime id "
-					+ std::to_string(cs->numericId) + " (custom; grant + casting deferred to a later session).");
+				if ( SAMSpells::grantCustomSpell(player, sp) ) { ++learned; }
 			}
 			else
 			{

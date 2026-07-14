@@ -1396,16 +1396,9 @@ namespace
 		}
 		if ( spell.find(':') != std::string::npos )
 		{
-			const SAMSpellDef* cs = SAMSpells::getSpellByName(spell);
-			if ( !cs )
-			{
-				SAM_ERROR("LUA", "sam_grant_spell: unknown custom spell '" + spell + "'.");
-				lua_pushboolean(Ls, 0);
-				return 1;
-			}
-			SAM_INFO("SAM", "sam_grant_spell: custom spell '" + spell + "' (runtime id "
-				+ std::to_string(cs->numericId) + ") recognized — in-engine grant + casting arrive in a later session.");
-			lua_pushboolean(Ls, 1);
+			// Custom spell — the engine spell_t is built at load, so grant it for real.
+			const bool ok = SAMSpells::grantCustomSpell(player, spell);
+			lua_pushboolean(Ls, ok ? 1 : 0);
 			return 1;
 		}
 		std::string lower = spell;
