@@ -779,11 +779,11 @@
     },
     "starting_spells": {
       "type": "array",
-      "description": "Spells the class knows from the start.",
+      "description": "Spells the class knows from the start. Each entry is EITHER a Barony spell constant name in SPELL_X form (e.g. 'SPELL_FORCEBOLT', from magic.hpp) OR a custom S.A.M spell id in 'namespace:spell' form (e.g. 'darkmage:shadow_bolt') declared by a mod's spells[] and registered by the spell loader.",
       "items": {
         "type": "string",
-        "pattern": "^SPELL_[A-Z0-9_]+$",
-        "description": "A Barony spell constant name in SPELL_X form (e.g. 'SPELL_FORCEBOLT'), from magic.hpp."
+        "pattern": "^(SPELL_[A-Z0-9_]+|[a-z][a-z0-9_]*:[a-z][a-z0-9_]*)$",
+        "description": "A vanilla spell constant ('SPELL_FORCEBOLT') or a custom spell id ('namespace:spell')."
       }
     },
     "stat_growth": {

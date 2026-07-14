@@ -38,6 +38,7 @@
 #include "net.hpp"
 #include "mod_tools.hpp"     // ItemTooltips (itemNameStringToItemID, spellItems)
 #include "magic/magic.hpp"   // addSpell
+#include "sam_spells.hpp"    // SAMSpells::getSpellByName (custom starting spells)
 #include <cctype>
 #include <cstdlib>           // free
 #endif
@@ -552,14 +553,17 @@ static void validateClassSemantics(const SAMClassDef& def, const std::string& fi
 				"treated as SERVICABLE.", /*warn=*/true);
 		}
 	}
-	// Starting spells — must be a SPELL_ name.
+	// Starting spells — either a vanilla SPELL_ name or a custom "namespace:spell" id.
+	// Custom spells register AFTER classes in the load loop, so we accept them by shape
+	// (contains ':') here and resolve them at grant time.
 	for ( const std::string& sp : def.startingSpells )
 	{
-		if ( spellIdFromName(sp) < 0 )
+		const bool looksCustom = sp.find(':') != std::string::npos;
+		if ( !looksCustom && spellIdFromName(sp) < 0 )
 		{
 			const std::string sug = SAMErrors::suggest(sp, validSpellNames());
 			SAMErrors::reportSemantic(MOD, fileLabel, "/starting_spells", sp, "not a known spell",
-				"a SPELL_ name (e.g. \"SPELL_FORCEBOLT\")",
+				"a SPELL_ name (e.g. \"SPELL_FORCEBOLT\") or a custom \"namespace:spell\" id",
 				sug.empty() ? "" : ("did you mean \"" + sug + "\"?"),
 				"class [" + def.id + "] skips this spell.", /*warn=*/true);
 		}
@@ -778,7 +782,18 @@ void SAMClasses::applySpells(int player)
 		const int id = spellIdFromName(sp);
 		if ( id < 0 )
 		{
-			SAM_ERROR(MOD, "class [" + def->id + "] references unknown spell '" + sp + "' — skipping.");
+			// Not a vanilla spell. If it's a registered CUSTOM spell ("namespace:spell"),
+			// recognize it and defer the grant — custom spells have no in-engine spell_t
+			// yet (that + casting arrive in a later session), so addSpell would assert.
+			if ( const SAMSpellDef* cs = SAMSpells::getSpellByName(sp) )
+			{
+				SAM_INFO(MOD, "class [" + def->id + "] starting spell '" + sp + "' -> runtime id "
+					+ std::to_string(cs->numericId) + " (custom; grant + casting deferred to a later session).");
+			}
+			else
+			{
+				SAM_ERROR(MOD, "class [" + def->id + "] references unknown spell '" + sp + "' — skipping.");
+			}
 			continue;
 		}
 		addSpell(id, player, true);

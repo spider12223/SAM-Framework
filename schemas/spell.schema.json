@@ -1,0 +1,137 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://sam-framework.dev/schemas/spell.schema.json",
+  "title": "S.A.M Spell",
+  "description": "Defines a custom spell. S.A.M's spell loader registers it into its runtime spell registry at a reserved id (>=2000) so it can be referenced by name ('namespace:spell'). NOTE: this version REGISTERS and validates the spell metadata and lets sam_grant_spell reference it; building the in-engine spell object and the actual CASTING behavior (projectile, damage, on-hit effects) is delivered in a later update. Every 'payload'/'projectile_type'/'damage_*'/'on_hit_*' field below is parsed and stored now but does not yet cast.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "name",
+    "payload"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Optional. URL of this JSON Schema, so editors give autocomplete + validation as you type. Ignored by S.A.M itself."
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*:[a-z][a-z0-9_]*$",
+      "description": "Unique spell id in 'namespace:spell' form (e.g. 'darkmage:shadow_bolt'). S.A.M assigns the runtime numeric spell id (>=2000) automatically."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Display name of the spell (e.g. 'Shadow Bolt')."
+    },
+    "description": {
+      "type": "string",
+      "description": "Short flavor/description text shown for the spell."
+    },
+    "mana_cost": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 1,
+      "description": "Mana required to cast the spell."
+    },
+    "projectile_type": {
+      "enum": [
+        "missile",
+        "missile_trio",
+        "none"
+      ],
+      "default": "missile",
+      "description": "How the spell is delivered. 'missile' = a single bolt (Barony PROPULSION_MISSILE / spell_element_missile root). 'missile_trio' = a 3-way spread (PROPULSION_MISSILE_TRIO / spell_element_trio). 'none' = a non-projectile/self spell. (Parsed now; drives casting in a later update.)"
+    },
+    "payload": {
+      "enum": [
+        "force",
+        "fire",
+        "lightning",
+        "cold",
+        "magic_missile",
+        "poison",
+        "slow",
+        "confuse",
+        "sleep",
+        "dig",
+        "dominate",
+        "charm_monster",
+        "acid_spray",
+        "bleed",
+        "ghost_bolt",
+        "stoneblood",
+        "locking",
+        "opening",
+        "tele_pull",
+        "steal_weapon",
+        "drain_soul"
+      ],
+      "description": "The spell's effect payload — maps 1:1 to a real Barony spell element (e.g. 'fire' -> spell_element_fireball, 'force' -> spell_element_forcebolt, 'charm_monster' -> spell_element_charm, 'magic_missile' -> spell_element_magicmissile). Determines the bolt's on-hit behavior. (Parsed now; drives casting in a later update.)"
+    },
+    "damage_min": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Minimum damage the spell deals. (Parsed now; applied when casting lands in a later update.)"
+    },
+    "damage_max": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Maximum damage the spell deals. (Parsed now; applied when casting lands in a later update.)"
+    },
+    "range": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Effective range / projectile travel distance. (Parsed now; applied in a later update.)"
+    },
+    "speed": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Projectile speed. (Parsed now; applied in a later update.)"
+    },
+    "on_hit_effect": {
+      "type": "string",
+      "description": "Optional. Status effect (an EFF_ effect name from stat.hpp, e.g. 'EFF_POISONED') applied to a struck target. (Parsed now; applied in a later update.)"
+    },
+    "on_hit_duration": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Optional. Duration in game ticks (50/sec) of on_hit_effect. (Parsed now; applied in a later update.)"
+    },
+    "on_hit_chance": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Optional. Percent chance (0-100) that on_hit_effect triggers on a hit. (Parsed now; applied in a later update.)"
+    },
+    "icon": {
+      "type": "string",
+      "description": "Optional. Path (relative to the mod folder) to a PNG spell icon, e.g. 'spells/shadow_bolt.png'. (Parsed now; drawn when the spell UI lands in a later update.)"
+    },
+    "starting_spell": {
+      "type": "boolean",
+      "default": false,
+      "description": "Optional. Hint that this spell is intended as a class starting spell. Actual granting is driven by a class's 'starting_spells' array (which may list this spell's 'namespace:spell' id)."
+    }
+  },
+  "examples": [
+    {
+      "id": "darkmage:shadow_bolt",
+      "name": "Shadow Bolt",
+      "description": "A bolt of condensed shadow that saps the life from its target.",
+      "mana_cost": 8,
+      "projectile_type": "missile",
+      "payload": "drain_soul",
+      "damage_min": 10,
+      "damage_max": 18,
+      "range": 20,
+      "speed": 6,
+      "on_hit_effect": "EFF_SLOW",
+      "on_hit_duration": 100,
+      "on_hit_chance": 50,
+      "icon": "spells/shadow_bolt.png",
+      "starting_spell": true
+    }
+  ]
+}

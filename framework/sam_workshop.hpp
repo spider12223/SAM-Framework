@@ -43,6 +43,7 @@ struct SAMModManifest
 	std::vector<std::string> items;        // relative paths to item JSON files
 	std::vector<std::string> patches;      // relative paths to patch JSON files
 	std::vector<std::string> monsters;     // relative paths to monster JSON files
+	std::vector<std::string> spells;       // relative paths to spell JSON files
 	std::vector<std::string> plugins;      // relative paths to plugin .dll files
 
 	std::string modPath;      // absolute directory this mod was loaded from

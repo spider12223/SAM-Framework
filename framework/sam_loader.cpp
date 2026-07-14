@@ -17,6 +17,7 @@
 #include "sam_sync.hpp"    // multiplayer sync — game build only (not in EDITOR_SOURCES)
 #include "sam_patcher.hpp" // layered data patches — game build only (needs PhysFS + outputdir)
 #include "sam_monsters.hpp"// custom monster overlay — game build only (needs PhysFS + outputdir)
+#include "sam_spells.hpp"  // custom spell registry — game build only (GAME_SOURCES)
 #include "sam_backup.hpp"  // daily save backup — game build only (needs outputdir + fs)
 #include "sam_lua_runtime.hpp" // Lua behavior scripting — game build only
 #include "sam_js_runtime.hpp"  // JavaScript + TypeScript scripting — game build only
@@ -48,6 +49,7 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 	SAMItems::clear();
 	SAMMonsterPatch::clear(); // v0.7.0 F5: drop any prior monster stat overrides
 #ifndef EDITOR
+	SAMSpells::clear(); // custom-spell registry — rebuild fresh each load
 	SAMSync::clear(); // drop any stale fingerprint state from a previous lobby
 
 	// Fresh sandboxed Lua VM for this load cycle — drops any behavior scripts
@@ -116,6 +118,9 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 		SAMItems::loadFromManifest(m);
 
 #ifndef EDITOR
+		// Custom spells (Session 1: metadata registry only — no in-engine spell yet).
+		SAMSpells::loadFromManifest(m);
+
 		// S.A.M scripting: auto-load behavior scripts sitting next to a class JSON.
 		// For "classes/assassin.json" we look for classes/assassin.{ts,js,lua} in the
 		// same mod folder and load ALL that exist (detection order ts -> js -> lua;
@@ -213,6 +218,7 @@ void SAMLoader::unload()
 	SAMItems::clear();         // also reverts sam_patch_item overrides (F5)
 	SAMMonsterPatch::clear();  // reverts sam_patch_monster overrides (F5)
 #ifndef EDITOR
+	SAMSpells::clear();   // drop the custom-spell registry
 	SAMSync::clear();
 	SAMPatcher::clear();  // unmount + wipe the generated patch overlay
 	SAMMonsters::clear(); // unmount + wipe the generated monster overlay

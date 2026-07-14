@@ -64,6 +64,8 @@ extern "C" {
 #	include "sam_items.hpp" // SAMItems::itemIdForIdString (custom item names in queries)
 #	include "sam_classes.hpp" // v0.7.0 F5: SAMClasses::patchClass / addClassPassive
 #	include "sam_monster_patches.hpp" // v0.7.0 F5: SAMMonsterPatch::set
+#	include "sam_spells.hpp"  // custom-spell registry (sam_grant_spell)
+#	include "magic/magic.hpp" // addSpell (grant a spell to a player)
 #	include <cctype>
 #endif
 
@@ -1315,6 +1317,48 @@ namespace
 #endif
 	}
 
+	// ---- custom spells (Session 1): grant a spell to a player -------------------
+	JSValue js_sam_grant_spell(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_FALSE; }
+		int32_t player = 0; JS_ToInt32(ctx, &player, argv[0]);
+		const char* spellC = JS_ToCString(ctx, argv[1]);
+		const std::string spell = spellC ? spellC : "";
+		if ( spellC ) { JS_FreeCString(ctx, spellC); }
+		SAM_INFO("API", "sam_grant_spell(player=" + std::to_string(player) + ", " + spell + ")");
+#ifdef SAM_JS_HAVE_BARONY
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] )
+		{
+			SAM_ERROR("JS", "sam_grant_spell: invalid player index " + std::to_string(player) + ".");
+			return JS_FALSE;
+		}
+		if ( spell.find(':') != std::string::npos )
+		{
+			const SAMSpellDef* cs = SAMSpells::getSpellByName(spell);
+			if ( !cs ) { SAM_ERROR("JS", "sam_grant_spell: unknown custom spell '" + spell + "'."); return JS_FALSE; }
+			SAM_INFO("SAM", "sam_grant_spell: custom spell '" + spell + "' (runtime id "
+				+ std::to_string(cs->numericId) + ") recognized — in-engine grant + casting arrive in a later session.");
+			return JS_TRUE;
+		}
+		std::string lower = spell;
+		for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
+		int id = -1;
+		for ( const auto& kv : ItemTooltips.spellItems )
+		{
+			if ( kv.second.internalName == lower ) { id = kv.first; break; }
+		}
+		if ( id < 0 ) { SAM_ERROR("JS", "sam_grant_spell: unknown spell '" + spell + "' (expected a SPELL_ name or \"namespace:spell\")."); return JS_FALSE; }
+		const bool ok = addSpell(id, player, true);
+		SAM_INFO("SAM", "sam_grant_spell: " + std::string(ok ? "granted" : "not granted (already known or non-local)")
+			+ " vanilla spell '" + spell + "' (id " + std::to_string(id) + ") to player " + std::to_string(player) + ".");
+		return ok ? JS_TRUE : JS_FALSE;
+#else
+		(void)player;
+		return JS_FALSE;
+#endif
+	}
+
 	// ---- sandbox construction -------------------------------------------------
 	JSContext* newSandboxContext(JSRuntime* rt)
 	{
@@ -1362,6 +1406,8 @@ namespace
 		JS_SetPropertyStr(ctx, g, "sam_patch_monster", JS_NewCFunction(ctx, js_sam_patch_monster, "sam_patch_monster", 2));
 		JS_SetPropertyStr(ctx, g, "sam_add_class_passive", JS_NewCFunction(ctx, js_sam_add_class_passive, "sam_add_class_passive", 2));
 		JS_SetPropertyStr(ctx, g, "sam_remove_class_passive", JS_NewCFunction(ctx, js_sam_remove_class_passive, "sam_remove_class_passive", 2));
+		// Custom spells (Session 1)
+		JS_SetPropertyStr(ctx, g, "sam_grant_spell", JS_NewCFunction(ctx, js_sam_grant_spell, "sam_grant_spell", 2));
 #ifdef SAM_JS_HAVE_BARONY
 		JS_SetPropertyStr(ctx, g, "sam_grant_gold", JS_NewCFunction(ctx, js_sam_grant_gold, "sam_grant_gold", 2));
 		JS_SetPropertyStr(ctx, g, "sam_apply_effect", JS_NewCFunction(ctx, js_sam_apply_effect, "sam_apply_effect", 3));

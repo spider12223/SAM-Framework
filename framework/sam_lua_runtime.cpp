@@ -67,6 +67,8 @@ extern "C" {
 #	include "sam_items.hpp" // SAMItems::itemIdForIdString (custom item names in queries)
 #	include "sam_classes.hpp" // v0.7.0 F5: SAMClasses::patchClass / addClassPassive
 #	include "sam_monster_patches.hpp" // v0.7.0 F5: SAMMonsterPatch::set
+#	include "sam_spells.hpp"  // custom-spell registry (sam_grant_spell)
+#	include "magic/magic.hpp" // addSpell (grant a spell to a player)
 #	include <cctype>
 #endif
 
@@ -1373,6 +1375,64 @@ namespace
 #endif
 	}
 
+	// ---- custom spells (Session 1): grant a spell to a player -------------------
+	// sam_grant_spell(player, "namespace:spell" | vanilla SPELL_ name). Vanilla spells
+	// are granted for real via addSpell(id, player, true); a custom spell id is
+	// recognized + logged, but its in-engine grant + casting arrive in a later session
+	// (no spell_t exists for it yet, so addSpell would assert).
+	int lua_sam_grant_spell(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const char* spellC = luaL_checkstring(Ls, 2);
+		const std::string spell = spellC ? spellC : "";
+		SAM_INFO("API", "sam_grant_spell(player=" + std::to_string(player) + ", " + spell + ")");
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] )
+		{
+			SAM_ERROR("LUA", "sam_grant_spell: invalid player index " + std::to_string(player) + ".");
+			lua_pushboolean(Ls, 0);
+			return 1;
+		}
+		if ( spell.find(':') != std::string::npos )
+		{
+			const SAMSpellDef* cs = SAMSpells::getSpellByName(spell);
+			if ( !cs )
+			{
+				SAM_ERROR("LUA", "sam_grant_spell: unknown custom spell '" + spell + "'.");
+				lua_pushboolean(Ls, 0);
+				return 1;
+			}
+			SAM_INFO("SAM", "sam_grant_spell: custom spell '" + spell + "' (runtime id "
+				+ std::to_string(cs->numericId) + ") recognized — in-engine grant + casting arrive in a later session.");
+			lua_pushboolean(Ls, 1);
+			return 1;
+		}
+		std::string lower = spell;
+		for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
+		int id = -1;
+		for ( const auto& kv : ItemTooltips.spellItems )
+		{
+			if ( kv.second.internalName == lower ) { id = kv.first; break; }
+		}
+		if ( id < 0 )
+		{
+			SAM_ERROR("LUA", "sam_grant_spell: unknown spell '" + spell + "' (expected a SPELL_ name or \"namespace:spell\").");
+			lua_pushboolean(Ls, 0);
+			return 1;
+		}
+		const bool ok = addSpell(id, player, true);
+		SAM_INFO("SAM", "sam_grant_spell: " + std::string(ok ? "granted" : "not granted (already known or non-local)")
+			+ " vanilla spell '" + spell + "' (id " + std::to_string(id) + ") to player " + std::to_string(player) + ".");
+		lua_pushboolean(Ls, ok ? 1 : 0);
+		return 1;
+#else
+		(void)player;
+		lua_pushboolean(Ls, 0);
+		return 1;
+#endif
+	}
+
 	int lua_panic(lua_State* Ls)
 	{
 		const char* msg = lua_tostring(Ls, -1);
@@ -1471,6 +1531,8 @@ namespace
 		lua_pushcfunction(L, lua_sam_patch_monster);       lua_setglobal(L, "sam_patch_monster");
 		lua_pushcfunction(L, lua_sam_add_class_passive);   lua_setglobal(L, "sam_add_class_passive");
 		lua_pushcfunction(L, lua_sam_remove_class_passive); lua_setglobal(L, "sam_remove_class_passive");
+		// Custom spells (Session 1: grant vanilla for real; custom recognized + deferred)
+		lua_pushcfunction(L, lua_sam_grant_spell);         lua_setglobal(L, "sam_grant_spell");
 
 #ifdef SAM_LUA_HAVE_BARONY
 		// Host bindings that actually affect the game (engine build only).
