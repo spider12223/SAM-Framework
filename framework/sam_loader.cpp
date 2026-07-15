@@ -27,6 +27,7 @@
 
 #include <string>
 #include <fstream>
+#include <set>
 #ifndef EDITOR
 #include <filesystem>
 #include <system_error>
@@ -121,54 +122,82 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 		// Custom spells (Session 1: metadata registry only — no in-engine spell yet).
 		SAMSpells::loadFromManifest(m);
 
-		// S.A.M scripting: auto-load behavior scripts sitting next to a class JSON.
-		// For "classes/assassin.json" we look for classes/assassin.{ts,js,lua} in the
-		// same mod folder and load ALL that exist (detection order ts -> js -> lua;
-		// each loaded script receives every event). A .ts is transpiled to JS once
-		// (cached), then run through the same sandboxed QuickJS as a .js script.
-		for ( const std::string& classRel : m.classes )
+		// S.A.M scripting: auto-load behavior scripts. A script (.ts/.js/.lua) defines
+		// on_event(event) and/or on_tick(event); once loaded it receives EVERY dispatched
+		// event (dispatch is global, not scoped to the content it shipped next to). We
+		// look in three places so item-only mods can carry logic too, not just classes:
+		//   1. next to each class JSON  — classes/<name>.{ts,js,lua}
+		//   2. next to each item  JSON  — items/<name>.{ts,js,lua}
+		//   3. a mod-level entry point  — <modroot>/main.{ts,js,lua}   (no JSON required)
+		// Detection order per base is ts -> js -> lua; all that exist load. A .ts is
+		// transpiled to JS once (cached), then run through the same sandboxed QuickJS.
+		auto samExists = [](const std::string& p) { std::ifstream f(p.c_str()); return f.good(); };
+		auto samFileName = [](const std::string& p) -> std::string {
+			const std::string::size_type s = p.find_last_of("/\\");
+			return (s != std::string::npos) ? p.substr(s + 1) : p;
+		};
+
+		// Guard against loading the same physical script twice (a duplicated manifest
+		// entry would otherwise double-register on_event and fire it twice per event).
+		std::set<std::string> loadedScriptPaths;
+
+		// Load the .ts/.js/.lua siblings for one base path (relative, no extension).
+		// `readableId` and `kind` only feed the log lines.
+		auto loadCompanionScripts = [&](const std::string& base, const std::string& readableId, const char* kind)
 		{
-			// Shared base name: strip a trailing ".json" ONLY when it is a real
-			// suffix. rfind matches ".json" anywhere, so a name like "knight.jsonc"
-			// would wrongly become "knight" and the loader would look for the wrong
-			// sibling script.
-			std::string base = classRel;
+			// TypeScript (transpiled to JS, cached under <outputdir>/sam_ts_cache).
+			const std::string tsPath = m.modPath + "/" + base + ".ts";
+			if ( samExists(tsPath) && loadedScriptPaths.insert(tsPath).second
+				&& SAMJs::loadScriptTS(tsPath, tsCacheDir, tsCompilerPath, m.ns) )
+			{
+				SAM_INFO("JS", std::string("Loaded script: ") + samFileName(tsPath) + " (TypeScript) for " + kind + " [" + readableId + "]");
+			}
+			// JavaScript.
+			const std::string jsPath = m.modPath + "/" + base + ".js";
+			if ( samExists(jsPath) && loadedScriptPaths.insert(jsPath).second
+				&& SAMJs::loadScriptJS(jsPath, m.ns) )
+			{
+				SAM_INFO("JS", std::string("Loaded script: ") + samFileName(jsPath) + " (JavaScript) for " + kind + " [" + readableId + "]");
+			}
+			// Lua.
+			const std::string luaPath = m.modPath + "/" + base + ".lua";
+			if ( samExists(luaPath) && loadedScriptPaths.insert(luaPath).second
+				&& SAMLua::loadScript(luaPath, m.ns) )
+			{
+				SAM_INFO("LUA", std::string("Loaded script: ") + samFileName(luaPath) + " (Lua) for " + kind + " [" + readableId + "]");
+			}
+		};
+
+		// Relative JSON path -> base (without a real ".json" suffix) + readable ns:name id.
+		// rfind matches ".json" anywhere, so strip ONLY a true trailing suffix, else a
+		// name like "knight.jsonc" would wrongly become "knight".
+		auto samScriptBaseId = [&](const std::string& rel, std::string& base, std::string& readableId)
+		{
+			base = rel;
 			if ( base.size() >= 5 && base.compare(base.size() - 5, 5, ".json") == 0 )
 			{
 				base = base.substr(0, base.size() - 5);
 			}
-
-			// Readable "<namespace>:<basename>" id for the log lines.
 			std::string idBase = base;
 			const std::string::size_type idSlash = idBase.find_last_of("/\\");
 			if ( idSlash != std::string::npos ) { idBase = idBase.substr(idSlash + 1); }
-			const std::string classId = m.ns + ":" + idBase;
+			readableId = m.ns + ":" + idBase;
+		};
 
-			auto samExists = [](const std::string& p) { std::ifstream f(p.c_str()); return f.good(); };
-			auto samFileName = [](const std::string& p) -> std::string {
-				const std::string::size_type s = p.find_last_of("/\\");
-				return (s != std::string::npos) ? p.substr(s + 1) : p;
-			};
-
-			// TypeScript (transpiled to JS, cached under <outputdir>/sam_ts_cache).
-			const std::string tsPath = m.modPath + "/" + base + ".ts";
-			if ( samExists(tsPath) && SAMJs::loadScriptTS(tsPath, tsCacheDir, tsCompilerPath, m.ns) )
-			{
-				SAM_INFO("JS", "Loaded script: " + samFileName(tsPath) + " (TypeScript) for [" + classId + "]");
-			}
-			// JavaScript.
-			const std::string jsPath = m.modPath + "/" + base + ".js";
-			if ( samExists(jsPath) && SAMJs::loadScriptJS(jsPath, m.ns) )
-			{
-				SAM_INFO("JS", "Loaded script: " + samFileName(jsPath) + " (JavaScript) for [" + classId + "]");
-			}
-			// Lua.
-			const std::string luaPath = m.modPath + "/" + base + ".lua";
-			if ( samExists(luaPath) && SAMLua::loadScript(luaPath, m.ns) )
-			{
-				SAM_INFO("LUA", "Loaded script: " + samFileName(luaPath) + " (Lua) for [" + classId + "]");
-			}
+		std::string scriptBase, scriptId;
+		for ( const std::string& classRel : m.classes )
+		{
+			samScriptBaseId(classRel, scriptBase, scriptId);
+			loadCompanionScripts(scriptBase, scriptId, "class");
 		}
+		for ( const std::string& itemRel : m.items )
+		{
+			samScriptBaseId(itemRel, scriptBase, scriptId);
+			loadCompanionScripts(scriptBase, scriptId, "item");
+		}
+		// Mod-level entry point: <modroot>/main.{ts,js,lua} — for mods that want one
+		// behavior file regardless of how many classes/items they ship (or none).
+		loadCompanionScripts("main", m.ns + ":main", "mod");
 #endif
 	}
 

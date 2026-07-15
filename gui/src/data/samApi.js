@@ -62,6 +62,10 @@ export const SAM_FUNCTIONS = [
   { name: "sam_spawn_item", category: "Rewards", hostOnly: true,
     params: [{ name: "x", type: "int" }, { name: "y", type: "int" }, { name: "item_name", type: "string" }],
     returns: "true on success (boolean)", desc: "Spawn a ground item (vanilla name) at map tile (x, y)." },
+  { name: "sam_item_id", category: "Rewards", hostOnly: false,
+    params: [{ name: "name", type: "string", values: ["vanilla ITEM name", "\"namespace:item\" (custom)"] }],
+    returns: "the item's numeric type id (int), or nil/null if unknown",
+    desc: "Resolve an item's numeric type id — compare it against event fields like on_block's shield_type to react only to a specific item. Accepts a vanilla name or a custom \"namespace:item\"." },
 
   // ---- Status effects ---------------------------------------------------------
   { name: "sam_apply_effect", category: "Status effects", hostOnly: true,
@@ -242,8 +246,8 @@ export const SAM_EVENTS = [
     gotcha: "" },
   { name: "player.on_block", category: "combat", cancellable: false,
     whenFired: "a player fully blocks a hit with a shield",
-    payload: [{ field: "player", type: "int" }, { field: "attacker_uid", type: "uid" }, { field: "attacker_type", type: "int" }, { field: "damage_blocked", type: "int" }],
-    gotcha: "" },
+    payload: [{ field: "player", type: "int" }, { field: "shield_type", type: "int" }, { field: "attacker_uid", type: "uid" }, { field: "attacker_type", type: "int" }, { field: "damage_blocked", type: "int" }],
+    gotcha: "Fires only on a FULL block (defending + incoming damage reduced to 0 with a shield equipped) — not on right-click alone. shield_type is the blocking shield's item id; gate with sam_item_id(\"namespace:item\") to react only to your own shield." },
   { name: "player.on_miss", category: "combat", cancellable: false,
     whenFired: "a player's melee swing connects with nothing",
     payload: [{ field: "player", type: "int" }, { field: "target_uid", type: "uid" }, { field: "weapon_type", type: "int" }],

@@ -457,6 +457,32 @@ namespace
 		return JS_NewBool(ctx, 1);
 	}
 
+	// sam_item_id("VANILLA_NAME" | "namespace:item") -> number|null. Resolve an item
+	// type's numeric id, for matching against event fields like on_block's shield_type.
+	// A name containing ':' resolves a custom S.A.M item; otherwise the vanilla tooltip
+	// name map is used (case-insensitive). Returns null if the item is unknown.
+	JSValue js_sam_item_id(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_NULL; }
+		std::string name;
+		{ const char* s = JS_ToCString(ctx, argv[0]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
+		int id = -1;
+		if ( name.find(':') != std::string::npos )
+		{
+			id = SAMItems::itemIdForIdString(name);
+		}
+		else
+		{
+			std::string lower = name;
+			for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
+			auto it = ItemTooltips.itemNameStringToItemID.find(lower);
+			if ( it != ItemTooltips.itemNameStringToItemID.end() ) { id = it->second; }
+		}
+		if ( id < 0 ) { return JS_NULL; }
+		return JS_NewInt32(ctx, id);
+	}
+
 	JSValue js_sam_message(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
@@ -1468,6 +1494,7 @@ namespace
 		JS_SetPropertyStr(ctx, g, "sam_set_stat", JS_NewCFunction(ctx, js_sam_set_stat, "sam_set_stat", 3));
 		JS_SetPropertyStr(ctx, g, "sam_get_floor", JS_NewCFunction(ctx, js_sam_get_floor, "sam_get_floor", 0));
 		JS_SetPropertyStr(ctx, g, "sam_spawn_item", JS_NewCFunction(ctx, js_sam_spawn_item, "sam_spawn_item", 3));
+		JS_SetPropertyStr(ctx, g, "sam_item_id", JS_NewCFunction(ctx, js_sam_item_id, "sam_item_id", 1));
 		JS_SetPropertyStr(ctx, g, "sam_message", JS_NewCFunction(ctx, js_sam_message, "sam_message", 2));
 		JS_SetPropertyStr(ctx, g, "sam_play_sound", JS_NewCFunction(ctx, js_sam_play_sound, "sam_play_sound", 2));
 		JS_SetPropertyStr(ctx, g, "sam_get_nearby_entities", JS_NewCFunction(ctx, js_sam_get_nearby_entities, "sam_get_nearby_entities", 2));

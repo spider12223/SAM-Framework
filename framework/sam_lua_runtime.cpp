@@ -532,6 +532,32 @@ namespace
 		return 1;
 	}
 
+	// sam_item_id("VANILLA_NAME" | "namespace:item") -> number|nil. Resolve an item
+	// type's numeric id, for matching against event fields like on_block's shield_type.
+	// A name containing ':' resolves a custom S.A.M item; otherwise the vanilla tooltip
+	// name map is used (case-insensitive). Returns nil if the item is unknown.
+	int lua_sam_item_id(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* nameC = luaL_checkstring(Ls, 1);
+		const std::string name = nameC ? nameC : "";
+		int id = -1;
+		if ( name.find(':') != std::string::npos )
+		{
+			id = SAMItems::itemIdForIdString(name);
+		}
+		else
+		{
+			std::string lower = name;
+			for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
+			auto it = ItemTooltips.itemNameStringToItemID.find(lower);
+			if ( it != ItemTooltips.itemNameStringToItemID.end() ) { id = it->second; }
+		}
+		if ( id < 0 ) { lua_pushnil(Ls); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)id);
+		return 1;
+	}
+
 	// sam_message(player, "text") — show a line in the player's message log.
 	int lua_sam_message(lua_State* Ls)
 	{
@@ -1660,6 +1686,8 @@ namespace
 		lua_setglobal(L, "sam_get_floor");
 		lua_pushcfunction(L, lua_sam_spawn_item);
 		lua_setglobal(L, "sam_spawn_item");
+		lua_pushcfunction(L, lua_sam_item_id);
+		lua_setglobal(L, "sam_item_id");
 		lua_pushcfunction(L, lua_sam_message);
 		lua_setglobal(L, "sam_message");
 		lua_pushcfunction(L, lua_sam_play_sound);
