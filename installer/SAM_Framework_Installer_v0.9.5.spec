@@ -22,7 +22,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='SAM_Framework_Installer_v0.4.0',
+    name='SAM_Framework_Installer_v0.9.5',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

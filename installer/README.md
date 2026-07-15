@@ -12,8 +12,8 @@ TypeScript compiler used for `.ts` mod scripts) next to it.
    - `payload/sam_barony.exe` — the S.A.M-patched Barony Release build
    - `payload/typescript.js`   — from `../framework/typescript/typescript.js`
 2. `pip install pyinstaller`
-3. `pyinstaller SAM_Framework_Installer_v0.4.0.spec`
-4. Output: `dist/SAM_Framework_Installer_v0.4.0.exe`
+3. `pyinstaller SAM_Framework_Installer_v0.9.5.spec`
+4. Output: `dist/SAM_Framework_Installer_v0.9.5.exe`
 
 `python installer.py --selftest` prints Steam/Barony auto-detection results
 without building the GUI.
