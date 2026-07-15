@@ -362,6 +362,20 @@ namespace
 		if ( n == "WEBBED" )     { return EFF_WEBBED;     }
 		if ( n == "SLOW" )       { return EFF_SLOW;       }
 		if ( n == "FAST" )       { return EFF_FAST;       }
+		// Custom S.A.M effect slots [135, NUMEFFECTS): accept a raw number ("135") or
+		// "CUSTOM:135". The engine's effect array reserves NUMEFFECTS=160 bits but the
+		// highest vanilla effect is EFF_DUCKED=134, so slots 135-159 are unused yet
+		// already serialized, saved, ticked and auto-expired — scripts can drive
+		// pseudo-effects with them (apply, react in on_status_effect_tick, revert on
+		// expiry). Only 135+ is allowed so a number can't stomp a vanilla effect slot.
+		{
+			const std::string num = (n.rfind("CUSTOM:", 0) == 0) ? n.substr(7) : n;
+			if ( !num.empty() && num.find_first_not_of("0123456789") == std::string::npos )
+			{
+				const int v = atoi(num.c_str());
+				if ( v >= 135 && v < NUMEFFECTS ) { return v; }
+			}
+		}
 		return -1;
 	}
 

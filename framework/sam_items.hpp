@@ -49,8 +49,9 @@ struct SAMItemDef
 	int goldValue = 0;
 	int level = -1;                 // -1 = excluded from random generation
 
-	std::string model;              // path (PLANNED — not loaded yet, placeholder used)
+	std::string model;              // path (PLANNED — loading a mod .vox not supported yet)
 	std::string modelFp;            // path (PLANNED — not loaded yet)
+	std::string modelFromItem;      // vanilla ItemType name (e.g. "SILVER_SHIELD") to clone the 3D model from
 	std::string icon;               // mod-relative PNG path — loaded into the inventory icon
 
 	std::map<std::string, int> attributes;

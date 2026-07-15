@@ -24,6 +24,9 @@
 
 #include "main.hpp"    // list_t/string_t, stringCopy, stringDeconstructor, list_* helpers
 #include "items.hpp"   // items[], ItemGeneric, ItemType, Category, ItemEquippableSlot, NUM_ITEM_SLOTS
+#ifndef EDITOR
+#include "mod_tools.hpp" // ItemTooltips.itemNameStringToItemID — resolves "model_from_item" names
+#endif
 
 #include <fstream>
 #include <sstream>
@@ -173,6 +176,46 @@ static ItemType templateForCategory(Category cat)
 	}
 }
 
+// A vanilla item whose model + inventory icon match an EQUIP SLOT, so a custom
+// equippable renders as the right KIND of gear. This takes priority over
+// templateForCategory for equippable items: the category "ARMOR" covers shields,
+// helms, breastplates, boots, gloves and cloaks, so a category-only placeholder
+// makes e.g. a shield clone a breastplate model — which renders as a misshapen
+// blob ("rock") in the shield hand. Selecting by slot fixes that.
+static ItemType templateForSlot(ItemEquippableSlot eslot)
+{
+	switch ( eslot )
+	{
+		case EQUIPPABLE_IN_SLOT_WEAPON:      return IRON_SWORD;
+		case EQUIPPABLE_IN_SLOT_SHIELD:      return WOODEN_SHIELD;
+		case EQUIPPABLE_IN_SLOT_HELM:        return LEATHER_HELM;
+		case EQUIPPABLE_IN_SLOT_BREASTPLATE: return LEATHER_BREASTPIECE;
+		case EQUIPPABLE_IN_SLOT_GLOVES:      return GLOVES;
+		case EQUIPPABLE_IN_SLOT_BOOTS:       return LEATHER_BOOTS;
+		case EQUIPPABLE_IN_SLOT_CLOAK:       return CLOAK;
+		case EQUIPPABLE_IN_SLOT_MASK:        return TOOL_BLINDFOLD;
+		case EQUIPPABLE_IN_SLOT_AMULET:      return AMULET_POISONRESISTANCE;
+		case EQUIPPABLE_IN_SLOT_RING:        return RING_ADORNMENT;
+		default:                             return IRON_SWORD; // NO_EQUIP: caller uses category
+	}
+}
+
+#ifndef EDITOR
+// Resolve a vanilla ItemType NAME (e.g. "SILVER_SHIELD", case-insensitive) to its
+// numeric type via Barony's item-name map, or -1 if unknown. Lets a modder pick the
+// exact vanilla 3D model their custom item clones ("model_from_item"). Game-only
+// (ItemTooltips is not populated in the editor build).
+static int vanillaItemTypeFromName(const std::string& n)
+{
+	if ( n.empty() ) { return -1; }
+	std::string lower = n;
+	for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
+	auto it = ItemTooltips.itemNameStringToItemID.find(lower);
+	if ( it != ItemTooltips.itemNameStringToItemID.end() ) { return it->second; }
+	return -1;
+}
+#endif
+
 // Deep-copy a source item's inventory-image list into dest, allocating fresh
 // nodes so the two lists never alias (mirrors ItemTooltips_t::readItemsFromFile).
 static void deepCopyImages(list_t& dest, const list_t& src)
@@ -216,15 +259,46 @@ static bool registerItem(SAMItemDef def)
 	def.numericId = id;
 
 	const Category cat = categoryFromName(def.category);
+	const ItemEquippableSlot eslot = slotFromName(def.slot);
 	ItemGeneric& slot = items[id];
 
-	// Placeholder visuals cloned from a category-appropriate vanilla item.
-	const ItemType tmpl = templateForCategory(cat);
+	// Placeholder visuals cloned from a vanilla item. For an EQUIPPABLE item pick
+	// the template by its equip slot (a shield clones a shield, boots clone boots,
+	// ...) so it renders as the right kind of gear; otherwise fall back to a
+	// category-appropriate template.
+	const ItemType tmpl = (eslot != NO_EQUIP) ? templateForSlot(eslot) : templateForCategory(cat);
 	slot.index = items[tmpl].index;
 	slot.fpindex = items[tmpl].fpindex;
 	slot.indexShort = items[tmpl].indexShort;
 	slot.variations = 1;
 	deepCopyImages(slot.images, items[tmpl].images);
+
+#ifndef EDITOR
+	// Explicit 3D-model source: clone the model (world + first-person + inventory icon)
+	// from a NAMED vanilla item, so a modder can pick exactly which vanilla model their
+	// custom item wears — e.g. "model_from_item": "SILVER_SHIELD". This overrides the
+	// slot/category placeholder above. It is the supported way to reuse a vanilla model;
+	// a mod-folder "model" .vox path is NOT loaded (SAM can't grow Barony's models[] at
+	// runtime yet). A per-item "icon" PNG (below) still overrides the 2D icon if present.
+	if ( !def.modelFromItem.empty() )
+	{
+		const int src = vanillaItemTypeFromName(def.modelFromItem);
+		if ( src >= 0 && src < NUMITEMS )
+		{
+			slot.index      = items[src].index;
+			slot.fpindex    = items[src].fpindex;
+			slot.indexShort = items[src].indexShort;
+			deepCopyImages(slot.images, items[src].images);
+			SAM_INFO(MOD, "Item [" + def.id + "] model_from_item '" + def.modelFromItem
+				+ "' -> vanilla type " + std::to_string(src) + " (model index " + std::to_string(items[src].index) + ")");
+		}
+		else
+		{
+			SAM_WARN(MOD, "Item [" + def.id + "] model_from_item '" + def.modelFromItem
+				+ "' is not a known vanilla ItemType — using the placeholder model.");
+		}
+	}
+#endif
 
 	// Custom inventory icon. The modern inventory UI draws items[type].images[0]'s
 	// PATH STRING via Image::get (which resolves an absolute path directly, exactly
@@ -274,7 +348,7 @@ static bool registerItem(SAMItemDef def)
 	slot.setIdentifiedName(def.nameIdentified);
 	slot.setUnidentifiedName(def.nameUnidentified.empty() ? def.nameIdentified : def.nameUnidentified);
 	slot.category = cat;
-	slot.item_slot = slotFromName(def.slot);
+	slot.item_slot = eslot;
 	slot.weight = def.weight;
 	slot.gold_value = def.goldValue;
 	slot.level = def.level;
@@ -400,6 +474,7 @@ void SAMItems::loadFromManifest(const SAMModManifest& manifest)
 		def.level = getInt("level", -1);
 		def.model = getStr("model");
 		def.modelFp = getStr("model_fp");
+		def.modelFromItem = getStr("model_from_item");
 		def.icon = getStr("icon");
 		def.onHitEffect = getStr("on_hit_effect");
 		def.onHitChance = getNum("on_hit_chance", 0.0);

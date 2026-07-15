@@ -278,7 +278,17 @@ void SAMSpells::buildEngineSpell(const SAMSpellDef& def)
 	root->node = node;
 
 	// Payload child (drives on-hit behavior + bolt sprite; damage overridden from the def).
+	// A missile root MUST have a child element: actMagicMissile dereferences
+	// elements.first->element on hit, so a childless bolt is a guaranteed crash. Every
+	// schema payload maps in samPayloadElement(); if a future/unknown one doesn't, fall
+	// back to 'force' so the bolt still casts safely instead of crashing on impact.
 	spellElement_t* payloadGlobal = samPayloadElement(def.payload);
+	if ( !payloadGlobal )
+	{
+		SAM_WARN(MOD, "buildEngineSpell: unknown payload '" + def.payload + "' for " + def.id
+			+ " — falling back to 'force' so the bolt still casts.");
+		payloadGlobal = samPayloadElement("force");
+	}
 	if ( payloadGlobal )
 	{
 		node = list_AddNodeLast(&root->elements);
@@ -291,7 +301,8 @@ void SAMSpells::buildEngineSpell(const SAMSpellDef& def)
 	}
 	else
 	{
-		SAM_WARN(MOD, "buildEngineSpell: unknown payload '" + def.payload + "' for " + def.id + " (bolt will be inert).");
+		SAM_ERROR(MOD, "buildEngineSpell: no payload element available for " + def.id
+			+ " — leaving it inert (won't cast a working bolt) rather than crash on hit.");
 	}
 	(void)selfCast;
 
