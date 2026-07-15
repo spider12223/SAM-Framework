@@ -1,11 +1,14 @@
 /*
- * Bundle the current mod (manifest + saved classes/items/monsters + binary
- * assets like portraits) laid out exactly how S.A.M expects a mod folder:
+ * Bundle the current mod (manifest + saved classes/items/monsters/spells/patches
+ * + behavior scripts + binary assets) laid out exactly how S.A.M expects a mod
+ * folder:
  *   mod.json
- *   classes/<name>.json
+ *   classes/<name>.json      classes/<name>.lua|js|ts   (companion behavior script)
  *   items/<name>.json
  *   monsters/<name>.json
- *   portraits/<name>.png   (any uploaded assets, at their declared paths)
+ *   spells/<name>.json
+ *   patches/<name>.json
+ *   portraits/<name>.png     (uploaded assets, at their declared paths)
  * Ready to drop into Barony/mods/<folder>/.
  *
  * buildModFiles() is the single source of truth for layout + $schema stamping;
@@ -23,6 +26,8 @@ const MOD_SCHEMA = `${SCHEMA_BASE}/mod.schema.json`;
 const CLASS_SCHEMA = `${SCHEMA_BASE}/class.schema.json`;
 const ITEM_SCHEMA = `${SCHEMA_BASE}/item.schema.json`;
 const MONSTER_SCHEMA = `${SCHEMA_BASE}/monster.schema.json`;
+const SPELL_SCHEMA = `${SCHEMA_BASE}/spell.schema.json`;
+const PATCH_SCHEMA = `${SCHEMA_BASE}/patch.schema.json`;
 
 /** "sam_test:shadow_knight" -> "shadow_knight" (file stem from the id). */
 export function fileStem(id, fallback) {
@@ -30,60 +35,101 @@ export function fileStem(id, fallback) {
   return (tail && tail.trim()) || fallback;
 }
 
+/** A patch has no id — derive a filename stem from its target path.
+ *  "items/items.json" -> "items_items". */
+export function patchStem(target, fallback) {
+  const s = String(target ?? '').replace(/\.json$/i, '').replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '');
+  return s || fallback;
+}
+
 /** Manifest-relative paths for each collection, exactly as the zip lays them out. */
-export function contentPaths(classes, items, monsters) {
+export function contentPaths(classes, items, monsters, spells = [], patches = []) {
   return {
     classPaths: classes.map((c, i) => `classes/${fileStem(c.id, `class_${i + 1}`)}.json`),
     itemPaths: items.map((it, i) => `items/${fileStem(it.id, `item_${i + 1}`)}.json`),
     monsterPaths: (monsters ?? []).map((m, i) => `monsters/${fileStem(m.id, `monster_${i + 1}`)}.json`),
+    spellPaths: (spells ?? []).map((s, i) => `spells/${fileStem(s.id, `spell_${i + 1}`)}.json`),
+    patchPaths: (patches ?? []).map((p, i) => `patches/${patchStem(p.target, `patch_${i + 1}`)}.json`),
   };
 }
 
 /** The mod.json object (sans $schema — callers stamp it when writing). */
-export function buildManifest(meta, classPaths, itemPaths, monsterPaths) {
+export function buildManifest(meta, paths) {
+  const { classPaths, itemPaths, monsterPaths, spellPaths, patchPaths } = paths;
   const manifest = {
     namespace: meta.namespace,
     name: meta.name,
     author: meta.author ?? '',
     version: meta.version,
     framework_min_version: meta.framework_min_version,
-    dependencies: [],
-    classes: classPaths,
-    items: itemPaths,
-    plugins: [],
-    description: meta.description ?? '',
   };
+  // Optional version-gating fields — only emitted when set.
+  for (const k of ['framework_max_version', 'barony_min_version', 'barony_max_version', 'incompatible_with_barony_version']) {
+    if (meta[k]) manifest[k] = meta[k];
+  }
+  manifest.dependencies = Array.isArray(meta.dependencies) ? meta.dependencies : [];
+  manifest.classes = classPaths;
+  manifest.items = itemPaths;
+  if (patchPaths && patchPaths.length) manifest.patches = patchPaths;
   if (monsterPaths && monsterPaths.length) manifest.monsters = monsterPaths;
+  if (spellPaths && spellPaths.length) manifest.spells = spellPaths;
+  manifest.plugins = [];
+  manifest.description = meta.description ?? '';
   return manifest;
+}
+
+/** The companion behavior-script path for a class, or null if it has no script.
+ *  scripts: { classId -> { lang, code } }. */
+export function scriptPathFor(classDef, i, scripts) {
+  const s = scripts?.[classDef.id];
+  if (!s || !s.code || !s.code.trim()) return null;
+  return { path: `classes/${fileStem(classDef.id, `class_${i + 1}`)}.${s.lang}`, code: s.code };
 }
 
 /**
  * The complete file list for the mod folder:
- *   [{ path, text }]  for JSON files ("$schema" stamped first)
+ *   [{ path, text }]  for JSON + script files ("$schema" stamped on JSON)
  *   [{ path, base64 }] for binary assets (portraits etc.)
- * classes/items/monsters: arrays of schema-shaped objects (already validated).
- * assets: { 'portraits/x.png': 'data:image/png;base64,...' }
+ * mod = { meta, classes, items, monsters, spells, patches, scripts, assets }.
  */
-export function buildModFiles(meta, classes, items, monsters = [], assets = {}) {
-  const { classPaths, itemPaths, monsterPaths } = contentPaths(classes, items, monsters);
-  const manifest = buildManifest(meta, classPaths, itemPaths, monsterPaths);
+export function buildModFiles(mod) {
+  const {
+    meta, classes = [], items = [], monsters = [], spells = [], patches = [],
+    scripts = {}, assets = {},
+  } = mod;
+  const paths = contentPaths(classes, items, monsters, spells, patches);
+  const manifest = buildManifest(meta, paths);
 
   const files = [
     // "$schema" first so it sits at the top of each file (editors expect it there).
     { path: 'mod.json', text: JSON.stringify({ $schema: MOD_SCHEMA, ...manifest }, null, 2) + '\n' },
     ...classes.map((c, i) => ({
-      path: classPaths[i],
+      path: paths.classPaths[i],
       text: JSON.stringify({ $schema: CLASS_SCHEMA, ...c }, null, 2) + '\n',
     })),
     ...items.map((it, i) => ({
-      path: itemPaths[i],
+      path: paths.itemPaths[i],
       text: JSON.stringify({ $schema: ITEM_SCHEMA, ...it }, null, 2) + '\n',
     })),
     ...monsters.map((m, i) => ({
-      path: monsterPaths[i],
+      path: paths.monsterPaths[i],
       text: JSON.stringify({ $schema: MONSTER_SCHEMA, ...m }, null, 2) + '\n',
     })),
+    ...spells.map((s, i) => ({
+      path: paths.spellPaths[i],
+      text: JSON.stringify({ $schema: SPELL_SCHEMA, ...s }, null, 2) + '\n',
+    })),
+    ...patches.map((p, i) => ({
+      path: paths.patchPaths[i],
+      text: JSON.stringify({ $schema: PATCH_SCHEMA, ...p }, null, 2) + '\n',
+    })),
   ];
+
+  // Companion behavior scripts, laid out next to their class JSON.
+  classes.forEach((c, i) => {
+    const sp = scriptPathFor(c, i, scripts);
+    if (sp) files.push({ path: sp.path, text: sp.code.endsWith('\n') ? sp.code : sp.code + '\n' });
+  });
 
   for (const [path, dataUrl] of Object.entries(assets)) {
     const base64 = String(dataUrl).split(',')[1];
@@ -93,9 +139,9 @@ export function buildModFiles(meta, classes, items, monsters = [], assets = {}) 
 }
 
 /** Returns the Blob of the zip. */
-export async function buildModZip(meta, classes, items, monsters = [], assets = {}) {
+export async function buildModZip(mod) {
   const zip = new JSZip();
-  for (const f of buildModFiles(meta, classes, items, monsters, assets)) {
+  for (const f of buildModFiles(mod)) {
     if (f.base64 !== undefined) zip.file(f.path, f.base64, { base64: true });
     else zip.file(f.path, f.text);
   }

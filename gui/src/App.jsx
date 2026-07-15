@@ -4,16 +4,22 @@ import Dashboard from '@/pages/Dashboard.jsx';
 import ClassEditor from '@/pages/ClassEditor.jsx';
 import ItemEditor from '@/pages/ItemEditor.jsx';
 import MonsterEditor from '@/pages/MonsterEditor.jsx';
+import SpellEditor from '@/pages/SpellEditor.jsx';
+import PatchEditor from '@/pages/PatchEditor.jsx';
 import ModBuilder from '@/pages/ModBuilder.jsx';
 import Validator from '@/pages/Validator.jsx';
+import ApiReference from '@/pages/ApiReference.jsx';
 
 const NAV = [
   { to: '/dashboard', icon: '🏰', label: 'Dashboard' },
   { to: '/class-editor', icon: '🛡', label: 'Class Editor' },
   { to: '/item-editor', icon: '⚔', label: 'Item Editor' },
   { to: '/monster-editor', icon: '👹', label: 'Monster Editor' },
+  { to: '/spell-editor', icon: '✨', label: 'Spell Editor' },
+  { to: '/patch-editor', icon: '🧩', label: 'Patch Editor' },
   { to: '/mod-builder', icon: '📦', label: 'Mod Builder' },
   { to: '/validator', icon: '📜', label: 'Validator' },
+  { to: '/api-reference', icon: '📖', label: 'API Reference' },
 ];
 
 function Banner() {
@@ -62,8 +68,11 @@ export default function App() {
                 <Route path="/class-editor" element={<ClassEditor />} />
                 <Route path="/item-editor" element={<ItemEditor />} />
                 <Route path="/monster-editor" element={<MonsterEditor />} />
+                <Route path="/spell-editor" element={<SpellEditor />} />
+                <Route path="/patch-editor" element={<PatchEditor />} />
                 <Route path="/mod-builder" element={<ModBuilder />} />
                 <Route path="/validator" element={<Validator />} />
+                <Route path="/api-reference" element={<ApiReference />} />
               </Routes>
             </main>
           </div>

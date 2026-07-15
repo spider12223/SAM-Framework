@@ -4,15 +4,16 @@
  * panels side by side; spells, stat growth and gold below; SAVE CLASS bottom.
  * Every list here comes from the schemas at runtime (see data/schemas.js).
  */
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CORE_ATTRIBUTES, OFFSET_STATS, SKILLS, ITEM_TYPES, ROLL_STATS, CATEGORIES,
-  skillLabel, skillBaseAttr,
+  CLASS_SPELL_REF_PATTERN, skillLabel, skillBaseAttr,
 } from '@/data/schemas.js';
 import { ITEM_ICONS } from '@/data/itemIcons.js';
 import { validate } from '@/lib/validate.js';
 import { checkBalance } from '@/lib/balance.js';
 import { useMod } from '@/state/ModContext.jsx';
+import ScriptEditor from '@/components/ScriptEditor.jsx';
 import {
   Panel, Field, TextInput, NumberInput, GoldSlider, Stepper, GoldButton,
   InventoryGrid, ItemIcon, ErrorList, SavedNote, BalanceHints,
@@ -94,33 +95,50 @@ function slugify(name) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'unnamed';
 }
 
-const SPELL_PATTERN = /^SPELL_[A-Z0-9_]+$/;
-
 export default function ClassEditor() {
-  const { meta, dispatch } = useMod();
+  const { meta, classes, spells: modSpells, scripts, editing, dispatch } = useMod();
 
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
+  // "Edit" handoff from the Mod Builder: seed the form from a saved class.
+  const editDef = editing?.kind === 'class' ? classes.find((c) => c.id === editing.id) : null;
+  const existingScript = editDef ? scripts[editDef.id] : null;
+
+  const [name, setName] = useState(editDef?.name ?? '');
+  const [description, setDescription] = useState(editDef?.description ?? '');
   const [attrs, setAttrs] = useState(() =>
-    Object.fromEntries(CORE_ATTRIBUTES.map((a) => [a, 10]))
+    Object.fromEntries(CORE_ATTRIBUTES.map((a) => [a, editDef?.stats?.[a] ?? 10]))
   );
   const [offsets, setOffsets] = useState(() =>
-    Object.fromEntries(OFFSET_STATS.map((s) => [s, 0]))
+    Object.fromEntries(OFFSET_STATS.map((s) => [s, editDef?.stats?.[s] ?? 0]))
   );
   const [skills, setSkills] = useState(() =>
-    Object.fromEntries(SKILLS.map((s) => [s, 0]))
+    Object.fromEntries(SKILLS.map((s) => [s, editDef?.skills?.[s] ?? 0]))
   );
-  const [items, setItems] = useState([]); // [{type, count}]
-  const [spells, setSpells] = useState([]);
+  const [items, setItems] = useState(() =>
+    (editDef?.starting_items ?? []).map((si) => ({ type: si.type, count: si.count ?? 1, equip: !!si.equip }))
+  );
+  const [spells, setSpells] = useState(editDef?.starting_spells ?? []);
   const [spellDraft, setSpellDraft] = useState('');
   const [spellError, setSpellError] = useState('');
-  const [growth, setGrowth] = useState({}); // attr -> 'strong' | 'weak' | undefined
-  const [gold, setGold] = useState(0);
-  const [portrait, setPortrait] = useState({ path: '', dataUrl: '' });
+  const [growth, setGrowth] = useState(() => {
+    const g = {};
+    for (const a of editDef?.stat_growth?.strong_rolls ?? []) g[a] = 'strong';
+    for (const a of editDef?.stat_growth?.weak_rolls ?? []) g[a] = 'weak';
+    return g;
+  });
+  const [gold, setGold] = useState(editDef?.gold ?? 0);
+  const [portrait, setPortrait] = useState({ path: editDef?.portrait ?? '', dataUrl: '' });
   const [portraitError, setPortraitError] = useState('');
+  const [scriptLang, setScriptLang] = useState(existingScript?.lang ?? 'lua');
+  const [scriptCode, setScriptCode] = useState(existingScript?.code ?? '');
   const [errors, setErrors] = useState([]);
   const [savedAs, setSavedAs] = useState('');
   const portraitRef = useRef(null);
+
+  // Consume the edit handoff so a later fresh visit starts blank.
+  useEffect(() => {
+    if (editing?.kind === 'class') dispatch({ type: 'clearEditing' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const namespace = meta.namespace || 'mymod';
   const classId = `${namespace}:${slugify(name)}`;
@@ -142,11 +160,12 @@ export default function ClassEditor() {
     reader.readAsDataURL(file);
   };
 
-  const addSpell = () => {
-    const s = spellDraft.trim().toUpperCase();
-    if (!s) return;
-    if (!SPELL_PATTERN.test(s)) {
-      setSpellError('Must be a SPELL_X constant, e.g. SPELL_FORCEBOLT');
+  const addSpell = (raw) => {
+    const input = (typeof raw === 'string' ? raw : spellDraft).trim();
+    if (!input) return;
+    const s = input.includes(':') ? input.toLowerCase() : input.toUpperCase();
+    if (!CLASS_SPELL_REF_PATTERN.test(s)) {
+      setSpellError('Use a SPELL_X constant or a custom "namespace:spell" id.');
       return;
     }
     setSpellError('');
@@ -213,6 +232,7 @@ export default function ClassEditor() {
       dispatch({ type: 'setAsset', path: portrait.path.trim(), dataUrl: portrait.dataUrl });
     }
     dispatch({ type: 'saveClass', def });
+    dispatch({ type: 'saveScript', classId: def.id, lang: scriptLang, code: scriptCode });
     setSavedAs(def.id);
   };
 
@@ -350,12 +370,23 @@ export default function ClassEditor() {
             <TextInput
               value={spellDraft}
               onChange={setSpellDraft}
-              placeholder="SPELL_FORCEBOLT"
+              placeholder="SPELL_FORCEBOLT or mymod:spell"
               onKeyDown={(e) => e.key === 'Enter' && addSpell()}
             />
-            <GoldButton onClick={addSpell}>Add</GoldButton>
+            <GoldButton onClick={() => addSpell()}>Add</GoldButton>
           </div>
           {spellError && <div className="sam-error text-sm mt-1">{spellError}</div>}
+          {modSpells.length > 0 && (
+            <div className="mt-3">
+              <div className="sam-label mb-1" style={{ color: '#8a6d2e' }}>Your custom spells</div>
+              <div className="flex flex-wrap gap-1">
+                {modSpells.map((sp) => (
+                  <button key={sp.id} type="button" className="sam-btn" style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
+                    onClick={() => addSpell(sp.id)} title={`add ${sp.id}`}>✨ {sp.name}</button>
+                ))}
+              </div>
+            </div>
+          )}
         </Panel>
 
         <Panel title="Stat Growth">
@@ -391,6 +422,17 @@ export default function ClassEditor() {
           </Field>
         </Panel>
       </div>
+
+      {/* ------------------------------------------------- behavior script */}
+      <Panel title="Behavior Script">
+        <div className="text-xs mb-3" style={{ color: '#6b5a35' }}>
+          Optional — this is what makes the class actually DO things. Ships as{' '}
+          <span className="sam-mono">classes/{slugify(name)}.{scriptLang}</span> next to the class JSON and auto-loads in-game.
+          Click a function, event, or snippet on the right to insert it; the{' '}
+          <span className="sam-mono">API Reference</span> page has the full surface.
+        </div>
+        <ScriptEditor code={scriptCode} onCode={setScriptCode} lang={scriptLang} onLang={setScriptLang} />
+      </Panel>
 
       {/* ------------------------------------------------------- save row */}
       <BalanceHints hints={hints} />

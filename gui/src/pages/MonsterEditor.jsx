@@ -5,7 +5,7 @@
  * existing base_type — its stats/gear/behaviour override the base creature.
  * Every enum here comes from the schema at runtime (see data/schemas.js).
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   MONSTER_BASE_TYPES, MONSTER_STAT_KEYS, MONSTER_RANDOM_STAT_KEYS,
   MONSTER_PROFICIENCIES, MONSTER_EQUIP_SLOTS, MONSTER_ITEM_STATUSES,
@@ -116,28 +116,62 @@ function EntryRow({ entry, showSlot, onChange, onRemove }) {
 }
 
 export default function MonsterEditor() {
-  const { meta, dispatch } = useMod();
+  const { meta, monsters, editing, dispatch } = useMod();
 
-  const [name, setName] = useState('');
-  const [baseType, setBaseType] = useState(MONSTER_BASE_TYPES[0]);
-  const [sex, setSex] = useState('');            // '' | '0' | '1'
-  const [appearance, setAppearance] = useState('');
-  const [stats, setStats] = useState({});        // key -> number | ''
-  const [randomStats, setRandomStats] = useState({});
-  const [profs, setProfs] = useState(() => Object.fromEntries(MONSTER_PROFICIENCIES.map((s) => [s, 0])));
-  const [flags, setFlags] = useState({});        // flag key -> bool
-  const [propNums, setPropNums] = useState({ xp_award_percent: '', spellbook_cast_cooldown: '' });
-  const [equip, setEquip] = useState([]);        // [{slot, ...entry}]
-  const [inventory, setInventory] = useState([]); // [{...entry}]
-  const [numFollowers, setNumFollowers] = useState(0);
-  const [followerVariants, setFollowerVariants] = useState([]); // [{key, weight}]
-  const [shop, setShop] = useState({
-    store_types: [], generate_default_shop_items: false,
-    num_generated_items_min: '', num_generated_items_max: '', generated_item_blessing_max: '',
+  // "Edit" handoff from the Mod Builder: seed the (deep) form from a saved monster.
+  const editDef = editing?.kind === 'monster' ? monsters.find((m) => m.id === editing.id) : null;
+  const entryFrom = (o, slot) => ({
+    ...blankEntry(slot ?? o.slot ?? ''),
+    type: o.type ?? '', status: o.status ?? '',
+    count: o.count ?? '', beatitude: o.beatitude ?? '',
+    spawn_percent_chance: o.spawn_percent_chance ?? '',
+    drop_percent_chance: o.drop_percent_chance ?? '',
+    slot_weighted_chance: o.slot_weighted_chance ?? '',
   });
-  const [spawn, setSpawn] = useState([]);        // [blankSpawn()]
+  const equipInit = () => {
+    const rows = [];
+    for (const [slot, val] of Object.entries(editDef?.equipped_items ?? {})) {
+      for (const o of Array.isArray(val) ? val : [val]) rows.push(entryFrom(o, slot));
+    }
+    return rows;
+  };
+
+  const [name, setName] = useState(editDef?.name ?? '');
+  const [baseType, setBaseType] = useState(editDef?.base_type ?? MONSTER_BASE_TYPES[0]);
+  const [sex, setSex] = useState(editDef?.sex != null ? String(editDef.sex) : '');
+  const [appearance, setAppearance] = useState(editDef?.appearance ?? '');
+  const [stats, setStats] = useState(editDef?.stats ?? {});
+  const [randomStats, setRandomStats] = useState(editDef?.random_stats ?? {});
+  const [profs, setProfs] = useState(() => Object.fromEntries(MONSTER_PROFICIENCIES.map((s) => [s, editDef?.proficiencies?.[s] ?? 0])));
+  const [flags, setFlags] = useState(() => Object.fromEntries(MONSTER_FLAG_KEYS.map((f) => [f, !!editDef?.properties?.[f]])));
+  const [propNums, setPropNums] = useState({
+    xp_award_percent: editDef?.properties?.xp_award_percent ?? '',
+    spellbook_cast_cooldown: editDef?.properties?.spellbook_cast_cooldown ?? '',
+  });
+  const [equip, setEquip] = useState(equipInit);
+  const [inventory, setInventory] = useState(() => (editDef?.inventory_items ?? []).map((o) => entryFrom(o)));
+  const [numFollowers, setNumFollowers] = useState(editDef?.followers?.num_followers ?? 0);
+  const [followerVariants, setFollowerVariants] = useState(() =>
+    Object.entries(editDef?.followers?.follower_variants ?? {}).map(([key, weight]) => ({ key, weight }))
+  );
+  const [shop, setShop] = useState(() => {
+    const sp = editDef?.shopkeeper_properties ?? {};
+    return {
+      store_types: Object.entries(sp.store_type_chances ?? {}).map(([key, weight]) => ({ key, weight })),
+      generate_default_shop_items: sp.generate_default_shop_items ?? false,
+      num_generated_items_min: sp.num_generated_items_min ?? '',
+      num_generated_items_max: sp.num_generated_items_max ?? '',
+      generated_item_blessing_max: sp.generated_item_blessing_max ?? '',
+    };
+  });
+  const [spawn, setSpawn] = useState(() => (editDef?.spawn ?? []).map((b) => ({ ...blankSpawn(), ...b, base_species: b.base_species ?? '' })));
   const [errors, setErrors] = useState([]);
   const [savedAs, setSavedAs] = useState('');
+
+  useEffect(() => {
+    if (editing?.kind === 'monster') dispatch({ type: 'clearEditing' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const namespace = meta.namespace || 'mymod';
   const monsterId = `${namespace}:${slugify(name)}`;

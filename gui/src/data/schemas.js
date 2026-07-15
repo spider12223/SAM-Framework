@@ -9,8 +9,10 @@ import modSchema from '@schemas/mod.schema.json';
 import classSchema from '@schemas/class.schema.json';
 import itemSchema from '@schemas/item.schema.json';
 import monsterSchema from '@schemas/monster.schema.json';
+import spellSchema from '@schemas/spell.schema.json';
+import patchSchema from '@schemas/patch.schema.json';
 
-export { modSchema, classSchema, itemSchema, monsterSchema };
+export { modSchema, classSchema, itemSchema, monsterSchema, spellSchema, patchSchema };
 
 /** All vanilla Barony ItemType names (from class.schema.json's itemType enum). */
 export const ITEM_TYPES = classSchema.definitions.itemType.enum;
@@ -100,3 +102,29 @@ export const SPAWN_MODES = monsterSchema.properties.spawn.items.properties.mode.
 /** Lowercase vanilla item names for monster gear (Barony's itemNameStrings
  *  are lowercase — the class schema's enum is the uppercase twin). */
 export const ITEM_TYPES_LOWER = ITEM_TYPES.map((t) => t.toLowerCase());
+
+/* ------------------------------------------------------------------ */
+/* Spell + patch enums (from spell.schema.json / patch.schema.json).    */
+/* ------------------------------------------------------------------ */
+
+/** Spell effect payloads (map 1:1 to Barony spell elements). */
+export const SPELL_PAYLOADS = spellSchema.properties.payload.enum;
+
+/** How a spell is delivered ('missile' | 'missile_trio' | 'none'). */
+export const SPELL_PROJECTILE_TYPES = spellSchema.properties.projectile_type.enum;
+
+/** Spell id pattern ("namespace:spell"). */
+export const SPELL_ID_PATTERN = new RegExp(spellSchema.properties.id.pattern);
+
+/** Patch operation kinds (edit_field | add_entry | remove_field | multiply_field). */
+export const PATCH_OPS = patchSchema.properties.operations.items.properties.op.enum;
+
+/** Dependency string pattern ("[?!]namespace[@x.y.z]"). */
+export const DEP_PATTERN = new RegExp(modSchema.properties.dependencies.items.pattern);
+
+/** Barony version pattern (accepts an optional leading 'v'). */
+export const BARONY_VERSION_PATTERN = new RegExp(modSchema.properties.barony_min_version.pattern);
+
+/** A class's starting_spells accepts a vanilla SPELL_X constant OR a custom
+ *  "namespace:spell" id — this matches either form. */
+export const CLASS_SPELL_REF_PATTERN = /^(SPELL_[A-Z0-9_]+|[a-z][a-z0-9_]*:[a-z][a-z0-9_]*)$/;

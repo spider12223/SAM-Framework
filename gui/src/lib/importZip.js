@@ -1,18 +1,19 @@
 /*
  * Import a S.A.M mod .zip back into editable session state — the inverse of
  * exportZip.buildModFiles. Reads mod.json, then every declared class/item/
- * monster JSON, validates each, and captures any other file (portraits, etc.)
- * as a base64 data URL so a round-trip is lossless.
+ * monster/spell/patch JSON, validates each, loads each class's companion
+ * behavior script (classes/<name>.lua|js|ts), and captures any other file
+ * (portraits, icons) as a base64 data URL so a round-trip is lossless.
  *
- * Returns { meta, classes, items, monsters, assets, report } where report is a
- * list of { path, message } for files that were skipped (missing or invalid).
+ * Returns { meta, classes, items, monsters, spells, patches, scripts, assets,
+ * report } where report is a list of { path, message } for skipped files.
  */
 import JSZip from 'jszip';
 import { validate } from '@/lib/validate.js';
 
-/** Strip the stamped "$schema" key — state stays URL-free; export re-stamps it.
- *  (Spreading { $schema: URL, ...def } lets def's own $schema WIN, so we must
- *  drop it on import or a stale/foreign URL survives.) */
+const SCRIPT_LANGS = ['ts', 'js', 'lua']; // detection order mirrors the loader
+
+/** Strip the stamped "$schema" key — state stays URL-free; export re-stamps it. */
 function stripSchema(obj) {
   if (obj && typeof obj === 'object' && '$schema' in obj) {
     const { $schema, ...rest } = obj;
@@ -46,6 +47,7 @@ async function readDef(zip, path, kind, report) {
 
 export async function parseModZip(file) {
   const report = [];
+  const scriptPaths = new Set(); // companion scripts consumed, so they aren't re-captured as assets
   const zip = await JSZip.loadAsync(file);
 
   const modEntry = zip.file('mod.json');
@@ -72,6 +74,11 @@ export async function parseModZip(file) {
     author: manifest.author ?? '',
     version: manifest.version ?? '1.0.0',
     framework_min_version: manifest.framework_min_version ?? '0.1.0',
+    framework_max_version: manifest.framework_max_version ?? '',
+    barony_min_version: manifest.barony_min_version ?? '',
+    barony_max_version: manifest.barony_max_version ?? '',
+    incompatible_with_barony_version: manifest.incompatible_with_barony_version ?? '',
+    dependencies: Array.isArray(manifest.dependencies) ? manifest.dependencies : [],
     description: manifest.description ?? '',
   };
 
@@ -79,12 +86,26 @@ export async function parseModZip(file) {
     classes: manifest.classes ?? [],
     items: manifest.items ?? [],
     monsters: manifest.monsters ?? [],
+    spells: manifest.spells ?? [],
+    patches: manifest.patches ?? [],
   };
 
   const classes = [];
+  const scripts = {};
   for (const p of declared.classes) {
     const def = await readDef(zip, p, 'class', report);
-    if (def) classes.push(def);
+    if (!def) continue;
+    classes.push(def);
+    // Load the companion behavior script sitting next to the class JSON.
+    for (const lang of SCRIPT_LANGS) {
+      const sp = p.replace(/\.json$/i, `.${lang}`);
+      const entry = zip.file(sp);
+      if (entry) {
+        scripts[def.id] = { lang, code: await entry.async('string') };
+        scriptPaths.add(sp);
+        break;
+      }
+    }
   }
   const items = [];
   for (const p of declared.items) {
@@ -96,17 +117,30 @@ export async function parseModZip(file) {
     const def = await readDef(zip, p, 'monster', report);
     if (def) monsters.push(def);
   }
+  const spells = [];
+  for (const p of declared.spells) {
+    const def = await readDef(zip, p, 'spell', report);
+    if (def) spells.push(def);
+  }
+  const patches = [];
+  for (const p of declared.patches) {
+    const def = await readDef(zip, p, 'patch', report);
+    if (def) patches.push(def);
+  }
 
-  // Capture any non-declared, non-JSON file as an asset (portraits, icons...).
+  // Capture any non-declared, non-JSON, non-script file as an asset.
   const declaredSet = new Set([
-    'mod.json', ...declared.classes, ...declared.items, ...declared.monsters,
+    'mod.json',
+    ...declared.classes, ...declared.items, ...declared.monsters,
+    ...declared.spells, ...declared.patches,
+    ...scriptPaths,
   ]);
   const assets = {};
   const assetEntries = [];
   zip.forEach((relPath, entry) => {
     if (entry.dir) return;
     if (declaredSet.has(relPath)) return;
-    if (relPath.toLowerCase().endsWith('.json')) return; // stray JSON isn't an asset
+    if (/\.(json|lua|js|ts)$/i.test(relPath)) return; // JSON + scripts aren't assets
     assetEntries.push([relPath, entry]);
   });
   for (const [relPath, entry] of assetEntries) {
@@ -118,5 +152,5 @@ export async function parseModZip(file) {
     assets[relPath] = `data:${mime};base64,${base64}`;
   }
 
-  return { meta, classes, items, monsters, assets, report };
+  return { meta, classes, items, monsters, spells, patches, scripts, assets, report };
 }

@@ -491,3 +491,33 @@ select.sam-input { appearance: none; cursor: pointer; }
 .sam-diff-ctx { color: #9b8a5a; white-space: pre; }
 .sam-diff-add-text { color: #9dc76a; }
 .sam-diff-del-text { color: #e07a6a; }
+
+/* ------ Script editor reference panel + API Reference ---------------- */
+.sam-ref-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  border: none;
+  border-bottom: 1px solid rgba(201, 146, 42, 0.12);
+  background: transparent;
+  cursor: pointer;
+  color: var(--color-parchment);
+}
+.sam-ref-item:hover { background: rgba(201, 146, 42, 0.10); }
+.sam-ref-item:last-child { border-bottom: none; }
+
+.sam-hostonly {
+  display: inline-block;
+  font-size: 0.6rem;
+  line-height: 1;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 2px 5px;
+  margin-left: 4px;
+  border-radius: 3px;
+  background: #4a2410;
+  color: #e0a060;
+  border: 1px solid #6b3a1a;
+  vertical-align: middle;
+}

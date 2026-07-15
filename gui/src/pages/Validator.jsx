@@ -16,6 +16,8 @@ const SCHEMA_LABELS = {
   class: 'Class definition',
   item: 'Item definition',
   monster: 'Monster definition',
+  spell: 'Spell definition',
+  patch: 'Layered patch',
 };
 
 /** Which schema file each kind validates against (for the success note). */
@@ -24,14 +26,18 @@ const SCHEMA_FILE = {
   class: 'schemas/class.schema.json',
   item: 'schemas/item.schema.json',
   monster: 'schemas/monster.schema.json',
+  spell: 'schemas/spell.schema.json',
+  patch: 'schemas/patch.schema.json',
 };
 
 /** Guess the schema kind from an object's shape (see task heuristics). */
 function detectKind(data) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
   if ('namespace' in data && 'framework_min_version' in data) return 'mod';
+  if ('target' in data && 'operations' in data) return 'patch';
   // Monsters also carry a `stats` object, so test base_type FIRST.
   if ('base_type' in data) return 'monster';
+  if ('payload' in data) return 'spell';
   if ('stats' in data) return 'class';
   if ('name_identified' in data) return 'item';
   return null;
@@ -191,12 +197,14 @@ export default function Validator() {
       {/* ---------------------------------------------------------- hint */}
       <Panel title="Schemas It Checks">
         <div className="text-sm space-y-1" style={{ color: 'var(--color-parchment)' }}>
-          <div>Validation runs against the three source-of-truth schemas that live in <span className="sam-mono">SAM-Framework/schemas/</span>:</div>
+          <div>Validation runs against the six source-of-truth schemas that live in <span className="sam-mono">SAM-Framework/schemas/</span>:</div>
           <ul className="space-y-1 mt-2">
             <li><span className="sam-mono">mod.schema.json</span> <span style={{ color: '#6b5a35' }}>— the {SCHEMA_LABELS.mod.toLowerCase()}</span></li>
             <li><span className="sam-mono">class.schema.json</span> <span style={{ color: '#6b5a35' }}>— a {SCHEMA_LABELS.class.toLowerCase()}</span></li>
             <li><span className="sam-mono">item.schema.json</span> <span style={{ color: '#6b5a35' }}>— an {SCHEMA_LABELS.item.toLowerCase()}</span></li>
             <li><span className="sam-mono">monster.schema.json</span> <span style={{ color: '#6b5a35' }}>— a {SCHEMA_LABELS.monster.toLowerCase()}</span></li>
+            <li><span className="sam-mono">spell.schema.json</span> <span style={{ color: '#6b5a35' }}>— a {SCHEMA_LABELS.spell.toLowerCase()}</span></li>
+            <li><span className="sam-mono">patch.schema.json</span> <span style={{ color: '#6b5a35' }}>— a {SCHEMA_LABELS.patch.toLowerCase()}</span></li>
           </ul>
         </div>
       </Panel>

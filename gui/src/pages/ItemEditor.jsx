@@ -4,7 +4,7 @@
  * APPEARANCE / ATTRIBUTES panels; SAVE ITEM at the bottom with a live JSON
  * preview. Category + slot lists come from the schemas at runtime.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { CATEGORIES, SLOTS } from '@/data/schemas.js';
 import { validate } from '@/lib/validate.js';
 import { checkBalance } from '@/lib/balance.js';
@@ -22,25 +22,35 @@ function slugify(name) {
 const numOr = (v, d) => (v === '' || v === null || v === undefined ? d : v);
 
 export default function ItemEditor() {
-  const { meta, dispatch } = useMod();
+  const { meta, items, editing, dispatch } = useMod();
 
-  const [nameId, setNameId] = useState('');
-  const [nameUnid, setNameUnid] = useState('');
-  const [category, setCategory] = useState(CATEGORIES[0]);
-  const [slot, setSlot] = useState('NO_EQUIP');
-  const [weight, setWeight] = useState(0);
-  const [goldValue, setGoldValue] = useState(0);
-  const [level, setLevel] = useState(0);
-  const [stackable, setStackable] = useState(false);
-  const [magicLevel, setMagicLevel] = useState(0);
-  const [model, setModel] = useState('');
-  const [modelFp, setModelFp] = useState('');
-  const [icon, setIcon] = useState('');
-  const [attribs, setAttribs] = useState([]); // [{ key, value }]
+  // "Edit" handoff from the Mod Builder: seed the form from a saved item.
+  const editDef = editing?.kind === 'item' ? items.find((it) => it.id === editing.id) : null;
+
+  const [nameId, setNameId] = useState(editDef?.name_identified ?? '');
+  const [nameUnid, setNameUnid] = useState(editDef?.name_unidentified ?? '');
+  const [category, setCategory] = useState(editDef?.category ?? CATEGORIES[0]);
+  const [slot, setSlot] = useState(editDef?.slot ?? 'NO_EQUIP');
+  const [weight, setWeight] = useState(editDef?.weight ?? 0);
+  const [goldValue, setGoldValue] = useState(editDef?.gold_value ?? 0);
+  const [level, setLevel] = useState(editDef?.level ?? 0);
+  const [stackable, setStackable] = useState(editDef?.stackable ?? false);
+  const [magicLevel, setMagicLevel] = useState(editDef?.magic_level ?? 0);
+  const [model, setModel] = useState(editDef?.model ?? '');
+  const [modelFp, setModelFp] = useState(editDef?.model_fp ?? '');
+  const [icon, setIcon] = useState(editDef?.icon ?? '');
+  const [attribs, setAttribs] = useState(() =>
+    Object.entries(editDef?.attributes ?? {}).map(([key, value]) => ({ key, value }))
+  );
   const [attrKey, setAttrKey] = useState('');
   const [attrVal, setAttrVal] = useState(0);
   const [errors, setErrors] = useState([]);
   const [savedAs, setSavedAs] = useState('');
+
+  useEffect(() => {
+    if (editing?.kind === 'item') dispatch({ type: 'clearEditing' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const namespace = meta.namespace || 'mymod';
   const itemId = `${namespace}:${slugify(nameId)}`;

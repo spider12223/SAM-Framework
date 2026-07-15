@@ -225,7 +225,7 @@ export function SearchSelect({ options, value, onPick, placeholder = 'Search…'
 }
 
 /** Row in a Starting Items-style list: name, count box, optional clone, red X. */
-export function ItemRow({ icon = '⚔', name, count, onCount, onRemove, onClone, sub }) {
+export function ItemRow({ icon = '⚔', name, count, onCount, onRemove, onClone, onEdit, sub }) {
   return (
     <div className="sam-well flex items-center gap-3 px-3 py-2">
       <span className="opacity-40 select-none cursor-grab" aria-hidden>⣿</span>
@@ -243,6 +243,9 @@ export function ItemRow({ icon = '⚔', name, count, onCount, onRemove, onClone,
           onChange={(e) => onCount(Math.max(1, Number(e.target.value) || 1))}
           aria-label={`${name} count`}
         />
+      )}
+      {onEdit && (
+        <button type="button" className="sam-step" onClick={onEdit} title="Edit" aria-label={`edit ${name}`}>✎</button>
       )}
       {onClone && (
         <button type="button" className="sam-step" onClick={onClone} title="Duplicate" aria-label={`duplicate ${name}`}>⧉</button>

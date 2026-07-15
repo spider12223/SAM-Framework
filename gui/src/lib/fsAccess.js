@@ -19,6 +19,7 @@ export const isFsSupported =
 const DB_NAME = 'sam-fs';
 const STORE = 'handles';
 const KEY = 'modsDir';
+const LOG_KEY = 'samLog';
 
 function idb() {
   return new Promise((resolve, reject) => {
@@ -106,6 +107,38 @@ async function fileHandleFor(root, relPath) {
     dir = await dir.getDirectoryHandle(part, { create: true });
   }
   return dir.getFileHandle(fileName, { create: true });
+}
+
+/* -------- read sam_log.txt (close the test loop) ------------------------ */
+
+export const isFilePickSupported =
+  typeof window !== 'undefined' && typeof window.showOpenFilePicker === 'function';
+
+/**
+ * Read the contents of the player's sam_log.txt. Prompts once for the file
+ * (stored in IDB so later reads don't re-prompt). Pass { forcePick: true } to
+ * choose a different file. Chromium only.
+ */
+export async function readSamLog({ forcePick = false } = {}) {
+  if (!isFilePickSupported) throw new Error('Reading the log needs a Chromium browser (Chrome/Edge).');
+  let handle = null;
+  if (!forcePick) {
+    try { handle = await idbGet(LOG_KEY); } catch { handle = null; }
+  }
+  if (handle) {
+    const q = await handle.queryPermission?.({ mode: 'read' });
+    if (q !== 'granted' && (await handle.requestPermission?.({ mode: 'read' })) !== 'granted') handle = null;
+  }
+  if (!handle) {
+    const picked = await window.showOpenFilePicker({
+      id: 'sam-log',
+      types: [{ description: 'S.A.M log', accept: { 'text/plain': ['.txt', '.log'] } }],
+    });
+    handle = picked[0];
+    try { await idbSet(LOG_KEY, handle); } catch { /* non-fatal */ }
+  }
+  const file = await handle.getFile();
+  return file.text();
 }
 
 /**

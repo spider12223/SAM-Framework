@@ -3,7 +3,9 @@
  * validate(kind, data) -> { valid, errors: [{ path, message }] }
  */
 import Ajv from 'ajv';
-import { modSchema, classSchema, itemSchema, monsterSchema } from '@/data/schemas.js';
+import {
+  modSchema, classSchema, itemSchema, monsterSchema, spellSchema, patchSchema,
+} from '@/data/schemas.js';
 
 const ajv = new Ajv({ allErrors: true, strict: false });
 
@@ -12,6 +14,8 @@ const validators = {
   class: ajv.compile(classSchema),
   item: ajv.compile(itemSchema),
   monster: ajv.compile(monsterSchema),
+  spell: ajv.compile(spellSchema),
+  patch: ajv.compile(patchSchema),
 };
 
 export const SCHEMA_KINDS = Object.keys(validators);
