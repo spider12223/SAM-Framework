@@ -20,7 +20,7 @@ import threading
 # --------------------------------------------------------------------------- #
 #  Constants
 # --------------------------------------------------------------------------- #
-APP_VERSION = "0.9.5"
+APP_VERSION = "0.9.6"
 APP_TITLE = f"S.A.M Framework Installer v{APP_VERSION}"
 PAYLOAD_NAME = "sam_barony.exe"   # bundled S.A.M barony.exe (see --add-data)
 TS_PAYLOAD_NAME = "typescript.js" # bundled TypeScript compiler for .ts mod scripts
