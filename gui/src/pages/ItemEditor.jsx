@@ -284,6 +284,32 @@ export default function ItemEditor() {
         </GoldButton>
       </div>
 
+      {/* --------------------------------------------------- preview card */}
+      <Panel title="Preview">
+        <div className="sam-well p-3 flex gap-3 items-start" style={{ maxWidth: 440 }}>
+          <div className="sam-panel flex items-center justify-center shrink-0" style={{ width: 56, height: 56, fontSize: '1.8rem', padding: 0 }} aria-hidden>⚔</div>
+          <div className="flex-1 min-w-0">
+            <div style={{ color: 'var(--color-gold-bright)', fontSize: '1.05rem' }}>{def.name_identified || 'Unnamed item'}</div>
+            {def.name_unidentified && <div className="text-xs" style={{ color: '#6b5a35' }}>unidentified: “{def.name_unidentified}”</div>}
+            <div className="text-xs mt-1" style={{ color: 'var(--color-parchment)' }}>
+              {def.category}{def.slot && def.slot !== 'NO_EQUIP' ? ` · ${def.slot.replace('EQUIPPABLE_IN_SLOT_', '').toLowerCase()}` : ''}
+              {def.stackable ? ' · stackable' : ''}{def.magic_level ? ` · magic ${def.magic_level}` : ''}
+            </div>
+            <div className="text-xs mt-1 sam-mono" style={{ color: '#9b8a5a' }}>wgt {def.weight} · {def.gold_value}g · lvl {def.level}</div>
+            <div className="text-xs mt-1" style={{ color: '#9dc76a' }}>
+              model: {def.model_from_item || (def.slot && def.slot !== 'NO_EQUIP' ? `auto (${def.slot.replace('EQUIPPABLE_IN_SLOT_', '').toLowerCase()} placeholder)` : 'category placeholder')}
+            </div>
+            {def.attributes && (
+              <div className="flex flex-wrap gap-1 mt-2">
+                {Object.entries(def.attributes).map(([k, v]) => (
+                  <span key={k} className="sam-well px-2 py-0.5 text-xs" style={{ color: 'var(--color-parchment)' }}><span className="sam-mono">{k}</span> {v > 0 ? `+${v}` : v}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </Panel>
+
       {/* -------------------------------------------------- live JSON */}
       <Panel title="Live JSON Preview" bodyClassName="p-0">
         <pre className="sam-mono m-0 p-4 overflow-x-auto text-xs" style={{ color: '#9b8a5a' }}>
