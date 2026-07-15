@@ -352,7 +352,36 @@ static bool registerItem(SAMItemDef def)
 	slot.weight = def.weight;
 	slot.gold_value = def.goldValue;
 	slot.level = def.level;
+#ifndef EDITOR
+	// Give the custom item a REAL hover tooltip instead of the "tooltip_default"
+	// placeholder ("this item does not have a tooltip yet"). Clone tooltip_default so
+	// we inherit its colors/layout (a bare struct renders text invisible), then swap in
+	// the item's own description. Mirrors how sam_spells injects into spellItems.
+	if ( ItemTooltips.tooltips.count("tooltip_default") )
+	{
+		std::string ttKey = "tooltip_sam_";
+		for ( char c : def.id )
+		{
+			const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
+			ttKey += ok ? c : '_';
+		}
+		auto ttCopy = ItemTooltips.tooltips["tooltip_default"]; // copy first (avoid map-rehash invalidation)
+		ttCopy.descriptionText.clear();
+		const std::string body = def.description.empty() ? def.nameIdentified : def.description;
+		std::istringstream bs(body);
+		std::string bl;
+		while ( std::getline(bs, bl) ) { ttCopy.descriptionText.push_back(bl); }
+		if ( ttCopy.descriptionText.empty() ) { ttCopy.descriptionText.push_back(body); }
+		ItemTooltips.tooltips[ttKey] = std::move(ttCopy);
+		slot.tooltip = ttKey;
+	}
+	else
+	{
+		slot.tooltip = "tooltip_default";
+	}
+#else
 	slot.tooltip = "tooltip_default";
+#endif
 	slot.attributes.clear();
 	for ( const auto& kv : def.attributes )
 	{
@@ -458,6 +487,7 @@ void SAMItems::loadFromManifest(const SAMModManifest& manifest)
 		}
 
 		def.nameUnidentified = getStr("name_unidentified");
+		def.description = getStr("description");
 		def.slot = getStr("slot");
 		if ( def.slot.empty() ) { def.slot = "NO_EQUIP"; }
 		// Slot present but not a known enum name → warn + suggest, then fall back.

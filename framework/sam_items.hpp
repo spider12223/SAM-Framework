@@ -43,6 +43,7 @@ struct SAMItemDef
 
 	std::string nameIdentified;
 	std::string nameUnidentified;
+	std::string description;        // hover-tooltip body (injected into ItemTooltips)
 	std::string category;           // "WEAPON" etc. (Barony Category enum name)
 	std::string slot = "NO_EQUIP";  // ItemEquippableSlot enum name
 	int weight = 0;

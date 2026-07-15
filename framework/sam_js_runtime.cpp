@@ -1368,6 +1368,48 @@ namespace
 #endif
 	}
 
+	// sam_cast_spell(player, spell) — mirror of the Lua binding: fire a spell/bolt from a
+	// player in their facing direction (host-only, trap=true so it's free + never blocked
+	// by the defend guard). Returns true if a projectile spawned.
+	JSValue js_sam_cast_spell(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_FALSE; }
+		int32_t player = 0; JS_ToInt32(ctx, &player, argv[0]);
+		const char* spellC = JS_ToCString(ctx, argv[1]);
+		const std::string spell = spellC ? spellC : "";
+		if ( spellC ) { JS_FreeCString(ctx, spellC); }
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_cast_spell refused: host only."); return JS_FALSE; }
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity )
+		{
+			SAM_ERROR("JS", "sam_cast_spell: invalid player index " + std::to_string(player) + ".");
+			return JS_FALSE;
+		}
+		int id = -1;
+		if ( spell.find(':') != std::string::npos )
+		{
+			const SAMSpellDef* d = SAMSpells::getSpellByName(spell);
+			if ( d ) { id = d->numericId; }
+		}
+		else
+		{
+			std::string lower = spell;
+			for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
+			for ( const auto& kv : ItemTooltips.spellItems ) { if ( kv.second.internalName == lower ) { id = kv.first; break; } }
+		}
+		if ( id < 0 ) { SAM_ERROR("JS", "sam_cast_spell: unknown spell '" + spell + "' (SPELL_ name or \"namespace:spell\")."); return JS_FALSE; }
+		spell_t* sp = getSpellFromID(id);
+		if ( !sp ) { SAM_ERROR("JS", "sam_cast_spell: spell '" + spell + "' (id " + std::to_string(id) + ") has no engine spell."); return JS_FALSE; }
+		Entity* missile = castSpell(players[player]->entity->getUID(), sp, false, true);
+		SAM_INFO("SAM", "sam_cast_spell: player " + std::to_string(player) + " cast '" + spell + "'" + (missile ? "" : " (no projectile)"));
+		return missile ? JS_TRUE : JS_FALSE;
+#else
+		(void)player; (void)spell;
+		return JS_FALSE;
+#endif
+	}
+
 	// ---- sandbox construction -------------------------------------------------
 	JSContext* newSandboxContext(JSRuntime* rt)
 	{
@@ -1417,6 +1459,7 @@ namespace
 		JS_SetPropertyStr(ctx, g, "sam_remove_class_passive", JS_NewCFunction(ctx, js_sam_remove_class_passive, "sam_remove_class_passive", 2));
 		// Custom spells (Session 1)
 		JS_SetPropertyStr(ctx, g, "sam_grant_spell", JS_NewCFunction(ctx, js_sam_grant_spell, "sam_grant_spell", 2));
+		JS_SetPropertyStr(ctx, g, "sam_cast_spell", JS_NewCFunction(ctx, js_sam_cast_spell, "sam_cast_spell", 2));
 #ifdef SAM_JS_HAVE_BARONY
 		JS_SetPropertyStr(ctx, g, "sam_grant_gold", JS_NewCFunction(ctx, js_sam_grant_gold, "sam_grant_gold", 2));
 		JS_SetPropertyStr(ctx, g, "sam_apply_effect", JS_NewCFunction(ctx, js_sam_apply_effect, "sam_apply_effect", 3));

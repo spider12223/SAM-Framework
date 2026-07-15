@@ -148,6 +148,9 @@ export const SAM_FUNCTIONS = [
   { name: "sam_grant_spell", category: "Spells", hostOnly: true,
     params: [{ name: "player", type: "int" }, { name: "spell", type: "string", values: ["vanilla SPELL_ name", "\"namespace:spell\" (custom)"] }],
     returns: "true on success (boolean)", desc: "Grant a spell to a player: a vanilla SPELL_ name, or a custom \"namespace:spell\"." },
+  { name: "sam_cast_spell", category: "Spells", hostOnly: true,
+    params: [{ name: "player", type: "int" }, { name: "spell", type: "string", values: ["vanilla SPELL_ name", "\"namespace:spell\" (custom)"] }],
+    returns: "true if a projectile spawned (boolean)", desc: "Immediately FIRE a spell/bolt from a player in the direction they face (free, no mana). Great for 'shoot on block'. Don't call from an on_spell_cast handler." },
 
   // ---- Persistence ------------------------------------------------------------
   { name: "sam_save_data", category: "Persistence", hostOnly: false,

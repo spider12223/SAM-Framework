@@ -29,6 +29,10 @@
       "type": "string",
       "description": "Item name shown before identification (e.g. 'black sword')."
     },
+    "description": {
+      "type": "string",
+      "description": "Optional. Hover-tooltip body text shown in-game (use \\n for line breaks). If omitted, the tooltip falls back to the item's name. Replaces the 'this item does not have a tooltip yet' placeholder."
+    },
     "category": {
       "enum": [
         "WEAPON",
@@ -83,11 +87,15 @@
     },
     "model": {
       "type": "string",
-      "description": "PLANNED — not yet loaded by the framework. Path (relative to the mod folder) to the third-person/world .vox model. Custom items currently use a placeholder model cloned from a similar vanilla item; setting this has no visual effect yet."
+      "description": "PLANNED and IGNORED. Loading a NEW .vox model from the mod folder is not supported yet (SAM can't grow Barony's models[] at runtime). To choose the 3D model, use 'model_from_item' to reuse an existing vanilla item's model. Setting 'model' has no effect."
     },
     "model_fp": {
       "type": "string",
-      "description": "PLANNED — not yet loaded by the framework. Path to the first-person .vox model the wielder sees. No visual effect yet (see 'model')."
+      "description": "PLANNED and IGNORED (see 'model'). The first-person model is taken from 'model_from_item' too."
+    },
+    "model_from_item": {
+      "type": "string",
+      "description": "Reuse an existing vanilla item's 3D model (world + first-person + inventory icon) for this custom item, by vanilla ItemType name — e.g. \"SILVER_SHIELD\", \"STEEL_SWORD\", \"IRON_HELM\". This is the supported way to give a custom item a real model. If omitted, the item clones a placeholder that matches its equip slot (a shield looks like a wooden shield, boots like boots, etc.). If the name is unknown, the placeholder is used and a warning is logged. A per-item 'icon' PNG still overrides the 2D inventory icon."
     },
     "icon": {
       "type": "string",

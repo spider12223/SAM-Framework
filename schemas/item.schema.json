@@ -29,6 +29,10 @@
       "type": "string",
       "description": "Item name shown before identification (e.g. 'black sword')."
     },
+    "description": {
+      "type": "string",
+      "description": "Optional. Hover-tooltip body text shown in-game (use \\n for line breaks). If omitted, the tooltip falls back to the item's name. Replaces the 'this item does not have a tooltip yet' placeholder."
+    },
     "category": {
       "enum": [
         "WEAPON",

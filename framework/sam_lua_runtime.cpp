@@ -1496,6 +1496,50 @@ namespace
 #endif
 	}
 
+	// sam_cast_spell(player, spell) — fire a spell/bolt from a player in the direction
+	// they face (host-authoritative). spell = a vanilla SPELL_ name or "namespace:spell".
+	// Passes trap=true so the scripted cast is free (no mana/skill-up) and is never blocked
+	// by the defend/animation guard — ideal for "shoot on block". Returns true if a
+	// projectile spawned. Do NOT call from an on_spell_cast handler (infinite recursion).
+	int lua_sam_cast_spell(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const char* spellC = luaL_checkstring(Ls, 2);
+		const std::string spell = spellC ? spellC : "";
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_cast_spell refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity )
+		{
+			SAM_ERROR("LUA", "sam_cast_spell: invalid player index " + std::to_string(player) + ".");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		int id = -1;
+		if ( spell.find(':') != std::string::npos )
+		{
+			const SAMSpellDef* d = SAMSpells::getSpellByName(spell);
+			if ( d ) { id = d->numericId; }
+		}
+		else
+		{
+			std::string lower = spell;
+			for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
+			for ( const auto& kv : ItemTooltips.spellItems ) { if ( kv.second.internalName == lower ) { id = kv.first; break; } }
+		}
+		if ( id < 0 ) { SAM_ERROR("LUA", "sam_cast_spell: unknown spell '" + spell + "' (SPELL_ name or \"namespace:spell\")."); lua_pushboolean(Ls, 0); return 1; }
+		spell_t* sp = getSpellFromID(id);
+		if ( !sp ) { SAM_ERROR("LUA", "sam_cast_spell: spell '" + spell + "' (id " + std::to_string(id) + ") has no engine spell."); lua_pushboolean(Ls, 0); return 1; }
+		Entity* missile = castSpell(players[player]->entity->getUID(), sp, false, true);
+		SAM_INFO("SAM", "sam_cast_spell: player " + std::to_string(player) + " cast '" + spell + "'" + (missile ? "" : " (no projectile)"));
+		lua_pushboolean(Ls, missile ? 1 : 0);
+		return 1;
+#else
+		(void)player; (void)spell;
+		lua_pushboolean(Ls, 0);
+		return 1;
+#endif
+	}
+
 	int lua_panic(lua_State* Ls)
 	{
 		const char* msg = lua_tostring(Ls, -1);
@@ -1596,6 +1640,7 @@ namespace
 		lua_pushcfunction(L, lua_sam_remove_class_passive); lua_setglobal(L, "sam_remove_class_passive");
 		// Custom spells (Session 1: grant vanilla for real; custom recognized + deferred)
 		lua_pushcfunction(L, lua_sam_grant_spell);         lua_setglobal(L, "sam_grant_spell");
+		lua_pushcfunction(L, lua_sam_cast_spell);          lua_setglobal(L, "sam_cast_spell");
 
 #ifdef SAM_LUA_HAVE_BARONY
 		// Host bindings that actually affect the game (engine build only).
