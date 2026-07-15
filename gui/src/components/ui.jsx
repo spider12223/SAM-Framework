@@ -293,3 +293,198 @@ export function ErrorList({ errors, className = '' }) {
 export function SavedNote({ children }) {
   return <div className="sam-ok text-sm mt-2">{children}</div>;
 }
+
+/* ------------------------------------------------------------------ */
+/* Barony-style starting-items inventory grid + item-picker modal.     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Full-screen modal listing every vanilla ItemType, grouped by category, with a
+ * search box. Click an item to pick it (calls onPick then onClose).
+ *   allTypes    : string[]  — every ItemType name
+ *   iconFor     : (t) => string emoji
+ *   categoryFor : (t) => category key
+ *   categories  : string[]  — category display order
+ */
+export function ItemPickerModal({ allTypes, iconFor, categoryFor, categories, onPick, onClose }) {
+  const [query, setQuery] = useState('');
+  const inputRef = useRef(null);
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const groups = useMemo(() => {
+    const q = query.trim().toUpperCase();
+    const byCat = new Map(categories.map((c) => [c, []]));
+    const extra = [];
+    for (const t of allTypes) {
+      if (q && !t.toUpperCase().includes(q)) continue;
+      const cat = categoryFor(t);
+      if (byCat.has(cat)) byCat.get(cat).push(t);
+      else extra.push(t);
+    }
+    const out = categories.map((c) => [c, byCat.get(c)]).filter(([, xs]) => xs.length > 0);
+    if (extra.length) out.push(['OTHER', extra]);
+    return out;
+  }, [allTypes, categoryFor, categories, query]);
+
+  const total = useMemo(() => groups.reduce((n, [, xs]) => n + xs.length, 0), [groups]);
+  const nice = (c) => c.replace(/_/g, ' ');
+
+  return (
+    <div className="sam-modal-backdrop" onMouseDown={onClose}>
+      <div className="sam-panel sam-modal" onMouseDown={(e) => e.stopPropagation()}>
+        <header className="sam-panel-header">
+          <span className="sam-ornament">◆</span>
+          <span>Choose an Item</span>
+          <span className="sam-ornament">◆</span>
+        </header>
+        <div className="p-3">
+          <input
+            ref={inputRef}
+            className="sam-input"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={`Search ${allTypes.length} items — e.g. IRON_SWORD`}
+          />
+        </div>
+        <div className="flex-1 overflow-y-auto" style={{ borderTop: '1px solid #4a3617' }}>
+          {total === 0 ? (
+            <div className="px-3 py-6 text-sm text-center" style={{ color: '#6b5a35' }}>
+              No items match “{query}”.
+            </div>
+          ) : (
+            groups.map(([cat, xs]) => (
+              <div key={cat}>
+                <div className="sam-cat-header">{nice(cat)} · {xs.length}</div>
+                {xs.map((t) => (
+                  <div key={t} className="sam-pick-row" onMouseDown={() => { onPick(t); onClose(); }}>
+                    <span className="sam-pick-icon" aria-hidden>{iconFor(t)}</span>
+                    <span className="flex-1 truncate" style={{ color: 'var(--color-parchment)' }}>{t}</span>
+                    <span className="text-xs shrink-0" style={{ color: '#6b5a35' }}>{nice(cat)}</span>
+                  </div>
+                ))}
+              </div>
+            ))
+          )}
+        </div>
+        <div className="px-3 py-2 flex items-center justify-between" style={{ borderTop: '1px solid #4a3617' }}>
+          <span className="text-xs" style={{ color: '#6b5a35' }}>{total} shown · Esc to close</span>
+          <GoldButton onClick={onClose}>Close</GoldButton>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Barony-style starting-items editor: a 4-column 64×64 slot grid (click an empty
+ * slot to add via the picker, click a filled slot to change it, ✕ to remove),
+ * plus a loadout list below with a count input + equip checkbox per item.
+ *   items    : [{ type, count, equip }]
+ *   onChange : (nextItems) => void
+ * plus the same allTypes / iconFor / categoryFor / categories the modal needs.
+ */
+export function InventoryGrid({ items, allTypes, iconFor, categoryFor, categories, onChange }) {
+  const [picker, setPicker] = useState(null); // null=closed | { slot: number | 'new' }
+
+  const nSlots = Math.max(8, Math.ceil((items.length + 1) / 4) * 4);
+
+  const pick = (type) => {
+    if (!picker) return;
+    if (picker.slot === 'new') {
+      const i = items.findIndex((it) => it.type === type);
+      if (i >= 0) onChange(items.map((it, j) => (j === i ? { ...it, count: it.count + 1 } : it)));
+      else onChange([...items, { type, count: 1, equip: false }]);
+    } else {
+      onChange(items.map((it, j) => (j === picker.slot ? { ...it, type } : it)));
+    }
+  };
+
+  const removeAt = (i) => onChange(items.filter((_, j) => j !== i));
+  const setField = (i, field, val) => onChange(items.map((it, j) => (j === i ? { ...it, [field]: val } : it)));
+
+  return (
+    <div>
+      <div className="grid" style={{ gridTemplateColumns: 'repeat(4, 64px)', gap: 4, justifyContent: 'start' }}>
+        {Array.from({ length: nSlots }).map((_, i) => {
+          const it = items[i];
+          if (!it) {
+            const isNextEmpty = i === items.length;
+            return (
+              <button
+                key={i}
+                type="button"
+                className={`sam-slot sam-slot-empty ${picker?.slot === 'new' && isNextEmpty ? 'selected' : ''}`}
+                title="Add an item"
+                onClick={() => setPicker({ slot: 'new' })}
+              >
+                +
+              </button>
+            );
+          }
+          return (
+            <div
+              key={i}
+              role="button"
+              tabIndex={0}
+              className={`sam-slot ${picker?.slot === i ? 'selected' : ''}`}
+              title={`${it.type} — click to change`}
+              onClick={() => setPicker({ slot: i })}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setPicker({ slot: i }); } }}
+            >
+              <span aria-hidden>{iconFor(it.type)}</span>
+              {it.count > 1 && <span className="sam-slot-count">×{it.count}</span>}
+              <span className="sam-slot-x" title="Remove" onClick={(e) => { e.stopPropagation(); removeAt(i); }}>✕</span>
+            </div>
+          );
+        })}
+      </div>
+
+      {items.length === 0 ? (
+        <div className="text-sm py-3 text-center" style={{ color: '#6b5a35' }}>
+          Empty loadout — click a slot to add starting gear.
+        </div>
+      ) : (
+        <div className="mt-4 space-y-1.5">
+          <div className="sam-label mb-1" style={{ fontSize: '0.78rem' }}>Loadout — count &amp; equip</div>
+          {items.map((it, i) => (
+            <div key={i} className="sam-well flex items-center gap-2 px-2 py-1.5">
+              <span className="w-6 text-center" aria-hidden>{iconFor(it.type)}</span>
+              <span className="flex-1 min-w-0 truncate text-sm" style={{ color: 'var(--color-parchment)' }}>{it.type}</span>
+              <input
+                className="sam-valuebox w-12"
+                type="number"
+                min={1}
+                value={it.count}
+                onChange={(e) => setField(i, 'count', Math.max(1, Number(e.target.value) || 1))}
+                aria-label={`${it.type} count`}
+                title="count"
+              />
+              <label className="flex items-center gap-1.5 cursor-pointer" title="Equip on start (weapons/armor/rings)">
+                <input type="checkbox" className="sam-check" checked={!!it.equip} onChange={(e) => setField(i, 'equip', e.target.checked)} />
+                <span className="sam-label" style={{ fontSize: '0.72rem' }}>equip</span>
+              </label>
+              <button type="button" className="sam-step sam-remove" onClick={() => removeAt(i)} aria-label={`remove ${it.type}`}>✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {picker && (
+        <ItemPickerModal
+          allTypes={allTypes}
+          iconFor={iconFor}
+          categoryFor={categoryFor}
+          categories={categories}
+          onPick={pick}
+          onClose={() => setPicker(null)}
+        />
+      )}
+    </div>
+  );
+}

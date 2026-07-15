@@ -6,7 +6,7 @@
  */
 import { useMemo, useRef, useState } from 'react';
 import {
-  CORE_ATTRIBUTES, OFFSET_STATS, SKILLS, ITEM_TYPES, ROLL_STATS,
+  CORE_ATTRIBUTES, OFFSET_STATS, SKILLS, ITEM_TYPES, ROLL_STATS, CATEGORIES,
   skillLabel, skillBaseAttr,
 } from '@/data/schemas.js';
 import { validate } from '@/lib/validate.js';
@@ -14,7 +14,7 @@ import { checkBalance } from '@/lib/balance.js';
 import { useMod } from '@/state/ModContext.jsx';
 import {
   Panel, Field, TextInput, NumberInput, GoldSlider, Stepper, GoldButton,
-  SearchSelect, ItemRow, ErrorList, SavedNote, BalanceHints,
+  InventoryGrid, ErrorList, SavedNote, BalanceHints,
 } from '@/components/ui.jsx';
 
 const MAX_PORTRAIT_BYTES = 256 * 1024; // portraits are 54x54 — anything big is a mistake
@@ -51,6 +51,29 @@ function itemIcon(type) {
   if (/STAFF|SCEPTER/.test(type)) return '🪄';
   if (/KEY/.test(type)) return '🗝️';
   return '⚔️';
+}
+
+/* Group an ItemType into one of the schema's categories for the picker.
+ * Barony names items by category prefix (POTION_, SCROLL_, TOOL_, …); the rest
+ * (weapons/armor named by material+type) fall to keyword matching. Heuristic —
+ * only drives grouping in the picker, so the odd edge case is harmless. */
+function itemCategory(t) {
+  if (/^POTION_/.test(t)) return 'POTION';
+  if (/^SCROLL_/.test(t)) return 'SCROLL';
+  if (/^SPELLBOOK_/.test(t)) return 'SPELLBOOK';
+  if (/^TOME_/.test(t)) return 'TOME_SPELL';
+  if (/^MAGICSTAFF_/.test(t)) return 'MAGICSTAFF';
+  if (/^RING_/.test(t)) return 'RING';
+  if (/^AMULET_/.test(t)) return 'AMULET';
+  if (/^GEM_/.test(t)) return 'GEM';
+  if (/^FOOD_/.test(t)) return 'FOOD';
+  if (/^TOOL_|^KEY_|^INSTRUMENT_/.test(t)) return 'TOOL';
+  if (t === 'SPELL_ITEM') return 'SPELL_CAT';
+  if (t === 'READABLE_BOOK') return 'BOOK';
+  if (/TOMAHAWK|CHAKRAM|SHURIKEN|BOOMERANG|BOLAS|PLUMBATA|DART|GREASE_BALL|DUST_BALL|SLOP_BALL|THROWING/.test(t)) return 'THROWN';
+  if (/SWORD|DAGGER|RAPIER|CLAYMORE|ANELACE|FALSHION|AXE|MACE|FLAIL|SHILLELAGH|KNUCKLES|SPEAR|HALBERD|TRIDENT|LANCE|GLAIVE|POLEARM|BOW|CROSSBOW|SLING|QUIVER|KNIFE|SCEPTER/.test(t)) return 'WEAPON';
+  if (/SHIELD|SCUTUM|BREASTPIECE|DOUBLET|TUNIC|GAMBESON|HAUBERK|ROBE|SHAWL|HELM|HAT|HOOD|MASK|CAP|COIF|CROWN|CIRCLET|LAURELS|TURBAN|HEADDRESS|MITER|BOOTS|LOAFERS|CLEAT|GLOVES|GAUNTLETS|BRACERS|CLOAK|PAULDRONS|APRON|VISOR/.test(t)) return 'ARMOR';
+  return 'TOOL';
 }
 
 function slugify(name) {
@@ -105,16 +128,6 @@ export default function ClassEditor() {
     reader.readAsDataURL(file);
   };
 
-  const addItem = (type) => {
-    setItems((prev) => {
-      const i = prev.findIndex((it) => it.type === type);
-      if (i >= 0) {
-        return prev.map((it, j) => (j === i ? { ...it, count: it.count + 1 } : it));
-      }
-      return [...prev, { type, count: 1 }];
-    });
-  };
-
   const addSpell = () => {
     const s = spellDraft.trim().toUpperCase();
     if (!s) return;
@@ -152,7 +165,12 @@ export default function ClassEditor() {
     if (description.trim()) def.description = description.trim();
     if (Object.keys(nonzeroSkills).length) def.skills = nonzeroSkills;
     if (items.length) {
-      def.starting_items = items.map((it) => ({ type: it.type, count: it.count }));
+      def.starting_items = items.map((it) => {
+        const entry = { type: it.type };
+        if (it.count > 1) entry.count = it.count;
+        if (it.equip) entry.equip = true;
+        return entry;
+      });
     }
     if (spells.length) def.starting_spells = spells;
     const strong = ROLL_STATS.filter((a) => growth[a] === 'strong');
@@ -285,33 +303,14 @@ export default function ClassEditor() {
         </Panel>
 
         <Panel title="Starting Items">
-          <div className="space-y-2 mb-3 max-h-[330px] overflow-y-auto pr-1">
-            {items.length === 0 && (
-              <div className="text-sm py-2 text-center" style={{ color: '#6b5a35' }}>
-                No starting items yet — search below to add.
-              </div>
-            )}
-            {items.map((it) => (
-              <ItemRow
-                key={it.type}
-                icon={itemIcon(it.type)}
-                name={it.type}
-                count={it.count}
-                onCount={(count) =>
-                  setItems((prev) => prev.map((p) => (p.type === it.type ? { ...p, count } : p)))
-                }
-                onRemove={() => setItems((prev) => prev.filter((p) => p.type !== it.type))}
-              />
-            ))}
-          </div>
-          <Field label={`Add item (${ITEM_TYPES.length} vanilla types)`}>
-            <SearchSelect
-              options={ITEM_TYPES}
-              value=""
-              onPick={addItem}
-              placeholder="Search — e.g. IRON_SWORD"
-            />
-          </Field>
+          <InventoryGrid
+            items={items}
+            allTypes={ITEM_TYPES}
+            iconFor={itemIcon}
+            categoryFor={itemCategory}
+            categories={CATEGORIES}
+            onChange={setItems}
+          />
         </Panel>
       </div>
 
