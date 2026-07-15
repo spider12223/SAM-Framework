@@ -9,12 +9,13 @@ import {
   CORE_ATTRIBUTES, OFFSET_STATS, SKILLS, ITEM_TYPES, ROLL_STATS, CATEGORIES,
   skillLabel, skillBaseAttr,
 } from '@/data/schemas.js';
+import { ITEM_ICONS } from '@/data/itemIcons.js';
 import { validate } from '@/lib/validate.js';
 import { checkBalance } from '@/lib/balance.js';
 import { useMod } from '@/state/ModContext.jsx';
 import {
   Panel, Field, TextInput, NumberInput, GoldSlider, Stepper, GoldButton,
-  InventoryGrid, ErrorList, SavedNote, BalanceHints,
+  InventoryGrid, ItemIcon, ErrorList, SavedNote, BalanceHints,
 } from '@/components/ui.jsx';
 
 const MAX_PORTRAIT_BYTES = 256 * 1024; // portraits are 54x54 — anything big is a mistake
@@ -29,7 +30,7 @@ const SKILL_ICONS = {
   PRO_THAUMATURGY: '📿', PRO_ALCHEMY: '⚗️',
 };
 
-function itemIcon(type) {
+function itemEmoji(type) {
   if (/SWORD|DAGGER|RAPIER|CLAYMORE|ANELACE|FALSHION/.test(type)) return '🗡️';
   if (/SHIELD|SCUTUM/.test(type)) return '🛡️';
   if (/BOW|CROSSBOW|SLING|QUIVER/.test(type)) return '🏹';
@@ -51,6 +52,19 @@ function itemIcon(type) {
   if (/STAFF|SCEPTER/.test(type)) return '🪄';
   if (/KEY/.test(type)) return '🗝️';
   return '⚔️';
+}
+
+/* Real in-game icon URL for an ItemType, or null if we don't have one.
+ * import.meta.env.BASE_URL is '/' in dev and '/SAM-Framework/' in the Pages build. */
+function iconSrc(type) {
+  const file = ITEM_ICONS[type];
+  return file ? `${import.meta.env.BASE_URL}item-icons/${file}` : null;
+}
+
+/* What the grid + picker render for an item: the real Barony PNG when it's
+ * available locally, otherwise the emoji (so the public build still works). */
+function itemIcon(type) {
+  return <ItemIcon src={iconSrc(type)} emoji={itemEmoji(type)} />;
 }
 
 /* Group an ItemType into one of the schema's categories for the picker.

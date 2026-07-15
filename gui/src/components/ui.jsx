@@ -294,6 +294,19 @@ export function SavedNote({ children }) {
   return <div className="sam-ok text-sm mt-2">{children}</div>;
 }
 
+/**
+ * Item icon: renders the real in-game PNG when `src` is given, else the `emoji`.
+ * Degrades to the emoji on image load error (e.g. when the Barony art isn't
+ * bundled), so the icon area always shows something.
+ */
+export function ItemIcon({ src, emoji }) {
+  const [failed, setFailed] = useState(false);
+  if (src && !failed) {
+    return <img src={src} alt="" className="sam-item-icon" draggable={false} onError={() => setFailed(true)} />;
+  }
+  return emoji;
+}
+
 /* ------------------------------------------------------------------ */
 /* Barony-style starting-items inventory grid + item-picker modal.     */
 /* ------------------------------------------------------------------ */
@@ -437,7 +450,7 @@ export function InventoryGrid({ items, allTypes, iconFor, categoryFor, categorie
               onClick={() => setPicker({ slot: i })}
               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setPicker({ slot: i }); } }}
             >
-              <span aria-hidden>{iconFor(it.type)}</span>
+              <span className="sam-slot-ico" aria-hidden>{iconFor(it.type)}</span>
               {it.count > 1 && <span className="sam-slot-count">×{it.count}</span>}
               <span className="sam-slot-x" title="Remove" onClick={(e) => { e.stopPropagation(); removeAt(i); }}>✕</span>
             </div>
@@ -454,7 +467,7 @@ export function InventoryGrid({ items, allTypes, iconFor, categoryFor, categorie
           <div className="sam-label mb-1" style={{ fontSize: '0.78rem' }}>Loadout — count &amp; equip</div>
           {items.map((it, i) => (
             <div key={i} className="sam-well flex items-center gap-2 px-2 py-1.5">
-              <span className="w-6 text-center" aria-hidden>{iconFor(it.type)}</span>
+              <span className="sam-pick-icon" aria-hidden>{iconFor(it.type)}</span>
               <span className="flex-1 min-w-0 truncate text-sm" style={{ color: 'var(--color-parchment)' }}>{it.type}</span>
               <input
                 className="sam-valuebox w-12"

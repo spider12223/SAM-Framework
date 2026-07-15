@@ -49,6 +49,11 @@ log.txt
 # NOTE: S.A.M's OWN bundled models under model-library/ are content and SHOULD
 # be committed, so .vox/.png are intentionally NOT ignored here.
 
+# NOTE: the real Barony item-icon PNGs under gui/public/item-icons/ ARE bundled
+# (the GUI shows the in-game icons; src/data/itemIcons.js maps ItemType -> filename,
+# with an emoji fallback for anything unmapped). They are Turning Wheel's art —
+# shipped here alongside the framework, same as the engine we already redistribute.
+
 # --- OS cruft ---
 .DS_Store
 Thumbs.db
