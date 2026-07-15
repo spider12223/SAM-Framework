@@ -31,6 +31,28 @@ namespace SAMErrors
 	// A short, modder-readable file label: "namespace/relative/path.json".
 	std::string displayFile(const std::string& nsOrLabel, const std::string& relPath);
 
+	// True if a mod-supplied RELATIVE path tries to escape its mod folder — it is
+	// absolute (leading '/' or '\\', or an "X:" drive prefix) or contains a ".."
+	// path segment. Loaders must reject such a path BEFORE joining it onto the mod
+	// directory and opening the result, so a crafted mod.json entry like
+	// "../../other/file" cannot reach outside the mod's own folder. Header-only so
+	// every loader (game + editor) can call it without a link dependency.
+	inline bool relPathEscapes(const std::string& rel)
+	{
+		if ( !rel.empty() && (rel[0] == '/' || rel[0] == '\\') ) { return true; } // absolute
+		if ( rel.size() >= 2 && rel[1] == ':' ) { return true; }                   // "X:" drive
+		std::size_t i = 0;
+		for ( ;; )
+		{
+			const std::size_t j = rel.find_first_of("/\\", i);
+			const std::size_t end = (j == std::string::npos) ? rel.size() : j;
+			if ( end - i == 2 && rel[i] == '.' && rel[i + 1] == '.' ) { return true; } // ".." segment
+			if ( j == std::string::npos ) { break; }
+			i = j + 1;
+		}
+		return false;
+	}
+
 	// A structured SEMANTIC error (valid JSON, but a value is wrong). Emits a
 	// header + indented detail lines through SAMLogger. `valueNote`, `fix`, and
 	// `consequence` may be empty (their lines are then omitted). `warn=true`

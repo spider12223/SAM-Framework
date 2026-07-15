@@ -295,6 +295,34 @@ static Translated translateMonster(const json& in, const std::string& modNs, con
 	}
 	const std::string idNs = id.substr(0, colon);
 	tr.slug = id.substr(colon + 1);
+
+	// Path-traversal guard: tr.slug and modNs both become part of the on-disk
+	// overlay filename (variantFile), written under the overlay dir via a raw
+	// std::ofstream that does NOT normalize '..'. Reject anything that isn't a
+	// plain identifier so a crafted id like "ns:../../evil" (or a "../"
+	// namespace) can't escape the sam_monster_overlay directory.
+	auto safeIdent = [](const std::string& s) -> bool {
+		if ( s.empty() ) { return false; }
+		for ( char c : s )
+		{
+			const bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+				|| (c >= '0' && c <= '9') || c == '_' || c == '-';
+			if ( !ok ) { return false; }
+		}
+		return true;
+	};
+	if ( !safeIdent(tr.slug) )
+	{
+		SAMErrors::reportSemantic(MOD, fileLabel, "/id", id, "monster id has illegal characters after ':'",
+			"only letters, digits, '_' or '-' (e.g. \"" + modNs + ":goblin_captain\")", "", "monster NOT loaded.");
+		return tr;
+	}
+	if ( !safeIdent(modNs) )
+	{
+		SAMErrors::reportSemantic(MOD, fileLabel, "/namespace", modNs, "mod namespace has illegal characters",
+			"only letters, digits, '_' or '-'", "", "monster NOT loaded.");
+		return tr;
+	}
 	if ( idNs != modNs )
 	{
 		SAM_WARN(MOD, "Monster id '" + id + "' namespace does not match mod namespace '" + modNs

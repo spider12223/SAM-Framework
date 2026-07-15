@@ -707,7 +707,12 @@ namespace
 
 	nlohmann::json luaToJson(lua_State* Ls, int idx, int depth)
 	{
-		if ( depth > 32 ) { return nullptr; }
+		// Depth cap + lua_checkstack: on the object path each level keeps a key on
+		// the Lua stack while recursing into its value, so a deep table can exceed
+		// the LUA_MINSTACK slots guaranteed to a C function. Grow the stack with the
+		// non-throwing form (luaL_checkstack would longjmp past C++ destructors) so
+		// the lua_next/lua_rawgeti/lua_pushnil pushes never write past the stack.
+		if ( depth > 32 || !lua_checkstack(Ls, 6) ) { return nullptr; }
 		idx = lua_absindex(Ls, idx);
 		switch ( lua_type(Ls, idx) )
 		{
@@ -746,8 +751,45 @@ namespace
 		}
 	}
 
-	void jsonToLua(lua_State* Ls, const nlohmann::json& j)
+	// Max JSON nesting we will parse/marshal. Guards both nlohmann's recursive
+	// parser and jsonToLua below against C-stack overflow from crafted/corrupt
+	// on-disk mod data. luaToJson (writer) caps at 32, so anything SAM produces
+	// stays well under this; deeper hand-authored data is rejected as corrupt.
+	static const int SAM_JSON_MAX_DEPTH = 64;
+
+	// Reject text that nests deeper than `limit` BEFORE handing it to
+	// nlohmann::json::parse (whose recursive descent has no depth limit and can
+	// blow the native stack). String contents are skipped so brackets inside
+	// strings don't inflate the count. O(n) and short-circuits on the first
+	// over-limit bracket.
+	bool jsonDepthWithinLimit(const std::string& text, int limit)
 	{
+		int depth = 0;
+		bool inStr = false, esc = false;
+		for ( char c : text )
+		{
+			if ( inStr )
+			{
+				if ( esc )            { esc = false; }
+				else if ( c == '\\' ) { esc = true; }
+				else if ( c == '"' )  { inStr = false; }
+				continue;
+			}
+			if ( c == '"' )                  { inStr = true; }
+			else if ( c == '[' || c == '{' ) { if ( ++depth > limit ) { return false; } }
+			else if ( c == ']' || c == '}' ) { if ( depth > 0 ) { --depth; } }
+		}
+		return true;
+	}
+
+	void jsonToLua(lua_State* Ls, const nlohmann::json& j, int depth)
+	{
+		// Depth cap bounds native recursion; lua_checkstack grows the Lua value
+		// stack so lua_createtable/push never write past it (a C function is only
+		// guaranteed LUA_MINSTACK slots). Use lua_checkstack, NOT luaL_checkstack:
+		// the latter raises a Lua error (longjmp) that would skip the C++
+		// destructors of the nlohmann iterators in scope here.
+		if ( depth > SAM_JSON_MAX_DEPTH || !lua_checkstack(Ls, 4) ) { lua_pushnil(Ls); return; }
 		if ( j.is_boolean() )                                    { lua_pushboolean(Ls, j.get<bool>() ? 1 : 0); }
 		else if ( j.is_number_integer() || j.is_number_unsigned() ) { lua_pushinteger(Ls, (lua_Integer)j.get<long long>()); }
 		else if ( j.is_number() )                               { lua_pushnumber(Ls, j.get<double>()); }
@@ -756,12 +798,12 @@ namespace
 		{
 			lua_createtable(Ls, (int)j.size(), 0);
 			int i = 1;
-			for ( const auto& el : j ) { jsonToLua(Ls, el); lua_rawseti(Ls, -2, i++); }
+			for ( const auto& el : j ) { jsonToLua(Ls, el, depth + 1); lua_rawseti(Ls, -2, i++); }
 		}
 		else if ( j.is_object() )
 		{
 			lua_createtable(Ls, 0, (int)j.size());
-			for ( auto it = j.begin(); it != j.end(); ++it ) { jsonToLua(Ls, it.value()); lua_setfield(Ls, -2, it.key().c_str()); }
+			for ( auto it = j.begin(); it != j.end(); ++it ) { jsonToLua(Ls, it.value(), depth + 1); lua_setfield(Ls, -2, it.key().c_str()); }
 		}
 		else { lua_pushnil(Ls); }
 	}
@@ -781,7 +823,10 @@ namespace
 			std::filesystem::create_directories(std::filesystem::path(path).parent_path(), ec);
 			std::ofstream f(path, std::ios::binary | std::ios::trunc);
 			if ( !f.is_open() ) { SAM_ERROR("LUA", "sam_save_data: cannot write " + path); lua_pushboolean(Ls, 0); return 1; }
-			f << j.dump();
+			// 'replace' handler: non-UTF-8 Lua-string bytes -> U+FFFD instead of a
+			// thrown type_error (the try/catch already prevents a crash, but this
+			// persists the data instead of dropping the whole save).
+			f << j.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
 		}
 		catch ( ... ) { SAM_ERROR("LUA", "sam_save_data: failed writing key '" + key + "'."); lua_pushboolean(Ls, 0); return 1; }
 		SAM_INFO("SAM", "Saved data key '" + key + "' for [" + g_currentNs + "]");
@@ -799,9 +844,14 @@ namespace
 		std::ifstream f(samModDataFile(g_currentNs, key), std::ios::binary);
 		if ( !f.is_open() ) { lua_pushnil(Ls); return 1; }
 		const std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+		if ( !jsonDepthWithinLimit(text, SAM_JSON_MAX_DEPTH) )
+		{
+			SAM_WARN("LUA", "sam_load_data: data for key '" + key + "' nests too deep — nil.");
+			lua_pushnil(Ls); return 1;
+		}
 		nlohmann::json j = nlohmann::json::parse(text, nullptr, false);
 		if ( j.is_discarded() ) { SAM_WARN("LUA", "sam_load_data: corrupt data for key '" + key + "' — nil."); lua_pushnil(Ls); return 1; }
-		jsonToLua(Ls, j);
+		jsonToLua(Ls, j, 0);
 		SAM_INFO("SAM", "Loaded data key '" + key + "' for [" + g_currentNs + "]");
 		return 1;
 	}
@@ -1168,7 +1218,7 @@ namespace
 		if ( js.empty() ) { lua_pushnil(Ls); return 1; }
 		nlohmann::json j = nlohmann::json::parse(js, nullptr, false);
 		if ( j.is_discarded() ) { lua_pushnil(Ls); return 1; }
-		jsonToLua(Ls, j);
+		jsonToLua(Ls, j, 0);
 		return 1;
 	}
 
@@ -1179,7 +1229,13 @@ namespace
 		const long long uid = (long long)luaL_checkinteger(Ls, 1);
 		const char* keyC = luaL_checkstring(Ls, 2);
 		nlohmann::json j = luaToJson(Ls, 3, 0);
-		SAMLua::monsterDataSet((unsigned)(Sint32)uid, keyC ? keyC : "", j.dump());
+		// Lua strings are raw bytes; a non-UTF-8 value makes strict dump() throw
+		// nlohmann::type_error. Since Lua is built as C (setjmp/longjmp), that C++
+		// exception would unwind past lua_pcall -> std::terminate (host crash).
+		// Use the 'replace' handler so invalid bytes become U+FFFD and dump()
+		// never throws. (Matches the try/catch guard in sam_save_data.)
+		SAMLua::monsterDataSet((unsigned)(Sint32)uid, keyC ? keyC : "",
+			j.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace));
 		return 0;
 	}
 
@@ -1882,7 +1938,15 @@ namespace SAMLua
 			if ( --t.remaining > 0 ) { ++i; continue; }
 			if ( t.repeating )
 			{
-				due.push_back({ t.ns, t.callbackRef, false });
+				// Take an OWN reference for the due-list. If an earlier due callback
+				// this tick cancels + re-registers this repeating timer, samRemoveTimer
+				// luaL_unref's t.callbackRef and its registry slot can be recycled by a
+				// new luaL_ref — a bare shared ref would then fetch the WRONG callback.
+				// The dup is independent of t.callbackRef and is freed right after firing
+				// (Due.oneShot == true). Matches the JS runtime's JS_DupValue approach.
+				lua_rawgeti(L, LUA_REGISTRYINDEX, t.callbackRef);
+				const int ownRef = luaL_ref(L, LUA_REGISTRYINDEX);
+				due.push_back({ t.ns, ownRef, true });
 				t.remaining = t.interval > 0 ? t.interval : 1;
 				++i;
 			}

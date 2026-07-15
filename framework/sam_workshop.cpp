@@ -11,7 +11,8 @@
 #include "sam_errors.hpp"
 #include "nlohmann/json.hpp"
 
-#include <cstdio>   // sscanf
+#include <cstdio>
+#include <cstdlib>  // strtol
 #include <fstream>
 #include <sstream>
 #include <set>
@@ -38,6 +39,18 @@ static bool readWholeFile(const std::string& path, std::string& out)
 	{
 		return false;
 	}
+	// Cap: mod.json is untrusted Workshop content read on every game start. Refuse
+	// an absurdly large manifest before slurping it into memory (bad_alloc / OOM).
+	static const std::streamoff MAX_MANIFEST_BYTES = 4 * 1024 * 1024; // 4 MB
+	f.seekg(0, std::ios::end);
+	const std::streamoff size = f.tellg();
+	if ( size > MAX_MANIFEST_BYTES )
+	{
+		SAM_WARN(MOD, "Manifest " + path + " is too large (" + std::to_string((long long)size)
+			+ " bytes, cap " + std::to_string((long long)MAX_MANIFEST_BYTES) + ") — mod skipped.");
+		return false;
+	}
+	f.seekg(0, std::ios::beg);
 	std::ostringstream ss;
 	ss << f.rdbuf();
 	out = ss.str();
@@ -59,11 +72,25 @@ static std::string joinPath(const std::string& dir, const std::string& file)
 	return dir + "/" + file;
 }
 
-// Parse "MAJOR.MINOR.PATCH" leniently; missing parts default to 0.
+// Parse "MAJOR.MINOR.PATCH" leniently; missing parts default to 0. Uses strtol
+// with clamping instead of sscanf("%d"): a %d conversion that overflows int is
+// UB, and the version strings come from untrusted mod.json. Each component is
+// clamped to [0, 1000000] so nonsense/overflowing values compare sanely.
 static void parseVersion(const std::string& v, int out[3])
 {
 	out[0] = out[1] = out[2] = 0;
-	sscanf(v.c_str(), "%d.%d.%d", &out[0], &out[1], &out[2]);
+	const char* p = v.c_str();
+	for ( int i = 0; i < 3 && *p; ++i )
+	{
+		char* end = nullptr;
+		long val = std::strtol(p, &end, 10);
+		if ( end == p ) { break; }             // no digits consumed
+		if ( val < 0 ) { val = 0; }
+		if ( val > 1000000 ) { val = 1000000; } // clamp absurd / strtol-saturated values
+		out[i] = static_cast<int>(val);
+		p = end;
+		if ( *p == '.' ) { ++p; } else { break; }
+	}
 }
 
 // Returns true if `have` >= `need` (semantic version comparison).
@@ -194,17 +221,27 @@ static bool parseManifest(const std::string& jsonText, const std::string& modPat
 		}
 		return "";
 	};
-	auto getStringArray = [&](const char* key) -> std::vector<std::string> {
+	auto getStringArray = [&](const char* key, bool arePaths) -> std::vector<std::string> {
 		std::vector<std::string> result;
 		auto it = j.find(key);
 		if ( it != j.end() && it->is_array() )
 		{
 			for ( const auto& element : *it )
 			{
-				if ( element.is_string() )
+				if ( !element.is_string() ) { continue; }
+				const std::string s = element.get<std::string>();
+				// Path-traversal guard: these array entries are RELATIVE file paths
+				// that the loaders join onto the mod folder and then open/execute.
+				// Reject any that escape the mod dir so a crafted "../.." entry can't
+				// reach files outside it. (Centralized here so classes/items/patches/
+				// monsters/spells/plugins are all covered.)
+				if ( arePaths && SAMErrors::relPathEscapes(s) )
 				{
-					result.push_back(element.get<std::string>());
+					SAM_WARN(MOD, std::string("Manifest '") + key + "' entry '" + s
+						+ "' escapes the mod folder — ignored.");
+					continue;
 				}
+				result.push_back(s);
 			}
 		}
 		return result;
@@ -220,13 +257,13 @@ static bool parseManifest(const std::string& jsonText, const std::string& modPat
 	out.baronyMaxVersion = getString("barony_max_version");
 	out.incompatibleWithBaronyVersion = getString("incompatible_with_barony_version");
 	out.description = getString("description");
-	out.dependencies = getStringArray("dependencies");
-	out.classes = getStringArray("classes");
-	out.items = getStringArray("items");
-	out.patches = getStringArray("patches");
-	out.monsters = getStringArray("monsters");
-	out.spells = getStringArray("spells");
-	out.plugins = getStringArray("plugins");
+	out.dependencies = getStringArray("dependencies", false); // namespaces, not paths
+	out.classes = getStringArray("classes", true);
+	out.items = getStringArray("items", true);
+	out.patches = getStringArray("patches", true);
+	out.monsters = getStringArray("monsters", true);
+	out.spells = getStringArray("spells", true);
+	out.plugins = getStringArray("plugins", true);
 	out.modPath = modPath;
 	out.displayName = displayName;
 

@@ -68,7 +68,12 @@ static void nowStamps(std::string& dateOut, std::string& stampOut)
 	stampOut = s;
 }
 
-void SAMBackup::backupIfNeeded(const std::string& modFingerprint)
+// Implementation split out so backupIfNeeded() can wrap it in a try/catch and
+// honor the header's "Never throws / never blocks mod loading" contract: the
+// std::filesystem directory_iterator range-loops below advance with the THROWING
+// operator++ (the error_code overload only makes CONSTRUCTION non-throwing), so a
+// mid-iteration OS error would otherwise escape into mod loading.
+static void backupImpl(const std::string& modFingerprint)
 {
 	std::error_code ec;
 
@@ -144,7 +149,12 @@ void SAMBackup::backupIfNeeded(const std::string& modFingerprint)
 
 	if ( copied == 0 )
 	{
-		SAM_WARN(MOD, "Backup folder created but no saves copied — leaving it empty.");
+		// Remove the just-created empty folder. The once-per-day guard above keys
+		// only on a today-dated folder NAME, so leaving an empty one behind would
+		// suppress every backup attempt for the rest of the day.
+		std::error_code rmec;
+		fs::remove_all(dest, rmec);
+		SAM_WARN(MOD, "Backup folder created but no saves copied — removed the empty folder.");
 		return;
 	}
 	SAM_INFO(MOD, "Save backed up to sam_backups/" + folderName + "/ (" + std::to_string(copied)
@@ -173,5 +183,24 @@ void SAMBackup::backupIfNeeded(const std::string& modFingerprint)
 				SAM_DEBUG(MOD, "Pruned old backup: " + folders[i]);
 			}
 		}
+	}
+}
+
+void SAMBackup::backupIfNeeded(const std::string& modFingerprint)
+{
+	// Never throw and never block mod loading — a failed/aborted backup is logged
+	// and ignored (a directory_iterator operator++ can throw on a mid-scan OS error).
+	try
+	{
+		backupImpl(modFingerprint);
+	}
+	catch ( const std::exception& e )
+	{
+		SAM_WARN(MOD, std::string("Backup aborted by an unexpected error (") + e.what()
+			+ ") — mod loading continues normally.");
+	}
+	catch ( ... )
+	{
+		SAM_WARN(MOD, "Backup aborted by an unknown error — mod loading continues normally.");
 	}
 }

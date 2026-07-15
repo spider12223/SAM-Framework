@@ -184,6 +184,13 @@ void SAMClasses::loadFromManifest(const SAMModManifest& manifest)
 		// lazily in the UI (Image::get); a corrupt-but-present file simply draws
 		// no icon there, which is likewise non-fatal.
 		def.portrait = getStr(j, "portrait");
+		// Path-traversal guard: def.portrait is untrusted mod JSON joined onto
+		// modPath and later handed to the UI image loader. Drop it if it escapes.
+		if ( !def.portrait.empty() && SAMErrors::relPathEscapes(def.portrait) )
+		{
+			SAM_WARN(MOD, "Class [" + def.id + "] portrait path '" + def.portrait + "' escapes the mod folder — ignoring it.");
+			def.portrait.clear();
+		}
 		if ( !def.portrait.empty() )
 		{
 			const std::string abs = toForwardSlashes(joinPath(manifest.modPath, def.portrait));
@@ -744,10 +751,14 @@ void SAMClasses::applyLoadout(int player)
 			Item* item2 = itemPickup(player, item);
 			if ( item2 )
 			{
+				// useItem() drinks/reads consumables and can free item2 via
+				// consumeItem() (count -> 0), leaving item2 dangling. Capture the
+				// uid BEFORE useItem so the hotbar write never touches freed memory.
+				const Uint32 pickedUid = item2->uid;
 				if ( si.equip ) { useItem(item2, player); }
 				if ( si.hotbarSlot >= 0 && si.hotbarSlot < static_cast<int>(NUM_HOTBAR_SLOTS) )
 				{
-					hotbar[si.hotbarSlot].item = item2->uid;
+					hotbar[si.hotbarSlot].item = pickedUid;
 				}
 			}
 			free(item);

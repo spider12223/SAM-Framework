@@ -49,6 +49,11 @@ static bool s_haveHostFingerprint = false;
 static std::string s_hostFingerprint;
 static bool s_mismatch = false;
 static std::string s_mismatchDetails;
+// Anti-spam: distinct fingerprints already processed + a hard prompt cap, so an
+// attacker on unauthenticated direct-IP can't alternate two fingerprints to defeat
+// the single-value dedup and re-fire the mismatch prompt endlessly.
+static std::map<std::string, bool> s_seenFingerprints;
+static int s_fpPromptCount = 0;
 
 /*-------------------------------------------------------------------------------
 	Local helpers
@@ -329,6 +334,18 @@ bool SAMSync::receiveFingerprint(const char* data, int len)
 
 	s_hostFingerprint = assembled;
 	s_haveHostFingerprint = true;
+
+	// Only prompt for a fingerprint we have NOT already processed this session, and
+	// cap total prompts. This defeats the alternating-A/B spam that slips past the
+	// single-value dedup above, while still surfacing a genuine first-time change.
+	static const int MAX_FP_PROMPTS = 8;
+	if ( s_seenFingerprints.count(assembled) || s_fpPromptCount >= MAX_FP_PROMPTS )
+	{
+		SAM_DEBUG(MOD, "Fingerprint already seen or prompt cap reached — not re-firing.");
+		return false;
+	}
+	s_seenFingerprints[assembled] = true;
+	++s_fpPromptCount;
 	compareFingerprints();
 	return true;
 }
@@ -369,4 +386,6 @@ void SAMSync::clear()
 	s_haveHostFingerprint = false;
 	s_mismatch = false;
 	s_mismatchDetails.clear();
+	s_seenFingerprints.clear();
+	s_fpPromptCount = 0;
 }

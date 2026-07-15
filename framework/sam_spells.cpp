@@ -397,6 +397,9 @@ std::string SAMSpells::getIconPath(int spellId)
 {
 	const SAMSpellDef* def = getSpell(spellId);
 	if ( !def || def->icon.empty() ) { return std::string(); }
+	// Path-traversal guard: def->icon is untrusted mod JSON; refuse to resolve a
+	// path that escapes the mod folder (fall back to no custom icon).
+	if ( SAMErrors::relPathEscapes(def->icon) ) { return std::string(); }
 	const std::string abs = joinPath(def->modPath, def->icon);
 	std::ifstream f(abs.c_str(), std::ios::binary);
 	if ( !f.good() ) { return std::string(); }

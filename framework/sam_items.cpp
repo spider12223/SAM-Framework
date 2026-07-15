@@ -184,8 +184,10 @@ static void deepCopyImages(list_t& dest, const list_t& src)
 	{
 		string_t* srcStr = static_cast<string_t*>(node->element);
 		string_t* s = static_cast<string_t*>(malloc(sizeof(string_t)));
+		if ( !s ) { continue; }
 		const size_t len = 64;
 		s->data = static_cast<char*>(malloc(sizeof(char) * len));
+		if ( !s->data ) { free(s); continue; }
 		memset(s->data, 0, sizeof(char) * len);
 		s->lines = 1;
 		node_t* n = list_AddNodeLast(&dest);
@@ -230,17 +232,37 @@ static bool registerItem(SAMItemDef def)
 	// image node 0 at the mod's PNG. deepCopyImages allocates a 64-byte buffer that
 	// is too small for an absolute path, so free + re-malloc it to fit. If the file
 	// is missing we keep the placeholder (cloned above), never crash.
+	// Path-traversal guard: def.icon is untrusted mod JSON, joined onto modPath
+	// here AND again in getIconPath(). Drop it if it escapes the mod folder so
+	// neither path can open a file outside the mod's own directory.
+	if ( !def.icon.empty() && SAMErrors::relPathEscapes(def.icon) )
+	{
+		SAM_WARN(MOD, "Item [" + def.id + "] icon path '" + def.icon + "' escapes the mod folder — ignoring it.");
+		def.icon.clear();
+	}
 	if ( !def.icon.empty() )
 	{
 		const std::string abs = toForwardSlashes(joinPath(def.modPath, def.icon));
 		if ( fileExists(abs) && slot.images.first )
 		{
 			string_t* s = static_cast<string_t*>(slot.images.first->element);
-			free(s->data);
-			s->data = static_cast<char*>(malloc(abs.size() + 1));
-			memset(s->data, 0, abs.size() + 1);
-			stringCopy(s->data, abs.c_str(), abs.size(), abs.size());
-			SAM_INFO(MOD, "Item [" + def.id + "] custom inventory icon -> " + abs);
+			// Allocate BEFORE freeing the old buffer so an OOM keeps the placeholder
+			// intact instead of leaving a dangling/null s->data.
+			char* buf = static_cast<char*>(malloc(abs.size() + 1));
+			if ( buf )
+			{
+				free(s->data);
+				memset(buf, 0, abs.size() + 1);
+				// dest_size = full capacity (abs.size()+1); passing abs.size() would
+				// make stringCopy overwrite the LAST real char with the terminator.
+				stringCopy(buf, abs.c_str(), abs.size() + 1, abs.size());
+				s->data = buf;
+				SAM_INFO(MOD, "Item [" + def.id + "] custom inventory icon -> " + abs);
+			}
+			else
+			{
+				SAM_ERROR(MOD, "Item [" + def.id + "] icon: out of memory — keeping placeholder.");
+			}
 		}
 		else
 		{

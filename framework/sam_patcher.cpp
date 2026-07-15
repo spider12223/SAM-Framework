@@ -183,7 +183,17 @@ static bool applyOne(json& doc, const json& op, const std::string& target,
 		const double factor = vIt->get<double>();
 		if ( doc[ptr].is_number_integer() )
 		{
-			doc[ptr] = static_cast<long long>(std::llround(doc[ptr].get<double>() * factor));
+			// Clamp before llround/cast: an out-of-range double is UB for both. The
+			// bounds are the largest double < 2^63 and exactly -2^63 (both land in
+			// long long range). Precision above 2^53 is unavoidable via double, but
+			// this at least removes the undefined behavior on absurd mod factors.
+			double product = doc[ptr].get<double>() * factor;
+			const double LL_MAX = 9223372036854774784.0;   // largest double below 2^63
+			const double LL_MIN = -9223372036854775808.0;  // -2^63 (representable)
+			if ( !std::isfinite(product) ) { product = 0.0; }
+			else if ( product > LL_MAX )  { product = LL_MAX; }
+			else if ( product < LL_MIN )  { product = LL_MIN; }
+			doc[ptr] = static_cast<long long>(std::llround(product));
 		}
 		else
 		{
@@ -307,6 +317,24 @@ void SAMPatcher::applyAll(const std::vector<SAMModManifest>& mods)
 		return; // no patches declared
 	}
 
+	// Barony reads each data file into a FIXED-size buffer and null-terminates at
+	// the byte count read, silently TRUNCATING (and thus corrupting the WHOLE JSON,
+	// not just our additions) if the file exceeds it. The safe overlay cap is that
+	// file's real buffer size — NOT one global value. Sizes verified at the
+	// fp->read(buf,1,sizeof(buf)-1) sites in Barony/src/mod_tools.cpp: nearly every
+	// whole-file reader uses a 65536-byte buffer; the only smaller ones are
+	// seed_names.json (10000) and *model_positions.json (32000); items.json is 600000.
+	auto safeMaxFor = [](const std::string& tgt) -> size_t {
+		auto endsWith = [](const std::string& s, const char* suf) {
+			const std::string x(suf);
+			return s.size() >= x.size() && s.compare(s.size() - x.size(), x.size(), x) == 0;
+		};
+		if ( tgt == "items/items.json" )             { return 590000; } // 600000-byte buffer
+		if ( tgt == "data/seed_names.json" )         { return 9500;   } // 10000-byte buffer
+		if ( endsWith(tgt, "model_positions.json") ) { return 31000;  } // 32000-byte buffers
+		return 65000;                                                   // 65536-byte buffer (all others)
+	};
+
 	for ( const auto& kv : byTarget )
 	{
 		const std::string& target = kv.first;
@@ -354,15 +382,17 @@ void SAMPatcher::applyAll(const std::vector<SAMModManifest>& mods)
 
 		// Serialize compact (strips the base file's whitespace, so it is smaller
 		// than the pretty-printed original) so we stay under Barony's fixed read
-		// buffers — items/items.json is read into a ~599999-byte buffer and would
-		// be TRUNCATED (breaking every entry, not just added ones) if exceeded.
-		// If the merge is still too big, skip the overlay so the base loads intact.
+		// buffer for THIS target (see safeMaxFor above). If the merge still exceeds
+		// that file's buffer, skip the overlay so the base file loads intact rather
+		// than being truncated mid-JSON (which would corrupt every entry, not just
+		// the added ones).
 		const std::string merged = doc.dump();
-		static const size_t SAFE_MAX = 590000;
-		if ( merged.size() >= SAFE_MAX )
+		const size_t safeMax = safeMaxFor(target);
+		if ( merged.size() >= safeMax )
 		{
 			SAM_ERROR(MOD, "Merged '" + target + "' is " + std::to_string(merged.size())
-				+ " bytes — too large for Barony's read buffer; skipping this overlay so the base file loads intact. Reduce add_entry patches.");
+				+ " bytes — exceeds this file's " + std::to_string(safeMax)
+				+ "-byte safe cap for Barony's fixed read buffer; skipping this overlay so the base file loads intact. Reduce add_entry patches.");
 			continue;
 		}
 		const std::string outPath = joinPath(overlayRealDir(), target);

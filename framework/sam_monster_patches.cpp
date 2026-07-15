@@ -71,17 +71,21 @@ namespace SAMMonsterPatch
 			else if ( f == "PER" )   { stats->PER = clampI(v, -128, MAX_PLAYER_STAT_VALUE); }
 			else if ( f == "CHR" )   { stats->CHR = clampI(v, -128, MAX_PLAYER_STAT_VALUE); }
 			else if ( f == "LVL" || f == "LEVEL" ) { stats->LVL = clampI(v, 1, 255); }
-			else if ( f == "RANDOM_HP" )    { stats->RANDOM_HP = v; }
-			else if ( f == "RANDOM_MAXHP" ) { stats->RANDOM_MAXHP = v; }
-			else if ( f == "RANDOM_MP" )    { stats->RANDOM_MP = v; }
-			else if ( f == "RANDOM_MAXMP" ) { stats->RANDOM_MAXMP = v; }
-			else if ( f == "RANDOM_STR" )   { stats->RANDOM_STR = v; }
-			else if ( f == "RANDOM_DEX" )   { stats->RANDOM_DEX = v; }
-			else if ( f == "RANDOM_CON" )   { stats->RANDOM_CON = v; }
-			else if ( f == "RANDOM_INT" )   { stats->RANDOM_INT = v; }
-			else if ( f == "RANDOM_PER" )   { stats->RANDOM_PER = v; }
-			else if ( f == "RANDOM_CHR" )   { stats->RANDOM_CHR = v; }
-			else if ( f == "RANDOM_LVL" )   { stats->RANDOM_LVL = v; }
+			// RANDOM_* are consumed by the engine as `rng.rand() % (field + 1)`
+			// (entity.cpp setRandomMonsterStats). A negative value makes the
+			// divisor 0 -> integer div-by-zero crash on spawn; INT_MAX makes the
+			// `+1` overflow (UB). Clamp to [0, INT_MAX-1] like vanilla buttons.cpp.
+			else if ( f == "RANDOM_HP" )    { stats->RANDOM_HP = clampI(v, 0, 0x7ffffffe); }
+			else if ( f == "RANDOM_MAXHP" ) { stats->RANDOM_MAXHP = clampI(v, 0, 0x7ffffffe); }
+			else if ( f == "RANDOM_MP" )    { stats->RANDOM_MP = clampI(v, 0, 0x7ffffffe); }
+			else if ( f == "RANDOM_MAXMP" ) { stats->RANDOM_MAXMP = clampI(v, 0, 0x7ffffffe); }
+			else if ( f == "RANDOM_STR" )   { stats->RANDOM_STR = clampI(v, 0, 0x7ffffffe); }
+			else if ( f == "RANDOM_DEX" )   { stats->RANDOM_DEX = clampI(v, 0, 0x7ffffffe); }
+			else if ( f == "RANDOM_CON" )   { stats->RANDOM_CON = clampI(v, 0, 0x7ffffffe); }
+			else if ( f == "RANDOM_INT" )   { stats->RANDOM_INT = clampI(v, 0, 0x7ffffffe); }
+			else if ( f == "RANDOM_PER" )   { stats->RANDOM_PER = clampI(v, 0, 0x7ffffffe); }
+			else if ( f == "RANDOM_CHR" )   { stats->RANDOM_CHR = clampI(v, 0, 0x7ffffffe); }
+			else if ( f == "RANDOM_LVL" )   { stats->RANDOM_LVL = clampI(v, 0, 0x7ffffffe); }
 			// Unknown keys are silently ignored (the runtime binding validates + warns).
 		}
 		// Vanilla coupling: if MAXHP was set without HP, pin HP to it; always resync OLDHP.

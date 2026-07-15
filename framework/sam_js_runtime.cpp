@@ -1490,15 +1490,27 @@ namespace
 		JS_SetMaxStackSize(g_tsRt, 4u * 1024u * 1024u);  // typescript.js recurses deeply
 		JS_SetInterruptHandler(g_tsRt, js_interrupt, nullptr);
 		g_tsCtx = JS_NewContext(g_tsRt); // full standard context (still no libc/os — never linked)
-		if ( !g_tsCtx ) { SAM_ERROR("JS", "transpile context alloc failed"); return false; }
+		if ( !g_tsCtx )
+		{
+			// Free the runtime we just allocated, else the next call re-runs
+			// JS_NewRuntime() (the g_tsCtx guard above is still null) and leaks it.
+			SAM_ERROR("JS", "transpile context alloc failed");
+			JS_FreeRuntime(g_tsRt); g_tsRt = nullptr;
+			return false;
+		}
 
 		setDeadline(g_cfg.transpileBudgetMs);
 		JSValue r = JS_Eval(g_tsCtx, tsLib.c_str(), tsLib.size(), "typescript.js", JS_EVAL_TYPE_GLOBAL);
 		clearDeadline();
 		if ( JS_IsException(r) )
 		{
+			// Tear down fully: leaving g_tsCtx/g_tsRt set would make the `if (g_tsCtx)`
+			// fast-path above wrongly report the (broken) transpiler as ready, so every
+			// later transpile() would run against a context where `ts` never attached.
 			SAM_ERROR("JS", "failed to load typescript.js: " + exceptionToString(g_tsCtx));
 			JS_FreeValue(g_tsCtx, r);
+			JS_FreeContext(g_tsCtx); g_tsCtx = nullptr;
+			JS_FreeRuntime(g_tsRt);  g_tsRt = nullptr;
 			return false;
 		}
 		JS_FreeValue(g_tsCtx, r);
@@ -1511,6 +1523,8 @@ namespace
 		if ( !ok )
 		{
 			SAM_ERROR("JS", "typescript.js loaded but global 'ts' is missing (UMD did not attach).");
+			JS_FreeContext(g_tsCtx); g_tsCtx = nullptr;
+			JS_FreeRuntime(g_tsRt);  g_tsRt = nullptr;
 			return false;
 		}
 		SAM_INFO("JS", "TypeScript compiler loaded under QuickJS (" + std::to_string(tsLib.size() / 1024) + " KB).");
@@ -1619,6 +1633,12 @@ namespace SAMJs
 		for ( auto& sc : g_scripts )
 		{
 			if ( !sc.enabled ) { continue; }
+			// A script may define only on_tick (no on_event); its onEvent is
+			// JS_UNDEFINED. Calling JS_Call on undefined throws a TypeError that the
+			// catch below would treat as a script error and permanently disable the
+			// script (killing its on_tick too). Skip it here, mirroring the Lua
+			// dispatchEvent's `callbackRef == LUA_NOREF` guard.
+			if ( JS_IsUndefined(sc.onEvent) ) { continue; }
 			JSValue evObj = makeEventObject(sc.ctx, ev);
 			JSValue argv[1] = { evObj };
 			g_currentNs = sc.ns;
@@ -1636,6 +1656,19 @@ namespace SAMJs
 			}
 			else
 			{
+				// A host-API argument conversion (e.g. a throwing valueOf on a passed
+				// object) can leave an exception pending even though the callback
+				// returned a normal value. Surface + clear it so it neither lingers on
+				// the shared runtime nor is silently swallowed.
+				JSValue pend = JS_GetException(sc.ctx);
+				if ( !JS_IsNull(pend) )
+				{
+					const char* pc = JS_ToCString(sc.ctx, pend);
+					SAM_WARN("JS", "on_event in '" + sc.path + "' left a pending host-API error: "
+						+ std::string(pc ? pc : "?"));
+					if ( pc ) { JS_FreeCString(sc.ctx, pc); }
+				}
+				JS_FreeValue(sc.ctx, pend);
 				++delivered;
 			}
 			JS_FreeValue(sc.ctx, ret);
@@ -1669,6 +1702,13 @@ namespace SAMJs
 				SAM_WARN("JS", "script '" + sc.path + "' disabled after an on_tick error.");
 				sc.enabled = false;
 				SAMLogger::noteScriptError();
+			}
+			else
+			{
+				// Clear any exception a host-API conversion left pending (see
+				// dispatchEvent). Silent here — this runs ~50x/sec.
+				JSValue pend = JS_GetException(sc.ctx);
+				JS_FreeValue(sc.ctx, pend);
 			}
 			JS_FreeValue(sc.ctx, ret);
 		}
@@ -1704,6 +1744,7 @@ namespace SAMJs
 			clearDeadline();
 			g_currentNs = savedNs;
 			if ( JS_IsException(ret) ) { SAM_WARN("JS", "timer callback error: " + exceptionToString(d.ctx)); }
+			else { JSValue pend = JS_GetException(d.ctx); JS_FreeValue(d.ctx, pend); } // clear a swallowed host-API error
 			JS_FreeValue(d.ctx, ret);
 			JS_FreeValue(d.ctx, d.cb);
 		}

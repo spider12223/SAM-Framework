@@ -128,10 +128,15 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 		// (cached), then run through the same sandboxed QuickJS as a .js script.
 		for ( const std::string& classRel : m.classes )
 		{
-			// Shared base name: strip the ".json" extension.
+			// Shared base name: strip a trailing ".json" ONLY when it is a real
+			// suffix. rfind matches ".json" anywhere, so a name like "knight.jsonc"
+			// would wrongly become "knight" and the loader would look for the wrong
+			// sibling script.
 			std::string base = classRel;
-			const std::string::size_type ext = base.rfind(".json");
-			if ( ext != std::string::npos ) { base = base.substr(0, ext); }
+			if ( base.size() >= 5 && base.compare(base.size() - 5, 5, ".json") == 0 )
+			{
+				base = base.substr(0, base.size() - 5);
+			}
 
 			// Readable "<namespace>:<basename>" id for the log lines.
 			std::string idBase = base;
