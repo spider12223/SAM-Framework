@@ -7,6 +7,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { SAM_FUNCTIONS, SAM_EVENTS } from '@/data/samApi.js';
 import { SNIPPETS } from '@/data/snippets.js';
+import { lintScript } from '@/lib/lintScript.js';
 import { GoldButton } from '@/components/ui.jsx';
 
 const LANGS = [
@@ -67,6 +68,8 @@ export default function ScriptEditor({ code, onCode, lang, onLang }) {
     if (e.key === 'Tab') { e.preventDefault(); insert('    '); }
   };
 
+  const diagnostics = useMemo(() => lintScript(code), [code]);
+
   const q = query.trim().toLowerCase();
   const fns = useMemo(
     () => SAM_FUNCTIONS.filter((f) => !q || f.name.includes(q) || f.desc.toLowerCase().includes(q) || f.category.toLowerCase().includes(q)),
@@ -119,6 +122,19 @@ export default function ScriptEditor({ code, onCode, lang, onLang }) {
           placeholder={'-- define on_event(event) and/or on_tick(event)\n-- click an API call, event, or snippet on the right to insert it'}
           style={{ fontSize: '0.8rem', lineHeight: 1.5, whiteSpace: 'pre', overflowWrap: 'normal', tabSize: 4 }}
         />
+        {diagnostics.length > 0 && (
+          <div className="sam-well p-2 mt-2" style={{ borderColor: '#7a5a2a' }}>
+            <div className="sam-label mb-1" style={{ color: '#d4a84b' }}>⚠ {diagnostics.length} hint{diagnostics.length === 1 ? '' : 's'}</div>
+            <ul className="space-y-1">
+              {diagnostics.slice(0, 20).map((d, i) => (
+                <li key={i} className="text-xs" style={{ color: 'var(--color-parchment)' }}>
+                  <span className="sam-mono" style={{ color: '#8a6d2e' }}>line {d.line}</span> — {d.message}
+                </li>
+              ))}
+            </ul>
+            <div className="text-xs mt-1" style={{ color: '#6b5a35' }}>advisory — checked against the SAM API; never blocks saving/export</div>
+          </div>
+        )}
       </div>
 
       {/* -------- reference / insert panel -------- */}

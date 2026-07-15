@@ -5,12 +5,12 @@
  * preview. Category + slot lists come from the schemas at runtime.
  */
 import { useEffect, useMemo, useState } from 'react';
-import { CATEGORIES, SLOTS } from '@/data/schemas.js';
+import { CATEGORIES, SLOTS, ITEM_TYPES } from '@/data/schemas.js';
 import { validate } from '@/lib/validate.js';
 import { checkBalance } from '@/lib/balance.js';
 import { useMod } from '@/state/ModContext.jsx';
 import {
-  Panel, Field, TextInput, NumberInput, Select, GoldButton,
+  Panel, Field, TextInput, NumberInput, Select, SearchSelect, GoldButton,
   ErrorList, SavedNote, BalanceHints,
 } from '@/components/ui.jsx';
 
@@ -38,6 +38,7 @@ export default function ItemEditor() {
   const [magicLevel, setMagicLevel] = useState(editDef?.magic_level ?? 0);
   const [model, setModel] = useState(editDef?.model ?? '');
   const [modelFp, setModelFp] = useState(editDef?.model_fp ?? '');
+  const [modelFromItem, setModelFromItem] = useState(editDef?.model_from_item ?? '');
   const [icon, setIcon] = useState(editDef?.icon ?? '');
   const [attribs, setAttribs] = useState(() =>
     Object.entries(editDef?.attributes ?? {}).map(([key, value]) => ({ key, value }))
@@ -81,6 +82,7 @@ export default function ItemEditor() {
     if (nameUnid.trim()) def.name_unidentified = nameUnid.trim();
     if (model.trim()) def.model = model.trim();
     if (modelFp.trim()) def.model_fp = modelFp.trim();
+    if (modelFromItem.trim()) def.model_from_item = modelFromItem.trim();
     if (icon.trim()) def.icon = icon.trim();
     if (attribs.length) {
       def.attributes = Object.fromEntries(attribs.map((a) => [a.key, a.value]));
@@ -107,7 +109,7 @@ export default function ItemEditor() {
   const def = useMemo(buildDef,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [nameId, nameUnid, category, slot, weight, goldValue, level, stackable,
-      magicLevel, model, modelFp, icon, attribs, namespace]);
+      magicLevel, model, modelFp, modelFromItem, icon, attribs, namespace]);
   const preview = useMemo(() => JSON.stringify(def, null, 2), [def]);
   const hints = useMemo(() => checkBalance('item', def), [def]);
 
@@ -185,23 +187,39 @@ export default function ItemEditor() {
 
         <Panel title="Appearance">
           <div className="mb-3 text-xs" style={{ color: '#9dc76a' }}>
-            ✓ The <span className="sam-mono">Inventory Icon</span> loads in-game — point it at a PNG
-            in your mod folder. The 3D <span className="sam-mono">World Model</span> fields are still
-            PLANNED (not yet loaded — the game shows a placeholder model for now).
+            ✓ Both the <span className="sam-mono">3D Model</span> and the <span className="sam-mono">Inventory Icon</span> load in-game (v0.9.3+).
+            Borrow a vanilla item's 3D model, and point the icon at your own PNG.
           </div>
           <div className="space-y-3">
             <Field
-              label="World Model"
-              hint="PLANNED — not yet loaded; items use a placeholder model for now"
+              label="3D Model — reuse a vanilla item"
+              hint='Your item wears this vanilla item&apos;s model (world + first-person), e.g. SILVER_SHIELD. Leave blank to auto-pick by equip slot (a shield looks like a shield, boots like boots…).'
             >
-              <TextInput value={model} onChange={setModel} placeholder="models/shadowblade.vox" />
-            </Field>
-            <Field label="First-Person Model" hint="PLANNED — not yet loaded">
-              <TextInput value={modelFp} onChange={setModelFp} placeholder="models/shadowblade_fp.vox" />
+              <SearchSelect
+                options={ITEM_TYPES}
+                value={modelFromItem}
+                onPick={setModelFromItem}
+                placeholder="SILVER_SHIELD"
+                allowCustom
+              />
+              {modelFromItem && (
+                <button type="button" className="mt-1 text-xs underline" style={{ color: '#a03327' }} onClick={() => setModelFromItem('')}>clear</button>
+              )}
             </Field>
             <Field label="Inventory Icon" hint="Loaded at runtime — path to a PNG in your mod folder (e.g. items/shadowblade.png)">
               <TextInput value={icon} onChange={setIcon} placeholder="items/shadowblade.png" />
             </Field>
+            <details>
+              <summary className="text-xs cursor-pointer" style={{ color: '#6b5a35' }}>Custom .vox model paths (not supported yet)</summary>
+              <div className="space-y-3 mt-2">
+                <Field label="World Model" hint="PLANNED — a new .vox can't be loaded yet; use the 3D Model picker above">
+                  <TextInput value={model} onChange={setModel} placeholder="models/shadowblade.vox" />
+                </Field>
+                <Field label="First-Person Model" hint="PLANNED — not yet loaded">
+                  <TextInput value={modelFp} onChange={setModelFp} placeholder="models/shadowblade_fp.vox" />
+                </Field>
+              </div>
+            </details>
           </div>
         </Panel>
 
