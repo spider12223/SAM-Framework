@@ -1,0 +1,15 @@
+{
+  "$schema": "https://spider12223.github.io/SAM-Framework/schemas/class.schema.json",
+  "id": "vanillaplus:berserker",
+  "name": "Berserker",
+  "description": "A raging glass cannon who fights unarmored. The closer to death, the deadlier — and faster.",
+  "stats": { "STR": 2, "DEX": -1, "CON": -1, "INT": -2, "PER": 1, "CHR": 1, "HP": 10, "MP": -10 },
+  "skills": { "PRO_AXE": 55, "PRO_SWORD": 30, "PRO_UNARMED": 15 },
+  "starting_items": [
+    { "type": "STEEL_GREATAXE", "status": "DECREPIT", "equip": true, "hotbar_slot": 0 },
+    { "type": "POTION_BOOZE", "count": 1 },
+    { "type": "FOOD_MEAT", "count": 2 },
+    { "type": "TOOL_TORCH", "hotbar_slot": 1 }
+  ],
+  "stat_growth": { "strong_rolls": ["STR", "CON"], "weak_rolls": ["INT", "DEX"] }
+}

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://spider12223.github.io/SAM-Framework/schemas/mod.schema.json",
+  "namespace": "vanillaplus",
+  "name": "Vanilla Plus",
+  "author": "SAM Example",
+  "version": "1.0.0",
+  "framework_min_version": "0.7.0",
+  "description": "Five new classes that feel at home in vanilla Barony — Ranger, Necromancer, Paladin, Berserker, and Trickster. Each has balanced starting stats/gear plus a small scripted signature ability.",
+  "classes": [
+    "classes/ranger.json",
+    "classes/necromancer.json",
+    "classes/paladin.json",
+    "classes/berserker.json",
+    "classes/trickster.json"
+  ]
+}

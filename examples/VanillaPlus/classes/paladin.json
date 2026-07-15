@@ -1,0 +1,19 @@
+{
+  "$schema": "https://spider12223.github.io/SAM-Framework/schemas/class.schema.json",
+  "id": "vanillaplus:paladin",
+  "name": "Paladin",
+  "description": "A holy warrior sworn to protect. Strong of arm and shielded by faith.",
+  "stats": { "STR": 2, "DEX": -2, "CON": 1, "INT": -1, "PER": 0, "CHR": 1, "HP": 5, "MP": -5 },
+  "skills": { "PRO_MACE": 50, "PRO_SHIELD": 40, "PRO_LEADERSHIP": 20, "PRO_THAUMATURGY": 15 },
+  "starting_items": [
+    { "type": "IRON_MACE", "status": "SERVICABLE", "equip": true, "hotbar_slot": 0 },
+    { "type": "IRON_SHIELD", "status": "SERVICABLE", "equip": true },
+    { "type": "CHAIN_HAUBERK", "status": "SERVICABLE", "equip": true },
+    { "type": "CLOAK", "status": "SERVICABLE", "equip": true },
+    { "type": "POTION_HEALING", "count": 1 },
+    { "type": "TOOL_TORCH", "hotbar_slot": 1 },
+    { "type": "FOOD_BREAD", "count": 2 }
+  ],
+  "starting_spells": ["SPELL_HEALING"],
+  "stat_growth": { "strong_rolls": ["STR", "CON"], "weak_rolls": ["DEX", "INT"] }
+}

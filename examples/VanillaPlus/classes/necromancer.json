@@ -1,0 +1,18 @@
+{
+  "$schema": "https://spider12223.github.io/SAM-Framework/schemas/class.schema.json",
+  "id": "vanillaplus:necromancer",
+  "name": "Necromancer",
+  "description": "A commander of the dead. Raises servants from the fallen and drains the souls of the slain.",
+  "stats": { "STR": -2, "DEX": 0, "CON": -2, "INT": 3, "PER": 0, "CHR": 2, "HP": -10, "MP": 15 },
+  "skills": { "PRO_MYSTICISM": 50, "PRO_SORCERY": 30, "PRO_SWORD": 15 },
+  "starting_items": [
+    { "type": "IRON_DAGGER", "status": "SERVICABLE", "equip": true, "hotbar_slot": 0 },
+    { "type": "ROBE_CULTIST", "status": "SERVICABLE", "equip": true },
+    { "type": "TOOL_LANTERN", "status": "SERVICABLE", "equip": true },
+    { "type": "SPELLBOOK_DRAIN_SOUL", "status": "WORN" },
+    { "type": "POTION_RESTOREMAGIC", "count": 1 },
+    { "type": "FOOD_BREAD", "count": 2 }
+  ],
+  "starting_spells": ["SPELL_SUMMON"],
+  "stat_growth": { "strong_rolls": ["INT", "CHR"], "weak_rolls": ["STR", "CON"] }
+}

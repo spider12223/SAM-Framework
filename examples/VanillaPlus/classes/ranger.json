@@ -1,0 +1,18 @@
+{
+  "$schema": "https://spider12223.github.io/SAM-Framework/schemas/class.schema.json",
+  "id": "vanillaplus:ranger",
+  "name": "Ranger",
+  "description": "A wilderness survivor and master archer — deadly at range, resourceful on the hunt.",
+  "stats": { "STR": -1, "DEX": 2, "CON": 1, "INT": -2, "PER": 2, "CHR": -1, "HP": 5, "MP": -10 },
+  "skills": { "PRO_RANGED": 50, "PRO_STEALTH": 35, "PRO_SWORD": 20 },
+  "starting_items": [
+    { "type": "SHORTBOW", "status": "SERVICABLE", "equip": true, "hotbar_slot": 0 },
+    { "type": "QUIVER_HUNTING", "status": "SERVICABLE", "equip": true },
+    { "type": "LEATHER_BREASTPIECE", "status": "SERVICABLE", "equip": true },
+    { "type": "LEATHER_BOOTS", "status": "SERVICABLE", "equip": true },
+    { "type": "CLOAK", "status": "SERVICABLE", "equip": true },
+    { "type": "FOOD_BREAD", "count": 2 },
+    { "type": "TOOL_TORCH", "hotbar_slot": 1 }
+  ],
+  "stat_growth": { "strong_rolls": ["DEX", "PER"], "weak_rolls": ["STR", "INT"] }
+}

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://spider12223.github.io/SAM-Framework/schemas/class.schema.json",
+  "id": "vanillaplus:trickster",
+  "name": "Trickster",
+  "description": "A cunning rogue who fights dirty — twin daggers, smoke, and a knack for vanishing.",
+  "stats": { "STR": -1, "DEX": 2, "CON": -1, "INT": -1, "PER": 2, "CHR": -1, "HP": -5, "MP": 5 },
+  "skills": { "PRO_STEALTH": 55, "PRO_SWORD": 40, "PRO_LOCKPICKING": 30, "PRO_RANGED": 15 },
+  "starting_items": [
+    { "type": "IRON_DAGGER", "status": "SERVICABLE", "count": 2, "equip": true, "hotbar_slot": 0 },
+    { "type": "CLOAK", "status": "SERVICABLE", "equip": true },
+    { "type": "DUST_BALL", "count": 2, "hotbar_slot": 1 },
+    { "type": "TOOL_LOCKPICK", "count": 2 },
+    { "type": "FOOD_APPLE", "count": 2 },
+    { "type": "TOOL_TORCH", "hotbar_slot": 2 }
+  ],
+  "stat_growth": { "strong_rolls": ["DEX", "PER"], "weak_rolls": ["STR", "CON"] }
+}
