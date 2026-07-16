@@ -18,13 +18,22 @@ import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import VOXELS from '@/data/characterVoxels.json';
 
 /*
- * Model axes, established by rendering the torso's silhouettes rather than assumed:
+ * Model axes, read off the models rather than assumed:
  *   size[0] = x = DEPTH   (front-to-back)
  *   size[1] = y = WIDTH   (shoulder-to-shoulder)
- *   size[2] = z = HEIGHT
- * The "looking along X" view of MaleTorso shows broad shoulders tapering to the waist —
- * i.e. that is the FRONT, so y is width, not depth. Getting this backwards renders the
- * figure as a stack of squashed slabs.
+ *   size[2] = z = HEIGHT, growing DOWNWARD — z=0 is the TOP of a model.
+ *
+ * Both facts are load-bearing, and each has a distinct failure mode:
+ *  - WIDTH vs DEPTH: the "looking along X" view of MaleTorso shows broad shoulders
+ *    tapering to the waist — i.e. that is the FRONT, so y is width, not depth. Getting
+ *    this backwards renders the figure as a stack of squashed slabs.
+ *  - Z DIRECTION: MaleHead1 keeps its hair at z=0..6 with skin (the neck) at z=7, and
+ *    MaleLegRight has the boot as a solid dark mass at its HIGHEST z. So z points down.
+ *    Treating it as up flips every limb about its own centre while the layout offsets
+ *    below stay correct — a well-posed character assembled from upside-down parts.
+ *
+ * Offsets in layout() are therefore written in render space (+z is up) and model z is
+ * negated once, on the way in, so the two conventions never have to be juggled at once.
  */
 const DEPTH = 0, WIDTH = 1, HEIGHT = 2;
 
@@ -92,9 +101,9 @@ export default function CharacterBox({ sex = 'male', onSexChange, headId = '', h
       const sd = m.size[DEPTH], sw = m.size[WIDTH], sh = m.size[HEIGHT];
       for (let i = 0; i < m.v.length; i += 4) {
         pts.push([
-          m.v[i + DEPTH] - sd / 2 + o[0],   // depth
-          m.v[i + WIDTH] - sw / 2 + o[1],   // width
-          m.v[i + HEIGHT] - sh / 2 + o[2],  // height
+          m.v[i + DEPTH] - sd / 2 + o[0],      // depth
+          m.v[i + WIDTH] - sw / 2 + o[1],      // width
+          -(m.v[i + HEIGHT] - sh / 2) + o[2],  // height: model z grows down, render up
           m.colors[m.v[i + 3]],
         ]);
       }
