@@ -413,22 +413,55 @@ namespace
 		const std::string n = samUpper(name.c_str());
 		Stat* s = stats[player];
 		Entity* e = players[player]->entity;
-		if      ( n == "HP" )    { if ( e ) { e->setHP(value); } else { s->HP = samClampInt(value, 0, s->MAXHP); } }
-		else if ( n == "MP" )    { if ( e ) { e->setMP(value); } else { s->MP = samClampInt(value, 0, s->MAXMP); } }
-		else if ( n == "MAXHP" ) { s->MAXHP = (value < 1 ? 1 : value); if ( s->HP > s->MAXHP ) { s->HP = s->MAXHP; } }
-		else if ( n == "MAXMP" ) { s->MAXMP = (value < 0 ? 0 : value); if ( s->MP > s->MAXMP ) { s->MP = s->MAXMP; } }
-		else if ( n == "STR" )   { s->STR = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
-		else if ( n == "DEX" )   { s->DEX = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
-		else if ( n == "CON" )   { s->CON = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
-		else if ( n == "INT" )   { s->INT = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
-		else if ( n == "PER" )   { s->PER = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
-		else if ( n == "CHR" )   { s->CHR = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
-		else if ( n == "GOLD" )  { s->GOLD = (value < 0 ? 0 : value); }
-		else if ( n == "LEVEL" || n == "LVL" ) { s->LVL = samClampInt(value, 1, 255); }
-		else if ( n == "EXP" )   { s->EXP = samClampInt(value, 0, 99); }
+		// Clamps and flush are kept in lockstep with the Lua sam_set_stat by using the same
+		// shared SAMLua constants and helpers — the two runtimes having quietly different
+		// bounds is a bug class this framework has already shipped once.
+		enum { JS_SYNC_NONE, JS_SYNC_ATTR, JS_SYNC_GOLD } sync = JS_SYNC_NONE;
+		// setHP/setMP self-emit UPHP/UPMP only when an entity exists; with none (dead player
+		// awaiting respawn) the raw write needs the ATTR flush, same as the Lua path.
+		if      ( n == "HP" )    { if ( e ) { e->setHP(value); } else { s->HP = samClampInt(value, 0, s->MAXHP); sync = JS_SYNC_ATTR; } }
+		else if ( n == "MP" )    { if ( e ) { e->setMP(value); } else { s->MP = samClampInt(value, 0, s->MAXMP); sync = JS_SYNC_ATTR; } }
+		else if ( n == "MAXHP" ) { s->MAXHP = samClampInt(value, 1, SAMLua::STAT_WIRE_MAX); if ( s->HP > s->MAXHP ) { s->HP = s->MAXHP; } sync = JS_SYNC_ATTR; }
+		else if ( n == "MAXMP" ) { s->MAXMP = samClampInt(value, 0, SAMLua::STAT_WIRE_MAX); if ( s->MP > s->MAXMP ) { s->MP = s->MAXMP; } sync = JS_SYNC_ATTR; }
+		else if ( n == "STR" )   { s->STR = samClampInt(value, SAMLua::ATTR_WIRE_MIN, MAX_PLAYER_STAT_VALUE); sync = JS_SYNC_ATTR; }
+		else if ( n == "DEX" )   { s->DEX = samClampInt(value, SAMLua::ATTR_WIRE_MIN, MAX_PLAYER_STAT_VALUE); sync = JS_SYNC_ATTR; }
+		else if ( n == "CON" )   { s->CON = samClampInt(value, SAMLua::ATTR_WIRE_MIN, MAX_PLAYER_STAT_VALUE); sync = JS_SYNC_ATTR; }
+		else if ( n == "INT" )   { s->INT = samClampInt(value, SAMLua::ATTR_WIRE_MIN, MAX_PLAYER_STAT_VALUE); sync = JS_SYNC_ATTR; }
+		else if ( n == "PER" )   { s->PER = samClampInt(value, SAMLua::ATTR_WIRE_MIN, MAX_PLAYER_STAT_VALUE); sync = JS_SYNC_ATTR; }
+		else if ( n == "CHR" )   { s->CHR = samClampInt(value, SAMLua::ATTR_WIRE_MIN, MAX_PLAYER_STAT_VALUE); sync = JS_SYNC_ATTR; }
+		else if ( n == "GOLD" )  { s->GOLD = (value < 0 ? 0 : value); sync = JS_SYNC_GOLD; }
+		else if ( n == "LEVEL" || n == "LVL" ) { s->LVL = samClampInt(value, 1, 255); sync = JS_SYNC_ATTR; }
+		else if ( n == "EXP" )   { s->EXP = samClampInt(value, 0, 99); sync = JS_SYNC_ATTR; }
 		else { SAM_ERROR("JS", "sam_set_stat: unknown stat '" + name + "'."); return JS_NewBool(ctx, 0); }
+		if      ( sync == JS_SYNC_ATTR ) { SAMLua::flushStatToClient(player); }
+		else if ( sync == JS_SYNC_GOLD ) { SAMLua::flushGoldToClient(player); }
 		SAM_INFO("JS", "Set stat " + n + " = " + std::to_string(value) + " on player " + std::to_string(player));
 		return JS_NewBool(ctx, 1);
+	}
+
+	// sam_set_move_speed(player, mult) — host-only; syncs to the owning client.
+	JSValue js_sam_set_move_speed(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1;
+		double mult = 1.0;
+		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( argc >= 2 ) { JS_ToFloat64(ctx, &mult, argv[1]); }
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_set_move_speed refused: host only."); return JS_NewBool(ctx, 0); }
+		if ( player < 0 || player >= MAXPLAYERS )
+		{ SAM_ERROR("JS", "sam_set_move_speed: invalid player index " + std::to_string(player) + "."); return JS_NewBool(ctx, 0); }
+		SAMLua::setMoveSpeedMult(player, mult);
+		return JS_NewBool(ctx, 1);
+	}
+
+	// sam_get_move_speed(player) -> number. Readable on clients too — a client's own
+	// multiplier is exactly what its movement code is using.
+	JSValue js_sam_get_move_speed(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1;
+		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		return JS_NewFloat64(ctx, SAMLua::getMoveSpeedMult(player));
 	}
 
 	JSValue js_sam_get_floor(JSContext* ctx, JSValueConst /*this_val*/, int /*argc*/, JSValueConst* /*argv*/)
@@ -1540,6 +1573,8 @@ namespace
 		JS_SetPropertyStr(ctx, g, "sam_remove_effect", JS_NewCFunction(ctx, js_sam_remove_effect, "sam_remove_effect", 2));
 		JS_SetPropertyStr(ctx, g, "sam_get_stat", JS_NewCFunction(ctx, js_sam_get_stat, "sam_get_stat", 2));
 		JS_SetPropertyStr(ctx, g, "sam_set_stat", JS_NewCFunction(ctx, js_sam_set_stat, "sam_set_stat", 3));
+		JS_SetPropertyStr(ctx, g, "sam_set_move_speed", JS_NewCFunction(ctx, js_sam_set_move_speed, "sam_set_move_speed", 2));
+		JS_SetPropertyStr(ctx, g, "sam_get_move_speed", JS_NewCFunction(ctx, js_sam_get_move_speed, "sam_get_move_speed", 1));
 		JS_SetPropertyStr(ctx, g, "sam_get_floor", JS_NewCFunction(ctx, js_sam_get_floor, "sam_get_floor", 0));
 		JS_SetPropertyStr(ctx, g, "sam_spawn_item", JS_NewCFunction(ctx, js_sam_spawn_item, "sam_spawn_item", 3));
 		JS_SetPropertyStr(ctx, g, "sam_item_id", JS_NewCFunction(ctx, js_sam_item_id, "sam_item_id", 1));

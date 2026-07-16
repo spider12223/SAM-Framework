@@ -39,6 +39,7 @@ extern "C" {
 
 #include <cstdlib>
 #include <cstring>
+#include <cmath>    // lround — move-speed fixed-point encoding
 #include <string>
 #include <vector>
 #include <map>
@@ -338,6 +339,11 @@ namespace
 	// ---- shared helpers for the host API (primitives only) --------------------
 	inline int samClampInt(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
+	// What sam_set_stat owes the client after a write. The flush itself is
+	// SAMLua::flushStatToClient/flushGoldToClient — public so the JS runtime calls the
+	// same code instead of growing a second copy that drifts out of step.
+	enum SamStatSync { SAM_SYNC_NONE, SAM_SYNC_ATTR, SAM_SYNC_GOLD };
+
 	inline std::string samUpper(const char* in)
 	{
 		std::string o = in ? in : "";
@@ -485,22 +491,56 @@ namespace
 		const std::string n = samUpper(nameC);
 		Stat* s = stats[player];
 		Entity* e = players[player]->entity;
-		if      ( n == "HP" )    { if ( e ) { e->setHP(value); } else { s->HP = samClampInt(value, 0, s->MAXHP); } }
-		else if ( n == "MP" )    { if ( e ) { e->setMP(value); } else { s->MP = samClampInt(value, 0, s->MAXMP); } }
-		else if ( n == "MAXHP" ) { s->MAXHP = (value < 1 ? 1 : value); if ( s->HP > s->MAXHP ) { s->HP = s->MAXHP; } }
-		else if ( n == "MAXMP" ) { s->MAXMP = (value < 0 ? 0 : value); if ( s->MP > s->MAXMP ) { s->MP = s->MAXMP; } }
-		else if ( n == "STR" )   { s->STR = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
-		else if ( n == "DEX" )   { s->DEX = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
-		else if ( n == "CON" )   { s->CON = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
-		else if ( n == "INT" )   { s->INT = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
-		else if ( n == "PER" )   { s->PER = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
-		else if ( n == "CHR" )   { s->CHR = samClampInt(value, -128, MAX_PLAYER_STAT_VALUE); }
-		else if ( n == "GOLD" )  { s->GOLD = (value < 0 ? 0 : value); }
-		else if ( n == "LEVEL" || n == "LVL" ) { s->LVL = samClampInt(value, 1, 255); }
-		else if ( n == "EXP" )   { s->EXP = samClampInt(value, 0, 99); }
+		SamStatSync sync = SAM_SYNC_NONE;
+		// setHP/setMP emit UPHP/UPMP themselves — but only when there IS an entity. With
+		// none (a dead player awaiting respawn) the raw write below reaches no client on
+		// its own, so it needs the ATTR flush like every other field. ATTR already carries
+		// HP/MAXHP/MP/MAXMP, so this costs no new wire format.
+		if      ( n == "HP" )    { if ( e ) { e->setHP(value); } else { s->HP = samClampInt(value, 0, s->MAXHP); sync = SAM_SYNC_ATTR; } }
+		else if ( n == "MP" )    { if ( e ) { e->setMP(value); } else { s->MP = samClampInt(value, 0, s->MAXMP); sync = SAM_SYNC_ATTR; } }
+		else if ( n == "MAXHP" ) { s->MAXHP = samClampInt(value, 1, SAMLua::STAT_WIRE_MAX); if ( s->HP > s->MAXHP ) { s->HP = s->MAXHP; } sync = SAM_SYNC_ATTR; }
+		else if ( n == "MAXMP" ) { s->MAXMP = samClampInt(value, 0, SAMLua::STAT_WIRE_MAX); if ( s->MP > s->MAXMP ) { s->MP = s->MAXMP; } sync = SAM_SYNC_ATTR; }
+		else if ( n == "STR" )   { s->STR = samClampInt(value, SAMLua::ATTR_WIRE_MIN, MAX_PLAYER_STAT_VALUE); sync = SAM_SYNC_ATTR; }
+		else if ( n == "DEX" )   { s->DEX = samClampInt(value, SAMLua::ATTR_WIRE_MIN, MAX_PLAYER_STAT_VALUE); sync = SAM_SYNC_ATTR; }
+		else if ( n == "CON" )   { s->CON = samClampInt(value, SAMLua::ATTR_WIRE_MIN, MAX_PLAYER_STAT_VALUE); sync = SAM_SYNC_ATTR; }
+		else if ( n == "INT" )   { s->INT = samClampInt(value, SAMLua::ATTR_WIRE_MIN, MAX_PLAYER_STAT_VALUE); sync = SAM_SYNC_ATTR; }
+		else if ( n == "PER" )   { s->PER = samClampInt(value, SAMLua::ATTR_WIRE_MIN, MAX_PLAYER_STAT_VALUE); sync = SAM_SYNC_ATTR; }
+		else if ( n == "CHR" )   { s->CHR = samClampInt(value, SAMLua::ATTR_WIRE_MIN, MAX_PLAYER_STAT_VALUE); sync = SAM_SYNC_ATTR; }
+		else if ( n == "GOLD" )  { s->GOLD = (value < 0 ? 0 : value); sync = SAM_SYNC_GOLD; }
+		else if ( n == "LEVEL" || n == "LVL" ) { s->LVL = samClampInt(value, 1, 255); sync = SAM_SYNC_ATTR; }
+		else if ( n == "EXP" )   { s->EXP = samClampInt(value, 0, 99); sync = SAM_SYNC_ATTR; }
 		else { SAM_ERROR("LUA", std::string("sam_set_stat: unknown stat '") + (nameC ? nameC : "") + "'."); lua_pushboolean(Ls, 0); return 1; }
+		// Without this the write lands host-side only and the client's sheet silently
+		// disagrees until some unrelated event happens to fire an ATTR of its own.
+		// HP/MP are absent on purpose — setHP/setMP already emit UPHP/UPMP.
+		if      ( sync == SAM_SYNC_ATTR ) { SAMLua::flushStatToClient(player); }
+		else if ( sync == SAM_SYNC_GOLD ) { SAMLua::flushGoldToClient(player); }
 		SAM_INFO("LUA", std::string("Set stat ") + n + " = " + std::to_string(value) + " on player " + std::to_string(player));
 		lua_pushboolean(Ls, 1);
+		return 1;
+	}
+
+	// sam_set_move_speed(player, mult) — host-only; syncs to the owning client.
+	int lua_sam_set_move_speed(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const double mult = (double)luaL_checknumber(Ls, 2);
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_set_move_speed refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		if ( player < 0 || player >= MAXPLAYERS )
+		{ SAM_ERROR("LUA", "sam_set_move_speed: invalid player index " + std::to_string(player) + "."); lua_pushboolean(Ls, 0); return 1; }
+		SAMLua::setMoveSpeedMult(player, mult);
+		lua_pushboolean(Ls, 1);
+		return 1;
+	}
+
+	// sam_get_move_speed(player) -> number. Readable on clients too: a client needs to see
+	// its own multiplier, and that is exactly the value its movement code is using.
+	int lua_sam_get_move_speed(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		lua_pushnumber(Ls, (lua_Number)SAMLua::getMoveSpeedMult(player));
 		return 1;
 	}
 
@@ -626,6 +666,50 @@ namespace
 	// ---- expanded player queries (Part 5) --------------------------------------
 
 	int g_samSessionKills[MAXPLAYERS] = { 0 }; // SAM-tracked (Barony has no per-player counter)
+
+	// ---- per-player move-speed multiplier --------------------------------------
+
+	double g_samMoveSpeed[MAXPLAYERS] = { 1.0, 1.0, 1.0, 1.0 };
+	static_assert(MAXPLAYERS == 4, "g_samMoveSpeed's initializer must cover every player slot");
+
+	const double SAM_MOVE_SPEED_MIN = 0.1;
+	const double SAM_MOVE_SPEED_MAX = 3.0;
+
+	// Order matters: NaN must be caught BEFORE the clamp, not by it. NaN compares false
+	// against everything, so `v < MIN ? MIN : (v > MAX ? MAX : v)` returns NaN unchanged
+	// and it would reach speedFactor, where it poisons PLAYER_VELX/Y permanently — the
+	// player simply stops moving for the rest of the game with nothing in the log.
+	inline double samSanitizeSpeed(double v)
+	{
+		if ( !(v == v) ) { return 1.0; }                       // NaN
+		if ( v < SAM_MOVE_SPEED_MIN ) { return SAM_MOVE_SPEED_MIN; } // also catches -inf
+		if ( v > SAM_MOVE_SPEED_MAX ) { return SAM_MOVE_SPEED_MAX; } // also catches +inf
+		return v;
+	}
+
+	// Tell the client that owns `player` its multiplier changed.
+	//
+	// Host->client, in-game: the receiving entry lives in net.cpp's clientPacketHandlers.
+	// Guarded the way every vanilla per-client send is: a local or splitscreen player
+	// already reads g_samMoveSpeed directly, and player 0 would index net_clients[-1].
+	void samSendMoveSpeed(int player)
+	{
+		if ( multiplayer != SERVER ) { return; }
+		if ( player <= 0 || player >= MAXPLAYERS ) { return; }
+		if ( !players[player] || players[player]->isLocalPlayer() ) { return; }
+		if ( client_disconnected[player] ) { return; }
+
+		strcpy((char*)net_packet->data, "SAMS");
+		net_packet->data[4] = (Uint8)player;
+		// Fixed point x1000 rather than a raw double: the wire stays endian-defined via
+		// SDLNet_Write32, and 0.1..3.0 needs nowhere near the precision of 8 raw bytes.
+		SDLNet_Write32((Uint32)(Sint32)lround(g_samMoveSpeed[player] * 1000.0), &net_packet->data[5]);
+		net_packet->address.host = net_clients[player - 1].host;
+		net_packet->address.port = net_clients[player - 1].port;
+		net_packet->len = 9;
+		sendPacketSafe(net_sock, -1, net_packet, player - 1);
+	}
+
 
 	std::string samItemName(int type)
 	{
@@ -1735,6 +1819,10 @@ namespace
 		lua_setglobal(L, "sam_get_stat");
 		lua_pushcfunction(L, lua_sam_set_stat);
 		lua_setglobal(L, "sam_set_stat");
+		lua_pushcfunction(L, lua_sam_set_move_speed);
+		lua_setglobal(L, "sam_set_move_speed");
+		lua_pushcfunction(L, lua_sam_get_move_speed);
+		lua_setglobal(L, "sam_get_move_speed");
 		lua_pushcfunction(L, lua_sam_get_floor);
 		lua_setglobal(L, "sam_get_floor");
 		lua_pushcfunction(L, lua_sam_spawn_item);
@@ -2307,6 +2395,116 @@ namespace SAMLua
 	{
 #ifdef SAM_LUA_HAVE_BARONY
 		for ( int i = 0; i < MAXPLAYERS; ++i ) { g_samSessionKills[i] = 0; }
+#endif
+	}
+
+	double getMoveSpeedMult(int player)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( player < 0 || player >= MAXPLAYERS ) { return 1.0; }
+		// Sanitize on the way OUT as well as in. This is called from the movement inner
+		// loop, where the cost is a compare and the alternative is a NaN reaching
+		// PLAYER_VELX — cheap insurance against any future writer that skips the setter.
+		return samSanitizeSpeed(g_samMoveSpeed[player]);
+#else
+		(void)player; return 1.0;
+#endif
+	}
+
+	void setMoveSpeedMult(int player, double mult)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( player < 0 || player >= MAXPLAYERS ) { return; }
+		if ( multiplayer == CLIENT ) { return; } // host is authoritative; see the header
+		g_samMoveSpeed[player] = samSanitizeSpeed(mult);
+		samSendMoveSpeed(player);
+#else
+		(void)player; (void)mult;
+#endif
+	}
+
+	void applyMoveSpeedMult(int player, double mult)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( player < 0 || player >= MAXPLAYERS ) { return; }
+		// Receive side: store only. Re-sending here would bounce the value back at the
+		// host, and on a listen server that is an infinite loop.
+		g_samMoveSpeed[player] = samSanitizeSpeed(mult);
+#else
+		(void)player; (void)mult;
+#endif
+	}
+
+	void resetMoveSpeed()
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		// Deliberately local-only: a new game tears every client's session down anyway, and
+		// sending here would touch net_packet from the menu, off the game thread's cadence.
+		for ( int i = 0; i < MAXPLAYERS; ++i ) { g_samMoveSpeed[i] = 1.0; }
+#endif
+	}
+
+	// Push a player's attributes to the client that owns them.
+	//
+	// This is a sixth hand-inlined copy of vanilla's ATTR packet, by necessity: the engine
+	// never factored it out — entity.cpp repeats the same 21 bytes at 2842/4817/7984/8174/
+	// 18875 — so there is nothing to call. Kept field-for-field identical to those five.
+	// The receiver (net.cpp ~5195) is stock and must not be bent to suit us: S.A.M clients
+	// have to keep understanding stock hosts, and vice versa.
+	//
+	// Not used for HP/MP: Entity::setHP/setMP already emit UPHP/UPMP themselves.
+	void flushStatToClient(int player)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		// Guarded exactly as vanilla guards its five sites. player 0 is not merely
+		// pointless here — net_clients[player - 1] would read out of bounds.
+		if ( multiplayer != SERVER ) { return; }
+		if ( player <= 0 || player >= MAXPLAYERS ) { return; }
+		if ( !players[player] || players[player]->isLocalPlayer() ) { return; }
+		if ( client_disconnected[player] || !stats[player] ) { return; }
+		Stat* s = stats[player];
+
+		strcpy((char*)net_packet->data, "ATTR");
+		net_packet->data[4] = clientnum;
+		net_packet->data[5] = (Sint8)s->STR;
+		net_packet->data[6] = (Sint8)s->DEX;
+		net_packet->data[7] = (Sint8)s->CON;
+		net_packet->data[8] = (Sint8)s->INT;
+		net_packet->data[9] = (Sint8)s->PER;
+		net_packet->data[10] = (Sint8)s->CHR;
+		net_packet->data[11] = (Uint8)s->EXP;
+		net_packet->data[12] = (Uint8)s->LVL;
+		SDLNet_Write16((Sint16)s->HP, &net_packet->data[13]);
+		SDLNet_Write16((Sint16)s->MAXHP, &net_packet->data[15]);
+		SDLNet_Write16((Sint16)s->MP, &net_packet->data[17]);
+		SDLNet_Write16((Sint16)s->MAXMP, &net_packet->data[19]);
+		net_packet->address.host = net_clients[player - 1].host;
+		net_packet->address.port = net_clients[player - 1].port;
+		net_packet->len = 21;
+		sendPacketSafe(net_sock, -1, net_packet, player - 1);
+#else
+		(void)player;
+#endif
+	}
+
+	// Gold rides its own packet (actgold.cpp ~141) — ATTR has no field for it, so without
+	// this a scripted gold change stays host-side forever no matter how many ATTRs fire.
+	void flushGoldToClient(int player)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer != SERVER ) { return; }
+		if ( player <= 0 || player >= MAXPLAYERS ) { return; }
+		if ( !players[player] || players[player]->isLocalPlayer() ) { return; }
+		if ( client_disconnected[player] || !stats[player] ) { return; }
+
+		strcpy((char*)net_packet->data, "GOLD");
+		SDLNet_Write32((Uint32)stats[player]->GOLD, &net_packet->data[4]);
+		net_packet->address.host = net_clients[player - 1].host;
+		net_packet->address.port = net_clients[player - 1].port;
+		net_packet->len = 8;
+		sendPacketSafe(net_sock, -1, net_packet, player - 1);
+#else
+		(void)player;
 #endif
 	}
 

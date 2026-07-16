@@ -115,6 +115,44 @@ namespace SAMLua
 	bool isActionHeld(int player, const std::string& action);
 	const char* actionBinding(int player, const std::string& action);
 
+	// Per-player move-speed multiplier (sam_set_move_speed / sam_get_move_speed).
+	//
+	// Movement is computed by the machine that OWNS the player, so a host-set multiplier
+	// for a remote player has to travel to that client's exe or it does nothing at all.
+	// setMoveSpeedMult is host-only and syncs via the 'SAMS' packet; applyMoveSpeedMult is
+	// the receive side (it stores without re-sending, so there is no echo).
+	//
+	// Range is [0.1, 3.0]. The ceiling is not a safety limit: the engine already clamps
+	// final velocity magnitude to 5.0 unconditionally (actplayer.cpp ~4809), so a
+	// multiplier physically cannot carry a player past a speed vanilla itself allows.
+	// 3.0 is where the useful range ends — a max-speed character's terminal velocity is
+	// ~1.75, so the engine's clamp starts swallowing the difference around 2.8x, while a
+	// slow or heavily-laden character still gains the full amount.
+	double getMoveSpeedMult(int player);
+	void setMoveSpeedMult(int player, double mult);
+	void applyMoveSpeedMult(int player, double mult);
+	// Drop every multiplier back to 1.0 (call on a new game, so a prior run's speed
+	// effects don't leak into the next). Safe before init.
+	void resetMoveSpeed();
+
+	// ---- scripted stat writes: making them real on the client -------------------
+	//
+	// A raw write to stats[player] only exists on the host. Vanilla never factored its
+	// stat-sync packet out — entity.cpp hand-inlines the same 21 bytes at five sites — so
+	// there is no engine helper to call and S.A.M has to carry its own. These live here,
+	// rather than once per runtime, precisely so the Lua and JS paths cannot drift apart.
+	// Both are host-only and no-op for local/splitscreen players, who read stats[] direct.
+	void flushStatToClient(int player);   // ATTR: STR/DEX/CON/INT/PER/CHR/EXP/LVL/HP/MAXHP/MP/MAXMP
+	void flushGoldToClient(int player);   // GOLD rides its own packet; ATTR has no field for it
+
+	// Bounds a scripted stat write must respect to survive the wire. These are protocol
+	// limits, not design choices — see the definitions in the .cpp for why.
+	//   STAT_WIRE_MAX: MAXHP/MAXMP go over ATTR as Sint16, so >32767 desyncs permanently.
+	//   ATTR_WIRE_MIN: attributes get one byte, and the stock receiver's decode hack reads
+	//                  raw 128..248 as positive — so only -7..-1 survive as negatives.
+	constexpr int STAT_WIRE_MAX = 32767;
+	constexpr int ATTR_WIRE_MIN = -7;
+
 	// v0.7.0 Feature 4 — per-monster scratch data (JSON-string values), shared with the
 	// JS runtime through these accessors. Cleared on shutdown.
 	void monsterDataSet(unsigned uid, const std::string& key, const std::string& jsonValue);
