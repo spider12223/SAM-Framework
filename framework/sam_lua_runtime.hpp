@@ -91,6 +91,30 @@ namespace SAMLua
 	void pollInput();
 	bool isKeyHeld(const std::string& name);
 
+	// Bound-ACTION hooks. Unlike pollInput above (which reads raw SDL keycodes and so
+	// ignores the player's keybinds entirely), these read Barony's own named actions —
+	// "Attack", "Defend", "Use" — so a script reacting to "Use" automatically follows
+	// whatever the player rebound it to, and can never collide with a binding because it
+	// claims none of its own. Mouse buttons work here; the raw-key path can't see them.
+	//
+	// STRICTLY READ-ONLY: we only ever call the const Input::binary()/binding(). The
+	// consume* calls are non-const and are what would starve vanilla's own readers
+	// (blocking, attacking, the hotbar), so they must never appear in this framework.
+	//
+	// pollActions() runs on EVERY machine (input only exists locally — Input::inputs[]
+	// holds live data for local players only). The host dispatches directly; a client
+	// forwards each edge to the host via the 'SAMA' packet so the hooks fire host-side,
+	// where host-only APIs like sam_cast_spell actually work.
+	void pollActions();
+	// Fire on_action_pressed/on_action_released for a player. Called by pollActions on
+	// the host, and by the 'SAMA' packet handler for a remote client's edges.
+	void dispatchAction(int player, int actionIndex, bool pressed);
+	// Wire format for 'SAMA' — index into the action table. Returns "" if out of range.
+	const char* actionNameForIndex(int index);
+	// Backs sam_is_action_held / sam_get_action_binding.
+	bool isActionHeld(int player, const std::string& action);
+	const char* actionBinding(int player, const std::string& action);
+
 	// v0.7.0 Feature 4 — per-monster scratch data (JSON-string values), shared with the
 	// JS runtime through these accessors. Cleared on shutdown.
 	void monsterDataSet(unsigned uid, const std::string& key, const std::string& jsonValue);

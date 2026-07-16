@@ -7,7 +7,7 @@ TypeScript compiler used for `.ts` mod scripts) next to it.
 
 ## Where the payload comes from
 
-Since **v1.0.0** the installer is **lean**: it ships no payload and downloads the
+Since **v1.1.0** the installer is **lean**: it ships no payload and downloads the
 newest release assets at install time from the permanent GitHub "latest" redirect:
 
 ```
@@ -35,8 +35,8 @@ offline/bundled build is a one-line `.spec` change away (see below).
 ## Build
 
 1. `pip install pyinstaller`
-2. `pyinstaller SAM_Framework_Installer_v1.0.0.spec`
-3. Output: `dist/SAM_Framework_Installer_v1.0.0.exe` (~11 MB — that's PyInstaller's
+2. `pyinstaller SAM_Framework_Installer_v1.1.0.spec`
+3. Output: `dist/SAM_Framework_Installer_v1.1.0.exe` (~11 MB — that's PyInstaller's
    Python + tkinter runtime; the payload is no longer inside)
 
 ### Building an offline/bundled installer instead

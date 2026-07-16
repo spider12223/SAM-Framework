@@ -11,8 +11,10 @@ Where the payload comes from (see resolve_payload):
     files via `datas`), it installs those — works fully offline.
   * Otherwise it DOWNLOADS the newest release assets from GitHub at install time.
     This is the default from v1.0.0 on: it means publishing a release updates every
-    installer already out in the wild, so we never rebuild and re-upload an ~18 MB
-    installer per version again, and the installer itself is ~100 KB.
+    installer already out in the wild, so we never rebuild and re-upload an installer
+    per version again. It also drops the build from ~18 MB to ~11.6 MB — not smaller,
+    because PyInstaller's bundled Python + tkinter runtime is the bulk of it; only the
+    payload's ~6.4 MB compressed footprint goes away. The real win is not rebuilding.
 
   python installer.py                    -> launch the GUI installer
   python installer.py --selftest         -> Steam/Barony auto-detection + payload source
@@ -32,7 +34,7 @@ import urllib.request
 # --------------------------------------------------------------------------- #
 #  Constants
 # --------------------------------------------------------------------------- #
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 APP_TITLE = f"S.A.M Framework Installer v{APP_VERSION}"
 PAYLOAD_NAME = "sam_barony.exe"   # bundled S.A.M barony.exe (see --add-data)
 TS_PAYLOAD_NAME = "typescript.js" # bundled TypeScript compiler for .ts mod scripts

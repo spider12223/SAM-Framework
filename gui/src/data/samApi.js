@@ -20,6 +20,19 @@ export const MONSTER_STATS = ["STR", "DEX", "SPEED", "CON", "INT", "PER", "CHR",
 export const EFFECTS = ["LEVITATING", "INVISIBLE", "CONFUSED", "POISONED", "BLEEDING", "ASLEEP", "PARALYZED", "DRUNK", "BLIND", "GREASY", "VOMITING", "WEBBED", "SLOW", "FAST"];
 export const EQUIP_SLOTS = ["WEAPON", "SHIELD", "HELMET", "ARMOR", "BREASTPLATE", "GLOVES", "BOOTS", "SHOES", "RING", "AMULET", "CLOAK", "MASK"];
 
+/**
+ * Barony's own bound action names, as a script sees them. Reacting to one of these
+ * follows whatever the player rebound it to — that's why you use these instead of a
+ * raw key, and why a mod can't collide with someone's keybinds.
+ * Defaults for reference: Attack=Mouse1, Use=Mouse3, Defend=Space, Cast Spell=F,
+ * "Hotbar Up / Select"=Mouse2 (right-click). Names are space/case-sensitive.
+ */
+export const ACTIONS = [
+  "Attack", "Defend", "Use", "Cast Spell", "Sneak",
+  "Hotbar Up / Select", "Hotbar Down / Cancel", "Hotbar Left", "Hotbar Right",
+  "Call Out", "Command NPC", "Quick Turn",
+];
+
 export const SAM_FUNCTIONS = [
   // ---- Logging ----------------------------------------------------------------
   { name: "sam_log", category: "Logging", hostOnly: false,
@@ -81,7 +94,15 @@ export const SAM_FUNCTIONS = [
   // ---- Inventory --------------------------------------------------------------
   { name: "sam_get_equipped_item", category: "Inventory", hostOnly: false,
     params: [{ name: "player", type: "int" }, { name: "slot", type: "string", values: EQUIP_SLOTS }],
-    returns: "the item name (string; nil/null if slot empty)", desc: "Get the item name equipped in a slot (ARMOR==BREASTPLATE, BOOTS==SHOES)." },
+    returns: "the item name (string; nil/null if slot empty)", desc: "Get the item NAME equipped in a slot (ARMOR==BREASTPLATE, BOOTS==SHOES). Vanilla items only — it can't name a custom item, so use sam_get_equipped_item_id to test for one." },
+  { name: "sam_get_equipped_item_id", category: "Inventory", hostOnly: false,
+    params: [{ name: "player", type: "int" }, { name: "slot", type: "string", values: EQUIP_SLOTS }],
+    returns: "the numeric item id (int; nil/null if slot empty)",
+    desc: "Get the item ID equipped in a slot. Compare it against sam_item_id(\"namespace:item\") to check whether YOUR custom item is equipped — the id is a number, so the name-returning version above can never match it." },
+  { name: "sam_is_defending", category: "Player state", hostOnly: false,
+    params: [{ name: "player", type: "int" }],
+    returns: "whether the player is blocking (boolean)",
+    desc: "Whether the player is actually blocking right now — the real engine state, not just the Defend button being down. Works for remote players in multiplayer." },
   { name: "sam_get_inventory_count", category: "Inventory", hostOnly: false,
     params: [{ name: "player", type: "int" }, { name: "item_name", type: "string" }],
     returns: "total count held (number)", desc: "Count how many of an item (vanilla or custom name) a player holds." },
@@ -189,7 +210,15 @@ export const SAM_FUNCTIONS = [
   // ---- Input ------------------------------------------------------------------
   { name: "sam_is_key_held", category: "Input", hostOnly: false,
     params: [{ name: "key_name", type: "string", values: ["A-Z", "0-9", "F1-F12"] }],
-    returns: "whether the key is down (boolean)", desc: "Check whether a supported key is currently held (A-Z, 0-9, F1-F12)." },
+    returns: "whether the key is down (boolean)", desc: "Check whether a supported RAW key is currently held (A-Z, 0-9, F1-F12). Ignores the player's keybinds — prefer sam_is_action_held, which follows them." },
+  { name: "sam_is_action_held", category: "Input", hostOnly: false,
+    params: [{ name: "player", type: "int" }, { name: "action", type: "string", values: ACTIONS }],
+    returns: "whether the action is active (boolean)",
+    desc: "Check whether a BOUND action is held. Reads Barony's own binding, so it follows whatever the player rebound it to (and works with mouse buttons, which raw keys can't see). Local player only — input never leaves its machine." },
+  { name: "sam_get_action_binding", category: "Input", hostOnly: false,
+    params: [{ name: "player", type: "int" }, { name: "action", type: "string", values: ACTIONS }],
+    returns: "the physical input, e.g. \"Mouse3\" (string; nil/null if unbound)",
+    desc: "What the player actually has an action bound to — use it to print a correct prompt instead of guessing a key." },
 ];
 
 export const SAM_EVENTS = [
@@ -380,10 +409,18 @@ export const SAM_EVENTS = [
     whenFired: "before a player's HP is reduced (bracketed around Entity::modHP)",
     payload: [{ field: "player", type: "int" }, { field: "damage", type: "int" }],
     gotcha: "no player. prefix; the ONLY cancellable event — call sam_modify_damage(player, new) to reduce/cancel the incoming hit" },
+  { name: "on_action_pressed", category: "input", cancellable: false,
+    whenFired: "a BOUND action goes down — e.g. the player presses whatever they have \"Use\" mapped to",
+    payload: [{ field: "player", type: "int" }, { field: "action", type: "string" }, { field: "binding", type: "string" }],
+    gotcha: "no player. prefix. This is the one to use for button-mapped abilities: it reads Barony's named actions, so it follows the player's own keybinds and can never collide with them (it claims no key of its own), and it sees mouse buttons — which the raw-key hooks cannot. Observation only, so vanilla blocking/attacking/hotbar keep working. `binding` is the physical input (\"Mouse3\") for prompts, and is only filled in for the local player. Single-fire per press; use sam_is_action_held for continuous checks. In multiplayer a client's press is forwarded to the host, so the hook fires host-side where host-only APIs work." },
+  { name: "on_action_released", category: "input", cancellable: false,
+    whenFired: "a bound action goes back up",
+    payload: [{ field: "player", type: "int" }, { field: "action", type: "string" }, { field: "binding", type: "string" }],
+    gotcha: "no player. prefix; the release twin of on_action_pressed" },
   { name: "on_key_pressed", category: "input", cancellable: false,
-    whenFired: "a supported key transitions to down (A-Z, 0-9, F1-F12)",
+    whenFired: "a supported RAW key transitions to down (A-Z, 0-9, F1-F12)",
     payload: [{ field: "player", type: "int" }, { field: "key_name", type: "string" }, { field: "held", type: "int" }],
-    gotcha: "no player. prefix; single-fire per press — use sam_is_key_held for continuous checks" },
+    gotcha: "no player. prefix; single-fire per press — use sam_is_key_held for continuous checks. Reads the PHYSICAL key and ignores the player's keybinds, so it can collide with whatever they've bound there, and it can't see mouse buttons — prefer on_action_pressed unless you specifically want a raw key." },
   { name: "on_key_released", category: "input", cancellable: false,
     whenFired: "a supported key transitions to up (A-Z, 0-9, F1-F12)",
     payload: [{ field: "player", type: "int" }, { field: "key_name", type: "string" }],

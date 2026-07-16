@@ -584,6 +584,54 @@ namespace
 		return JS_NewString(ctx, samItemNameJs((int)it->type).c_str());
 	}
 
+	// sam_get_equipped_item_id(player, slot) -> number|null. The NUMERIC item type, so it
+	// can be compared against sam_item_id("ns:item"). js_sam_get_equipped_item above
+	// returns a display NAME from the vanilla name table, which never contains custom
+	// items — so it can never match a custom id.
+	JSValue js_sam_get_equipped_item_id(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		std::string slot; if ( argc >= 2 ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { slot = s; JS_FreeCString(ctx, s); } }
+		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return JS_NULL; }
+		for ( char& c : slot ) { c = (char)std::toupper((unsigned char)c); }
+		Item* it = samEquippedSlotJs(player, slot);
+		if ( !it ) { return JS_NULL; }
+		return JS_NewInt32(ctx, (int)it->type);
+	}
+
+	// sam_is_defending(player) -> boolean. Real engine blocking state, not just the button
+	// being down. Correct for remote players too — vanilla syncs it with its 'SHLD' packet.
+	JSValue js_sam_is_defending(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return JS_NewBool(ctx, 0); }
+		return JS_NewBool(ctx, stats[player]->defending ? 1 : 0);
+	}
+
+	// sam_is_action_held(player, "Use") -> boolean. Reads a BOUND action, so it follows
+	// the player's keybinds. Local player only (input never leaves its machine).
+	JSValue js_sam_is_action_held(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		std::string action; if ( argc >= 2 ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { action = s; JS_FreeCString(ctx, s); } }
+		return JS_NewBool(ctx, SAMLua::isActionHeld(player, action) ? 1 : 0);
+	}
+
+	// sam_get_action_binding(player, "Use") -> string|null. The physical input behind an
+	// action ("Mouse3"), for prompts. null when the player has it unbound.
+	JSValue js_sam_get_action_binding(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		std::string action; if ( argc >= 2 ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { action = s; JS_FreeCString(ctx, s); } }
+		const char* b = SAMLua::actionBinding(player, action);
+		if ( !b || !b[0] ) { return JS_NULL; }
+		return JS_NewString(ctx, b);
+	}
+
 	JSValue js_sam_get_inventory_count(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
@@ -1499,6 +1547,10 @@ namespace
 		JS_SetPropertyStr(ctx, g, "sam_play_sound", JS_NewCFunction(ctx, js_sam_play_sound, "sam_play_sound", 2));
 		JS_SetPropertyStr(ctx, g, "sam_get_nearby_entities", JS_NewCFunction(ctx, js_sam_get_nearby_entities, "sam_get_nearby_entities", 2));
 		JS_SetPropertyStr(ctx, g, "sam_get_equipped_item", JS_NewCFunction(ctx, js_sam_get_equipped_item, "sam_get_equipped_item", 2));
+		JS_SetPropertyStr(ctx, g, "sam_get_equipped_item_id", JS_NewCFunction(ctx, js_sam_get_equipped_item_id, "sam_get_equipped_item_id", 2));
+		JS_SetPropertyStr(ctx, g, "sam_is_defending", JS_NewCFunction(ctx, js_sam_is_defending, "sam_is_defending", 1));
+		JS_SetPropertyStr(ctx, g, "sam_is_action_held", JS_NewCFunction(ctx, js_sam_is_action_held, "sam_is_action_held", 2));
+		JS_SetPropertyStr(ctx, g, "sam_get_action_binding", JS_NewCFunction(ctx, js_sam_get_action_binding, "sam_get_action_binding", 2));
 		JS_SetPropertyStr(ctx, g, "sam_get_inventory_count", JS_NewCFunction(ctx, js_sam_get_inventory_count, "sam_get_inventory_count", 2));
 		JS_SetPropertyStr(ctx, g, "sam_has_effect", JS_NewCFunction(ctx, js_sam_has_effect, "sam_has_effect", 2));
 		JS_SetPropertyStr(ctx, g, "sam_get_class", JS_NewCFunction(ctx, js_sam_get_class, "sam_get_class", 1));

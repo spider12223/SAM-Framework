@@ -56,6 +56,7 @@ extern "C" {
 #	include "game.hpp"      // engine globals
 #	include "items.hpp"     // ItemType, Status, newItem, itemPickup
 #	include "player.hpp"    // players[], isLocalPlayer()
+#	include "input.hpp"     // Input::inputs[] — bound-action reads (const only, never consume*)
 #	include "net.hpp"
 #	include "mod_tools.hpp" // ItemTooltips.itemNameStringToItemID
 #	include "stat.hpp"      // Stat members, EFF_* effect ids, stats[], MAX_PLAYER_STAT_VALUE
@@ -661,6 +662,58 @@ namespace
 		Item* it = samEquippedSlot(player, samUpper(slotC));
 		if ( !it ) { lua_pushnil(Ls); return 1; }
 		lua_pushstring(Ls, samItemName((int)it->type).c_str());
+		return 1;
+	}
+
+	// sam_get_equipped_item_id(player, slot) -> number|nil. The NUMERIC item type, so it
+	// can be compared against sam_item_id("ns:item"). sam_get_equipped_item above returns
+	// a display NAME built from the vanilla name table, which never contains custom items
+	// — so it can never match a custom id, which made "is MY item equipped?" impossible.
+	int lua_sam_get_equipped_item_id(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const char* slotC = luaL_checkstring(Ls, 2);
+		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { lua_pushnil(Ls); return 1; }
+		Item* it = samEquippedSlot(player, samUpper(slotC));
+		if ( !it ) { lua_pushnil(Ls); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)it->type);
+		return 1;
+	}
+
+	// sam_is_defending(player) -> boolean. The real engine blocking state, not just the
+	// button being down. Correct in multiplayer for remote players too: vanilla already
+	// syncs it to the host with its own 'SHLD' packet.
+	int lua_sam_is_defending(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { lua_pushboolean(Ls, 0); return 1; }
+		lua_pushboolean(Ls, stats[player]->defending ? 1 : 0);
+		return 1;
+	}
+
+	// sam_is_action_held(player, "Use") -> boolean. Reads a BOUND action, so it follows
+	// the player's own keybinds. Local player only (input never leaves its machine).
+	int lua_sam_is_action_held(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const char* action = luaL_checkstring(Ls, 2);
+		lua_pushboolean(Ls, SAMLua::isActionHeld(player, action ? action : "") ? 1 : 0);
+		return 1;
+	}
+
+	// sam_get_action_binding(player, "Use") -> string|nil. The physical input behind an
+	// action ("Mouse3"), for prompts. nil when the player has it unbound.
+	int lua_sam_get_action_binding(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const char* action = luaL_checkstring(Ls, 2);
+		const char* b = SAMLua::actionBinding(player, action ? action : "");
+		if ( !b || !b[0] ) { lua_pushnil(Ls); return 1; }
+		lua_pushstring(Ls, b);
 		return 1;
 	}
 
@@ -1698,6 +1751,14 @@ namespace
 		// Expanded player queries (Part 5).
 		lua_pushcfunction(L, lua_sam_get_equipped_item);
 		lua_setglobal(L, "sam_get_equipped_item");
+		lua_pushcfunction(L, lua_sam_get_equipped_item_id);
+		lua_setglobal(L, "sam_get_equipped_item_id");
+		lua_pushcfunction(L, lua_sam_is_defending);
+		lua_setglobal(L, "sam_is_defending");
+		lua_pushcfunction(L, lua_sam_is_action_held);
+		lua_setglobal(L, "sam_is_action_held");
+		lua_pushcfunction(L, lua_sam_get_action_binding);
+		lua_setglobal(L, "sam_get_action_binding");
 		lua_pushcfunction(L, lua_sam_get_inventory_count);
 		lua_setglobal(L, "sam_get_inventory_count");
 		lua_pushcfunction(L, lua_sam_has_effect);
@@ -1999,6 +2060,123 @@ namespace SAMLua
 		return it != keystatus.end() && it->second;
 #else
 		(void)name; return false;
+#endif
+	}
+
+	// ---- bound-action hooks ----------------------------------------------------
+	//
+	// The gameplay-relevant subset of Barony's own action names (ui/MainMenu.cpp
+	// defaultBindings). We look them up BY NAME, so whatever the player rebound an
+	// action to is what a script sees — that is the entire reason this exists instead
+	// of the raw-key path above.
+	//
+	// THE ORDER IS THE 'SAMA' WIRE FORMAT: append only, never reorder or remove, or a
+	// client and host on different builds would disagree about which action fired.
+	//
+	// Note "Hotbar Up / Select" is right-click by default: a mod CAN react to it, and
+	// because we only observe, the hotbar keeps working normally.
+	const std::vector<std::string>& samActionList()
+	{
+		static const std::vector<std::string> v = {
+			"Attack", "Defend", "Use", "Cast Spell", "Sneak",
+			"Hotbar Up / Select", "Hotbar Down / Cancel", "Hotbar Left", "Hotbar Right",
+			"Call Out", "Command NPC", "Quick Turn",
+		};
+		return v;
+	}
+
+	const char* actionNameForIndex(int index)
+	{
+		const auto& v = samActionList();
+		return ( index >= 0 && index < (int)v.size() ) ? v[index].c_str() : "";
+	}
+
+	bool isActionHeld(int player, const std::string& action)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( player < 0 || player >= MAXPLAYERS ) { return false; }
+		// const read — cannot touch binding_t::consumed, so vanilla is unaffected.
+		return Input::inputs[player].binary(action.c_str());
+#else
+		(void)player; (void)action; return false;
+#endif
+	}
+
+	const char* actionBinding(int player, const std::string& action)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( player < 0 || player >= MAXPLAYERS ) { return ""; }
+		return Input::inputs[player].binding(action.c_str()); // "" when unbound
+#else
+		(void)player; (void)action; return "";
+#endif
+	}
+
+	void dispatchAction(int player, int actionIndex, bool pressed)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( !L ) { return; }
+		if ( player < 0 || player >= MAXPLAYERS ) { return; }
+		const char* action = actionNameForIndex(actionIndex);
+		if ( !action || !action[0] ) { return; }
+
+		// The physical input behind the action, for prompts ("press Mouse3"). Only the
+		// LOCAL player's bindings live on this machine — Input::inputs[] forwards every
+		// remote index to inputs[0] in a netgame — so reporting it for a remote player
+		// would be this machine's binding, not theirs. Send it only when it's really ours.
+		const char* bindTo = ( player == clientnum ) ? actionBinding(player, action) : "";
+
+		const char* evName = pressed ? "on_action_pressed" : "on_action_released";
+		SAMLua::Event ev; ev.setName(evName);
+		ev.i("player", player); ev.s("action", action); ev.s("binding", bindTo ? bindTo : "");
+		SAMLua::dispatchEvent(ev);
+
+		SAMJs::Event jsev; jsev.setName(evName);
+		jsev.i("player", player); jsev.s("action", action); jsev.s("binding", bindTo ? bindTo : "");
+		SAMJs::dispatchEvent(jsev);
+#else
+		(void)player; (void)actionIndex; (void)pressed;
+#endif
+	}
+
+	void pollActions()
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( !L ) { return; }
+		const int player = clientnum;
+		if ( player < 0 || player >= MAXPLAYERS ) { return; }
+
+		static std::unordered_map<int, bool> prev; // action index -> last observed state
+		const auto& actions = samActionList();
+		for ( size_t i = 0; i < actions.size(); ++i )
+		{
+			// binary() is const: it reads binding_t::binary and never sets `consumed`,
+			// which is the only thing that could starve vanilla's own readers. Do NOT
+			// switch this to binaryToggle/consume* — blocking and attacking would break.
+			const bool down = Input::inputs[player].binary(actions[i].c_str());
+			auto prevIt = prev.find((int)i);
+			const bool was = ( prevIt != prev.end() ) && prevIt->second;
+			if ( down == was ) { continue; }
+			prev[(int)i] = down;
+
+			if ( multiplayer == CLIENT )
+			{
+				// Input is local, but the hooks must fire where host-only APIs work.
+				// Forward the edge; the host dispatches it for this player index.
+				strcpy((char*)net_packet->data, "SAMA");
+				net_packet->data[4] = (Uint8)player;
+				net_packet->data[5] = (Uint8)i;
+				net_packet->data[6] = down ? 1 : 0;
+				net_packet->address.host = net_server.host;
+				net_packet->address.port = net_server.port;
+				net_packet->len = 7;
+				sendPacketSafe(net_sock, -1, net_packet, 0);
+			}
+			else
+			{
+				dispatchAction(player, (int)i, down);
+			}
+		}
 #endif
 	}
 

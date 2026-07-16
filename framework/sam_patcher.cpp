@@ -320,19 +320,37 @@ void SAMPatcher::applyAll(const std::vector<SAMModManifest>& mods)
 	// Barony reads each data file into a FIXED-size buffer and null-terminates at
 	// the byte count read, silently TRUNCATING (and thus corrupting the WHOLE JSON,
 	// not just our additions) if the file exceeds it. The safe overlay cap is that
-	// file's real buffer size — NOT one global value. Sizes verified at the
-	// fp->read(buf,1,sizeof(buf)-1) sites in Barony/src/mod_tools.cpp: nearly every
-	// whole-file reader uses a 65536-byte buffer; the only smaller ones are
-	// seed_names.json (10000) and *model_positions.json (32000); items.json is 600000.
+	// file's real buffer size — NOT one global value. Every size below was read off
+	// the actual `char buf[N]` / `constexpr buffer_size` at that file's reader.
+	//
+	// Getting this wrong is harmful in BOTH directions, so the table is worth keeping
+	// honest as Barony changes:
+	//   * cap ABOVE the real buffer -> an oversized overlay passes this check and the
+	//     engine truncates it mid-JSON, corrupting the file. tiles/banners/appraisal/
+	//     class_descriptions/race_descriptions have NO size guard of their own, so this
+	//     check is the only thing standing between a modder and a corrupt data file.
+	//   * cap BELOW the real buffer -> we refuse overlays the engine had room for,
+	//     making the file silently unpatchable (item_tooltips.json had 16x headroom).
 	auto safeMaxFor = [](const std::string& tgt) -> size_t {
 		auto endsWith = [](const std::string& s, const char* suf) {
 			const std::string x(suf);
 			return s.size() >= x.size() && s.compare(s.size() - x.size(), x.size(), x) == 0;
 		};
-		if ( tgt == "items/items.json" )             { return 590000; } // 600000-byte buffer
-		if ( tgt == "data/seed_names.json" )         { return 9500;   } // 10000-byte buffer
-		if ( endsWith(tgt, "model_positions.json") ) { return 31000;  } // 32000-byte buffers
-		return 65000;                                                   // 65536-byte buffer (all others)
+		// --- readers with a LARGER buffer than the default ---
+		if ( tgt == "items/items.json" )              { return 590000;  } // 600000-byte buffer (mod_tools.cpp readItemsFromFile)
+		if ( tgt == "items/item_tooltips.json" )      { return 1000000; } // 1<<20 buffer (mod_tools.cpp:1770)
+		if ( tgt == "data/class_hotbars.json" )       { return 138000;  } // char buf[140000] (mod_tools.cpp:9895)
+		if ( tgt == "lang/item_names.json" )          { return 129000;  } // 1<<17 buffer (mod_tools.cpp:1534)
+		// --- readers with a SMALLER buffer than the default (corruption risk) ---
+		if ( tgt == "data/tiles.json" )               { return 1000;    } // char buf[1024] (init.cpp:1111)
+		if ( tgt == "data/banners.json" )             { return 2000;    } // char buf[2048] (ui/MainMenu.cpp:27024)
+		if ( tgt == "lang/book_names.json" )          { return 8000;    } // 1<<13 buffer (mod_tools.cpp:1688)
+		if ( tgt == "data/appraisal_tables.json" )    { return 31000;   } // static char buf[32000] (identify_and_appraise.cpp:605)
+		if ( tgt == "data/class_descriptions.json" )  { return 31000;   } // char buf[32000] (ui/MainMenu.cpp:13282)
+		if ( tgt == "data/race_descriptions.json" )   { return 31000;   } // static char buf[32000] (ui/MainMenu.cpp:13430)
+		if ( tgt == "data/seed_names.json" )          { return 9500;    } // char buf[10000] (mod_tools.cpp:628)
+		if ( endsWith(tgt, "model_positions.json") )  { return 31000;   } // 32000-byte buffers
+		return 65000;                                                     // 65536-byte buffer (all others)
 	};
 
 	for ( const auto& kv : byTarget )
