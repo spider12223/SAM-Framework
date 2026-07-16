@@ -902,6 +902,233 @@
           "description": "Final multiplier applied last. Default 1.0. Values at/near 0 are floored to a very slow trickle rather than dividing by zero."
         }
       }
+    },
+    "appearance": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A look forced on every player of this class. Currently the HEAD only. Resolution per player is races[theirRace] -> races.default -> their normal head, so a class never imposes a look on a race you did not write for — which is what keeps custom classes playable on every race.",
+      "properties": {
+        "survive_shapeshift": {
+          "type": "boolean",
+          "description": "Keep the class look while polymorphed or shapeshifted. Default false — a look that survives polymorph reads as a bug, not a feature."
+        },
+        "races": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Race name -> look. \"default\" covers any race with no entry of its own.",
+          "properties": {
+            "default": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The look for one race. Omit a race and its players keep their normal appearance.",
+              "properties": {
+                "head": {
+                  "type": "string",
+                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                }
+              }
+            },
+            "HUMAN": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The look for one race. Omit a race and its players keep their normal appearance.",
+              "properties": {
+                "head": {
+                  "type": "string",
+                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                }
+              }
+            },
+            "SKELETON": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The look for one race. Omit a race and its players keep their normal appearance.",
+              "properties": {
+                "head": {
+                  "type": "string",
+                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                }
+              }
+            },
+            "VAMPIRE": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The look for one race. Omit a race and its players keep their normal appearance.",
+              "properties": {
+                "head": {
+                  "type": "string",
+                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                }
+              }
+            },
+            "SUCCUBUS": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The look for one race. Omit a race and its players keep their normal appearance.",
+              "properties": {
+                "head": {
+                  "type": "string",
+                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                }
+              }
+            },
+            "GOATMAN": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The look for one race. Omit a race and its players keep their normal appearance.",
+              "properties": {
+                "head": {
+                  "type": "string",
+                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                }
+              }
+            },
+            "AUTOMATON": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The look for one race. Omit a race and its players keep their normal appearance.",
+              "properties": {
+                "head": {
+                  "type": "string",
+                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                }
+              }
+            },
+            "INCUBUS": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The look for one race. Omit a race and its players keep their normal appearance.",
+              "properties": {
+                "head": {
+                  "type": "string",
+                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                }
+              }
+            },
+            "GOBLIN": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The look for one race. Omit a race and its players keep their normal appearance.",
+              "properties": {
+                "head": {
+                  "type": "string",
+                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                }
+              }
+            },
+            "INSECTOID": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The look for one race. Omit a race and its players keep their normal appearance.",
+              "properties": {
+                "head": {
+                  "type": "string",
+                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                }
+              }
+            },
+            "RAT": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The look for one race. Omit a race and its players keep their normal appearance.",
+              "properties": {
+                "head": {
+                  "type": "string",
+                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                }
+              }
+            },
+            "TROLL": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The look for one race. Omit a race and its players keep their normal appearance.",
+              "properties": {
+                "head": {
+                  "type": "string",
+                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                }
+              }
+            },
+            "SPIDER": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The look for one race. Omit a race and its players keep their normal appearance.",
+              "properties": {
+                "head": {
+                  "type": "string",
+                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                }
+              }
+            },
+            "IMP": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The look for one race. Omit a race and its players keep their normal appearance.",
+              "properties": {
+                "head": {
+                  "type": "string",
+                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                }
+              }
+            },
+            "GNOME": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The look for one race. Omit a race and its players keep their normal appearance.",
+              "properties": {
+                "head": {
+                  "type": "string",
+                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                }
+              }
+            },
+            "GREMLIN": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The look for one race. Omit a race and its players keep their normal appearance.",
+              "properties": {
+                "head": {
+                  "type": "string",
+                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                }
+              }
+            },
+            "DRYAD": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The look for one race. Omit a race and its players keep their normal appearance.",
+              "properties": {
+                "head": {
+                  "type": "string",
+                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                }
+              }
+            },
+            "MYCONID": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The look for one race. Omit a race and its players keep their normal appearance.",
+              "properties": {
+                "head": {
+                  "type": "string",
+                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                }
+              }
+            },
+            "SALAMANDER": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The look for one race. Omit a race and its players keep their normal appearance.",
+              "properties": {
+                "head": {
+                  "type": "string",
+                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "examples": [

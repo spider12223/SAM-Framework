@@ -10,6 +10,8 @@ import {
   CLASS_SPELL_REF_PATTERN, skillLabel, skillBaseAttr,
 } from '@/data/schemas.js';
 import { ITEM_ICONS } from '@/data/itemIcons.js';
+import { ALL_HEADS, APPEARANCE_RACES, headLabel } from '@/data/characterHeads.js';
+import CharacterBox from '@/components/CharacterBox.jsx';
 import { validate } from '@/lib/validate.js';
 import { checkBalance } from '@/lib/balance.js';
 import { useMod } from '@/state/ModContext.jsx';
@@ -150,6 +152,15 @@ export default function ClassEditor() {
     for (const a of ROLL_STATS) s[a] = editDef?.mp_regen?.stat_scaling?.[a] ?? '';
     return s;
   });
+  // Per-race forced look. [{ race, head }] — kept as a list so the form can hold a
+  // half-typed row without it becoming a JSON key.
+  const [looks, setLooks] = useState(() =>
+    Object.entries(editDef?.appearance?.races ?? {}).map(([race, v]) => ({ race, head: v?.head ?? '' }))
+  );
+  const [surviveShift, setSurviveShift] = useState(editDef?.appearance?.survive_shapeshift ?? false);
+  // Preview-only: which body the rig draws. Not part of the class JSON — sex is the
+  // player's own choice at character creation, and a class can't (and shouldn't) force it.
+  const [previewSex, setPreviewSex] = useState('male');
   const [gold, setGold] = useState(editDef?.gold ?? 0);
   const [portrait, setPortrait] = useState({ path: editDef?.portrait ?? '', dataUrl: '' });
   const [portraitError, setPortraitError] = useState('');
@@ -258,6 +269,16 @@ export default function ClassEditor() {
       if (Object.keys(scaling).length) def.mp_regen.stat_scaling = scaling;
       if (regenMult !== 1) def.mp_regen.multiplier = regenMult;
     }
+    // Only emit rows that actually name a head; a blank row is someone mid-edit.
+    const races = {};
+    for (const l of looks) {
+      if (!l.race || !String(l.head).trim()) continue;
+      races[l.race] = { head: String(l.head).trim() };
+    }
+    if (Object.keys(races).length) {
+      def.appearance = { races };
+      if (surviveShift) def.appearance.survive_shapeshift = true;
+    }
     if (gold > 0) def.gold = gold;
     if (portrait.path.trim()) def.portrait = portrait.path.trim();
     return def;
@@ -284,9 +305,22 @@ export default function ClassEditor() {
   const def = useMemo(buildDef,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [name, description, attrs, offsets, skills, items, spells, growth, gold, portrait, namespace,
-      hpMpGrowth, mpRegenBase, mpRegenMult, mpRegenScaling]);
+      hpMpGrowth, mpRegenBase, mpRegenMult, mpRegenScaling, looks, surviveShift]);
   const preview = useMemo(() => JSON.stringify(def, null, 2), [def]);
   const hints = useMemo(() => checkBalance('class', def), [def]);
+
+  // The head the box rig should describe: prefer "default", else the first row that
+  // names one. Only a vanilla head resolves to a catalog entry — a custom "ns:model"
+  // has no dimensions we can know here, so the rig falls back to a male body and the
+  // label just shows the id.
+  const previewHeadId = useMemo(() => {
+    const row = looks.find((l) => l.race === 'default' && l.head) ?? looks.find((l) => l.head);
+    return row ? String(row.head).trim() : '';
+  }, [looks]);
+  const previewHead = useMemo(
+    () => ALL_HEADS.find((h) => h.id === previewHeadId) ?? null,
+    [previewHeadId]
+  );
 
   return (
     <div className="space-y-4 max-w-7xl mx-auto">
@@ -433,6 +467,84 @@ export default function ClassEditor() {
               </div>
             </div>
           )}
+        </Panel>
+
+        <Panel title="Character Look">
+          <div className="text-xs mb-2" style={{ color: '#e0b46a' }}>
+            ⏳ <b>Needs a newer S.A.M than the current release.</b> You can design and export
+            this now, but the published build ignores the <span className="sam-mono">appearance</span> block —
+            players just keep their normal head until the next release lands.
+          </div>
+          <div className="text-xs mb-2" style={{ color: '#6b5a35' }}>
+            Force a head on everyone who plays this class. Pick a race, pick a head — or
+            type a <span className="sam-mono">namespace:model</span> to use your own
+            <span className="sam-mono"> .vox</span>.
+            <span className="sam-ok"> default</span> covers any race you don't list.
+          </div>
+          <div className="text-xs mb-3 sam-error">
+            ⚠ Head only. The body can't be forced: the game only assigns torso/arms/legs
+            when that armour slot is <b>empty</b>, so a body look would vanish the moment
+            the player equips anything. A race you don't list keeps its normal look — that's
+            deliberate, so a class never breaks a race you didn't design for.
+          </div>
+          <div className="space-y-2">
+            {looks.map((l, i) => (
+              <div key={i} className="grid grid-cols-[9rem_1fr_auto] gap-2 items-center">
+                <select
+                  className="sam-input"
+                  value={l.race}
+                  onChange={(e) => setLooks((p) => p.map((x, j) => (j === i ? { ...x, race: e.target.value } : x)))}
+                >
+                  {APPEARANCE_RACES.map((r) => <option key={r} value={r}>{r}</option>)}
+                </select>
+                <input
+                  className="sam-input"
+                  list="sam-head-list"
+                  value={l.head}
+                  onChange={(e) => setLooks((p) => p.map((x, j) => (j === i ? { ...x, head: e.target.value } : x)))}
+                  placeholder="pick a head, or mymod:witch_head"
+                />
+                <button
+                  type="button" className="sam-step sam-remove" style={{ width: 26, height: 26 }}
+                  onClick={() => setLooks((p) => p.filter((_, j) => j !== i))} aria-label="remove look"
+                >✕</button>
+              </div>
+            ))}
+            <datalist id="sam-head-list">
+              {ALL_HEADS.map((h) => <option key={h.id} value={h.id}>{h.label}</option>)}
+            </datalist>
+          </div>
+          <div className="sam-divider" />
+          {/* Preview the look being edited. The rig is a body diagram at real model
+              proportions; the head can't be drawn as a box, so its name is labelled. */}
+          <CharacterBox
+            sex={previewSex}
+            onSexChange={setPreviewSex}
+            headId={previewHeadId}
+            headLabel={previewHead ? previewHead.label : previewHeadId}
+          />
+          {looks.filter((l) => l.head).length > 0 && (
+            <div className="text-xs mt-2" style={{ color: '#6b5a35' }}>
+              {looks.filter((l) => l.head).map((l, i) => (
+                <div key={i}>
+                  <span className="sam-mono">{l.race}</span> → {headLabel(l.head)}
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="mt-3 flex items-center gap-3">
+            <GoldButton onClick={() => setLooks((p) => [...p, { race: p.length ? 'HUMAN' : 'default', head: '' }])}>
+              + Add race look
+            </GoldButton>
+            {looks.length > 0 && (
+              <GoldButton
+                tone={surviveShift ? 'green' : 'gold'}
+                onClick={() => setSurviveShift((s) => !s)}
+              >
+                {surviveShift ? '✓ Survives polymorph' : '✗ Drops on polymorph'}
+              </GoldButton>
+            )}
+          </div>
         </Panel>
 
         <Panel title="HP / MP Growth">

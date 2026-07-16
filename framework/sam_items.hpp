@@ -50,8 +50,12 @@ struct SAMItemDef
 	int goldValue = 0;
 	int level = -1;                 // -1 = excluded from random generation
 
-	std::string model;              // path (PLANNED — loading a mod .vox not supported yet)
-	std::string modelFp;            // path (PLANNED — not loaded yet)
+	// Mod-supplied .vox models. The path is the mod-relative one the modder wrote, which
+	// IS its PhysFS logical path (a mod folder is mounted at the root), e.g.
+	// "models/mymod/sword.vox". Registered + resolved to an engine model index by
+	// registerModModels(); overrides modelFromItem when both are set.
+	std::string model;              // world/held model
+	std::string modelFp;            // optional separate first-person model
 	std::string modelFromItem;      // vanilla ItemType name (e.g. "SILVER_SHIELD") to clone the 3D model from
 	std::string icon;               // mod-relative PNG path — loaded into the inventory icon
 
@@ -109,4 +113,11 @@ public:
 	// renderer calls this for type >= SAM_ITEM_ID_BASE so a custom slot serves its
 	// own icon directly, independent of the vanilla images[]/appearance indexing.
 	static std::string getIconPath(int itemId);
+
+	// Load every custom .vox a registered item asked for via its "model"/"model_fp"
+	// field, and point the item at it. Must be called from Mods::loadMods AFTER the
+	// engine's own model-replacement pass — see sam_models.hpp for why the ordering
+	// matters and why growing the model tables is only safe at that exact point.
+	// No-op when no item ships a model.
+	static void registerModModels();
 };

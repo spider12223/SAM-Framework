@@ -21,6 +21,7 @@
 #include "sam_classes.hpp"
 #include "sam_workshop.hpp"
 #include "sam_items.hpp"     // SAMItems::itemIdForIdString (custom-item validation)
+#include "sam_models.hpp"    // SAMModels::modelIndexForId (resolve a class appearance head)
 #include "sam_logger.hpp"
 #include "sam_errors.hpp"
 #include "nlohmann/json.hpp"
@@ -234,6 +235,25 @@ void SAMClasses::loadFromManifest(const SAMModManifest& manifest)
 			def.growthMP      = getInt(g, "MP", 3);
 			def.growthRegenHP = getInt(g, "HP_REGEN", 3);
 			def.growthRegenMP = getInt(g, "MP_REGEN", 3);
+		}
+
+		// Optional per-class look. Only the head is supported — see SAMClassDef for why
+		// the body limbs can't be forced (they're armour-gated).
+		if ( j.contains("appearance") && j["appearance"].is_object() )
+		{
+			const json& a = j["appearance"];
+			def.surviveShapeshift = getBool(a, "survive_shapeshift", false);
+			if ( a.contains("races") && a["races"].is_object() )
+			{
+				for ( auto it = a["races"].begin(); it != a["races"].end(); ++it )
+				{
+					if ( !it.value().is_object() ) { continue; }
+					const json& entry = it.value();
+					const std::string head = getStr(entry, "head");
+					if ( head.empty() ) { continue; }
+					def.appearanceHeads[it.key()] = head;
+				}
+			}
 		}
 
 		// Optional mana-regen tuning, applied on top of the engine's computed rate.
@@ -716,6 +736,100 @@ void SAMClasses::applyStatOverrides(int classnum, Stat* stat)
 	}
 	SAM_INFO(MOD, "Applied class override for id " + std::to_string(classnum) + " ("
 		+ std::to_string(p.stats.size()) + " stat(s), " + std::to_string(p.skills.size()) + " skill(s))");
+}
+
+namespace
+{
+	// Every head index this framework registered, so the engine's hardcoded
+	// isPlayerHeadSprite switch can be widened to accept them.
+	std::set<int> s_customHeadSprites;
+
+	// Barony's RACE_* -> the Monster enum name a modder writes in "races". Kept local so
+	// this file doesn't depend on the engine's race tables; an unknown key simply never
+	// matches and falls through to "default", which is the safe outcome.
+	const char* samRaceKey(int playerRace)
+	{
+		switch ( playerRace )
+		{
+			case 0:  return "HUMAN";
+			case 1:  return "SKELETON";
+			case 2:  return "VAMPIRE";
+			case 3:  return "SUCCUBUS";
+			case 4:  return "GOATMAN";
+			case 5:  return "AUTOMATON";
+			case 6:  return "INCUBUS";
+			case 7:  return "GOBLIN";
+			case 8:  return "INSECTOID";
+			case 9:  return "RAT";
+			case 10: return "TROLL";
+			case 11: return "SPIDER";
+			case 12: return "IMP";
+			case 13: return "GNOME";
+			case 14: return "GREMLIN";
+			case 15: return "DRYAD";
+			case 16: return "MYCONID";
+			case 17: return "SALAMANDER";
+			default: return "";
+		}
+	}
+}
+
+void SAMClasses::resolveAppearance()
+{
+	s_customHeadSprites.clear();
+	for ( auto& kv : s_registry )
+	{
+		SAMClassDef& def = kv.second;
+		def.appearanceHeadIdx.clear();
+		for ( const auto& hv : def.appearanceHeads )
+		{
+			// A custom .vox registered by SAMModels wins; otherwise fall back to a plain
+			// numeric index so a modder can name a vanilla head directly.
+			int idx = SAMModels::modelIndexForId(hv.second);
+			if ( idx < 0 )
+			{
+				char* end = nullptr;
+				const long n = std::strtol(hv.second.c_str(), &end, 10);
+				if ( end && *end == '\0' && n >= 0 ) { idx = (int)n; }
+			}
+			if ( idx < 0 )
+			{
+				SAM_WARN(MOD, "Class [" + def.id + "] appearance head '" + hv.second
+					+ "' for race '" + hv.first + "' is not a registered model — ignoring it "
+					+ "(that race keeps its normal head).");
+				continue;
+			}
+			def.appearanceHeadIdx[hv.first] = idx;
+			// Only OUR models need the isPlayerHeadSprite widening; a vanilla index is
+			// already in the engine's switch.
+			if ( SAMModels::modelIndexForId(hv.second) >= 0 ) { s_customHeadSprites.insert(idx); }
+			SAM_DEBUG(MOD, "  [" + def.id + "] head for " + hv.first + " -> model " + std::to_string(idx));
+		}
+	}
+}
+
+int SAMClasses::headSpriteFor(int classnum, int playerRace)
+{
+	const SAMClassDef* def = getClass(classnum);
+	if ( !def || def->appearanceHeadIdx.empty() ) { return -1; }
+
+	const char* key = samRaceKey(playerRace);
+	if ( key && key[0] )
+	{
+		auto it = def->appearanceHeadIdx.find(key);
+		if ( it != def->appearanceHeadIdx.end() ) { return it->second; }
+	}
+	// No entry for this race — fall back to "default" if the author wrote one, else
+	// leave the player alone entirely. Never force a look onto a race nobody authored
+	// for: the limb offset table is indexed BY RACE, so a mismatched head would sit at
+	// the wrong focal point.
+	auto def_it = def->appearanceHeadIdx.find("default");
+	return ( def_it != def->appearanceHeadIdx.end() ) ? def_it->second : -1;
+}
+
+bool SAMClasses::isCustomHeadSprite(int sprite)
+{
+	return s_customHeadSprites.find(sprite) != s_customHeadSprites.end();
 }
 
 void SAMClasses::applyManaRegen(int classnum, const int* statValues, int numStats, double& regenPerMinute)

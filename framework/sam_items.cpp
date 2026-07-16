@@ -20,6 +20,7 @@
 #include "sam_workshop.hpp"
 #include "sam_logger.hpp"
 #include "sam_errors.hpp"
+#include "sam_models.hpp" // custom .vox registration (appendModels / modelIndexForId)
 #include "nlohmann/json.hpp"
 
 #include "main.hpp"    // list_t/string_t, stringCopy, stringDeconstructor, list_* helpers
@@ -32,6 +33,7 @@
 #include <sstream>
 #include <cstring>
 #include <cstdlib>
+#include <set>
 
 using nlohmann::json;
 
@@ -277,9 +279,9 @@ static bool registerItem(SAMItemDef def)
 	// Explicit 3D-model source: clone the model (world + first-person + inventory icon)
 	// from a NAMED vanilla item, so a modder can pick exactly which vanilla model their
 	// custom item wears — e.g. "model_from_item": "SILVER_SHIELD". This overrides the
-	// slot/category placeholder above. It is the supported way to reuse a vanilla model;
-	// a mod-folder "model" .vox path is NOT loaded (SAM can't grow Barony's models[] at
-	// runtime yet). A per-item "icon" PNG (below) still overrides the 2D icon if present.
+	// slot/category placeholder above, and is in turn overridden by an explicit "model"
+	// .vox (registerModModels runs later and wins). A per-item "icon" PNG (below) still
+	// overrides the 2D icon if present.
 	if ( !def.modelFromItem.empty() )
 	{
 		const int src = vanillaItemTypeFromName(def.modelFromItem);
@@ -655,4 +657,85 @@ std::string SAMItems::getIconPath(int itemId)
 		return std::string(); // fall back to the placeholder rather than a broken path
 	}
 	return out;
+}
+
+void SAMItems::registerModModels()
+{
+#ifndef EDITOR
+	// A mod's folder is PhysFS-mounted at the root, so a file the mod ships at
+	// <moddir>/models/sword.vox is logically just "models/sword.vox" — which is exactly
+	// what loadVoxel wants, and exactly what the modder wrote in the JSON. No joining
+	// against modPath here (unlike `icon`, which needs a real absolute path for the
+	// image loader). The model path IS the logical path.
+	//
+	// Consequence worth knowing: model paths share one namespace with vanilla and with
+	// every other mod. Two mods shipping "models/sword.vox" resolve to whichever mounted
+	// first. Modders should namespace their folder (models/<yourmod>/sword.vox).
+	std::vector<SAMModels::Request> reqs;
+	std::set<std::string> seen;
+
+	auto want = [&](SAMItemDef& def, std::string& path, const char* field) {
+		if ( path.empty() ) { return; }
+		// Untrusted mod JSON — the same guard `icon` gets. A model path that climbs out
+		// of the mod folder could point loadVoxel at any file on disk.
+		if ( SAMErrors::relPathEscapes(path) )
+		{
+			SAM_WARN(MOD, "Item [" + def.id + "] " + field + " path '" + path
+				+ "' escapes the mod folder — ignoring it.");
+			path.clear();
+			return;
+		}
+		if ( seen.insert(path).second )
+		{
+			// The path is its own id: unique, stable, and it saves inventing a naming
+			// scheme. Two items sharing one .vox therefore cost one model entry.
+			reqs.push_back({ path, path });
+		}
+	};
+
+	for ( auto& kv : s_registry )
+	{
+		want(kv.second, kv.second.model, "model");
+		want(kv.second, kv.second.modelFp, "model_fp");
+	}
+	if ( reqs.empty() ) { return; }
+
+	SAMModels::appendModels(reqs);
+
+	// Point each item at what it asked for. This runs after model_from_item has already
+	// set an index, so an explicit "model" deliberately wins over a cloned vanilla one.
+	for ( auto& kv : s_registry )
+	{
+		SAMItemDef& def = kv.second;
+		const int id = kv.first;
+		if ( id < 0 || id >= NUM_ITEM_SLOTS ) { continue; }
+
+		if ( !def.model.empty() )
+		{
+			const int idx = SAMModels::modelIndexForId(def.model);
+			if ( idx >= 0 )
+			{
+				items[id].index = idx;
+				// No separate short-race variant for a custom model; reuse the same one
+				// so short races don't silently fall back to the placeholder.
+				items[id].indexShort = idx;
+				// Held/first-person view defaults to the same model unless the mod gave
+				// a dedicated one below.
+				if ( def.modelFp.empty() ) { items[id].fpindex = idx; }
+				SAM_INFO(MOD, "Item [" + def.id + "] model '" + def.model
+					+ "' -> model index " + std::to_string(idx));
+			}
+		}
+		if ( !def.modelFp.empty() )
+		{
+			const int idx = SAMModels::modelIndexForId(def.modelFp);
+			if ( idx >= 0 )
+			{
+				items[id].fpindex = idx;
+				SAM_INFO(MOD, "Item [" + def.id + "] model_fp '" + def.modelFp
+					+ "' -> model index " + std::to_string(idx));
+			}
+		}
+	}
+#endif
 }

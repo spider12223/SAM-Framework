@@ -74,6 +74,20 @@ struct SAMClassDef
 	double mpRegenMultiplier = 1.0;
 	std::map<std::string, double> mpRegenStatScaling;
 
+	// Optional "appearance" block — a look forced on every player of this class.
+	//   appearanceHeads : race name -> head model id ("ns:model", or a vanilla head
+	//                     name). The key "default" covers any race with no entry.
+	//   appearanceHeadIdx : the same map resolved to engine model indices by
+	//                     resolveAppearance(). -1 means unresolved/unknown.
+	//   surviveShapeshift : keep the look while polymorphed/shapeshifted. Default false —
+	//                     a class look that survives polymorph reads as a bug.
+	// Only the HEAD is covered: it is the one limb the engine assigns unconditionally
+	// every frame. Torso/arms/legs are only assigned when that armour slot is EMPTY, so
+	// a forced body look would vanish the moment the player equips anything.
+	std::map<std::string, std::string> appearanceHeads;
+	std::map<std::string, int> appearanceHeadIdx;
+	bool surviveShapeshift = false;
+
 	std::map<std::string, int> skills;          // "PRO_X" -> 0..100
 	std::vector<SAMStartingItem> startingItems;
 	std::vector<std::string> startingSpells;    // "SPELL_X"
@@ -156,6 +170,22 @@ public:
 	// the framework free of Barony's stat internals. No-op for a vanilla class, an
 	// unregistered id, or a class without an mp_regen block.
 	static void applyManaRegen(int classnum, const int* statValues, int numStats, double& regenPerMinute);
+
+	// ---- per-class appearance -------------------------------------------------
+	// Resolve every class's appearance block against the model table. Call once after
+	// models are registered (custom heads must exist before we can index them).
+	static void resolveAppearance();
+
+	// The head model index this class forces for `playerRace`, or -1 to leave the
+	// player's own head alone. Resolution is races[race] -> races["default"] -> -1, so a
+	// class never imposes a look on a race its author didn't write for — that's what
+	// keeps custom classes playable on every race.
+	static int headSpriteFor(int classnum, int playerRace);
+
+	// Is `sprite` a head this framework registered? Barony's Entity::isPlayerHeadSprite
+	// is a hardcoded switch over vanilla indices, and a custom head answers false there
+	// — which breaks the client's player-entity binding. This backs the patch widening it.
+	static bool isCustomHeadSprite(int sprite);
 	static void applyPassives(int classnum, Stat* myStats);
 	// Grant starting items (called from initClass items chain).
 	static void applyLoadout(int player);
