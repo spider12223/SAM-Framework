@@ -329,7 +329,7 @@ export default function ClassEditor() {
         <button
           type="button"
           className="sam-panel flex items-center justify-center shrink-0 overflow-hidden"
-          style={{ width: 84, height: 84, fontSize: '2.2rem', padding: 0, cursor: 'pointer' }}
+          style={{ width: 84, height: 84, fontSize: '2.2rem', padding: 0, cursor: 'var(--sam-cursor-active)' }}
           title="Upload class portrait (PNG, 54×54)"
           onClick={() => portraitRef.current?.click()}
         >
