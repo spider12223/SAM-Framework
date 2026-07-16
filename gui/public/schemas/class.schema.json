@@ -779,11 +779,11 @@
     },
     "starting_spells": {
       "type": "array",
-      "description": "Spells the class knows from the start.",
+      "description": "Spells the class knows from the start. Each entry is EITHER a Barony spell constant name in SPELL_X form (e.g. 'SPELL_FORCEBOLT', from magic.hpp) OR a custom S.A.M spell id in 'namespace:spell' form (e.g. 'darkmage:shadow_bolt') declared by a mod's spells[] and registered by the spell loader.",
       "items": {
         "type": "string",
-        "pattern": "^SPELL_[A-Z0-9_]+$",
-        "description": "A Barony spell constant name in SPELL_X form (e.g. 'SPELL_FORCEBOLT'), from magic.hpp."
+        "pattern": "^(SPELL_[A-Z0-9_]+|[a-z][a-z0-9_]*:[a-z][a-z0-9_]*)$",
+        "description": "A vanilla spell constant ('SPELL_FORCEBOLT') or a custom spell id ('namespace:spell')."
       }
     },
     "stat_growth": {
@@ -828,6 +828,80 @@
       "minimum": 0,
       "default": 0,
       "description": "Starting gold granted to the class."
+    },
+    "hp_mp_growth": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Per-level HP/MP growth and regeneration (Barony's ClassBaseGrowths row). Distinct from 'stat_growth', which controls which ATTRIBUTES roll high/low on level-up. Every key defaults to 3 — the engine's 'default' row, which is exactly what custom classes silently used before — so omitting this block changes nothing.",
+      "properties": {
+        "HP": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "HP growth per level (vanilla range ~2-4; Barbarian/Warrior 4, Wizard 2). Default 3."
+        },
+        "MP": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "MP growth per level (vanilla range ~1-5; Wizard 5, Machinist 1). Default 3."
+        },
+        "HP_REGEN": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Health-regen growth per level (vanilla ~1-5; Rogue 5, Barbarian 1). Higher = faster HP regen. Default 3."
+        },
+        "MP_REGEN": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Mana-regen growth per level (vanilla ~1-5; Wizard/Mesmer 5, Barbarian 1). Higher = faster MP regen. Default 3."
+        }
+      }
+    },
+    "mp_regen": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional mana-regen tuning applied on top of the engine's computed rate (in MP per minute). Omit for vanilla behaviour. NOTE: vanilla scales mana regen off PER (0.05) and CHR (0.1) ONLY — INT contributes NOTHING, because the engine's table scores INT at 0.0 and skips any stat scored 0. Use stat_scaling to make INT (or any stat) actually drive regen.",
+      "properties": {
+        "base": {
+          "type": "number",
+          "description": "Flat MP-per-minute added before scaling. Default 0."
+        },
+        "stat_scaling": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "MP-per-minute gained per point of an attribute. This is how you make INT drive mana regen.",
+          "properties": {
+            "STR": {
+              "type": "number",
+              "description": "MP/min per point of STR."
+            },
+            "DEX": {
+              "type": "number",
+              "description": "MP/min per point of DEX."
+            },
+            "CON": {
+              "type": "number",
+              "description": "MP/min per point of CON."
+            },
+            "INT": {
+              "type": "number",
+              "description": "MP/min per point of INT."
+            },
+            "PER": {
+              "type": "number",
+              "description": "MP/min per point of PER."
+            },
+            "CHR": {
+              "type": "number",
+              "description": "MP/min per point of CHR."
+            }
+          }
+        },
+        "multiplier": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Final multiplier applied last. Default 1.0. Values at/near 0 are floored to a very slow trickle rather than dividing by zero."
+        }
+      }
     }
   },
   "examples": [

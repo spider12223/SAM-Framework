@@ -21,6 +21,15 @@ import {
 
 const MAX_PORTRAIT_BYTES = 256 * 1024; // portraits are 54x54 — anything big is a mistake
 
+// Per-level HP/MP growth row (Barony's ClassBaseGrowths). Vanilla rows run ~1-5 per
+// field; 3 is the engine's "default" row. Distinct from `stat_growth`, which is about
+// which ATTRIBUTES roll high/low on level-up.
+const HPMP_GROWTH_KEYS = ['HP', 'MP', 'HP_REGEN', 'MP_REGEN'];
+const HPMP_GROWTH_LABELS = {
+  HP: 'HP / level', MP: 'MP / level',
+  HP_REGEN: 'HP regen', MP_REGEN: 'MP regen',
+};
+
 const ATTR_ICONS = { STR: '💪', DEX: '🪶', CON: '❤️', INT: '📖', PER: '👁️', CHR: '🎭' };
 
 const SKILL_ICONS = {
@@ -125,6 +134,22 @@ export default function ClassEditor() {
     for (const a of editDef?.stat_growth?.weak_rolls ?? []) g[a] = 'weak';
     return g;
   });
+  // Per-level HP/MP growth + regen. 3 is the engine's "default" row — which is exactly
+  // what every custom class silently used before the growth lookup was fixed — so the
+  // form starts there and only emits JSON once you change something.
+  const [hpMpGrowth, setHpMpGrowth] = useState(() => ({
+    HP: editDef?.hp_mp_growth?.HP ?? 3,
+    MP: editDef?.hp_mp_growth?.MP ?? 3,
+    HP_REGEN: editDef?.hp_mp_growth?.HP_REGEN ?? 3,
+    MP_REGEN: editDef?.hp_mp_growth?.MP_REGEN ?? 3,
+  }));
+  const [mpRegenBase, setMpRegenBase] = useState(editDef?.mp_regen?.base ?? 0);
+  const [mpRegenMult, setMpRegenMult] = useState(editDef?.mp_regen?.multiplier ?? 1);
+  const [mpRegenScaling, setMpRegenScaling] = useState(() => {
+    const s = {};
+    for (const a of ROLL_STATS) s[a] = editDef?.mp_regen?.stat_scaling?.[a] ?? '';
+    return s;
+  });
   const [gold, setGold] = useState(editDef?.gold ?? 0);
   const [portrait, setPortrait] = useState({ path: editDef?.portrait ?? '', dataUrl: '' });
   const [portraitError, setPortraitError] = useState('');
@@ -213,6 +238,26 @@ export default function ClassEditor() {
       if (strong.length) def.stat_growth.strong_rolls = strong;
       if (weak.length) def.stat_growth.weak_rolls = weak;
     }
+    // Only emit hp_mp_growth once it differs from the engine default row, so an
+    // untouched class keeps producing byte-identical JSON to before.
+    const growthNum = (k) => (hpMpGrowth[k] === '' ? 3 : Number(hpMpGrowth[k]));
+    if (HPMP_GROWTH_KEYS.some((k) => growthNum(k) !== 3)) {
+      def.hp_mp_growth = Object.fromEntries(HPMP_GROWTH_KEYS.map((k) => [k, growthNum(k)]));
+    }
+    // Same for mp_regen: omit entirely unless the modder actually tuned something.
+    const scaling = Object.fromEntries(
+      Object.entries(mpRegenScaling)
+        .filter(([, v]) => v !== '' && Number(v) !== 0)
+        .map(([k, v]) => [k, Number(v)])
+    );
+    const regenBase = mpRegenBase === '' ? 0 : Number(mpRegenBase);
+    const regenMult = mpRegenMult === '' ? 1 : Number(mpRegenMult);
+    if (regenBase !== 0 || regenMult !== 1 || Object.keys(scaling).length) {
+      def.mp_regen = {};
+      if (regenBase !== 0) def.mp_regen.base = regenBase;
+      if (Object.keys(scaling).length) def.mp_regen.stat_scaling = scaling;
+      if (regenMult !== 1) def.mp_regen.multiplier = regenMult;
+    }
     if (gold > 0) def.gold = gold;
     if (portrait.path.trim()) def.portrait = portrait.path.trim();
     return def;
@@ -238,7 +283,8 @@ export default function ClassEditor() {
 
   const def = useMemo(buildDef,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [name, description, attrs, offsets, skills, items, spells, growth, gold, portrait, namespace]);
+    [name, description, attrs, offsets, skills, items, spells, growth, gold, portrait, namespace,
+      hpMpGrowth, mpRegenBase, mpRegenMult, mpRegenScaling]);
   const preview = useMemo(() => JSON.stringify(def, null, 2), [def]);
   const hints = useMemo(() => checkBalance('class', def), [def]);
 
@@ -387,6 +433,48 @@ export default function ClassEditor() {
               </div>
             </div>
           )}
+        </Panel>
+
+        <Panel title="HP / MP Growth">
+          <div className="text-xs mb-2" style={{ color: '#6b5a35' }}>
+            Gained per level. Vanilla runs 1–5 (Wizard MP 5, Barbarian MP 2). 3 is the
+            engine default — leave them all at 3 and nothing is written to your JSON.
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {HPMP_GROWTH_KEYS.map((k) => (
+              <Field key={k} label={HPMP_GROWTH_LABELS[k]}>
+                <NumberInput
+                  value={hpMpGrowth[k]}
+                  min={0}
+                  onChange={(v) => setHpMpGrowth((p) => ({ ...p, [k]: v }))}
+                />
+              </Field>
+            ))}
+          </div>
+          <div className="sam-divider" />
+          <div className="text-xs mb-2" style={{ color: '#6b5a35' }}>
+            <span className="sam-ok">Mana regen tuning</span> (optional). Heads up: vanilla
+            scales mana regen off <b>PER</b> and <b>CHR</b> only — <b>INT does nothing</b>.
+            Add an INT scaling below to make it matter.
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Flat MP/min" hint="added before the multiplier">
+              <NumberInput value={mpRegenBase} onChange={setMpRegenBase} />
+            </Field>
+            <Field label="Multiplier" hint="applied last; 1 = unchanged">
+              <NumberInput value={mpRegenMult} min={0} onChange={setMpRegenMult} />
+            </Field>
+          </div>
+          <div className="grid grid-cols-3 gap-2 mt-2">
+            {ROLL_STATS.map((a) => (
+              <Field key={a} label={`${ATTR_ICONS[a]} ${a}`} hint="MP/min per point">
+                <NumberInput
+                  value={mpRegenScaling[a]}
+                  onChange={(v) => setMpRegenScaling((p) => ({ ...p, [a]: v }))}
+                />
+              </Field>
+            ))}
+          </div>
         </Panel>
 
         <Panel title="Stat Growth">

@@ -324,6 +324,33 @@ void SAMSpells::buildEngineSpell(const SAMSpellDef& def)
 	if ( !def.onHitEffect.empty() ) { si.spellTags.insert(ItemTooltips_t::SPELL_TAG_STATUS_EFFECT); }
 	ItemTooltips.spellNameStringToSpellID[internalName] = id;
 
+	// 3) Hover description. ItemTooltips_t::getSpellDescriptionText (mod_tools.cpp:2459)
+	//    looks the text up as templates["template_desc_" + internalName], a vector of
+	//    lines it joins with '\n', and falls back to the "no description" default when the
+	//    key is absent. The `description` schema field was parsed but never reached that
+	//    map, so custom spells always showed the fallback. Split on newlines to match the
+	//    line-vector shape; erased again in removeEngineSpells() so a mod reload cannot
+	//    leak stale entries.
+	{
+		const std::string descKey = "template_desc_" + internalName;
+		if ( def.description.empty() )
+		{
+			ItemTooltips.templates.erase(descKey);
+		}
+		else
+		{
+			std::vector<std::string>& lines = ItemTooltips.templates[descKey];
+			lines.clear();
+			std::string line;
+			std::istringstream descStream(def.description);
+			while ( std::getline(descStream, line) )
+			{
+				if ( !line.empty() && line.back() == '\r' ) { line.pop_back(); }
+				lines.push_back(line);
+			}
+		}
+	}
+
 	SAM_INFO(MOD, "Built spell_t for " + def.name + " -> allGameSpells[" + std::to_string(id) + "]");
 }
 
@@ -378,6 +405,9 @@ void SAMSpells::removeEngineSpells()
 		}
 		ItemTooltips.spellItems.erase(id);
 		ItemTooltips.spellNameStringToSpellID.erase(samSpellInternalName(kv.second.id));
+		// Drop the hover-description template written by buildEngineSpell, so a mod
+		// reload cannot leave a stale entry behind in the shared templates map.
+		ItemTooltips.templates.erase("template_desc_" + samSpellInternalName(kv.second.id));
 	}
 }
 

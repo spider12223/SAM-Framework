@@ -105,6 +105,15 @@
         "description": "Path to a monster JSON file conforming to monster.schema.json."
       }
     },
+    "spells": {
+      "type": "array",
+      "description": "Relative paths (from the mod folder) to custom spell definition JSON files provided by this mod. The spell loader registers each into S.A.M's spell registry at a reserved runtime id (>=2000) so it can be referenced by 'namespace:spell' (e.g. in a class's starting_spells or via sam_grant_spell). Each file conforms to spell.schema.json.",
+      "items": {
+        "type": "string",
+        "pattern": "\\.json$",
+        "description": "Path to a spell JSON file conforming to spell.schema.json."
+      }
+    },
     "plugins": {
       "type": "array",
       "description": "PLANNED — the S.A.M plugin system is not yet implemented; declared .dll files are counted but NOT loaded. Leave this empty for now. (Relative paths to compiled plugin .dll files.)",

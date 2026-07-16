@@ -53,6 +53,27 @@ struct SAMClassDef
 	// Attribute / HP / MP deltas (added on top of the race base). intel == INT.
 	int str = 0, dex = 0, con = 0, intel = 0, per = 0, chr = 0, hp = 0, mp = 0;
 
+	// Per-level growth row — Barony's ClassBaseGrowths (HP, MP, HP regen, MP regen).
+	// The engine's table is indexed by class id, so custom ids fell out of bounds and
+	// every custom class silently shared the engine's "default" row {3,3,3,3}. These
+	// default to that same row, so omitting the JSON "growth" block leaves an existing
+	// mod's behaviour byte-for-byte unchanged; setting it finally makes it tunable.
+	int growthHP = 3, growthMP = 3, growthRegenHP = 3, growthRegenMP = 3;
+
+	// Optional "mp_regen" block, applied on top of Barony's computed mana-regen rate
+	// (in MP per minute; the engine then converts it to ticks-between-MP).
+	//   base         — flat add
+	//   statScaling  — stat name ("INT") -> MP/min per point. NOTE: the engine's own
+	//                  table pins INT at 0.0 and skips any stat scored 0.0, so vanilla
+	//                  INT contributes NOTHING to mana regen. This is how a class makes
+	//                  INT (or any stat) actually drive regen.
+	//   multiplier   — final scale, applied last
+	// hasMpRegen stays false when the block is absent, so the vanilla result is untouched.
+	bool hasMpRegen = false;
+	double mpRegenBase = 0.0;
+	double mpRegenMultiplier = 1.0;
+	std::map<std::string, double> mpRegenStatScaling;
+
 	std::map<std::string, int> skills;          // "PRO_X" -> 0..100
 	std::vector<SAMStartingItem> startingItems;
 	std::vector<std::string> startingSpells;    // "SPELL_X"
@@ -128,6 +149,13 @@ public:
 	// v0.7.0 F5: apply any sam_patch_class stat overrides (absolute) + sam_add_class_passive
 	// effects. Called from initClassStats after all deltas, before the HP/MP clamp.
 	static void applyStatOverrides(int classnum, Stat* myStats);
+
+	// Apply a custom class's "mp_regen" block to the engine's computed mana-regen rate.
+	// `statValues` is indexed in Barony's STAT_* order (STR, DEX, CON, INT, PER, CHR) and
+	// holds the player's already-resolved stat totals; passing them in keeps this side of
+	// the framework free of Barony's stat internals. No-op for a vanilla class, an
+	// unregistered id, or a class without an mp_regen block.
+	static void applyManaRegen(int classnum, const int* statValues, int numStats, double& regenPerMinute);
 	static void applyPassives(int classnum, Stat* myStats);
 	// Grant starting items (called from initClass items chain).
 	static void applyLoadout(int player);

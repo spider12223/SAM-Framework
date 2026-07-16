@@ -29,6 +29,7 @@ export default function ItemEditor() {
 
   const [nameId, setNameId] = useState(editDef?.name_identified ?? '');
   const [nameUnid, setNameUnid] = useState(editDef?.name_unidentified ?? '');
+  const [description, setDescription] = useState(editDef?.description ?? '');
   const [category, setCategory] = useState(editDef?.category ?? CATEGORIES[0]);
   const [slot, setSlot] = useState(editDef?.slot ?? 'NO_EQUIP');
   const [weight, setWeight] = useState(editDef?.weight ?? 0);
@@ -80,6 +81,7 @@ export default function ItemEditor() {
       level: numOr(level, 0),
     };
     if (nameUnid.trim()) def.name_unidentified = nameUnid.trim();
+    if (description.trim()) def.description = description.trim();
     if (model.trim()) def.model = model.trim();
     if (modelFp.trim()) def.model_fp = modelFp.trim();
     if (modelFromItem.trim()) def.model_from_item = modelFromItem.trim();
@@ -108,7 +110,7 @@ export default function ItemEditor() {
 
   const def = useMemo(buildDef,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [nameId, nameUnid, category, slot, weight, goldValue, level, stackable,
+    [nameId, nameUnid, description, category, slot, weight, goldValue, level, stackable,
       magicLevel, model, modelFp, modelFromItem, icon, attribs, namespace]);
   const preview = useMemo(() => JSON.stringify(def, null, 2), [def]);
   const hints = useMemo(() => checkBalance('item', def), [def]);
@@ -174,6 +176,16 @@ export default function ItemEditor() {
               <NumberInput value={magicLevel} onChange={setMagicLevel} />
             </Field>
           </div>
+          <div className="sam-divider" />
+          <Field label="Description" hint="Hover tooltip text — one line per row">
+            <textarea
+              className="sam-input"
+              rows={2}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="A shield that answers a blow with one of its own."
+            />
+          </Field>
           <div className="sam-divider" />
           <Field label="Stackable">
             <GoldButton

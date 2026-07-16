@@ -828,6 +828,80 @@
       "minimum": 0,
       "default": 0,
       "description": "Starting gold granted to the class."
+    },
+    "hp_mp_growth": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Per-level HP/MP growth and regeneration (Barony's ClassBaseGrowths row). Distinct from 'stat_growth', which controls which ATTRIBUTES roll high/low on level-up. Every key defaults to 3 — the engine's 'default' row, which is exactly what custom classes silently used before — so omitting this block changes nothing.",
+      "properties": {
+        "HP": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "HP growth per level (vanilla range ~2-4; Barbarian/Warrior 4, Wizard 2). Default 3."
+        },
+        "MP": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "MP growth per level (vanilla range ~1-5; Wizard 5, Machinist 1). Default 3."
+        },
+        "HP_REGEN": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Health-regen growth per level (vanilla ~1-5; Rogue 5, Barbarian 1). Higher = faster HP regen. Default 3."
+        },
+        "MP_REGEN": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Mana-regen growth per level (vanilla ~1-5; Wizard/Mesmer 5, Barbarian 1). Higher = faster MP regen. Default 3."
+        }
+      }
+    },
+    "mp_regen": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional mana-regen tuning applied on top of the engine's computed rate (in MP per minute). Omit for vanilla behaviour. NOTE: vanilla scales mana regen off PER (0.05) and CHR (0.1) ONLY — INT contributes NOTHING, because the engine's table scores INT at 0.0 and skips any stat scored 0. Use stat_scaling to make INT (or any stat) actually drive regen.",
+      "properties": {
+        "base": {
+          "type": "number",
+          "description": "Flat MP-per-minute added before scaling. Default 0."
+        },
+        "stat_scaling": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "MP-per-minute gained per point of an attribute. This is how you make INT drive mana regen.",
+          "properties": {
+            "STR": {
+              "type": "number",
+              "description": "MP/min per point of STR."
+            },
+            "DEX": {
+              "type": "number",
+              "description": "MP/min per point of DEX."
+            },
+            "CON": {
+              "type": "number",
+              "description": "MP/min per point of CON."
+            },
+            "INT": {
+              "type": "number",
+              "description": "MP/min per point of INT."
+            },
+            "PER": {
+              "type": "number",
+              "description": "MP/min per point of PER."
+            },
+            "CHR": {
+              "type": "number",
+              "description": "MP/min per point of CHR."
+            }
+          }
+        },
+        "multiplier": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Final multiplier applied last. Default 1.0. Values at/near 0 are floored to a very slow trickle rather than dividing by zero."
+        }
+      }
     }
   },
   "examples": [

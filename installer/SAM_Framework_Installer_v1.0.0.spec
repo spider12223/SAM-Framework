@@ -5,7 +5,7 @@ a = Analysis(
     ['installer.py'],
     pathex=[],
     binaries=[],
-    datas=[('payload/sam_barony.exe', '.'), ('payload/typescript.js', '.')],
+    datas=[],  # lean build: payload is downloaded from the latest GitHub release at install time
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -22,7 +22,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='SAM_Framework_Installer_v0.9.7',
+    name='SAM_Framework_Installer_v1.0.0',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

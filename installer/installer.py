@@ -1,13 +1,22 @@
 """
-S.A.M Framework Installer  v0.4.0
----------------------------------
+S.A.M Framework Installer
+-------------------------
 A standalone Windows installer that drops the S.A.M-patched barony.exe (plus
 typescript.js, the TypeScript compiler for .ts mod scripts) into the player's
 Barony game folder, backing up their original first. Built with tkinter +
-PyInstaller (both files are bundled inside as data and extracted at runtime).
+PyInstaller.
 
-  python installer.py            -> launch the GUI installer
-  python installer.py --selftest -> print Steam/Barony auto-detection results
+Where the payload comes from (see resolve_payload):
+  * If the installer was built WITH a bundled payload (the old .spec passed the
+    files via `datas`), it installs those — works fully offline.
+  * Otherwise it DOWNLOADS the newest release assets from GitHub at install time.
+    This is the default from v1.0.0 on: it means publishing a release updates every
+    installer already out in the wild, so we never rebuild and re-upload an ~18 MB
+    installer per version again, and the installer itself is ~100 KB.
+
+  python installer.py                    -> launch the GUI installer
+  python installer.py --selftest         -> Steam/Barony auto-detection + payload source
+  python installer.py --selftest-download-> exercise the real download + verification
 """
 
 import os
@@ -15,15 +24,30 @@ import re
 import sys
 import queue
 import shutil
+import tempfile
 import threading
+import urllib.error
+import urllib.request
 
 # --------------------------------------------------------------------------- #
 #  Constants
 # --------------------------------------------------------------------------- #
-APP_VERSION = "0.9.7"
+APP_VERSION = "1.0.0"
 APP_TITLE = f"S.A.M Framework Installer v{APP_VERSION}"
 PAYLOAD_NAME = "sam_barony.exe"   # bundled S.A.M barony.exe (see --add-data)
 TS_PAYLOAD_NAME = "typescript.js" # bundled TypeScript compiler for .ts mod scripts
+
+# Where to fetch the payload when this installer was built WITHOUT a bundled copy.
+# "/releases/latest/download/<asset>" is a permanent GitHub redirect to the newest
+# release's asset of that name — no API call, so no token and no rate limit. That is
+# the whole point: cutting a release updates every installer already in the wild, and
+# we never rebuild/re-upload an 18 MB installer again. It only works while the asset
+# names below stay stable across releases — do not rename them.
+REPO_SLUG = "spider12223/SAM-Framework"
+RELEASE_LATEST = "https://github.com/" + REPO_SLUG + "/releases/latest/download"
+EXE_ASSET = "barony.exe"
+TS_ASSET = "typescript.js"
+MIN_EXE_BYTES = 4 * 1024 * 1024   # a real barony.exe is ~13 MB; anything tiny is an error page
 
 # BSD 2-Clause requires this notice be reproduced when distributing the binary.
 ATTRIBUTION = "Built on Barony (BSD 2-Clause)  © 2013-2020 Turning Wheel LLC"
@@ -107,6 +131,98 @@ def find_barony():
     return None
 
 
+def _download(url, dst, label, on_progress=None, lo=0.0, hi=1.0):
+    """Stream `url` to `dst`, reporting progress into the [lo, hi] slice.
+    Raises a player-readable RuntimeError on any network failure."""
+    req = urllib.request.Request(url, headers={"User-Agent": "SAM-Framework-Installer/" + APP_VERSION})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp, open(dst, "wb") as out:
+            total = 0
+            try:
+                total = int(resp.headers.get("Content-Length") or 0)
+            except (TypeError, ValueError):
+                total = 0
+            done = 0
+            while True:
+                chunk = resp.read(256 * 1024)
+                if not chunk:
+                    break
+                out.write(chunk)
+                done += len(chunk)
+                if on_progress:
+                    frac = (done / total) if total else 0.0
+                    mb = done / (1024 * 1024)
+                    text = "Downloading %s… %.1f MB" % (label, mb)
+                    if total:
+                        text += " of %.1f MB" % (total / (1024 * 1024))
+                    on_progress(lo + (hi - lo) * min(1.0, frac), text)
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(
+            "Couldn't download %s from GitHub (HTTP %s).\n\n"
+            "The release may still be publishing. Wait a minute and try again, or grab "
+            "%s manually from:\n%s" % (label, exc.code, label, RELEASE_LATEST)
+        ) from exc
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise RuntimeError(
+            "Couldn't reach GitHub to download %s.\n\n"
+            "This installer fetches the latest S.A.M build at install time, so it needs "
+            "an internet connection. Check your connection (or a firewall/proxy blocking "
+            "it) and try again.\n\nDetails: %s" % (label, exc)
+        ) from exc
+
+
+def _verify_exe(path):
+    """Make sure we downloaded a real Windows executable and not a truncated file or an
+    HTML error page. This runs BEFORE we touch the player's game folder — writing a
+    bogus barony.exe would leave them unable to launch."""
+    size = os.path.getsize(path) if os.path.isfile(path) else 0
+    if size < MIN_EXE_BYTES:
+        raise RuntimeError(
+            "The downloaded barony.exe is only %d bytes, which is far too small to be "
+            "real — the download was probably interrupted or GitHub returned an error "
+            "page. Nothing was changed; please try again." % size
+        )
+    with open(path, "rb") as f:
+        if f.read(2) != b"MZ":
+            raise RuntimeError(
+                "The downloaded barony.exe isn't a Windows executable (missing the 'MZ' "
+                "header). Nothing was changed; please try again."
+            )
+
+
+def resolve_payload(on_progress=None, lo=0.0, hi=1.0):
+    """Return (sam_exe_path, typescript_path) to install from.
+
+    If this installer was built with a bundled payload we use it (works offline). A
+    lean build has no bundle, so we download the newest release assets instead — that
+    is what lets a new S.A.M release reach existing installers without rebuilding one.
+    Downloads land in a temp dir; install_sam() copies from there."""
+    bundled = resource_path(PAYLOAD_NAME)
+    if os.path.isfile(bundled):
+        if on_progress:
+            on_progress(hi, None)
+        return bundled, resource_path(TS_PAYLOAD_NAME)
+
+    tmp = tempfile.mkdtemp(prefix="sam_install_")
+    exe_dst = os.path.join(tmp, EXE_ASSET)
+    ts_dst = os.path.join(tmp, TS_ASSET)
+
+    span = hi - lo
+    _download(RELEASE_LATEST + "/" + EXE_ASSET, exe_dst, "the S.A.M barony.exe",
+              on_progress, lo, lo + span * 0.75)
+    _verify_exe(exe_dst)
+
+    # typescript.js is optional — only .ts mod scripts need it. Never fail the whole
+    # install because the TypeScript compiler didn't come down.
+    try:
+        _download(RELEASE_LATEST + "/" + TS_ASSET, ts_dst, "typescript.js",
+                  on_progress, lo + span * 0.75, hi)
+    except RuntimeError:
+        ts_dst = None
+
+    return exe_dst, ts_dst
+
+
 def install_sam(barony_exe, sam_src, ts_src=None, on_progress=None):
     """Perform the actual install: back up barony.exe -> barony_vanilla.exe (only
     if no backup exists yet, so we never clobber a real vanilla with an already-
@@ -116,8 +232,8 @@ def install_sam(barony_exe, sam_src, ts_src=None, on_progress=None):
     This is GUI-independent so it can be tested directly."""
     if not os.path.isfile(sam_src):
         raise FileNotFoundError(
-            "The bundled S.A.M barony.exe could not be found inside the installer. "
-            "The download may be corrupt — try downloading it again."
+            "The S.A.M barony.exe to install could not be found. If this installer was "
+            "meant to download it, the download did not complete — try again."
         )
 
     def report(frac, status=None):
@@ -379,9 +495,15 @@ class Installer(tk.Tk):
         # Runs OFF the main thread. Must not call any tkinter method — only the
         # queue, which is thread-safe.
         try:
-            install_sam(
-                self.barony_path, resource_path(PAYLOAD_NAME), resource_path(TS_PAYLOAD_NAME),
+            # Fetch first (bundled build: instant; lean build: downloads the newest
+            # release), then run the same proven copy/backup step over it.
+            sam_src, ts_src = resolve_payload(
                 on_progress=lambda frac, status: self._queue.put(("progress", frac, status)),
+                lo=0.0, hi=0.6,
+            )
+            install_sam(
+                self.barony_path, sam_src, ts_src,
+                on_progress=lambda frac, status: self._queue.put(("progress", 0.6 + frac * 0.4, status)),
             )
             self._queue.put(("done", None, None))
         except Exception as exc:  # noqa: BLE001 - surface everything to the user
@@ -496,10 +618,35 @@ def main():
         print("steam_install_path :", steam)
         print("steam_libraries    :", steam_library_roots(steam))
         print("barony_exe         :", barony)
-        print("payload_present    :", os.path.isfile(resource_path(PAYLOAD_NAME)),
-              "(", resource_path(PAYLOAD_NAME), ")")
+        bundled = os.path.isfile(resource_path(PAYLOAD_NAME))
+        print("payload_bundled    :", bundled, "(", resource_path(PAYLOAD_NAME), ")")
+        print("payload_source     :", "bundled (offline)" if bundled
+              else "download " + RELEASE_LATEST + "/" + EXE_ASSET)
         print("RESULT             :", "DETECTED" if barony else "NOT DETECTED")
         return 0
+
+    if "--selftest-download" in sys.argv:
+        # Exercise the real download + verification path end-to-end WITHOUT touching any
+        # game files, so the fetch can be tested before shipping an installer.
+        print("source             :", RELEASE_LATEST + "/" + EXE_ASSET)
+        try:
+            tmp = tempfile.mkdtemp(prefix="sam_selftest_")
+            exe = os.path.join(tmp, EXE_ASSET)
+            _download(RELEASE_LATEST + "/" + EXE_ASSET, exe, "barony.exe",
+                      on_progress=lambda f, s: None)
+            _verify_exe(exe)
+            with open(exe, "rb") as f:
+                head = f.read(2)
+            print("downloaded_bytes   :", os.path.getsize(exe))
+            print("pe_header          :", head.decode("latin-1"))
+            print("verify_exe         : PASSED")
+            shutil.rmtree(tmp, ignore_errors=True)
+            print("RESULT             : DOWNLOAD OK")
+            return 0
+        except Exception as exc:  # noqa: BLE001 - selftest surfaces everything
+            print("RESULT             : DOWNLOAD FAILED")
+            print("error              :", exc)
+            return 1
     Installer().mainloop()
     return 0
 

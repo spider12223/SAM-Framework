@@ -155,6 +155,10 @@ void SAMClasses::loadFromManifest(const SAMModManifest& manifest)
 			auto it = o.find(k);
 			return (it != o.end() && it->is_boolean()) ? it->get<bool>() : dv;
 		};
+		auto getReal = [&](const json& o, const char* k, double dv) -> double {
+			auto it = o.find(k);
+			return (it != o.end() && it->is_number()) ? it->get<double>() : dv;
+		};
 
 		SAMClassDef def;
 		def.id = getStr(j, "id");
@@ -216,6 +220,45 @@ void SAMClasses::loadFromManifest(const SAMModManifest& manifest)
 			def.chr = getInt(s, "CHR", 0);
 			def.hp = getInt(s, "HP", 0);
 			def.mp = getInt(s, "MP", 0);
+		}
+
+		// Per-level HP/MP growth + regen (Barony's ClassBaseGrowths row). Named
+		// "hp_mp_growth" to stay clearly distinct from "stat_growth" above, which is a
+		// different thing entirely (which ATTRIBUTES roll high/low on level-up).
+		// Defaults are the engine's "default" row, which is what custom classes silently
+		// used before, so omitting this block is a no-op for existing mods.
+		if ( j.contains("hp_mp_growth") && j["hp_mp_growth"].is_object() )
+		{
+			const json& g = j["hp_mp_growth"];
+			def.growthHP      = getInt(g, "HP", 3);
+			def.growthMP      = getInt(g, "MP", 3);
+			def.growthRegenHP = getInt(g, "HP_REGEN", 3);
+			def.growthRegenMP = getInt(g, "MP_REGEN", 3);
+		}
+
+		// Optional mana-regen tuning, applied on top of the engine's computed rate.
+		// Unknown stat names are warned about and ignored rather than failing the load.
+		if ( j.contains("mp_regen") && j["mp_regen"].is_object() )
+		{
+			const json& r = j["mp_regen"];
+			def.hasMpRegen = true;
+			def.mpRegenBase = getReal(r, "base", 0.0);
+			def.mpRegenMultiplier = getReal(r, "multiplier", 1.0);
+			if ( r.contains("stat_scaling") && r["stat_scaling"].is_object() )
+			{
+				static const std::set<std::string> kStatNames = { "STR", "DEX", "CON", "INT", "PER", "CHR" };
+				for ( auto it = r["stat_scaling"].begin(); it != r["stat_scaling"].end(); ++it )
+				{
+					if ( !it.value().is_number() ) { continue; }
+					if ( kStatNames.find(it.key()) == kStatNames.end() )
+					{
+						SAM_WARN(MOD, "Class [" + def.id + "] mp_regen.stat_scaling has unknown stat '"
+							+ it.key() + "' (expected STR/DEX/CON/INT/PER/CHR) — ignored.");
+						continue;
+					}
+					def.mpRegenStatScaling[it.key()] = it.value().get<double>();
+				}
+			}
 		}
 
 		if ( j.contains("skills") && j["skills"].is_object() )
@@ -673,6 +716,34 @@ void SAMClasses::applyStatOverrides(int classnum, Stat* stat)
 	}
 	SAM_INFO(MOD, "Applied class override for id " + std::to_string(classnum) + " ("
 		+ std::to_string(p.stats.size()) + " stat(s), " + std::to_string(p.skills.size()) + " skill(s))");
+}
+
+void SAMClasses::applyManaRegen(int classnum, const int* statValues, int numStats, double& regenPerMinute)
+{
+	const SAMClassDef* def = getClass(classnum);
+	if ( !def || !def->hasMpRegen ) { return; } // vanilla class, or no mp_regen block
+
+	regenPerMinute += def->mpRegenBase;
+
+	if ( statValues && numStats > 0 )
+	{
+		// Barony's STAT_* order. Kept local so this file stays free of stat.hpp.
+		static const char* const kStatOrder[] = { "STR", "DEX", "CON", "INT", "PER", "CHR" };
+		const int kStatOrderCount = (int)(sizeof(kStatOrder) / sizeof(kStatOrder[0]));
+		for ( const auto& kv : def->mpRegenStatScaling )
+		{
+			for ( int i = 0; i < kStatOrderCount && i < numStats; ++i )
+			{
+				if ( kv.first == kStatOrder[i] )
+				{
+					regenPerMinute += statValues[i] * kv.second;
+					break;
+				}
+			}
+		}
+	}
+
+	regenPerMinute *= def->mpRegenMultiplier;
 }
 
 // v0.7.0 Feature 5: grant a class's registered passive effects (EFF_* ids) to a Stat
