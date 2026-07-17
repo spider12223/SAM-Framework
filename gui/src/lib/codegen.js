@@ -88,6 +88,9 @@ const SEQ_PREAMBLE = [
   '-- Counter for one-off timer ids. Each temporary change reverts on its own timer, so',
   '-- two of them overlapping both undo themselves — a shared id would replace the first',
   '-- revert and quietly leak the change.',
+  '--',
+  '-- Move speed is the deliberate exception: it is one slider per player rather than a',
+  '-- stack, so every speed duration shares one id and re-applying REFRESHES it.',
   'local _tmp_seq = 0',
   '',
 ];
@@ -159,6 +162,45 @@ export function generateLua(spec) {
   return out.join('\n') + '\n';
 }
 
+/**
+ * How long an action lasts, in words — appended to the read-back.
+ *
+ * The read-back is the only part of this tab a non-programmer actually reads, so it has to
+ * carry the duration. "set move speed" and "set move speed for 3 seconds" are different
+ * abilities, and a summary that renders both as "set move speed" is lying by omission.
+ */
+function durationPhrase(row) {
+  const p = row.params || {};
+  const secs = Number(p.seconds) || 1;
+  if (p.duration === 'for a while') return ` for ${secs}s`;
+  if (p.duration === 'fading away') return ` fading out over ${secs}s`;
+  if (p.duration === 'until') {
+    const said = conditionPhrase({ id: p.until_id, params: p.until_params, negate: p.until_negate });
+    return said ? ` until ${said}` : ' until… (pick a condition)';
+  }
+  return '';
+}
+
+/**
+ * A condition as an English clause, for the read-back.
+ *
+ * A block's `label` is dropdown-speak ("stat compares to a value") and does not survive
+ * being dropped into a sentence — "until the player stat compares to a value" is not a
+ * thing anyone says. So conditions carry a `phrase` that reads as a clause, with the params
+ * filled in ("until HP < 20"). Custom bricks have no phrase, so they fall back to the label.
+ */
+function conditionPhrase(row) {
+  const d = findCondition(row?.id);
+  if (!d) return null;
+  const p = row.params || {};
+  try {
+    if (row.negate && d.phraseNeg) return d.phraseNeg(p);
+    if (!row.negate && d.phrase) return d.phrase(p);
+  } catch { /* a half-filled param — fall through to the label */ }
+  const bare = d.label.replace(/^is /, '');
+  return `the player is ${row.negate ? 'NOT ' : ''}${bare}`;
+}
+
 /** A plain-English read-back, so you can sanity-check without reading Lua. */
 export function describeRule(rule) {
   const t = findTrigger(rule?.trigger?.id);
@@ -166,11 +208,11 @@ export function describeRule(rule) {
   const when = t.id === EVERY_SECONDS
     ? `Every ${Number(rule.trigger.params?.seconds) || 1} second(s)`
     : `When ${t.whenFired}`;
-  const conds = (rule.conditions || []).map((r) => {
-    const d = findCondition(r.id);
-    return d ? `${r.negate ? 'the player is NOT' : 'the player'} ${d.label.replace(/^is /, '')}` : null;
+  const conds = (rule.conditions || []).map(conditionPhrase).filter(Boolean);
+  const acts = (rule.actions || []).map((r) => {
+    const d = findAction(r.id);
+    return d ? `${d.label}${durationPhrase(r)}` : null;
   }).filter(Boolean);
-  const acts = (rule.actions || []).map((r) => findAction(r.id)?.label).filter(Boolean);
   let s = when;
   if (conds.length) s += `, and ${conds.join(', and ')}`;
   s += acts.length ? ` → ${acts.join(', then ')}.` : ' → (add an action).';

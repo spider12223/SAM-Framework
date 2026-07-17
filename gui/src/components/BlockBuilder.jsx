@@ -18,8 +18,8 @@
 import { useMemo, useState, useEffect } from 'react';
 import { Panel, Field, Select, TextInput, NumberInput, GoldButton } from '@/components/ui.jsx';
 import {
-  TRIGGERS, allConditions, findTrigger, findCondition, findAction, actionsFor, EVERY_SECONDS,
-  registerCustom,
+  TRIGGERS, allConditions, untilCandidates, findTrigger, findCondition, findAction, actionsFor,
+  EVERY_SECONDS, registerCustom,
 } from '@/data/blocks.js';
 import { generateLua, describeRule } from '@/lib/codegen.js';
 import CustomBlockEditor from '@/components/CustomBlockEditor.jsx';
@@ -40,12 +40,63 @@ const newRule = () => ({
 
 function Param({ p, value, onChange }) {
   const common = { value: value ?? p.default, onChange };
+  const options = p.labels
+    ? p.values.map((v) => ({ value: v, label: p.labels[v] || v }))
+    : p.values;
   return (
     <Field label={p.label || p.name} className="min-w-[8rem]">
-      {p.type === 'select' ? <Select {...common} options={p.values} />
+      {p.type === 'select' ? <Select {...common} options={options} />
         : p.type === 'number' ? <NumberInput {...common} min={p.min} max={p.max} />
         : <TextInput {...common} placeholder={p.default} />}
     </Field>
+  );
+}
+
+/**
+ * The condition inside a "lasts: until…" — a whole condition block nested in an action.
+ *
+ * It reuses the same catalog the ② IF list uses, so "until" can express anything a guard
+ * can, and a custom brick someone wrote shows up here too without any extra plumbing.
+ * Writes three flat keys (until_id / until_params / until_negate) rather than a nested
+ * object, because the params blob is what gets serialized and flat survives round-trips.
+ */
+function UntilPicker({ params, onChange }) {
+  // Only conditions safe to poll on a timer — see untilCandidates(). "random chance" and
+  // anything reading event.* are filtered out at the source, so they can't be picked here.
+  const list = untilCandidates();
+  const id = params.until_id || list[0]?.id;
+  const def = findCondition(id);
+  const set = (patch) => onChange({ ...params, ...patch });
+
+  return (
+    <div className="sam-well p-2 w-full mt-1">
+      <div className="flex items-end gap-2 flex-wrap">
+        <Field label="until" className="flex-1 min-w-[11rem]">
+          <Select
+            value={id}
+            onChange={(v) => set({ until_id: v, until_params: defaults(findCondition(v)), until_negate: false })}
+            options={list.map((c) => ({ value: c.id, label: c.label }))}
+          />
+        </Field>
+        {def?.negatable && (
+          <Field label="Invert" className="w-24">
+            <Select
+              value={params.until_negate ? 'not' : 'is'}
+              onChange={(v) => set({ until_negate: v === 'not' })}
+              options={[{ value: 'is', label: 'is' }, { value: 'not', label: 'is NOT' }]}
+            />
+          </Field>
+        )}
+        {(def?.params || []).map((cp) => (
+          <Param key={cp.name} p={cp} value={params.until_params?.[cp.name]}
+            onChange={(v) => set({ until_params: { ...params.until_params, [cp.name]: v } })} />
+        ))}
+      </div>
+      <div className="text-xs mt-2" style={{ color: '#6b5a35' }}>
+        Checked 5× a second while the change is active. It undoes itself the moment this
+        becomes true — and if it never does, the change lasts the rest of the run.
+      </div>
+    </div>
   );
 }
 
@@ -82,20 +133,32 @@ function Row({ kind, row, options, onChange, onRemove }) {
             />
           </Field>
         )}
-        {(def?.params || []).map((p) => (
-          <Param key={p.name} p={p} value={row.params?.[p.name]}
-            onChange={(v) => onChange({ ...row, params: { ...row.params, [p.name]: v } })} />
-        ))}
+        {/* showIf keeps "seconds" hidden until it means something — a seconds box next to
+            "permanently" is a question with no answer. */}
+        {(def?.params || [])
+          .filter((p) => p.type !== 'condition' && (!p.showIf || p.showIf(row.params || {})))
+          .map((p) => (
+            <Param key={p.name} p={p} value={row.params?.[p.name]}
+              onChange={(v) => onChange({ ...row, params: { ...row.params, [p.name]: v } })} />
+          ))}
         <GoldButton onClick={() => setPeek((v) => !v)} className="mb-[2px]" title="Show the Lua this block becomes"
           style={{ borderColor: peek ? 'var(--color-gold)' : undefined, color: peek ? 'var(--color-gold-bright)' : undefined }}
         >{'</>'}</GoldButton>
         <GoldButton tone="red" onClick={onRemove} className="mb-[2px]">✕</GoldButton>
       </div>
+      {(def?.params || []).some((p) => p.type === 'condition' && (!p.showIf || p.showIf(row.params || {}))) && (
+        <UntilPicker params={row.params || {}} onChange={(params) => onChange({ ...row, params })} />
+      )}
       {peek && (
         <pre className="mt-2 p-2 text-xs overflow-x-auto"
           style={{ background: '#150f06', border: '1px solid #4a3617', color: '#e8d5a3', whiteSpace: 'pre' }}>{code}</pre>
       )}
       {def?.note && <div className="text-xs mt-2" style={{ color: '#6b5a35' }}>{def.note}</div>}
+      {/* A warning that depends on the CURRENT values — e.g. a timed change to HP, which the
+          engine also writes. Distinct from the static note: it only shows when it applies. */}
+      {typeof def?.warn === 'function' && def.warn(row.params || {}) && (
+        <div className="text-xs mt-2 sam-error">⚠ {def.warn(row.params || {})}</div>
+      )}
     </div>
   );
 }

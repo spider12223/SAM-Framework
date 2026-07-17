@@ -80,8 +80,183 @@ const q = (s) => JSON.stringify(String(s ?? ''));
 export const MODES = ['flat', '% of max', '% of current'];
 /** Whether an HP change is allowed to be the thing that kills you. */
 export const KILL_MODES = ['can kill', 'cannot kill'];
-/** Whether a change sticks, or undoes itself on a timer. */
-export const DURATIONS = ['permanently', 'for a while'];
+
+/**
+ * How a change ENDS. Every one of these is a real question a modder asked out loud:
+ *   "how to make an action temporal, aka the thing it changes is not infinite"   -> for a while
+ *   "is it possible to set condition for REMOVING an action?"                    -> until
+ *   "100 strength for 100 seconds, every second lost is 1 strength down"         -> fading away
+ * Before this, only "change a stat" had any of it, and only the first one.
+ */
+export const DURATIONS = ['permanently', 'for a while', 'fading away', 'until'];
+export const DURATION_LABELS = {
+  permanently: 'permanently',
+  'for a while': 'for a while, then snap back',
+  'fading away': 'fading away gradually',
+  until: 'until something happens',
+};
+
+export const POLL_TICKS = 10;       // 5 checks/sec — an "until" that reacts within 0.2s
+export const FADE_STEP_TICKS = 50;  // fades give a step back once a second
+
+/**
+ * ONE timer id for every move-speed duration in a script, on purpose.
+ *
+ * Move speed is a single slider per player, not a stack. Two abilities cannot each own a
+ * private copy of it, so the honest model is last-writer-wins with a refreshing timer —
+ * exactly how Barony's own status effects behave when you re-apply them. Giving each
+ * application a unique id (the way stat deltas correctly do) would schedule two reverts
+ * to 1.0, and the FIRST one would cancel a buff the second application had just renewed.
+ */
+const SPEED_TIMER_ID = '"sam_move_speed"';
+const NEUTRAL_SPEED = 1;
+
+/**
+ * Emit a change that can expire.
+ *
+ * Two shapes, because there are two kinds of change and conflating them is how you ship a
+ * duration that quietly corrupts a save:
+ *
+ *   ADDITIVE (a stat delta) — the revert is "subtract what we added", per application.
+ *     Overlapping buffs each undo their own contribution, so they stack correctly.
+ *
+ *     It must subtract what LANDED, not what was asked for. sam_set_stat clamps attributes
+ *     to MAX_PLAYER_STAT_VALUE (248, stat.hpp:550), so at STR 200 a "+100" only moves you
+ *     48 — and a revert of -100 leaves you at 148. That is 52 points of strength destroyed
+ *     permanently, every time the ability fires. Measuring `applied` after the write is the
+ *     whole fix, and it costs one extra sam_get_stat.
+ *
+ *   ABSOLUTE (move speed) — there is one value. "Revert" means "put it back to neutral",
+ *     and re-applying must REFRESH rather than queue a second revert. See SPEED_TIMER_ID.
+ *
+ * `until` polls on a repeating timer and cancels itself once it fires. Self-cancelling from
+ * inside the callback is safe: tickTimers takes its own reference for the due list for
+ * precisely this case (sam_lua_runtime.cpp:2500).
+ */
+function temporal({ p, apply, read, write, absolute, from, idPrefix }) {
+  const dur = p.duration || 'permanently';
+  // `apply` takes the expression to build from: the live value when nothing needs to
+  // remember it, or `_before` once we have to measure what the clamp let through.
+  // Passing the wrong one is not a style question — a permanent change that reads
+  // `_before` reads a nil global and errors on every single fire.
+  if (dur === 'permanently') return apply(read);
+
+  const secs = Math.max(0.1, Number(p.seconds) || 1);
+  const lines = [apply(absolute ? null : '_before')].flat();
+
+  if (absolute) {
+    // One value, one owner. No _tmp_seq: a fresh id per application is exactly the bug.
+    const back = `${write(NEUTRAL_SPEED)}`;
+    if (dur === 'for a while') {
+      return [...lines,
+        `sam_set_timer(${SPEED_TIMER_ID}, ${Math.max(1, Math.round(secs * TICKS_PER_SECOND))}, function()`,
+        `  ${back}`,
+        'end)'];
+    }
+    if (dur === 'until') {
+      const cond = untilExpr(p);
+      if (!cond) return lines;
+      return [...lines,
+        `sam_set_repeating_timer(${SPEED_TIMER_ID}, ${POLL_TICKS}, function()`,
+        `  if ${cond} then`,
+        `    ${back}`,
+        `    sam_cancel_timer(${SPEED_TIMER_ID})`,
+        '  end',
+        'end)'];
+    }
+    // fading: glide from the applied value to neutral over `secs`, in 1-second steps.
+    const steps = Math.max(1, Math.round(secs));
+    return [...lines,
+      `local _k = 0`,
+      `sam_set_repeating_timer(${SPEED_TIMER_ID}, ${FADE_STEP_TICKS}, function()`,
+      '  _k = _k + 1',
+      `  if _k >= ${steps} then`,
+      `    ${back}`,
+      `    sam_cancel_timer(${SPEED_TIMER_ID})`,
+      '  else',
+      `    ${write(`${from} + (${NEUTRAL_SPEED} - ${from}) * _k / ${steps}`)}`,
+      '  end',
+      'end)'];
+  }
+
+  // ---- additive ------------------------------------------------------------------
+  // "until" with no condition chosen yet is just a permanent change — don't emit the
+  // measure-and-revert scaffolding for a revert that will never run.
+  if (dur === 'until' && !untilExpr(p)) return [apply(read)];
+
+  // Measure what the clamp actually let through, and hand back exactly that.
+  const pre = [
+    `local _before = ${read}`,
+    ...lines,
+    `local _applied = ${read} - _before`,
+  ];
+  const idExpr = `"${idPrefix}_" .. _tmp_seq`;
+
+  if (dur === 'for a while') {
+    return [...pre,
+      '_tmp_seq = _tmp_seq + 1',
+      `sam_set_timer(${idExpr}, ${Math.max(1, Math.round(secs * TICKS_PER_SECOND))}, function()`,
+      `  ${write(`${read} - _applied`)}`,
+      'end)'];
+  }
+
+  if (dur === 'until') {
+    const cond = untilExpr(p);
+    if (!cond) return pre;
+    return [...pre,
+      '_tmp_seq = _tmp_seq + 1',
+      `local _id = ${idExpr}`,
+      `sam_set_repeating_timer(_id, ${POLL_TICKS}, function()`,
+      `  if ${cond} then`,
+      `    ${write(`${read} - _applied`)}`,
+      '    sam_cancel_timer(_id)',
+      '  end',
+      'end)'];
+  }
+
+  // fading: hand it back over exactly `secs` seconds, whatever amount actually landed.
+  // _held tracks what is still owed, so the total returned always equals _applied — a
+  // buff that clamped on the way up still fades to precisely the baseline.
+  const steps = Math.max(1, Math.round(secs));
+  return [...pre,
+    '_tmp_seq = _tmp_seq + 1',
+    `local _id = ${idExpr}`,
+    'local _held, _k = _applied, 0',
+    `sam_set_repeating_timer(_id, ${FADE_STEP_TICKS}, function()`,
+    '  _k = _k + 1',
+    `  local _want = _k >= ${steps} and 0 or math.floor(_applied * (${steps} - _k) / ${steps})`,
+    '  if _held ~= _want then',
+    `    ${write(`${read} - (_held - _want)`)}`,
+    '    _held = _want',
+    '  end',
+    `  if _k >= ${steps} then sam_cancel_timer(_id) end`,
+    'end)'];
+}
+
+/** The condition chosen inside a "until…" duration, as a Lua expression. */
+function untilExpr(p) {
+  const def = findCondition(p.until_id);
+  if (!def) return null;
+  const expr = def.lua(p.until_params || {});
+  // Parens are load-bearing: `not a == b` parses as `(not a) == b` in Lua.
+  return p.until_negate ? `not (${expr})` : expr;
+}
+
+/**
+ * Params every expiring action shares. One definition, so the wording can't drift.
+ *
+ * Only actions that change a LASTING VALUE get these. "give an item", "cast a spell" and
+ * "show a message" are one-off events — there is nothing to expire. "apply a status effect"
+ * already takes its own duration in ticks, because the engine expires it for you.
+ */
+const durationParams = () => [
+  { name: 'duration', type: 'select', values: DURATIONS, labels: DURATION_LABELS, default: 'permanently', label: 'lasts' },
+  {
+    name: 'seconds', type: 'number', default: 5, min: 0.1, label: 'seconds',
+    showIf: (p) => p.duration === 'for a while' || p.duration === 'fading away',
+  },
+  { name: 'until', type: 'condition', label: 'until', showIf: (p) => p.duration === 'until' },
+];
 
 /**
  * Build a HP/MP change. Handles solidius's two asks:
@@ -119,11 +294,15 @@ export const CONDITIONS = [
     id: 'has_effect', label: 'is under an effect', negatable: true,
     params: [{ name: 'effect', type: 'select', values: EFFECTS, default: 'POISONED' }],
     lua: (p) => `sam_has_effect(player, ${q(p.effect)})`,
+    phrase: (p) => `the player has ${p.effect}`,
+    phraseNeg: (p) => `the player does NOT have ${p.effect}`,
   },
   {
     id: 'is_defending', label: 'is blocking / guarding', negatable: true,
     params: [],
     lua: () => 'sam_is_defending(player)',
+    phrase: () => 'the player is blocking',
+    phraseNeg: () => 'the player is NOT blocking',
   },
   {
     id: 'equipped_is', label: 'has a specific item equipped', negatable: true,
@@ -132,11 +311,15 @@ export const CONDITIONS = [
       { name: 'item', type: 'text', default: 'IRON_SHIELD', label: 'item name or ns:item' },
     ],
     lua: (p) => `sam_get_equipped_item_id(player, ${q(p.slot)}) == sam_item_id(${q(p.item)})`,
+    phrase: (p) => `${p.slot} is ${p.item}`,
+    phraseNeg: (p) => `${p.slot} is NOT ${p.item}`,
   },
   {
     id: 'slot_empty', label: 'has a slot empty', negatable: true,
     params: [{ name: 'slot', type: 'select', values: SLOTS, default: 'WEAPON' }],
     lua: (p) => `sam_get_equipped_item_id(player, ${q(p.slot)}) == nil`,
+    phrase: (p) => `${p.slot} is empty`,
+    phraseNeg: (p) => `${p.slot} is NOT empty`,
   },
   {
     id: 'stat_cmp', label: 'stat compares to a value', negatable: false,
@@ -146,11 +329,14 @@ export const CONDITIONS = [
       { name: 'value', type: 'number', default: 10 },
     ],
     lua: (p) => `sam_get_stat(player, ${q(p.stat)}) ${p.op} ${Number(p.value) || 0}`,
+    phrase: (p) => `${p.stat} ${p.op} ${Number(p.value) || 0}`,
   },
   {
     id: 'class_is', label: 'is playing a class', negatable: true,
     params: [{ name: 'name', type: 'text', default: 'My Class', label: 'class name (exactly as in its JSON)' }],
     lua: (p) => `sam_get_class(player) == ${q(p.name)}`,
+    phrase: (p) => `the player is a ${p.name}`,
+    phraseNeg: (p) => `the player is NOT a ${p.name}`,
     note: 'Class scripts get every event for every player, so this is how an ability stays yours.',
   },
   {
@@ -160,11 +346,17 @@ export const CONDITIONS = [
       { name: 'value', type: 'number', default: 5 },
     ],
     lua: (p) => `sam_get_floor() ${p.op} ${Number(p.value) || 0}`,
+    phrase: (p) => `the floor is ${p.op} ${Number(p.value) || 0}`,
   },
   {
     id: 'chance', label: 'random chance', negatable: false,
+    // NOT offered as an "until" condition: an until-poll runs 5×/sec, so "until a 25%
+    // roll" comes up in a fraction of a second — the user means "25% per second", which
+    // is a different thing. It is a fine IF-guard (rolled once when the ability fires).
+    pollable: false,
     params: [{ name: 'percent', type: 'number', default: 25, min: 1, max: 100, label: '% of the time' }],
     lua: (p) => `math.random(100) <= ${Number(p.percent) || 0}`,
+    phrase: (p) => `a ${Number(p.percent) || 0}% roll comes up`,
   },
   {
     id: 'move_speed_cmp', label: 'move speed compares to', negatable: false,
@@ -173,6 +365,7 @@ export const CONDITIONS = [
       { name: 'value', type: 'number', default: 1, label: 'multiplier (1 = normal)' },
     ],
     lua: (p) => `sam_get_move_speed(player) ${p.op} ${Number(p.value) || 0}`,
+    phrase: (p) => `move speed is ${p.op} ${Number(p.value) || 0}`,
   },
   {
     id: 'time_played_cmp', label: 'time in this run compares to', negatable: false,
@@ -182,6 +375,7 @@ export const CONDITIONS = [
     ],
     // sam_get_time_played returns TICKS, not seconds — convert so the input reads naturally.
     lua: (p) => `sam_get_time_played() ${p.op} ${Math.round((Number(p.seconds) || 0) * TICKS_PER_SECOND)}`,
+    phrase: (p) => `time in the run is ${p.op} ${Number(p.seconds) || 0}s`,
     note: 'Measured from the start of the run. 50 ticks = 1 second.',
   },
 ];
@@ -227,29 +421,31 @@ export const ACTIONS = [
     params: [
       { name: 'stat', type: 'select', values: STATS, default: 'STR' },
       { name: 'amount', type: 'number', default: 1, label: 'add this much' },
-      { name: 'duration', type: 'select', values: DURATIONS, default: 'permanently' },
-      { name: 'seconds', type: 'number', default: 5, min: 0.1, label: 'seconds (if temporary)' },
+      ...durationParams(),
     ],
-    needsSeq: (p) => p.duration === 'for a while',
+    needsSeq: (p) => p.duration && p.duration !== 'permanently',
     lua: (p) => {
       const stat = q(p.stat);
       const amt = Number(p.amount) || 0;
-      const apply = `sam_set_stat(player, ${stat}, sam_get_stat(player, ${stat}) + (${amt}))`;
-      if (p.duration !== 'for a while') return apply;
-      const ticks = Math.max(1, Math.round((Number(p.seconds) || 1) * TICKS_PER_SECOND));
-      // Each application gets its OWN timer id. sam_set_timer replaces a timer with the
-      // same id, so a shared one would drop reverts: miss twice quickly and you'd get
-      // two -1s but only one +1 back, permanently leaking the stat.
-      return [
-        apply,
-        '_tmp_seq = _tmp_seq + 1',
-        `sam_set_timer("tmp_${p.stat}_" .. _tmp_seq, ${ticks}, function()`,
-        `  sam_set_stat(player, ${stat}, sam_get_stat(player, ${stat}) + (${-amt}))`,
-        'end)',
-      ];
+      const read = `sam_get_stat(player, ${stat})`;
+      return temporal({
+        p,
+        read,
+        write: (v) => `sam_set_stat(player, ${stat}, ${v})`,
+        apply: (base) => `sam_set_stat(player, ${stat}, ${base} + (${amt}))`,
+        idPrefix: `tmp_${p.stat}`,
+      });
     },
-    note: '“For a while” undoes itself on a timer. Each application reverts independently, '
-        + 'so it stacks correctly if it fires again before the first one is up.',
+    note: 'Each application reverts on its own timer, so overlapping buffs stack and unstack '
+        + 'correctly. It hands back what the game ACTUALLY gave you: attributes stop at 248, '
+        + 'so a +100 on a strong character adds less than 100 — and gives back less than 100.',
+    // The engine writes HP/MP/GOLD/EXP/HUNGER on its own. A timed revert of one fights it:
+    // it subtracts what it added against a number that has since moved for other reasons.
+    warn: (p) => (p.duration && p.duration !== 'permanently' && ENGINE_WRITTEN_STATS.includes(p.stat)
+      ? `${p.stat} changes on its own as you play (damage, regen, spending). A timed change `
+        + `to it will fight the game over the same number — use a plain "change HP / change `
+        + `mana" for those, and keep timed changes to STR/DEX/CON/INT/PER/CHR.`
+      : null),
   },
   {
     id: 'apply_effect', label: 'apply a status effect', category: 'Player',
@@ -272,8 +468,23 @@ export const ACTIONS = [
   },
   {
     id: 'move_speed', label: 'set move speed', category: 'Player',
-    params: [{ name: 'mult', type: 'number', default: 1.5, min: 0.1, max: 3, label: 'multiplier (0.1-3)' }],
-    lua: (p) => `sam_set_move_speed(player, ${Number(p.mult) || 1})`,
+    params: [
+      { name: 'mult', type: 'number', default: 1.5, min: 0.1, max: 3, label: 'multiplier (0.1-3)' },
+      ...durationParams(),
+    ],
+    lua: (p) => {
+      const mult = Number(p.mult) || 1;
+      return temporal({
+        p,
+        absolute: true,
+        from: mult,
+        write: (v) => `sam_set_move_speed(player, ${v})`,
+        apply: () => `sam_set_move_speed(player, ${mult})`,
+      });
+    },
+    note: 'Move speed is one slider per player, not a stack — so unlike a stat, re-applying '
+        + 'REFRESHES the timer instead of queuing a second revert, and two speed abilities '
+        + 'will override each other (the most recent wins). 3 is the engine cap; it clamps.',
   },
   {
     id: 'damage_target', label: 'damage the target', category: 'Combat',
@@ -333,6 +544,41 @@ export function registerCustom(entries) {
 }
 
 export const allConditions = () => [...CONDITIONS, ...CUSTOM_CONDITIONS];
+
+/**
+ * Conditions that are safe to use as a "lasts: until…" — i.e. safe to POLL on a timer.
+ *
+ * Two exclusions, both by DERIVATION rather than a hand-kept list so they can't rot:
+ *   - `pollable: false` marks a condition whose truth is momentary. "until a 25% roll"
+ *     polled 5×/sec fires almost instantly, which is never what the user means.
+ *   - A condition whose Lua mentions `event`. The poll runs inside a closure that captured
+ *     the on_event `event` as an upvalue, so by the time it fires that event is long stale.
+ *     No built-in reads event; a custom brick can, so we render it and check.
+ */
+export function untilCandidates() {
+  return allConditions().filter((c) => {
+    if (c.pollable === false) return false;
+    let sample;
+    try { sample = c.lua(defaultsFor(c)); } catch { return true; } // can't render -> don't exclude
+    return !/\bevent\b/.test(String(sample));
+  });
+}
+
+function defaultsFor(def) {
+  const out = {};
+  for (const p of def?.params || []) out[p.name] = p.default;
+  return out;
+}
+
+/**
+ * Stats the engine writes on its own every tick — HP/MP from regen and damage, GOLD and
+ * EXP as you play, HUNGER as it drains. A timer that "reverts" one of these is fighting the
+ * engine over the same number: by the time it fires, `read - applied` subtracts against a
+ * value that has moved for entirely unrelated reasons. The attributes (STR…CHR) and the
+ * MAX/LEVEL ceilings don't drift, so a timed change to them is meaningful. This gates the
+ * WARNING, not the feature — someone who knows what they're doing can still ship it.
+ */
+export const ENGINE_WRITTEN_STATS = ['HP', 'MP', 'GOLD', 'EXP', 'HUNGER'];
 
 /** Actions valid for a trigger: those needing an event field it doesn't carry are hidden. */
 export function actionsFor(trigger) {
