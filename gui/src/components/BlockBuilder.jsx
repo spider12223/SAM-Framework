@@ -179,6 +179,7 @@ export default function BlockBuilder({ onUseScript, hasExistingCode }) {
   const [rules, setRules] = useState(() => [newRule()]);
   const [custom, setCustom] = useState(() => loadBlocks());
   const [editing, setEditing] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     registerCustom(custom.map((b) => ({ kind: b.kind, entry: toCatalogEntry(b) })));
@@ -228,11 +229,28 @@ export default function BlockBuilder({ onUseScript, hasExistingCode }) {
         <Panel title="Generated Lua">
           <pre className="sam-well p-3 text-xs overflow-x-auto" style={{ color: '#e8d5a3', whiteSpace: 'pre' }}>{lua}</pre>
           <div className="mt-3 flex flex-col gap-2">
-            <GoldButton onClick={() => onUseScript(lua)}>▶ Use this script</GoldButton>
+            <div className="flex gap-2">
+              <GoldButton onClick={() => onUseScript(lua)} className="flex-1">▶ Use this script</GoldButton>
+              {/*
+                Copy the whole thing, because hand-selecting it off the screen loses lines.
+                Someone deleted the comment block and took `function on_event(event)` with
+                it — leaving a bare `if` and an orphan `end`, which is a SYNTAX error, so
+                the file doesn't load at all and even the ability that worked alone dies.
+              */}
+              <GoldButton onClick={() => { navigator.clipboard?.writeText(lua); setCopied(true); setTimeout(() => setCopied(false), 1200); }}>
+                {copied ? '✓ Copied' : '⎘ Copy'}
+              </GoldButton>
+            </div>
             <div className="text-xs" style={{ color: '#6b5a35' }}>
               {hasExistingCode
                 ? '⚠ This REPLACES the script you already have. Copy it first if you want to keep it.'
                 : 'Writes this into the editor.'}
+            </div>
+            <div className="text-xs" style={{ color: '#6b5a35' }}>
+              Copy the whole thing. The comments are safe to delete, but keep
+              <span className="sam-mono"> function on_event(event) </span> and its final
+              <span className="sam-mono"> end </span> — without them the file won’t parse, and a file
+              that won’t parse loads nothing at all.
             </div>
             <div className="text-xs" style={{ color: '#6b5a35' }}>
               Blocks generate Lua one way. Tweak it in <b>Advanced</b> afterwards — those edits
