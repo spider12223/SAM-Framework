@@ -38,8 +38,8 @@ offline/bundled build is a one-line `.spec` change away (see below).
    version. The Workshop description silently sat five releases behind once; this is the
    guard so it can't happen quietly again.
 1. `pip install pyinstaller`
-2. `pyinstaller SAM_Framework_Installer_v1.2.6.spec`
-3. Output: `dist/SAM_Framework_Installer_v1.2.6.exe` (~11 MB — that's PyInstaller's
+2. `pyinstaller SAM_Framework_Installer_v1.2.7.spec`
+3. Output: `dist/SAM_Framework_Installer_v1.2.7.exe` (~11 MB — that's PyInstaller's
    Python + tkinter runtime; the payload is no longer inside)
 
 ### Building an offline/bundled installer instead
