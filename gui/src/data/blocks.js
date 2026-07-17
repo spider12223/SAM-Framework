@@ -91,6 +91,38 @@ export function triggerFields(trigger) {
 
 const q = (s) => JSON.stringify(String(s ?? ''));
 
+/** How an amount is read: a flat number, or a share of the max / the current value. */
+export const MODES = ['flat', '% of max', '% of current'];
+/** Whether an HP change is allowed to be the thing that kills you. */
+export const KILL_MODES = ['can kill', 'cannot kill'];
+
+/**
+ * Build a HP/MP change. Handles solidius's two asks:
+ *   - percentages ("lose 50% hp every 5 seconds") instead of only flat amounts, and
+ *   - a can-kill flag, which floors the result at 1 exactly like the engine's own
+ *     buddhamode ("Buddhas never die!") does inside Entity::setHP.
+ *
+ * "% of current" decays — halving 100 gives 50, 25, 12… it approaches death without a
+ * flat guarantee. "% of max" is a constant bite. They feel very different, so the
+ * builder makes you choose rather than guessing for you.
+ *
+ * math.floor is deliberate: on a LOSS it rounds away from you (loses the extra
+ * fraction), so a percentage tick can always make progress instead of stalling at 0.
+ */
+function hpChange(stat, p) {
+  const amt = Number(p.amount) || 0;
+  const maxStat = stat === 'HP' ? 'MAXHP' : 'MAXMP';
+  let delta;
+  if (p.mode === '% of max') delta = `math.floor(sam_get_stat(player, ${q(maxStat)}) * ${amt} / 100)`;
+  else if (p.mode === '% of current') delta = `math.floor(sam_get_stat(player, ${q(stat)}) * ${amt} / 100)`;
+  else delta = `(${amt})`;
+  const target = `sam_get_stat(player, ${q(stat)}) + ${delta}`;
+  // sam_set_stat already clamps the top end to MAX, so only the floor needs handling.
+  return p.can_kill === 'cannot kill'
+    ? `sam_set_stat(player, ${q(stat)}, math.max(1, ${target}))`
+    : `sam_set_stat(player, ${q(stat)}, ${target})`;
+}
+
 /**
  * Conditions — guards placed before the actions. Each maps to a real API call.
  * `negatable` gives solidius's "having no effect" for free.
@@ -185,15 +217,23 @@ export const ACTIONS = [
     lua: (p) => `sam_grant_gold(player, ${Number(p.amount) || 0})`,
   },
   {
-    id: 'heal', label: 'heal (or hurt) the player', category: 'Player',
-    params: [{ name: 'amount', type: 'number', default: 5, label: 'HP (negative to hurt)' }],
-    lua: (p) => `sam_set_stat(player, "HP", sam_get_stat(player, "HP") + (${Number(p.amount) || 0}))`,
-    note: 'sam_set_stat clamps to MAXHP, so this can\'t overheal.',
+    id: 'heal', label: 'change HP (heal or hurt)', category: 'Player',
+    params: [
+      { name: 'amount', type: 'number', default: 5, label: 'amount (negative to hurt)' },
+      { name: 'mode', type: 'select', values: MODES, default: 'flat' },
+      { name: 'can_kill', type: 'select', values: KILL_MODES, default: 'can kill' },
+    ],
+    lua: (p) => hpChange('HP', p),
+    note: 'Percent of CURRENT halves and halves (it decays); percent of MAX is a steady bite. '
+        + '“cannot kill” floors you at 1 HP — the same thing the engine\'s own buddhamode does.',
   },
   {
-    id: 'restore_mp', label: 'restore (or drain) mana', category: 'Player',
-    params: [{ name: 'amount', type: 'number', default: 5, label: 'MP (negative to drain)' }],
-    lua: (p) => `sam_set_stat(player, "MP", sam_get_stat(player, "MP") + (${Number(p.amount) || 0}))`,
+    id: 'restore_mp', label: 'change mana', category: 'Player',
+    params: [
+      { name: 'amount', type: 'number', default: 5, label: 'amount (negative to drain)' },
+      { name: 'mode', type: 'select', values: MODES, default: 'flat' },
+    ],
+    lua: (p) => hpChange('MP', { ...p, can_kill: 'can kill' }), // MP can't kill you
   },
   {
     id: 'set_stat', label: 'change a stat', category: 'Player',
