@@ -537,8 +537,12 @@ select.sam-input { appearance: none; cursor: var(--sam-cursor); }
   text-shadow: 0 1px 2px #000; pointer-events: none;
 }
 
+.sam-loadout-right { display: flex; flex-direction: column; gap: 0.8rem; }
 .sam-backpack { padding: 0.7rem 0.8rem; }
 .sam-backpack-grid { display: grid; grid-template-columns: repeat(auto-fill, 64px); gap: 4px; justify-content: start; }
+.sam-hotbar-panel { padding: 0.7rem 0.8rem; }
+.sam-hotbar { display: flex; flex-wrap: wrap; gap: 4px; }
+.sam-hotbar .sam-slot-label { color: var(--color-gold, #c9a227); font-family: Consolas, monospace; letter-spacing: 0; font-size: 0.68rem; }
 
 /* ---- inline detail strip + blessing dial ---------------------------- */
 .sam-detailstrip { padding: 0.9rem 1rem; }

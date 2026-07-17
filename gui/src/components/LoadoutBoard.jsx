@@ -115,7 +115,7 @@ function BlessingDial({ value, onChange }) {
 }
 
 /** The inline detail strip: blessing + status + identified + count + hotbar, and a live read-out. */
-function DetailStrip({ entry, patch, iconFor, onRemove }) {
+function DetailStrip({ entry, patch, onHotbar, iconFor, onRemove }) {
   const equipped = entry.equip;
   const plain = `${blessingLabel(entry.beatitude).toLowerCase()} ${entry.type}${entry.status !== 'SERVICABLE' ? ` (${entry.status.toLowerCase()})` : ''}${entry.identified ? '' : ', unidentified'}`;
   return (
@@ -146,8 +146,8 @@ function DetailStrip({ entry, patch, iconFor, onRemove }) {
         {!equipped && (
           <div>
             <div className="sam-label mb-1" style={{ fontSize: '0.72rem' }}>Hotbar</div>
-            <Select value={String(entry.hotbar_slot)} onChange={(v) => patch({ hotbar_slot: Number(v) })}
-              options={[{ value: '-1', label: 'none' }, ...Array.from({ length: 10 }, (_, i) => ({ value: String(i), label: `slot ${i}` }))]} />
+            <Select value={String(entry.hotbar_slot)} onChange={(v) => onHotbar(Number(v))}
+              options={[{ value: '-1', label: 'in pack' }, ...Array.from({ length: 10 }, (_, i) => ({ value: String(i), label: `slot ${i === 9 ? 0 : i + 1}` }))]} />
           </div>
         )}
       </div>
@@ -160,15 +160,31 @@ export default function LoadoutBoard({ items, onChange, allTypes, iconFor, categ
   const [picker, setPicker] = useState(null); // { slot } for equip, { backpack:true } for pack
   const [selectedKey, setSelectedKey] = useState(null);
 
-  const backpack = items.filter((it) => !it.equip);
+  const isPinned = (it) => !it.equip && Number(it.hotbar_slot) >= 0;
+  const backpack = items.filter((it) => !it.equip && !isPinned(it)); // loose (unpinned) items
+  const hotbarItem = (n) => items.find((it) => isPinned(it) && Number(it.hotbar_slot) === n);
   const selected = items.find((it) => it._key === selectedKey);
 
   const patch = (key, fields) => onChange(items.map((it) => (it._key === key ? { ...it, ...fields } : it)));
   const remove = (key) => { onChange(items.filter((it) => it._key !== key)); if (key === selectedKey) setSelectedKey(null); };
 
+  /** Pin an item to a hotbar slot (or -1 to send it back to the loose backpack), demoting
+   *  whatever held that slot so two starting items never fight over one hotbar key. */
+  const setHotbar = (key, n) => onChange(items.map((it) => {
+    if (it._key === key) return { ...it, equip: false, hotbar_slot: n, _slot: undefined };
+    if (n >= 0 && isPinned(it) && Number(it.hotbar_slot) === n) return { ...it, hotbar_slot: -1 };
+    return it;
+  }));
+
   const pick = (type) => {
     if (!picker) return;
-    if (picker.backpack) {
+    if (picker.hotbar != null) {
+      const n = picker.hotbar;
+      const demoted = items.map((it) => (isPinned(it) && Number(it.hotbar_slot) === n ? { ...it, hotbar_slot: -1 } : it));
+      const e = { ...newEntry(type, false), hotbar_slot: n };
+      onChange([...demoted, e]);
+      setSelectedKey(e._key);
+    } else if (picker.backpack) {
       const existing = backpack.find((it) => it.type === type);
       if (existing) patch(existing._key, { count: existing.count + 1 });
       else { const e = newEntry(type, false); onChange([...items, e]); setSelectedKey(e._key); }
@@ -198,7 +214,7 @@ export default function LoadoutBoard({ items, onChange, allTypes, iconFor, categ
     if (!s || placed.has(s)) conflicts.push(it); else placed.add(s);
   }
 
-  const pickerTypes = picker?.backpack ? allTypes
+  const pickerTypes = (picker?.backpack || picker?.hotbar != null) ? allTypes
     : picker ? [...itemsForSlot(picker.slot.id, allTypes), ...allTypes.filter((t) => t.includes(':'))]
     : allTypes;
 
@@ -224,22 +240,46 @@ export default function LoadoutBoard({ items, onChange, allTypes, iconFor, categ
           </div>
         </div>
 
-        {/* BACKPACK */}
-        <div className="sam-well sam-backpack">
-          <div className="sam-label mb-2" style={{ fontSize: '0.78rem' }}>Backpack · {backpack.length}</div>
-          <div className="sam-backpack-grid">
-            {backpack.map((it) => (
-              <Cell key={it._key} entry={it} ghostIcon={iconFor(it.type)}
-                selected={it._key === selectedKey}
-                onClick={() => setSelectedKey(it._key)} onRemove={() => remove(it._key)} />
-            ))}
-            <button type="button" className="sam-slot sam-slot-empty" title="Stash an item" onClick={() => setPicker({ backpack: true })}>
-              <span className="sam-slot-ghost" aria-hidden>+</span>
-            </button>
+        {/* BACKPACK + HOTBAR */}
+        <div className="sam-loadout-right">
+          <div className="sam-well sam-backpack">
+            <div className="sam-label mb-2" style={{ fontSize: '0.78rem' }}>Backpack · {backpack.length}</div>
+            <div className="sam-backpack-grid">
+              {backpack.map((it) => (
+                <Cell key={it._key} entry={it} ghostIcon={iconFor(it.type)}
+                  selected={it._key === selectedKey}
+                  onClick={() => setSelectedKey(it._key)} onRemove={() => remove(it._key)} />
+              ))}
+              <button type="button" className="sam-slot sam-slot-empty" title="Stash an item" onClick={() => setPicker({ backpack: true })}>
+                <span className="sam-slot-ghost" aria-hidden>+</span>
+              </button>
+            </div>
+            {backpack.length === 0 && (
+              <div className="text-xs mt-2" style={{ color: '#6b5a35' }}>Backpack empty — click + to stash starting supplies.</div>
+            )}
           </div>
-          {backpack.length === 0 && (
-            <div className="text-xs mt-2" style={{ color: '#6b5a35' }}>Backpack empty — click + to stash starting supplies.</div>
-          )}
+
+          <div className="sam-well sam-hotbar-panel">
+            <div className="sam-label mb-2" style={{ fontSize: '0.78rem' }}>Hotbar</div>
+            <div className="sam-hotbar">
+              {Array.from({ length: 10 }, (_, n) => {
+                const it = hotbarItem(n);
+                return (
+                  <div key={n} className="sam-slot-wrap">
+                    <div className="sam-slot-label">{n === 9 ? 0 : n + 1}</div>
+                    <Cell
+                      entry={it}
+                      ghostIcon={it ? iconFor(it.type) : ''}
+                      selected={it && it._key === selectedKey}
+                      onClick={() => (it ? setSelectedKey(it._key) : setPicker({ hotbar: n }))}
+                      onRemove={() => it && remove(it._key)}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+            <div className="text-xs mt-2" style={{ color: '#6b5a35' }}>Numbered quick-use slots. Click one to pin a starting item, or set an item's Hotbar in its details. A pinned item still counts as in the pack.</div>
+          </div>
         </div>
       </div>
 
@@ -259,7 +299,7 @@ export default function LoadoutBoard({ items, onChange, allTypes, iconFor, categ
 
       {/* DETAIL STRIP */}
       {selected
-        ? <div className="mt-4"><DetailStrip entry={selected} patch={(f) => patch(selected._key, f)} iconFor={iconFor} onRemove={() => remove(selected._key)} /></div>
+        ? <div className="mt-4"><DetailStrip entry={selected} patch={(f) => patch(selected._key, f)} onHotbar={(n) => setHotbar(selected._key, n)} iconFor={iconFor} onRemove={() => remove(selected._key)} /></div>
         : <div className="text-sm mt-4 text-center" style={{ color: '#6b5a35' }}>Click a slot to gear up, or click an item to set its blessing.</div>}
 
       {picker && (
@@ -268,7 +308,9 @@ export default function LoadoutBoard({ items, onChange, allTypes, iconFor, categ
           iconFor={iconFor}
           categoryFor={categoryFor}
           categories={categories}
-          title={picker.backpack ? 'Stash an Item' : `Choose ${findSlot(picker.slot.id)?.label} Gear`}
+          title={picker.hotbar != null ? `Hotbar Slot ${picker.hotbar === 9 ? 0 : picker.hotbar + 1}`
+            : picker.backpack ? 'Stash an Item'
+            : `Choose ${findSlot(picker.slot.id)?.label} Gear`}
           onPick={pick}
           onClose={() => setPicker(null)}
         />
