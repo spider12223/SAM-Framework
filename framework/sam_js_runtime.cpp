@@ -1640,7 +1640,45 @@ namespace
 
 		if ( !sc.enabled )
 		{
-			SAM_WARN("JS", "script '" + label + "' defines neither on_event(event) nor on_tick(event) — no handler registered.");
+			// Mirror of the Lua diagnostic: name the mistake. Defining a function after an
+			// EVENT name (on_action_pressed, on_hit, ...) registers nothing, because only
+			// on_event/on_tick are ever called. See the Lua note for why this trips people.
+			std::string strays;
+			JSValue gobj = JS_GetGlobalObject(ctx);
+			JSPropertyEnum* props = nullptr;
+			uint32_t count = 0;
+			if ( JS_GetOwnPropertyNames(ctx, &props, &count, gobj, JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) == 0 )
+			{
+				for ( uint32_t i = 0; i < count; ++i )
+				{
+					const char* n = JS_AtomToCString(ctx, props[i].atom);
+					if ( n && strncmp(n, "on_", 3) == 0 && strcmp(n, "on_event") != 0 && strcmp(n, "on_tick") != 0 )
+					{
+						JSValue v = JS_GetProperty(ctx, gobj, props[i].atom);
+						if ( JS_IsFunction(ctx, v) )
+						{
+							if ( !strays.empty() ) { strays += ", "; }
+							strays += std::string(n) + "()";
+						}
+						JS_FreeValue(ctx, v);
+					}
+					if ( n ) { JS_FreeCString(ctx, n); }
+					JS_FreeAtom(ctx, props[i].atom);
+				}
+				js_free(ctx, props);
+			}
+			JS_FreeValue(ctx, gobj);
+
+			if ( !strays.empty() )
+			{
+				SAM_WARN("JS", "script '" + label + "' defines " + strays + " — that is an EVENT NAME, not a handler, "
+					"so S.A.M never calls it and this script does nothing. S.A.M only calls on_event(event) and "
+					"on_tick(event). Write it as: function on_event(event) { if (event.name === \"<the event>\") { ... } }");
+			}
+			else
+			{
+				SAM_WARN("JS", "script '" + label + "' defines neither on_event(event) nor on_tick(event) — no handler registered.");
+			}
 		}
 		else
 		{

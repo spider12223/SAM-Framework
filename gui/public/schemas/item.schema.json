@@ -103,10 +103,17 @@
     },
     "attributes": {
       "type": "object",
-      "description": "Named integer attributes/effects for the item (maps to ItemGeneric.attributes). Keys are attribute names, values are integers.",
-      "additionalProperties": {
-        "type": "integer",
-        "description": "An integer attribute value."
+      "description": "Numeric bonuses the engine applies to this item. ONLY these keys are read: ATK (added by attackGetAttack for weapons) and AC (added by armorGetAC for armor/shields). Any other key would load and then be silently ignored, so they are rejected here instead. Item behaviour (effects, procs, abilities) comes from a companion script next to this JSON, not from a key.",
+      "additionalProperties": false,
+      "properties": {
+        "ATK": {
+          "type": "integer",
+          "description": "Attack bonus. Read for weapons; ignored on non-weapons."
+        },
+        "AC": {
+          "type": "integer",
+          "description": "Armor Class bonus. Read for armor and shields; ignored on other categories."
+        }
       }
     },
     "on_hit_effect": {

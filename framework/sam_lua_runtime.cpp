@@ -1991,7 +1991,46 @@ namespace SAMLua
 
 		if ( !s.enabled )
 		{
-			SAM_WARN("LUA", "Script '" + path + "' loaded but defines neither on_event(event) nor on_tick(event).");
+			// Name the actual mistake instead of just saying something's missing. By far the
+			// most common cause is defining a function named after an EVENT —
+			// `function on_action_pressed(event)` — because on_tick IS its own function while
+			// every other hook arrives as event.name through on_event. That asymmetry catches
+			// people constantly, and the old warning ("defines neither...") didn't hint at it.
+			// Any on_* global that isn't a handler is almost certainly this error.
+			std::string strays;
+			// Read the globals table from the registry, not via the name "_G" — a script
+			// is free to shadow or nil that name, and this diagnostic must still work.
+			lua_pushglobaltable(L);
+			const int gt = lua_gettop(L); // absolute index; lua_next shifts the stack
+			lua_pushnil(L);
+			while ( lua_next(L, gt) != 0 )
+			{
+				// key at -2, value at -1. Only read STRING keys: lua_tostring on a number
+				// key would coerce it in place and corrupt lua_next's iteration state.
+				if ( lua_isfunction(L, -1) && lua_type(L, -2) == LUA_TSTRING )
+				{
+					const char* n = lua_tostring(L, -2);
+					if ( n && strncmp(n, "on_", 3) == 0
+						&& strcmp(n, "on_event") != 0 && strcmp(n, "on_tick") != 0 )
+					{
+						if ( !strays.empty() ) { strays += ", "; }
+						strays += std::string(n) + "()";
+					}
+				}
+				lua_pop(L, 1); // pop value, keep key for the next lua_next
+			}
+			lua_pop(L, 1); // pop the globals table
+
+			if ( !strays.empty() )
+			{
+				SAM_WARN("LUA", "Script '" + path + "' defines " + strays + " — that is an EVENT NAME, not a handler, "
+					"so S.A.M never calls it and this script does nothing. S.A.M only calls on_event(event) and "
+					"on_tick(event). Write it as: function on_event(event) if event.name == \"<the event>\" then ... end end");
+			}
+			else
+			{
+				SAM_WARN("LUA", "Script '" + path + "' loaded but defines neither on_event(event) nor on_tick(event).");
+			}
 		}
 		else
 		{
