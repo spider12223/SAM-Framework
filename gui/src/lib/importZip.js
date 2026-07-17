@@ -45,14 +45,35 @@ async function readDef(zip, path, kind, report) {
   return def;
 }
 
+/** Wrap a JSZip so every lookup is transparently prefixed with the mod's folder. Exports
+ *  now nest everything under `<namespace>/`; this lets the rest of the importer keep using
+ *  plain root-relative paths (mod.json, classes/x.json) whether or not that wrapper exists. */
+function withPrefix(zip, prefix) {
+  if (!prefix) return zip;
+  return {
+    file: (p) => zip.file(prefix + p),
+    forEach: (cb) => zip.forEach((relPath, entry) => {
+      if (relPath.startsWith(prefix)) cb(relPath.slice(prefix.length), entry);
+    }),
+  };
+}
+
 export async function parseModZip(file) {
   const report = [];
   const scriptPaths = new Set(); // companion scripts consumed, so they aren't re-captured as assets
-  const zip = await JSZip.loadAsync(file);
+  const raw = await JSZip.loadAsync(file);
+
+  // mod.json is at the root of an old zip, or under a single top folder in a new one.
+  let prefix = '';
+  if (!raw.file('mod.json')) {
+    const wrapped = Object.keys(raw.files).filter((p) => p.endsWith('/mod.json') && p.split('/').length === 2);
+    if (wrapped.length === 1) prefix = wrapped[0].slice(0, -'mod.json'.length);
+  }
+  const zip = withPrefix(raw, prefix);
 
   const modEntry = zip.file('mod.json');
   if (!modEntry) {
-    throw new Error('No mod.json at the root of the zip — is this a S.A.M mod?');
+    throw new Error('No mod.json in the zip — is this a S.A.M mod?');
   }
 
   let manifest;

@@ -314,10 +314,11 @@ export default function ModBuilder() {
         </div>
       )}
       {notice && <SavedNote>{notice}</SavedNote>}
-      {savedAs && <SavedNote>Exported <span className="sam-mono">{savedAs}.zip</span> — unzip into <span className="sam-mono">Barony/mods/{savedAs}/</span></SavedNote>}
+      {savedAs && <SavedNote>Exported <span className="sam-mono">{savedAs}.zip</span> — it holds a <span className="sam-mono">{savedAs}/</span> folder; unzip it straight into <span className="sam-mono">Barony/mods/</span></SavedNote>}
       {fallbackMsg && (
         <div className="sam-well p-3 text-sm" style={{ color: 'var(--color-parchment)' }}>
-          Your browser can't write files directly, so the mod was downloaded as a zip. Unzip it so you get{' '}
+          Your browser can't write files directly, so the mod was downloaded as a zip. It already holds a{' '}
+          <span className="sam-mono">{meta.namespace}/</span> folder — unzip it into <span className="sam-mono">Barony/mods/</span> so you get{' '}
           <span className="sam-mono">Barony/mods/{meta.namespace}/mod.json</span>, then launch Barony. (Direct "Test in Barony" needs Chromium — Chrome, Edge.)
         </div>
       )}

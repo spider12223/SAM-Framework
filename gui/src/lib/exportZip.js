@@ -138,12 +138,17 @@ export function buildModFiles(mod) {
   return files;
 }
 
-/** Returns the Blob of the zip. */
+/** Returns the Blob of the zip.
+ *  Everything is nested under a single `<namespace>/` folder so unzipping drops a clean
+ *  mod folder straight into Barony/mods/, instead of spraying loose files into whatever
+ *  directory you unzipped in. Import (parseModZip) strips this wrapper back off. */
 export async function buildModZip(mod) {
   const zip = new JSZip();
+  const folder = (mod?.meta?.namespace || 'sam_mod').trim() || 'sam_mod';
   for (const f of buildModFiles(mod)) {
-    if (f.base64 !== undefined) zip.file(f.path, f.base64, { base64: true });
-    else zip.file(f.path, f.text);
+    const p = `${folder}/${f.path}`;
+    if (f.base64 !== undefined) zip.file(p, f.base64, { base64: true });
+    else zip.file(p, f.text);
   }
   return zip.generateAsync({ type: 'blob' });
 }
