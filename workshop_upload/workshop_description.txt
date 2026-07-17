@@ -21,7 +21,7 @@ Mod Barony with plain JSON files. No C++, no compiler, no engine knowledge. Writ
 [h1]Scripting — Lua, JavaScript, TypeScript[/h1]
 JSON says what your content [i]is[/i]. A script says what it [i]does[/i]. Drop a .lua, .js or .ts file next to any class or item JSON and it loads automatically (TypeScript is transpiled for you). No C++, no compiler.
 
-[b]49 hooks[/b] — combat (on_hit, on_kill, on_block, on_before_damage), lifecycle (level up, death, floor change, game start), items, shops, chests, traps, monsters, keyboard input, a per-tick handler, and bound actions (Attack / Defend / Use) that follow whatever the player rebound them to.
+[b]57 hooks[/b] — combat (on_hit, on_kill, on_block, on_before_damage), lifecycle (level up, death, floor change, game start), items (including picking one up off the ground), shops, chests, traps, monsters, keyboard input, a per-tick handler, world interactions (doors, levers, fountains, sinks, orb pedestals, teleporters, projectile impacts), and bound actions (Attack / Defend / Use) that follow whatever the player rebound them to.
 
 [b]53 host functions[/b] — grant items and gold, read and set stats, apply effects, cast spells, deal or modify damage, set move speed, read equipped items, timers, persistent per-mod data, full monster scripting by UID, and runtime patching of existing content that reverts when your mod unloads.
 
