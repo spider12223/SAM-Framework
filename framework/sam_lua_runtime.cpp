@@ -836,12 +836,30 @@ namespace
 		return 1;
 	}
 
+	// Resolve a player's class to a display name. playerClassLangEntry (editor.cpp) is NOT
+	// SAM-aware: for a custom id (>= SAM_CLASS_ID_BASE) it computes a bogus lang index
+	// (3223 + id - CLASS_CONJURER) and returns an unrelated string, so a script gating on
+	// sam_get_class(p) == "MyClass" never matched. Resolve custom ids from the registry —
+	// the same source the class-select UI uses — before falling back to the vanilla lookup.
+	// Shared by the Lua and JS bindings so the two can't disagree.
+	const char* samClassName(int player)
+	{
+		if ( player < 0 || player >= MAXPLAYERS ) { return ""; }
+		const int cls = client_classes[player];
+		if ( cls >= SAM_CLASS_ID_BASE )
+		{
+			const SAMClassDef* def = SAMClasses::getClass(cls);
+			return def ? def->name.c_str() : "";
+		}
+		return playerClassLangEntry(cls, player);
+	}
+
 	int lua_sam_get_class(lua_State* Ls)
 	{
 		SAMLogger::noteApiCall();
 		const int player = (int)luaL_checkinteger(Ls, 1);
 		if ( player < 0 || player >= MAXPLAYERS ) { lua_pushnil(Ls); return 1; }
-		lua_pushstring(Ls, playerClassLangEntry(client_classes[player], player));
+		lua_pushstring(Ls, samClassName(player));
 		return 1;
 	}
 

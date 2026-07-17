@@ -702,7 +702,15 @@ namespace
 		SAMLogger::noteApiCall();
 		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
 		if ( player < 0 || player >= MAXPLAYERS ) { return JS_NULL; }
-		return JS_NewString(ctx, playerClassLangEntry(client_classes[player], player));
+		// SAM-aware, mirroring the Lua binding: custom ids resolve from the registry, since
+		// playerClassLangEntry returns a bogus string for them (see the Lua samClassName note).
+		const int cls = client_classes[player];
+		if ( cls >= SAM_CLASS_ID_BASE )
+		{
+			const SAMClassDef* def = SAMClasses::getClass(cls);
+			return JS_NewString(ctx, def ? def->name.c_str() : "");
+		}
+		return JS_NewString(ctx, playerClassLangEntry(cls, player));
 	}
 
 	JSValue js_sam_get_kills(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
