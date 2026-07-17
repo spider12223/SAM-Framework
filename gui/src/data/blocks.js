@@ -305,10 +305,31 @@ export const ACTIONS = [
   },
 ];
 
+/*
+ * User-defined bricks ("lego packs") are merged in at runtime. They live in these arrays
+ * alongside the built-ins so every lookup, dropdown and the generator treat them
+ * identically — a custom brick is a first-class block, not a special case.
+ *
+ * Custom blocks carry no `needs`, so they're offered on every trigger. That's the one
+ * guarantee they don't get: the builder can't know which event fields a hand-written
+ * template reads. Their templates ARE linted against the real API before they can be
+ * saved (see lib/customBlocks.js), so they can't call a function that doesn't exist.
+ */
+let CUSTOM_CONDITIONS = [];
+let CUSTOM_ACTIONS = [];
+
+/** Replace the registered custom blocks (called whenever the user's pack changes). */
+export function registerCustom(entries) {
+  CUSTOM_CONDITIONS = entries.filter((e) => e.kind === 'condition').map((e) => e.entry);
+  CUSTOM_ACTIONS = entries.filter((e) => e.kind === 'action').map((e) => e.entry);
+}
+
+export const allConditions = () => [...CONDITIONS, ...CUSTOM_CONDITIONS];
+
 /** Actions valid for a trigger: those needing an event field it doesn't carry are hidden. */
 export function actionsFor(trigger) {
   const fields = triggerFields(trigger);
-  return ACTIONS.filter((a) => {
+  return [...ACTIONS, ...CUSTOM_ACTIONS].filter((a) => {
     if (a.onlyOn && !a.onlyOn.includes(trigger?.id)) return false;
     if (a.needs && !fields.includes(a.needs)) return false;
     return true;
@@ -316,5 +337,5 @@ export function actionsFor(trigger) {
 }
 
 export const findTrigger = (id) => TRIGGERS.find((t) => t.id === id);
-export const findCondition = (id) => CONDITIONS.find((c) => c.id === id);
-export const findAction = (id) => ACTIONS.find((a) => a.id === id);
+export const findCondition = (id) => allConditions().find((c) => c.id === id);
+export const findAction = (id) => [...ACTIONS, ...CUSTOM_ACTIONS].find((a) => a.id === id);

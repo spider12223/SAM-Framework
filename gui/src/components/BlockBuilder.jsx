@@ -14,12 +14,15 @@
  * Everything offered here is derived from the real API manifest (see data/blocks.js), so
  * the builder cannot produce a hook, function, or event field that doesn't exist.
  */
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { Panel, Field, Select, TextInput, NumberInput, GoldButton } from '@/components/ui.jsx';
 import {
-  TRIGGERS, CONDITIONS, findTrigger, findCondition, findAction, actionsFor, EVERY_SECONDS,
+  TRIGGERS, allConditions, findTrigger, findCondition, findAction, actionsFor, EVERY_SECONDS,
+  registerCustom,
 } from '@/data/blocks.js';
 import { generateLua, describeSpec } from '@/lib/codegen.js';
+import CustomBlockEditor from '@/components/CustomBlockEditor.jsx';
+import { loadBlocks, saveBlocks, toCatalogEntry } from '@/lib/customBlocks.js';
 
 const defaults = (def) => {
   const out = {};
@@ -39,13 +42,31 @@ function Param({ p, value, onChange }) {
   );
 }
 
-/** One condition/action row: a picker, its params, and a remove button. */
+/**
+ * One condition/action row: a picker, its params, a code peek, and a remove button.
+ *
+ * The </> peek is the point of the Basic tab, not a nicety: it shows the exact line THIS
+ * brick becomes, with your values already in it. That's how someone crosses from blocks
+ * to writing Lua — you see "give an item" is literally sam_grant_item(player, "..."),
+ * and eventually you stop needing the block.
+ */
 function Row({ kind, row, options, onChange, onRemove }) {
+  const [peek, setPeek] = useState(false);
   const def = kind === 'if' ? findCondition(row.id) : findAction(row.id);
   const pick = (id) => {
     const d = kind === 'if' ? findCondition(id) : findAction(id);
     onChange({ ...row, id, params: defaults(d), negate: false });
   };
+  // The same call the generator emits — shown as a guard for conditions so it reads the
+  // way it will actually appear in the script, not as a bare expression.
+  let code = '';
+  try {
+    const expr = def?.lua(row.params || {});
+    code = kind === 'if'
+      ? (row.negate ? `if ${expr} then return end` : `if not (${expr}) then return end`)
+      : expr;
+  } catch { code = '(pick options above)'; }
+
   return (
     <div className="sam-well p-3 mb-2">
       <div className="flex items-end gap-2 flex-wrap">
@@ -73,8 +94,20 @@ function Row({ kind, row, options, onChange, onRemove }) {
             onChange={(v) => onChange({ ...row, params: { ...row.params, [p.name]: v } })}
           />
         ))}
+        <GoldButton
+          onClick={() => setPeek((v) => !v)}
+          className="mb-[2px]"
+          title="Show the Lua this block becomes"
+          style={{ borderColor: peek ? 'var(--color-gold)' : undefined, color: peek ? 'var(--color-gold-bright)' : undefined }}
+        >{'</>'}</GoldButton>
         <GoldButton tone="red" onClick={onRemove} className="mb-[2px]">✕</GoldButton>
       </div>
+      {peek && (
+        <pre
+          className="mt-2 p-2 text-xs overflow-x-auto"
+          style={{ background: '#150f06', border: '1px solid #4a3617', color: '#e8d5a3', whiteSpace: 'pre' }}
+        >{code}</pre>
+      )}
       {def?.note && <div className="text-xs mt-2" style={{ color: '#6b5a35' }}>{def.note}</div>}
     </div>
   );
@@ -86,9 +119,18 @@ export default function BlockBuilder({ onUseScript, hasExistingCode }) {
     conditions: [],
     actions: [{ id: 'message', params: defaults(findAction('message')) }],
   });
+  const [custom, setCustom] = useState(() => loadBlocks());
+  const [editing, setEditing] = useState(false);
+
+  // Push the user's bricks into the catalog so they behave exactly like built-ins.
+  useEffect(() => {
+    registerCustom(custom.map((b) => ({ kind: b.kind, entry: toCatalogEntry(b) })));
+    saveBlocks(custom);
+  }, [custom]);
 
   const trigger = findTrigger(spec.trigger.id);
-  const availableActions = useMemo(() => actionsFor(trigger), [trigger]);
+  const availableActions = useMemo(() => actionsFor(trigger), [trigger, custom]);
+  const availableConditions = useMemo(() => allConditions(), [custom]);
   const lua = useMemo(() => generateLua(spec), [spec]);
   const english = useMemo(() => describeSpec(spec), [spec]);
 
@@ -105,7 +147,7 @@ export default function BlockBuilder({ onUseScript, hasExistingCode }) {
   };
 
   const addRow = (kind) => setSpec((s) => {
-    const list = kind === 'if' ? CONDITIONS : availableActions;
+    const list = kind === 'if' ? availableConditions : availableActions;
     const first = list[0];
     if (!first) return s;
     const row = { id: first.id, params: defaults(first), negate: false };
@@ -158,7 +200,7 @@ export default function BlockBuilder({ onUseScript, hasExistingCode }) {
             </div>
           )}
           {spec.conditions.map((row, i) => (
-            <Row key={i} kind="if" row={row} options={CONDITIONS}
+            <Row key={i} kind="if" row={row} options={availableConditions}
               onChange={(r) => patch('if', i, r)} onRemove={() => drop('if', i)} />
           ))}
           <GoldButton onClick={() => addRow('if')}>+ Add condition</GoldButton>
@@ -175,6 +217,19 @@ export default function BlockBuilder({ onUseScript, hasExistingCode }) {
             needs an event that carries one.
           </div>
         </Panel>
+
+        {editing
+          ? <div className="mt-4"><CustomBlockEditor blocks={custom} onChange={setCustom} onClose={() => setEditing(false)} /></div>
+          : (
+            <div className="mt-4 flex items-center gap-2">
+              <GoldButton onClick={() => setEditing(true)}>🧱 Make your own blocks…</GoldButton>
+              <span className="text-xs" style={{ color: '#6b5a35' }}>
+                {custom.length
+                  ? `${custom.length} custom block${custom.length === 1 ? '' : 's'} loaded — they show up in the lists above.`
+                  : 'Build a brick once and reuse it, or import a pack from a friend.'}
+              </span>
+            </div>
+          )}
       </div>
 
       <div>
