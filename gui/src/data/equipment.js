@@ -65,12 +65,51 @@ export const BLESSING_MIN = -3;
 export const BLESSING_MAX = 3;
 export function blessingLabel(b) {
   const n = Number(b) || 0;
-  if (n === 0) return 'Plain';
+  if (n === 0) return 'Uncursed';
   return (n > 0 ? `Blessed +${n}` : `Cursed ${n}`);
 }
 
 /** Item condition, worst to best (Barony's Status enum; note the spelling "SERVICABLE"). */
 export const STATUSES = ['BROKEN', 'DECREPIT', 'WORN', 'SERVICABLE', 'EXCELLENT'];
+
+/**
+ * The five Status values (BROKEN..EXCELLENT, indices 0-4) are ONE enum, but the game renders
+ * them with a completely different word per item category: a "serviceable" sword, a "flawed"
+ * ring, a "plain" potion, a "marked" scroll, a "slightly aged" ration are all Status 3. So on
+ * a potion, "condition" is the wrong word — it's the potion's look (evaporated / cloudy /
+ * swirly / plain / bubbly). Straight from lang/en.txt 982-1006; the stored value stays the
+ * Status enum, only the label changes, so no JSON or engine change is involved.
+ */
+const STATUS_WORDS = {
+  gear:   ['broken', 'decrepit', 'worn', 'serviceable', 'excellent'],      // weapon/armor/staff/tool/thrown (982)
+  gem:    ['destroyed', 'cracked', 'rough', 'flawed', 'flawless'],         // amulet/ring/gem (987)
+  potion: ['evaporated', 'cloudy', 'swirly', 'plain', 'bubbly'],          // potion (992)
+  scroll: ['shredded', 'torn', 'faded', 'marked', 'brand new'],           // scroll/book/tome (997)
+  food:   ['rotten', 'mouldy', 'aged', 'slightly aged', 'fresh'],         // food (1002)
+};
+
+/** How the Status control should read for an item of `category`: its field label, the word
+ *  for each Status value, and an optional hint. */
+export function statusStyleFor(category) {
+  switch (category) {
+    case 'POTION':
+      return { label: 'Look', words: STATUS_WORDS.potion, hint: 'How it looks before it’s identified.' };
+    case 'GEM': case 'AMULET': case 'RING':
+      return { label: 'Quality', words: STATUS_WORDS.gem };
+    case 'SCROLL': case 'SPELLBOOK': case 'BOOK': case 'TOME_SPELL': case 'SPELL_CAT': case 'TOME_SPELL_CAT':
+      return { label: 'Condition', words: STATUS_WORDS.scroll };
+    case 'FOOD':
+      return { label: 'Freshness', words: STATUS_WORDS.food };
+    default:
+      return { label: 'Condition', words: STATUS_WORDS.gear };
+  }
+}
+
+/** The category-specific word for a Status enum value (e.g. potion + 'EXCELLENT' -> 'bubbly'). */
+export function statusWord(category, status) {
+  const i = STATUSES.indexOf(status);
+  return statusStyleFor(category).words[i < 0 ? 3 : i];
+}
 
 /* ---- loadout entry <-> starting_items JSON ------------------------------------ */
 

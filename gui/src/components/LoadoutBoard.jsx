@@ -18,6 +18,7 @@ import { Panel, Select, NumberInput, ItemPickerModal } from '@/components/ui.jsx
 import {
   EQUIP_SLOTS, equipSlotOf, itemsForSlot, findSlot,
   BLESSING_MIN, BLESSING_MAX, blessingLabel, STATUSES, newEntry,
+  statusStyleFor, statusWord,
 } from '@/data/equipment.js';
 
 /** Which paperdoll slot an entry occupies: its item's natural slot, or its stored hint. */
@@ -33,7 +34,6 @@ function Cell({ entry, ghostIcon, label, selected, onClick, onRemove }) {
     );
   }
   const b = Number(entry.beatitude) || 0;
-  const poor = entry.status === 'BROKEN' || entry.status === 'DECREPIT';
   return (
     <div
       role="button" tabIndex={0}
@@ -46,7 +46,6 @@ function Cell({ entry, ghostIcon, label, selected, onClick, onRemove }) {
       {b !== 0 && <span className={`sam-slot-bless ${b > 0 ? 'bless-pos' : 'bless-neg'}`}>{b > 0 ? `+${b}` : b}</span>}
       {entry.count > 1 && <span className="sam-slot-count">×{entry.count}</span>}
       {!entry.identified && <span className="sam-slot-pip" title="unidentified">?</span>}
-      {poor && <span className="sam-slot-tag" title={entry.status}>{entry.status === 'BROKEN' ? '✖' : '⚠'}</span>}
       <span className="sam-slot-x" title="Remove" onClick={(e) => { e.stopPropagation(); onRemove(); }}>✕</span>
     </div>
   );
@@ -115,9 +114,12 @@ function BlessingDial({ value, onChange }) {
 }
 
 /** The inline detail strip: blessing + status + identified + count + hotbar, and a live read-out. */
-function DetailStrip({ entry, patch, onHotbar, iconFor, onRemove }) {
+function DetailStrip({ entry, patch, onHotbar, iconFor, onRemove, category }) {
   const equipped = entry.equip;
-  const plain = `${blessingLabel(entry.beatitude).toLowerCase()} ${entry.type}${entry.status !== 'SERVICABLE' ? ` (${entry.status.toLowerCase()})` : ''}${entry.identified ? '' : ', unidentified'}`;
+  const style = statusStyleFor(category);              // category-appropriate word for Status
+  const word = statusWord(category, entry.status);     // e.g. potion -> "bubbly"
+  const bWord = (Number(entry.beatitude) || 0) !== 0 ? `${blessingLabel(entry.beatitude).toLowerCase()} ` : '';
+  const plain = `${bWord}${word} ${entry.type}${entry.identified ? '' : ', unidentified'}`;
   return (
     <div className="sam-well sam-detailstrip">
       <div className="flex items-center gap-2 mb-3">
@@ -129,9 +131,9 @@ function DetailStrip({ entry, patch, onHotbar, iconFor, onRemove }) {
       <div className="sam-detailgrid">
         <BlessingDial value={entry.beatitude} onChange={(v) => patch({ beatitude: v })} />
         <div>
-          <div className="sam-label mb-1" style={{ fontSize: '0.72rem' }}>Condition</div>
+          <div className="sam-label mb-1" style={{ fontSize: '0.72rem' }} title={style.hint || ''}>{style.label}</div>
           <Select value={entry.status} onChange={(v) => patch({ status: v })}
-            options={STATUSES.map((s) => ({ value: s, label: s[0] + s.slice(1).toLowerCase() }))} />
+            options={STATUSES.map((s, i) => ({ value: s, label: style.words[i][0].toUpperCase() + style.words[i].slice(1) }))} />
         </div>
         <div>
           <div className="sam-label mb-1" style={{ fontSize: '0.72rem' }}>Count</div>
@@ -299,7 +301,7 @@ export default function LoadoutBoard({ items, onChange, allTypes, iconFor, categ
 
       {/* DETAIL STRIP */}
       {selected
-        ? <div className="mt-4"><DetailStrip entry={selected} patch={(f) => patch(selected._key, f)} onHotbar={(n) => setHotbar(selected._key, n)} iconFor={iconFor} onRemove={() => remove(selected._key)} /></div>
+        ? <div className="mt-4"><DetailStrip entry={selected} patch={(f) => patch(selected._key, f)} onHotbar={(n) => setHotbar(selected._key, n)} iconFor={iconFor} category={categoryFor(selected.type)} onRemove={() => remove(selected._key)} /></div>
         : <div className="text-sm mt-4 text-center" style={{ color: '#6b5a35' }}>Click a slot to gear up, or click an item to set its blessing.</div>}
 
       {picker && (
