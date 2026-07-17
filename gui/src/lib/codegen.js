@@ -55,26 +55,29 @@ function condExpr(row) {
   return row.negate ? `not (${expr})` : expr;
 }
 
-/** An action is one or more lines — "for a while" needs an apply plus a revert timer. */
-function actionLines(row) {
+/** An action is one or more lines — "for a while" needs an apply plus a revert timer.
+ *  `gen` is the generation counter that hands each "one at a time" change a unique lock. */
+function actionLines(row, gen) {
   const def = findAction(row.id);
   if (!def) return null;
-  const out = def.lua(row.params || {});
+  const out = def.lua(row.params || {}, gen);
   return Array.isArray(out) ? out : [out];
 }
 
-/** Does any rule use a temporary change, needing the unique-timer-id counter? */
-function needsSeq(rules) {
+/** Does any rule need a given per-action flag (`needsSeq` / `needsActive`)? */
+function anyRuleNeeds(rules, flag) {
   return rules.some((r) => (r.actions || []).some((row) => {
     const def = findAction(row.id);
-    return typeof def?.needsSeq === 'function' && def.needsSeq(row.params || {});
+    return typeof def?.[flag] === 'function' && def[flag](row.params || {});
   }));
 }
+const needsSeq = (rules) => anyRuleNeeds(rules, 'needsSeq');
+const needsActive = (rules) => anyRuleNeeds(rules, 'needsActive');
 
 /** One rule's IF + DO, indented. Conditions join with `and`; actions sit inside. */
-function ruleBody(rule, indent) {
+function ruleBody(rule, indent, gen) {
   const conds = (rule.conditions || []).map(condExpr).filter(Boolean);
-  const acts = (rule.actions || []).map(actionLines).filter(Boolean).flat();
+  const acts = (rule.actions || []).map((row) => actionLines(row, gen)).filter(Boolean).flat();
   if (!acts.length) return [`${indent}-- (add an action)`];
   if (!conds.length) return acts.map((a) => `${indent}${a}`);
   return [
@@ -92,8 +95,21 @@ const SEQ_PREAMBLE = [
   '-- Move speed is the deliberate exception: it is one slider per player rather than a',
   '-- stack, so every speed duration shares one id and re-applying REFRESHES it.',
   'local _tmp_seq = 0',
-  '',
 ];
+
+const ACTIVE_PREAMBLE = [
+  '-- Locks for "only one at a time" changes: while a key is true, that ability is running',
+  '-- and re-firing it does nothing until it ends. Each key is unique per ability.',
+  'local _active = {}',
+];
+
+/** The whole preamble, in order, with a trailing blank line if anything was emitted. */
+function preamble(rules) {
+  const lines = [];
+  if (needsSeq(rules)) lines.push(...SEQ_PREAMBLE);
+  if (needsActive(rules)) lines.push(...ACTIVE_PREAMBLE);
+  return lines.length ? [...lines, ''] : [''];
+}
 
 /**
  * spec = { rules: [{ trigger:{id,params}, conditions:[...], actions:[...] }, ...] }
@@ -106,13 +122,16 @@ export function generateLua(spec) {
   if (!rules.length) return `${HEADER}\n-- Add an ability to start.`;
 
   const out = [HEADER];
+  // One counter per generation pass hands each "one at a time" change a unique, stable
+  // lock key (_active["tmp_STR_once_1"], _2, …) so two of them never share a lock.
+  const gen = { n: 0 };
   const tickRules = rules.filter((r) => r.trigger.id === EVERY_SECONDS);
   const eventRules = rules.filter((r) => r.trigger.id !== EVERY_SECONDS);
   if (rules.length > 1) {
     out.push(...comment(`This class has ${rules.length} abilities. They share one on_event `
       + '(and/or one on_tick) because a script may only define each handler once.'));
   }
-  out.push(...(needsSeq(rules) ? SEQ_PREAMBLE : ['']));
+  out.push(...preamble(rules));
 
   if (eventRules.length) {
     // Group by trigger, preserving the order abilities were added.
@@ -135,7 +154,7 @@ export function generateLua(spec) {
         out.push('    -- This event carries no player; in single-player the local host is you.');
         out.push('    local player = 0');
       }
-      for (const r of group) out.push(...ruleBody(r, '    '));
+      for (const r of group) out.push(...ruleBody(r, '    ', gen));
     }
     out.push('  end', 'end');
   }
@@ -153,7 +172,7 @@ export function generateLua(spec) {
       const secs = Number(r.trigger.params?.seconds) || 1;
       const ticks = Math.max(1, Math.round(secs * TICKS_PER_SECOND));
       out.push(`  if event.tick_count % ${ticks} == 0 then -- every ${secs}s`);
-      out.push(...ruleBody(r, '    '));
+      out.push(...ruleBody(r, '    ', gen));
       out.push('  end');
     }
     out.push('end');
@@ -172,11 +191,12 @@ export function generateLua(spec) {
 function durationPhrase(row) {
   const p = row.params || {};
   const secs = Number(p.seconds) || 1;
-  if (p.duration === 'for a while') return ` for ${secs}s`;
-  if (p.duration === 'fading away') return ` fading out over ${secs}s`;
+  const stack = p.stacking === 'one' ? ' (one at a time)' : '';
+  if (p.duration === 'for a while') return ` for ${secs}s${stack}`;
+  if (p.duration === 'fading away') return ` fading out over ${secs}s${stack}`;
   if (p.duration === 'until') {
     const said = conditionPhrase({ id: p.until_id, params: p.until_params, negate: p.until_negate });
-    return said ? ` until ${said}` : ' until… (pick a condition)';
+    return said ? ` until ${said}${stack}` : ' until… (pick a condition)';
   }
   return '';
 }

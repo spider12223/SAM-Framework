@@ -240,6 +240,52 @@ check('a negated condition gates correctly (effect present -> blocked)',
   { start: '{STR=10}', want: { STR: 10 } });
 
 // ---------------------------------------------------------------------------------
+// solidius's stack flag: "one at a time" vs "each stacks separately".
+// ---------------------------------------------------------------------------------
+check('stacking=stack: two quick hits stack, then both unwind',
+  [rule('player.on_hit', [act('set_stat', { stat: 'STR', amount: 5, duration: 'for a while', seconds: 3, stacking: 'stack' })])],
+  `S.fire('player.on_hit', {player=0})
+   S.fire('player.on_hit', {player=0})   -- +10 total while both are up
+   local mid = S.state().stats.STR
+   S.seconds(4)
+   assert(mid == 20, 'expected +10 stacked, got ' .. (mid-10))`,
+  { start: '{STR=10}', want: { STR: 10, timers: 0 } });
+
+check('stacking=one: while it is running, a second hit adds nothing',
+  [rule('player.on_hit', [act('set_stat', { stat: 'STR', amount: 5, duration: 'for a while', seconds: 3, stacking: 'one' })])],
+  `S.fire('player.on_hit', {player=0})
+   S.seconds(1)
+   S.fire('player.on_hit', {player=0})   -- ignored: one already active
+   assert(S.state().stats.STR == 15, 'expected +5 only, got ' .. (S.state().stats.STR-10))
+   S.seconds(4)`,
+  { start: '{STR=10}', want: { STR: 10, timers: 0 } });
+
+check('stacking=one: the lock releases so a LATER hit works again',
+  [rule('player.on_hit', [act('set_stat', { stat: 'STR', amount: 5, duration: 'for a while', seconds: 3, stacking: 'one' })])],
+  `S.fire('player.on_hit', {player=0}) S.seconds(4)   -- runs and ends
+   S.fire('player.on_hit', {player=0})                -- fires fresh
+   assert(S.state().stats.STR == 15, 'expected re-fire to apply, got ' .. (S.state().stats.STR-10))
+   S.seconds(4)`,
+  { start: '{STR=10}', want: { STR: 10, timers: 0 } });
+
+check('stacking=one on a fade: mid-fade re-fire does not double it',
+  [rule('player.on_hit', [act('set_stat', { stat: 'STR', amount: 20, duration: 'fading away', seconds: 20, stacking: 'one' })])],
+  `S.fire('player.on_hit', {player=0}) S.seconds(5)
+   S.fire('player.on_hit', {player=0})   -- ignored while fading
+   S.seconds(30)`,
+  { start: '{STR=10}', want: { STR: 10, timers: 0 } });
+
+check('two DIFFERENT one-at-a-time abilities do not share a lock',
+  [
+    rule('player.on_hit', [act('set_stat', { stat: 'STR', amount: 5, duration: 'for a while', seconds: 3, stacking: 'one' })]),
+    rule('player.on_hit', [act('set_stat', { stat: 'DEX', amount: 5, duration: 'for a while', seconds: 3, stacking: 'one' })]),
+  ],
+  `S.fire('player.on_hit', {player=0})
+   assert(S.state().stats.STR == 15 and S.state().stats.DEX == 15, 'both should fire independently')
+   S.seconds(4)`,
+  { start: '{STR=10, DEX=10}', want: { STR: 10, timers: 0 } });
+
+// ---------------------------------------------------------------------------------
 // Guards the adversarial design panel demanded — these are pure-JS asserts, no Lua needed.
 // ---------------------------------------------------------------------------------
 function assert(name, cond) {

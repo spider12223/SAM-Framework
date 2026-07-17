@@ -85,8 +85,22 @@ export function Select({ value, onChange, options, className = '', ...rest }) {
 }
 
 /** Gold slider with live fill + value box (matches Core Attributes rows). */
-export function GoldSlider({ label, icon, value, onChange, min = 0, max = 20 }) {
-  const fill = ((value - min) / (max - min)) * 100;
+/**
+ * Slider with an EDITABLE value box.
+ *
+ * The box, not the slider, is the precise control: you can type an exact number, and it
+ * accepts values outside the slider's track (down to `inputMin`, up to `inputMax`) so a
+ * negative attribute — a class that starts BELOW the racial base, which several vanilla
+ * ones do — is reachable even though the slider itself stops at `min`. The slider is just
+ * the quick-drag path; its fill is clamped so an out-of-track value pins it to an end
+ * rather than overflowing.
+ */
+export function GoldSlider({
+  label, icon, value, onChange, min = 0, max = 20, inputMin = min, inputMax = max,
+}) {
+  const n = value === '' ? 0 : Number(value);
+  const fill = Math.max(0, Math.min(100, ((n - min) / (max - min)) * 100));
+  const clampBox = (v) => (v === '' ? 0 : Math.max(inputMin, Math.min(inputMax, v)));
   return (
     <div className="flex items-center gap-3 py-1.5">
       {icon && <span className="w-5 text-center" aria-hidden>{icon}</span>}
@@ -97,15 +111,26 @@ export function GoldSlider({ label, icon, value, onChange, min = 0, max = 20 }) 
         type="range"
         min={min}
         max={max}
-        value={value}
+        value={Math.max(min, Math.min(max, n))}
         onChange={(e) => onChange(Number(e.target.value))}
       />
-      <span className="sam-valuebox">{value}</span>
+      <input
+        className="sam-input sam-valuebox"
+        style={{ width: '3.4rem', textAlign: 'center' }}
+        type="number"
+        min={inputMin}
+        max={inputMax}
+        value={value}
+        onChange={(e) => onChange(e.target.value === '' ? '' : clampBox(Number(e.target.value)))}
+        aria-label={`${label} value`}
+      />
     </div>
   );
 }
 
-/** −/value/+ stepper row (matches Skill Levels rows). */
+/** −/value/+ stepper row (matches Skill Levels rows). The ± buttons nudge by `step`, but
+ *  the value box is editable so you can type an EXACT number — a class can start with
+ *  Swords 3, not just multiples of 5. */
 export function Stepper({ label, sub, value, onChange, min = 0, max = 100, step = 1 }) {
   const clamp = (v) => Math.min(max, Math.max(min, v));
   return (
@@ -113,9 +138,18 @@ export function Stepper({ label, sub, value, onChange, min = 0, max = 100, step 
       <span className="sam-label flex-1 truncate" style={{ fontSize: '0.95rem' }} title={sub}>
         {label}
       </span>
-      <button type="button" className="sam-step" onClick={() => onChange(clamp(value - step))} aria-label={`decrease ${label}`}>−</button>
-      <span className="sam-valuebox" style={{ minWidth: '2.6rem' }}>{value}</span>
-      <button type="button" className="sam-step" onClick={() => onChange(clamp(value + step))} aria-label={`increase ${label}`}>+</button>
+      <button type="button" className="sam-step" onClick={() => onChange(clamp((Number(value) || 0) - step))} aria-label={`decrease ${label}`}>−</button>
+      <input
+        className="sam-input sam-valuebox"
+        style={{ minWidth: '2.6rem', width: '3.2rem', textAlign: 'center' }}
+        type="number"
+        min={min}
+        max={max}
+        value={value}
+        onChange={(e) => onChange(e.target.value === '' ? '' : clamp(Number(e.target.value)))}
+        aria-label={`${label} value`}
+      />
+      <button type="button" className="sam-step" onClick={() => onChange(clamp((Number(value) || 0) + step))} aria-label={`increase ${label}`}>+</button>
     </div>
   );
 }

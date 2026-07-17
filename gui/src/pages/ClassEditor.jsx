@@ -220,12 +220,15 @@ export default function ClassEditor() {
   };
 
   const buildDef = () => {
+    // Coerce '' (a value box the user cleared mid-edit) to 0 — a delta of 0 is "no change",
+    // and it keeps a non-numeric out of the exported JSON.
+    const num = (v) => (v === '' || v === undefined ? 0 : Number(v));
     const stats = {};
-    for (const a of CORE_ATTRIBUTES) stats[a] = attrs[a];
-    for (const s of OFFSET_STATS) stats[s] = offsets[s] === '' ? 0 : offsets[s];
+    for (const a of CORE_ATTRIBUTES) stats[a] = num(attrs[a]);
+    for (const s of OFFSET_STATS) stats[s] = num(offsets[s]);
 
     const nonzeroSkills = Object.fromEntries(
-      Object.entries(skills).filter(([, v]) => v > 0)
+      Object.entries(skills).map(([k, v]) => [k, num(v)]).filter(([, v]) => v > 0)
     );
 
     const def = {
@@ -385,8 +388,10 @@ export default function ClassEditor() {
               label={a}
               icon={ATTR_ICONS[a]}
               value={attrs[a]}
-              min={0}
-              max={20}
+              min={-10}
+              max={30}
+              inputMin={-50}
+              inputMax={100}
               onChange={(v) => setAttrs((prev) => ({ ...prev, [a]: v }))}
             />
           ))}
@@ -412,7 +417,7 @@ export default function ClassEditor() {
               value={skills[s]}
               min={0}
               max={100}
-              step={5}
+              step={1}
               onChange={(v) => setSkills((prev) => ({ ...prev, [s]: v }))}
             />
           ))}

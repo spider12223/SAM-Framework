@@ -20,8 +20,37 @@ export const ITEM_TYPES = classSchema.definitions.itemType.enum;
 /** The PRO_X skill names (keys of the class schema's skills object). */
 export const SKILLS = Object.keys(classSchema.properties.skills.properties);
 
-/** Human label for a PRO_X skill: "PRO_LOCKPICKING" -> "Lockpicking". */
+/**
+ * The name the GAME shows for a skill — which is NOT the PRO_ constant with the underscores
+ * stripped. Barony renamed several: PRO_LOCKPICKING is "Tinkering", PRO_APPRAISAL is "Lore",
+ * the weapon skills are plural, and PRO_SHIELD is "Blocking". Source of truth is the shipped
+ * data/skillsheet_entries.json (keyed by the same PRO_ index), cross-checked against
+ * lang/en.txt (getSkillLangEntry = Language::get(236 + skill), stat.cpp:1083). A modder who
+ * sets "Tinkering 5" here must see "Tinkering 5" in game, so these have to match exactly.
+ */
+const SKILL_DISPLAY_NAMES = {
+  PRO_LOCKPICKING: 'Tinkering',
+  PRO_STEALTH: 'Stealth',
+  PRO_TRADING: 'Trading',
+  PRO_APPRAISAL: 'Lore',
+  PRO_THAUMATURGY: 'Thaumaturgy',
+  PRO_LEADERSHIP: 'Leadership',
+  PRO_MYSTICISM: 'Mysticism',
+  PRO_SORCERY: 'Sorcery',
+  PRO_RANGED: 'Ranged',
+  PRO_SWORD: 'Swords',
+  PRO_MACE: 'Maces',
+  PRO_AXE: 'Axes',
+  PRO_POLEARM: 'Polearms',
+  PRO_SHIELD: 'Blocking',
+  PRO_UNARMED: 'Unarmed',
+  PRO_ALCHEMY: 'Alchemy',
+};
+
+/** Human label for a PRO_X skill. Uses the real in-game name; falls back to a de-underscore
+ *  for anything not in the table (so a future/custom PRO_ still renders something sane). */
 export function skillLabel(pro) {
+  if (SKILL_DISPLAY_NAMES[pro]) return SKILL_DISPLAY_NAMES[pro];
   const raw = pro.replace(/^PRO_/, '').toLowerCase().replace(/_/g, ' ');
   return raw.replace(/\b\w/g, (c) => c.toUpperCase());
 }

@@ -100,6 +100,18 @@ export const POLL_TICKS = 10;       // 5 checks/sec — an "until" that reacts w
 export const FADE_STEP_TICKS = 50;  // fades give a step back once a second
 
 /**
+ * Whether re-firing a timed change while one is still running adds another (solidius: "if
+ * I punch an enemy to get strength, it checks if I already have that ability running, then
+ * doesn't add more until it ends; and if disabled, it adds more each running on their own
+ * timer"). Only meaningful for additive changes — move speed is one slider, always one.
+ */
+export const STACKING = ['stack', 'one'];
+export const STACKING_LABELS = {
+  stack: 'each stacks separately',
+  one: 'only one at a time',
+};
+
+/**
  * ONE timer id for every move-speed duration in a script, on purpose.
  *
  * Move speed is a single slider per player, not a stack. Two abilities cannot each own a
@@ -133,7 +145,7 @@ const NEUTRAL_SPEED = 1;
  * inside the callback is safe: tickTimers takes its own reference for the due list for
  * precisely this case (sam_lua_runtime.cpp:2500).
  */
-function temporal({ p, apply, read, write, absolute, from, idPrefix }) {
+function temporal({ p, apply, read, write, absolute, from, idPrefix, gen }) {
   const dur = p.duration || 'permanently';
   // `apply` takes the expression to build from: the live value when nothing needs to
   // remember it, or `_before` once we have to measure what the clamp let through.
@@ -184,53 +196,73 @@ function temporal({ p, apply, read, write, absolute, from, idPrefix }) {
   // measure-and-revert scaffolding for a revert that will never run.
   if (dur === 'until' && !untilExpr(p)) return [apply(read)];
 
+  // Stacking (solidius's ask): does re-firing while one is still running add another, or
+  // is it "one at a time"?
+  //   'stack' (default) — each application owns a private timer id (_tmp_seq), so overlaps
+  //     add up and each unwinds its own share. Punch twice quickly, get +10, unwind to +0.
+  //   'one'             — a file-scope lock (_active[key]) held for the whole duration.
+  //     While it's up, re-firing is a no-op ("doesn't add more until it ends"). The key is
+  //     unique per ability instance, so two different one-at-a-time buffs don't share a lock.
+  const one = p.stacking === 'one';
+  const key = `"${idPrefix}_once_${gen ? (gen.n += 1) : 0}"`;
+  const idExpr = one ? key : `"${idPrefix}_" .. _tmp_seq`;
+
   // Measure what the clamp actually let through, and hand back exactly that.
-  const pre = [
+  const measure = [
     `local _before = ${read}`,
     ...lines,
     `local _applied = ${read} - _before`,
   ];
-  const idExpr = `"${idPrefix}_" .. _tmp_seq`;
 
+  // The timer body, minus the outer lock. `clearOnEnd` is spliced in where the change is
+  // fully undone, so the lock releases exactly when the buff is really gone.
+  let inner;
   if (dur === 'for a while') {
-    return [...pre,
-      '_tmp_seq = _tmp_seq + 1',
+    inner = [...measure,
+      ...(one ? [] : ['_tmp_seq = _tmp_seq + 1']),
+      ...(one ? [`_active[${key}] = true`] : []),
       `sam_set_timer(${idExpr}, ${Math.max(1, Math.round(secs * TICKS_PER_SECOND))}, function()`,
       `  ${write(`${read} - _applied`)}`,
+      ...(one ? [`  _active[${key}] = false`] : []),
       'end)'];
-  }
-
-  if (dur === 'until') {
+  } else if (dur === 'until') {
     const cond = untilExpr(p);
-    if (!cond) return pre;
-    return [...pre,
-      '_tmp_seq = _tmp_seq + 1',
-      `local _id = ${idExpr}`,
-      `sam_set_repeating_timer(_id, ${POLL_TICKS}, function()`,
+    inner = [...measure,
+      ...(one ? [] : ['_tmp_seq = _tmp_seq + 1']),
+      ...(one ? [`_active[${key}] = true`] : [`local _id = ${idExpr}`]),
+      `sam_set_repeating_timer(${one ? key : '_id'}, ${POLL_TICKS}, function()`,
       `  if ${cond} then`,
       `    ${write(`${read} - _applied`)}`,
-      '    sam_cancel_timer(_id)',
+      `    sam_cancel_timer(${one ? key : '_id'})`,
+      ...(one ? [`    _active[${key}] = false`] : []),
       '  end',
+      'end)'];
+  } else {
+    // fading: hand it back over `secs` seconds, whatever amount actually landed. _held
+    // tracks what is still owed, so the total returned always equals _applied — a buff
+    // that clamped on the way up still fades to precisely the baseline.
+    const steps = Math.max(1, Math.round(secs));
+    inner = [...measure,
+      ...(one ? [] : ['_tmp_seq = _tmp_seq + 1']),
+      ...(one ? [`_active[${key}] = true`] : [`local _id = ${idExpr}`]),
+      'local _held, _k = _applied, 0',
+      `sam_set_repeating_timer(${one ? key : '_id'}, ${FADE_STEP_TICKS}, function()`,
+      '  _k = _k + 1',
+      `  local _want = _k >= ${steps} and 0 or math.floor(_applied * (${steps} - _k) / ${steps})`,
+      '  if _held ~= _want then',
+      `    ${write(`${read} - (_held - _want)`)}`,
+      '    _held = _want',
+      '  end',
+      `  if _k >= ${steps} then sam_cancel_timer(${one ? key : '_id'})${one ? `; _active[${key}] = false` : ''} end`,
       'end)'];
   }
 
-  // fading: hand it back over exactly `secs` seconds, whatever amount actually landed.
-  // _held tracks what is still owed, so the total returned always equals _applied — a
-  // buff that clamped on the way up still fades to precisely the baseline.
-  const steps = Math.max(1, Math.round(secs));
-  return [...pre,
-    '_tmp_seq = _tmp_seq + 1',
-    `local _id = ${idExpr}`,
-    'local _held, _k = _applied, 0',
-    `sam_set_repeating_timer(_id, ${FADE_STEP_TICKS}, function()`,
-    '  _k = _k + 1',
-    `  local _want = _k >= ${steps} and 0 or math.floor(_applied * (${steps} - _k) / ${steps})`,
-    '  if _held ~= _want then',
-    `    ${write(`${read} - (_held - _want)`)}`,
-    '    _held = _want',
-    '  end',
-    `  if _k >= ${steps} then sam_cancel_timer(_id) end`,
-    'end)'];
+  // "one at a time" gates the whole thing behind the lock.
+  if (!one) return inner;
+  return [
+    `if not _active[${key}] then`,
+    ...inner.map((l) => `  ${l}`),
+    'end'];
 }
 
 /** The condition chosen inside a "until…" duration, as a Lua expression. */
@@ -249,13 +281,20 @@ function untilExpr(p) {
  * "show a message" are one-off events — there is nothing to expire. "apply a status effect"
  * already takes its own duration in ticks, because the engine expires it for you.
  */
-const durationParams = () => [
+const durationParams = ({ additive = false } = {}) => [
   { name: 'duration', type: 'select', values: DURATIONS, labels: DURATION_LABELS, default: 'permanently', label: 'lasts' },
   {
     name: 'seconds', type: 'number', default: 5, min: 0.1, label: 'seconds',
     showIf: (p) => p.duration === 'for a while' || p.duration === 'fading away',
   },
   { name: 'until', type: 'condition', label: 'until', showIf: (p) => p.duration === 'until' },
+  // Stacking only makes sense for an additive change with an end. Move speed is one slider
+  // (always one-at-a-time), and a permanent change never ends so there's nothing to stack.
+  ...(additive ? [{
+    name: 'stacking', type: 'select', values: STACKING, labels: STACKING_LABELS, default: 'stack',
+    label: 'when it fires again',
+    showIf: (p) => p.duration && p.duration !== 'permanently',
+  }] : []),
 ];
 
 /**
@@ -421,15 +460,19 @@ export const ACTIONS = [
     params: [
       { name: 'stat', type: 'select', values: STATS, default: 'STR' },
       { name: 'amount', type: 'number', default: 1, label: 'add this much' },
-      ...durationParams(),
+      ...durationParams({ additive: true }),
     ],
-    needsSeq: (p) => p.duration && p.duration !== 'permanently',
-    lua: (p) => {
+    // 'one at a time' keys off a file-scope _active table, not the _tmp_seq counter, so it
+    // only needs the counter when it actually stacks.
+    needsSeq: (p) => p.duration && p.duration !== 'permanently' && p.stacking !== 'one',
+    needsActive: (p) => p.duration && p.duration !== 'permanently' && p.stacking === 'one',
+    lua: (p, gen) => {
       const stat = q(p.stat);
       const amt = Number(p.amount) || 0;
       const read = `sam_get_stat(player, ${stat})`;
       return temporal({
         p,
+        gen,
         read,
         write: (v) => `sam_set_stat(player, ${stat}, ${v})`,
         apply: (base) => `sam_set_stat(player, ${stat}, ${base} + (${amt}))`,
