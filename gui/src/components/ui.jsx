@@ -356,7 +356,7 @@ export function ItemIcon({ src, emoji }) {
  *   categoryFor : (t) => category key
  *   categories  : string[]  — category display order
  */
-export function ItemPickerModal({ allTypes, iconFor, categoryFor, categories, onPick, onClose }) {
+export function ItemPickerModal({ allTypes, iconFor, categoryFor, categories, onPick, onClose, title = 'Choose an Item' }) {
   const [query, setQuery] = useState('');
   const inputRef = useRef(null);
 
@@ -390,7 +390,7 @@ export function ItemPickerModal({ allTypes, iconFor, categoryFor, categories, on
       <div className="sam-panel sam-modal" onMouseDown={(e) => e.stopPropagation()}>
         <header className="sam-panel-header">
           <span className="sam-ornament">◆</span>
-          <span>Choose an Item</span>
+          <span>{title}</span>
           <span className="sam-ornament">◆</span>
         </header>
         <div className="p-3">

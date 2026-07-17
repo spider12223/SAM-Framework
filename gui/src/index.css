@@ -481,6 +481,87 @@ select.sam-input { appearance: none; cursor: var(--sam-cursor); }
   line-height: 1;
   pointer-events: none;
 }
+.sam-slot-unid { opacity: 0.55; filter: grayscale(0.5); }
+
+/* ---- Starting Loadout board ----------------------------------------- */
+.sam-loadout {
+  display: grid;
+  grid-template-columns: minmax(300px, 340px) 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+@media (max-width: 900px) { .sam-loadout { grid-template-columns: 1fr; } }
+
+.sam-paperdoll { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.sam-paperdoll-body { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: start; width: 100%; }
+.sam-paperdoll-bottom { display: flex; justify-content: center; }
+.sam-paperdoll-col { display: flex; flex-direction: column; gap: 8px; }
+.sam-paperdoll-center {
+  min-height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--color-border, #463619);
+  background: radial-gradient(ellipse at 50% 30%, rgba(255,235,180,0.05), transparent 70%), var(--color-stone);
+  border-radius: 3px;
+  box-shadow: inset 0 0 16px rgba(0,0,0,0.8);
+}
+.sam-paperdoll-portrait { width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; padding: 6px; }
+.sam-paperdoll-glyph { font-size: 3.4rem; opacity: 0.4; }
+
+.sam-slot-wrap { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.sam-slot-label {
+  font-family: Cinzel, Georgia, serif;
+  font-size: 0.6rem; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--color-gold-dim, #8a7749);
+}
+.sam-slot-ghost { font-size: 1.5rem; opacity: 0.4; pointer-events: none; }
+.sam-slot-empty:hover .sam-slot-ghost { opacity: 0.9; }
+
+.sam-slot.is-blessed { box-shadow: inset 0 0 12px rgba(0,0,0,0.8), 0 0 8px rgba(240,205,122,0.45); }
+.sam-slot.is-cursed  { box-shadow: inset 0 0 12px rgba(0,0,0,0.8), 0 0 8px rgba(176,60,45,0.5); }
+.sam-slot-bless {
+  position: absolute; top: -6px; right: -6px;
+  min-width: 16px; height: 16px; padding: 0 3px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: Consolas, monospace; font-size: 0.66rem; font-weight: 800; line-height: 1;
+  border-radius: 8px; text-shadow: 0 1px 1px #000;
+}
+.sam-slot-bless.bless-pos { background: var(--color-gold-fill, #c9922a); color: #1a1208; box-shadow: 0 0 5px rgba(240,205,122,0.7); }
+.sam-slot-bless.bless-neg { background: var(--color-blood, #b03c2d); color: #fff; box-shadow: 0 0 5px rgba(176,60,45,0.8); }
+.sam-slot-pip {
+  position: absolute; bottom: 0; left: 3px;
+  font-family: Consolas, monospace; font-size: 0.72rem; font-weight: 800; color: #d9b45a;
+  text-shadow: 0 1px 2px #000; pointer-events: none;
+}
+.sam-slot-tag {
+  position: absolute; top: 1px; left: 3px; font-size: 0.66rem; color: var(--color-blood, #b03c2d);
+  text-shadow: 0 1px 2px #000; pointer-events: none;
+}
+
+.sam-backpack { padding: 0.7rem 0.8rem; }
+.sam-backpack-grid { display: grid; grid-template-columns: repeat(auto-fill, 64px); gap: 4px; justify-content: start; }
+
+/* ---- inline detail strip + blessing dial ---------------------------- */
+.sam-detailstrip { padding: 0.9rem 1rem; }
+.sam-detailgrid {
+  display: grid; gap: 0.9rem 1.2rem;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  align-items: start;
+}
+.sam-beatitude { display: inline-flex; border: 1px solid var(--color-gold-dim, #8a7749); border-radius: 4px; overflow: hidden; }
+.sam-bstop {
+  width: 30px; height: 30px; border: 0; border-right: 1px solid rgba(0,0,0,0.5);
+  background: #17110a; color: #9a8552; font-family: Consolas, monospace; font-size: 0.78rem; font-weight: 700;
+  cursor: var(--sam-cursor);
+}
+.sam-bstop:last-child { border-right: 0; }
+.sam-bstop:hover { filter: brightness(1.3); }
+.sam-bstop.neg.on { background: var(--color-blood, #b03c2d); color: #fff; }
+.sam-bstop.pos.on { background: var(--color-gold-fill, #c9922a); color: #1a1208; }
+.sam-bstop.zero.on { background: #5a4a24; color: #f0d488; }
+.sam-linkish {
+  background: none; border: 0; color: var(--color-gold, #c9a227); font-size: 0.8rem;
+  text-decoration: underline; cursor: var(--sam-cursor); padding: 0 2px;
+}
 
 /* ---- equip checkbox (loadout list) ---------------------------------- */
 .sam-check {

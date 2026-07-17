@@ -19,8 +19,10 @@ import { useMod } from '@/state/ModContext.jsx';
 import ScriptEditor from '@/components/ScriptEditor.jsx';
 import {
   Panel, Field, TextInput, NumberInput, GoldSlider, Stepper, GoldButton,
-  InventoryGrid, ItemIcon, ErrorList, SavedNote, BalanceHints, SearchSelect,
+  ItemIcon, ErrorList, SavedNote, BalanceHints, SearchSelect,
 } from '@/components/ui.jsx';
+import LoadoutBoard from '@/components/LoadoutBoard.jsx';
+import { entryFromJson, entryToJson } from '@/data/equipment.js';
 
 const MAX_PORTRAIT_BYTES = 256 * 1024; // portraits are 54x54 — anything big is a mistake
 
@@ -126,7 +128,7 @@ export default function ClassEditor() {
     Object.fromEntries(SKILLS.map((s) => [s, editDef?.skills?.[s] ?? 0]))
   );
   const [items, setItems] = useState(() =>
-    (editDef?.starting_items ?? []).map((si) => ({ type: si.type, count: si.count ?? 1, equip: !!si.equip }))
+    (editDef?.starting_items ?? []).map(entryFromJson)
   );
   const [spells, setSpells] = useState(editDef?.starting_spells ?? []);
   const [spellError, setSpellError] = useState('');
@@ -239,12 +241,7 @@ export default function ClassEditor() {
     if (description.trim()) def.description = description.trim();
     if (Object.keys(nonzeroSkills).length) def.skills = nonzeroSkills;
     if (items.length) {
-      def.starting_items = items.map((it) => {
-        const entry = { type: it.type };
-        if (it.count > 1) entry.count = it.count;
-        if (it.equip) entry.equip = true;
-        return entry;
-      });
+      def.starting_items = items.map(entryToJson);
     }
     if (spells.length) def.starting_spells = spells;
     const strong = ROLL_STATS.filter((a) => growth[a] === 'strong');
@@ -379,8 +376,8 @@ export default function ClassEditor() {
         {portraitError && <div className="sam-error text-sm mt-1">{portraitError}</div>}
       </Panel>
 
-      {/* ------------------------------------------- three main panels */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+      {/* ------------------------------------------- attributes + skills */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
         <Panel title="Core Attributes">
           {CORE_ATTRIBUTES.map((a) => (
             <GoldSlider
@@ -423,17 +420,18 @@ export default function ClassEditor() {
           ))}
         </Panel>
 
-        <Panel title="Starting Items">
-          <InventoryGrid
-            items={items}
-            allTypes={ITEM_TYPES}
-            iconFor={itemIcon}
-            categoryFor={itemCategory}
-            categories={CATEGORIES}
-            onChange={setItems}
-          />
-        </Panel>
       </div>
+
+      {/* --------------------------------------- starting loadout (full width) */}
+      <LoadoutBoard
+        items={items}
+        onChange={setItems}
+        allTypes={ITEM_TYPES}
+        iconFor={itemIcon}
+        categoryFor={itemCategory}
+        categories={CATEGORIES}
+        portraitUrl={portrait.dataUrl}
+      />
 
       {/* --------------------------------------- spells + growth + gold */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
