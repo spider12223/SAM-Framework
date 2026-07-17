@@ -278,36 +278,14 @@ namespace
 		return o;
 	}
 
+	// Resolve an effect name via the shared SAMLua table — all of the engine's named
+	// effects plus custom slots. This used to be a second hand-written copy of the same
+	// if-chain, and both copies drifted to the same wrong place: 14 of the engine's 135
+	// effects, so STUNNED/FEAR/ROOTED/etc. were unreachable from either language.
+	// One table now, so Lua and JS cannot disagree about what an effect is called.
 	int samEffectNameToId(const char* nameIn)
 	{
-		const std::string n = samUpper(nameIn);
-		if ( n == "LEVITATING" ) { return EFF_LEVITATING; }
-		if ( n == "INVISIBLE" )  { return EFF_INVISIBLE;  }
-		if ( n == "CONFUSED" )   { return EFF_CONFUSED;   }
-		if ( n == "POISONED" )   { return EFF_POISONED;   }
-		if ( n == "BLEEDING" )   { return EFF_BLEEDING;   }
-		if ( n == "ASLEEP" )     { return EFF_ASLEEP;     }
-		if ( n == "PARALYZED" )  { return EFF_PARALYZED;  }
-		if ( n == "DRUNK" )      { return EFF_DRUNK;      }
-		if ( n == "BLIND" )      { return EFF_BLIND;      }
-		if ( n == "GREASY" )     { return EFF_GREASY;     }
-		if ( n == "VOMITING" )   { return EFF_VOMITING;   }
-		if ( n == "WEBBED" )     { return EFF_WEBBED;     }
-		if ( n == "SLOW" )       { return EFF_SLOW;       }
-		if ( n == "FAST" )       { return EFF_FAST;       }
-		// Custom S.A.M effect slots [135, NUMEFFECTS) — raw number ("135") or
-		// "CUSTOM:135". Mirrors the Lua runtime (parity). Slots 135-159 are unused by
-		// vanilla but already serialized/saved/ticked/auto-expired, so scripts can use
-		// them as pseudo-effects. Restricted to 135+ so a number can't hit a vanilla slot.
-		{
-			const std::string num = (n.rfind("CUSTOM:", 0) == 0) ? n.substr(7) : n;
-			if ( !num.empty() && num.find_first_not_of("0123456789") == std::string::npos )
-			{
-				const int v = atoi(num.c_str());
-				if ( v >= 135 && v < NUMEFFECTS ) { return v; }
-			}
-		}
-		return -1;
+		return SAMLua::effectIdFromName(nameIn);
 	}
 
 	JSValue js_sam_grant_gold(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)

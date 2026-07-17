@@ -11,13 +11,11 @@
  * tables the manifest doesn't enumerate — so they're transcribed from the source and
  * annotated with where to re-check them.
  */
-import { SAM_EVENTS, PLAYER_STATS } from '@/data/samApi.js';
+import { SAM_EVENTS, PLAYER_STATS, EFFECTS as API_EFFECTS } from '@/data/samApi.js';
 
-/** Bare effect names samEffectNameToId() accepts (sam_lua_runtime.cpp). Case-insensitive. */
-export const EFFECTS = [
-  'FAST', 'SLOW', 'POISONED', 'BLEEDING', 'CONFUSED', 'BLIND', 'ASLEEP',
-  'PARALYZED', 'INVISIBLE', 'LEVITATING', 'DRUNK', 'GREASY', 'VOMITING', 'WEBBED',
-];
+/** Effect names the engine knows — from the manifest, so this can't drift from the
+ *  runtime's table (it did: both sat at 14 of 135 for months). */
+export const EFFECTS = API_EFFECTS;
 
 /** Slot names samEquippedSlot() understands. ARMOR==BREASTPLATE, BOOTS==SHOES. */
 export const SLOTS = [

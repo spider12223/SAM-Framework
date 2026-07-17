@@ -357,24 +357,160 @@ namespace
 		return o;
 	}
 
+	// Every named effect the engine defines, so a script can name any of them.
+	//
+	// This used to be a hand-written if-chain covering 14 effects out of the 135 in
+	// stat.hpp — so STUNNED, FEAR, ROOTED, TELEPATH, MAGICREFLECT, THORNS and 115 others
+	// were simply unreachable by name. A script asking for one got "unknown effect" and
+	// silently did nothing, with no hint that the effect was real but unexposed.
+	// Generated from stat.hpp's EFF_* constants; keep it in step if the engine adds more.
+	struct SamEffectName { const char* name; int id; };
+	static const SamEffectName samEffectNames[] = {
+		{ "ASLEEP",                EFF_ASLEEP },
+		{ "POISONED",              EFF_POISONED },
+		{ "STUNNED",               EFF_STUNNED },
+		{ "CONFUSED",              EFF_CONFUSED },
+		{ "DRUNK",                 EFF_DRUNK },
+		{ "INVISIBLE",             EFF_INVISIBLE },
+		{ "BLIND",                 EFF_BLIND },
+		{ "GREASY",                EFF_GREASY },
+		{ "MESSY",                 EFF_MESSY },
+		{ "FAST",                  EFF_FAST },
+		{ "PARALYZED",             EFF_PARALYZED },
+		{ "LEVITATING",            EFF_LEVITATING },
+		{ "TELEPATH",              EFF_TELEPATH },
+		{ "VOMITING",              EFF_VOMITING },
+		{ "BLEEDING",              EFF_BLEEDING },
+		{ "SLOW",                  EFF_SLOW },
+		{ "MAGICRESIST",           EFF_MAGICRESIST },
+		{ "MAGICREFLECT",          EFF_MAGICREFLECT },
+		{ "VAMPIRICAURA",          EFF_VAMPIRICAURA },
+		{ "SHRINE_RED_BUFF",       EFF_SHRINE_RED_BUFF },
+		{ "SHRINE_GREEN_BUFF",     EFF_SHRINE_GREEN_BUFF },
+		{ "SHRINE_BLUE_BUFF",      EFF_SHRINE_BLUE_BUFF },
+		{ "HP_REGEN",              EFF_HP_REGEN },
+		{ "MP_REGEN",              EFF_MP_REGEN },
+		{ "PACIFY",                EFF_PACIFY },
+		{ "POLYMORPH",             EFF_POLYMORPH },
+		{ "KNOCKBACK",             EFF_KNOCKBACK },
+		{ "WITHDRAWAL",            EFF_WITHDRAWAL },
+		{ "POTION_STR",            EFF_POTION_STR },
+		{ "SHAPESHIFT",            EFF_SHAPESHIFT },
+		{ "WEBBED",                EFF_WEBBED },
+		{ "FEAR",                  EFF_FEAR },
+		{ "MAGICAMPLIFY",          EFF_MAGICAMPLIFY },
+		{ "DISORIENTED",           EFF_DISORIENTED },
+		{ "SHADOW_TAGGED",         EFF_SHADOW_TAGGED },
+		{ "TROLLS_BLOOD",          EFF_TROLLS_BLOOD },
+		{ "FLUTTER",               EFF_FLUTTER },
+		{ "DASH",                  EFF_DASH },
+		{ "DISTRACTED_COOLDOWN",   EFF_DISTRACTED_COOLDOWN },
+		{ "MIMIC_LOCKED",          EFF_MIMIC_LOCKED },
+		{ "ROOTED",                EFF_ROOTED },
+		{ "NAUSEA_PROTECTION",     EFF_NAUSEA_PROTECTION },
+		{ "CON_BONUS",             EFF_CON_BONUS },
+		{ "PWR",                   EFF_PWR },
+		{ "AGILITY",               EFF_AGILITY },
+		{ "RALLY",                 EFF_RALLY },
+		{ "MARIGOLD",              EFF_MARIGOLD },
+		{ "ENSEMBLE_FLUTE",        EFF_ENSEMBLE_FLUTE },
+		{ "ENSEMBLE_LYRE",         EFF_ENSEMBLE_LYRE },
+		{ "ENSEMBLE_DRUM",         EFF_ENSEMBLE_DRUM },
+		{ "ENSEMBLE_LUTE",         EFF_ENSEMBLE_LUTE },
+		{ "ENSEMBLE_HORN",         EFF_ENSEMBLE_HORN },
+		{ "LIFT",                  EFF_LIFT },
+		{ "GUARD_SPIRIT",          EFF_GUARD_SPIRIT },
+		{ "GUARD_BODY",            EFF_GUARD_BODY },
+		{ "DIVINE_GUARD",          EFF_DIVINE_GUARD },
+		{ "NIMBLENESS",            EFF_NIMBLENESS },
+		{ "GREATER_MIGHT",         EFF_GREATER_MIGHT },
+		{ "COUNSEL",               EFF_COUNSEL },
+		{ "STURDINESS",            EFF_STURDINESS },
+		{ "BLESS_FOOD",            EFF_BLESS_FOOD },
+		{ "PINPOINT",              EFF_PINPOINT },
+		{ "PENANCE",               EFF_PENANCE },
+		{ "SACRED_PATH",           EFF_SACRED_PATH },
+		{ "DETECT_ENEMY",          EFF_DETECT_ENEMY },
+		{ "BLOOD_WARD",            EFF_BLOOD_WARD },
+		{ "TRUE_BLOOD",            EFF_TRUE_BLOOD },
+		{ "DIVINE_ZEAL",           EFF_DIVINE_ZEAL },
+		{ "MAXIMISE",              EFF_MAXIMISE },
+		{ "MINIMISE",              EFF_MINIMISE },
+		{ "WEAKNESS",              EFF_WEAKNESS },
+		{ "INCOHERENCE",           EFF_INCOHERENCE },
+		{ "OVERCHARGE",            EFF_OVERCHARGE },
+		{ "ENVENOM_WEAPON",        EFF_ENVENOM_WEAPON },
+		{ "MAGIC_GREASE",          EFF_MAGIC_GREASE },
+		{ "COMMAND",               EFF_COMMAND },
+		{ "MIMIC_VOID",            EFF_MIMIC_VOID },
+		{ "CURSE_FLESH",           EFF_CURSE_FLESH },
+		{ "NUMBING_BOLT",          EFF_NUMBING_BOLT },
+		{ "DELAY_PAIN",            EFF_DELAY_PAIN },
+		{ "SEEK_CREATURE",         EFF_SEEK_CREATURE },
+		{ "TABOO",                 EFF_TABOO },
+		{ "COURAGE",               EFF_COURAGE },
+		{ "COWARDICE",             EFF_COWARDICE },
+		{ "SPORES",                EFF_SPORES },
+		{ "ABUNDANCE",             EFF_ABUNDANCE },
+		{ "GREATER_ABUNDANCE",     EFF_GREATER_ABUNDANCE },
+		{ "PRESERVE",              EFF_PRESERVE },
+		{ "MIST_FORM",             EFF_MIST_FORM },
+		{ "FORCE_SHIELD",          EFF_FORCE_SHIELD },
+		{ "LIGHTEN_LOAD",          EFF_LIGHTEN_LOAD },
+		{ "ATTRACT_ITEMS",         EFF_ATTRACT_ITEMS },
+		{ "RETURN_ITEM",           EFF_RETURN_ITEM },
+		{ "DEMESNE_DOOR",          EFF_DEMESNE_DOOR },
+		{ "REFLECTOR_SHIELD",      EFF_REFLECTOR_SHIELD },
+		{ "DIZZY",                 EFF_DIZZY },
+		{ "SPIN",                  EFF_SPIN },
+		{ "CRITICAL_SPELL",        EFF_CRITICAL_SPELL },
+		{ "MAGIC_WELL",            EFF_MAGIC_WELL },
+		{ "STATIC",                EFF_STATIC },
+		{ "ABSORB_MAGIC",          EFF_ABSORB_MAGIC },
+		{ "FLAME_CLOAK",           EFF_FLAME_CLOAK },
+		{ "DUSTED",                EFF_DUSTED },
+		{ "NOISE_VISIBILITY",      EFF_NOISE_VISIBILITY },
+		{ "RATION_SPICY",          EFF_RATION_SPICY },
+		{ "RATION_SOUR",           EFF_RATION_SOUR },
+		{ "RATION_BITTER",         EFF_RATION_BITTER },
+		{ "RATION_HEARTY",         EFF_RATION_HEARTY },
+		{ "RATION_HERBAL",         EFF_RATION_HERBAL },
+		{ "RATION_SWEET",          EFF_RATION_SWEET },
+		{ "GROWTH",                EFF_GROWTH },
+		{ "THORNS",                EFF_THORNS },
+		{ "BLADEVINES",            EFF_BLADEVINES },
+		{ "BASTION_MUSHROOM",      EFF_BASTION_MUSHROOM },
+		{ "BASTION_ROOTS",         EFF_BASTION_ROOTS },
+		{ "FOCI_LIGHT_PEACE",      EFF_FOCI_LIGHT_PEACE },
+		{ "FOCI_LIGHT_JUSTICE",    EFF_FOCI_LIGHT_JUSTICE },
+		{ "FOCI_LIGHT_PROVIDENCE", EFF_FOCI_LIGHT_PROVIDENCE },
+		{ "FOCI_LIGHT_PURITY",     EFF_FOCI_LIGHT_PURITY },
+		{ "FOCI_LIGHT_SANCTUARY",  EFF_FOCI_LIGHT_SANCTUARY },
+		{ "STASIS",                EFF_STASIS },
+		{ "HP_MP_REGEN",           EFF_HP_MP_REGEN },
+		{ "DISRUPTED",             EFF_DISRUPTED },
+		{ "FROST",                 EFF_FROST },
+		{ "MAGICIANS_ARMOR",       EFF_MAGICIANS_ARMOR },
+		{ "PROJECT_SPIRIT",        EFF_PROJECT_SPIRIT },
+		{ "DEFY_FLESH",            EFF_DEFY_FLESH },
+		{ "PINPOINT_DAMAGE",       EFF_PINPOINT_DAMAGE },
+		{ "SALAMANDER_HEART",      EFF_SALAMANDER_HEART },
+		{ "DIVINE_FIRE",           EFF_DIVINE_FIRE },
+		{ "HEALING_WORD",          EFF_HEALING_WORD },
+		{ "HOLY_FIRE",             EFF_HOLY_FIRE },
+		{ "SIGIL",                 EFF_SIGIL },
+		{ "SANCTUARY",             EFF_SANCTUARY },
+		{ "DUCKED",                EFF_DUCKED },
+	};
+
 	// Map a case-insensitive effect name to its EFF_* id, or -1 if unknown.
 	int samEffectNameToId(const char* nameIn)
 	{
 		const std::string n = samUpper(nameIn);
-		if ( n == "LEVITATING" ) { return EFF_LEVITATING; }
-		if ( n == "INVISIBLE" )  { return EFF_INVISIBLE;  }
-		if ( n == "CONFUSED" )   { return EFF_CONFUSED;   }
-		if ( n == "POISONED" )   { return EFF_POISONED;   }
-		if ( n == "BLEEDING" )   { return EFF_BLEEDING;   }
-		if ( n == "ASLEEP" )     { return EFF_ASLEEP;     }
-		if ( n == "PARALYZED" )  { return EFF_PARALYZED;  }
-		if ( n == "DRUNK" )      { return EFF_DRUNK;      }
-		if ( n == "BLIND" )      { return EFF_BLIND;      }
-		if ( n == "GREASY" )     { return EFF_GREASY;     }
-		if ( n == "VOMITING" )   { return EFF_VOMITING;   }
-		if ( n == "WEBBED" )     { return EFF_WEBBED;     }
-		if ( n == "SLOW" )       { return EFF_SLOW;       }
-		if ( n == "FAST" )       { return EFF_FAST;       }
+		for ( const auto& e : samEffectNames )
+		{
+			if ( n == e.name ) { return e.id; }
+		}
 		// Custom S.A.M effect slots [135, NUMEFFECTS): accept a raw number ("135") or
 		// "CUSTOM:135". The engine's effect array reserves NUMEFFECTS=160 bits but the
 		// highest vanilla effect is EFF_DUCKED=134, so slots 135-159 are unused yet
@@ -2464,6 +2600,17 @@ namespace SAMLua
 	{
 #ifdef SAM_LUA_HAVE_BARONY
 		for ( int i = 0; i < MAXPLAYERS; ++i ) { g_samSessionKills[i] = 0; }
+#endif
+	}
+
+	// Public wrapper so the JS runtime resolves effect names through the SAME table
+	// (see the header note — two copies is exactly how this got stuck at 14 of 135).
+	int effectIdFromName(const char* name)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		return samEffectNameToId(name);
+#else
+		(void)name; return -1;
 #endif
 	}
 

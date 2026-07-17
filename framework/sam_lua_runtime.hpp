@@ -135,6 +135,15 @@ namespace SAMLua
 	// effects don't leak into the next). Safe before init.
 	void resetMoveSpeed();
 
+	// Resolve a status-effect name to its engine id, or -1 if there's no such effect.
+	// Accepts any of the engine's named effects ("PARALYZED", "STUNNED", ...), plus a
+	// custom slot as a raw number ("135") or "CUSTOM:135".
+	//
+	// Lives here so the JS runtime shares it instead of keeping a second table. The two
+	// WERE separate copies, and they drifted to the same wrong place: 14 names out of the
+	// engine's 135, so most real effects were unreachable from either language.
+	int effectIdFromName(const char* name);
+
 	// ---- scripted stat writes: making them real on the client -------------------
 	//
 	// A raw write to stats[player] only exists on the host. Vanilla never factored its
