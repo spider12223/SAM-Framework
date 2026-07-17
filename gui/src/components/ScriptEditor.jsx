@@ -9,6 +9,7 @@ import { SAM_FUNCTIONS, SAM_EVENTS } from '@/data/samApi.js';
 import { SNIPPETS } from '@/data/snippets.js';
 import { lintScript } from '@/lib/lintScript.js';
 import { GoldButton } from '@/components/ui.jsx';
+import BlockBuilder from '@/components/BlockBuilder.jsx';
 
 const LANGS = [
   { id: 'lua', label: 'Lua' },
@@ -48,6 +49,9 @@ export default function ScriptEditor({ code, onCode, lang, onLang }) {
   const taRef = useRef(null);
   const [tab, setTab] = useState('api'); // api | events | snippets
   const [query, setQuery] = useState('');
+  // Basic = build it from blocks; Advanced = write the code. Start on Basic only for a
+  // fresh script, so we never hide someone's existing work behind a builder.
+  const [mode, setMode] = useState(() => ((code ?? '').trim() ? 'advanced' : 'basic'));
 
   const insert = (text) => {
     const ta = taRef.current;
@@ -86,7 +90,52 @@ export default function ScriptEditor({ code, onCode, lang, onLang }) {
 
   const langForSnippet = lang === 'lua' ? 'lua' : 'js';
 
+  const ModeTabs = (
+    <div className="flex items-center gap-1 mb-3">
+      {[
+        { id: 'basic', label: '🧱 Basic', hint: 'build it from blocks' },
+        { id: 'advanced', label: '</> Advanced', hint: 'write the code' },
+      ].map((m) => (
+        <button
+          key={m.id}
+          type="button"
+          className="sam-btn"
+          title={m.hint}
+          style={{
+            padding: '0.3rem 0.8rem',
+            borderColor: mode === m.id ? 'var(--color-gold)' : undefined,
+            color: mode === m.id ? 'var(--color-gold-bright)' : undefined,
+          }}
+          onClick={() => setMode(m.id)}
+        >{m.label}</button>
+      ))}
+      <span className="text-xs ml-2" style={{ color: '#6b5a35' }}>
+        {mode === 'basic'
+          ? 'Pick a trigger, add conditions and actions — it writes the Lua for you.'
+          : 'Full editor with the API, events and snippets.'}
+      </span>
+    </div>
+  );
+
+  if (mode === 'basic') {
+    return (
+      <div>
+        {ModeTabs}
+        <BlockBuilder
+          hasExistingCode={!!(code ?? '').trim()}
+          onUseScript={(generated) => {
+            onCode(generated);
+            onLang('lua');      // the builder emits Lua
+            setMode('advanced'); // land in the editor so it's obvious what you got
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
+    <div>
+    {ModeTabs}
     <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-3 items-start">
       {/* -------- editor -------- */}
       <div>
@@ -203,6 +252,7 @@ export default function ScriptEditor({ code, onCode, lang, onLang }) {
           ))}
         </div>
       </div>
+    </div>
     </div>
   );
 }
