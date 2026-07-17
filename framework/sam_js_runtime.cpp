@@ -393,6 +393,7 @@ namespace
 		else if ( n == "MP" )    { v = s->MP; }
 		else if ( n == "MAXMP" ) { v = s->MAXMP; }
 		else if ( n == "GOLD" )  { v = s->GOLD; }
+		else if ( n == "HUNGER" ) { v = s->HUNGER; }
 		else if ( n == "LEVEL" || n == "LVL" ) { v = s->LVL; }
 		else if ( n == "EXP" )   { v = s->EXP; }
 		else { SAM_ERROR("JS", "sam_get_stat: unknown stat '" + name + "'."); return JS_NewInt32(ctx, 0); }
@@ -416,7 +417,7 @@ namespace
 		// Clamps and flush are kept in lockstep with the Lua sam_set_stat by using the same
 		// shared SAMLua constants and helpers — the two runtimes having quietly different
 		// bounds is a bug class this framework has already shipped once.
-		enum { JS_SYNC_NONE, JS_SYNC_ATTR, JS_SYNC_GOLD } sync = JS_SYNC_NONE;
+		enum { JS_SYNC_NONE, JS_SYNC_ATTR, JS_SYNC_GOLD, JS_SYNC_HUNGER } sync = JS_SYNC_NONE;
 		// setHP/setMP self-emit UPHP/UPMP only when an entity exists; with none (dead player
 		// awaiting respawn) the raw write needs the ATTR flush, same as the Lua path.
 		if      ( n == "HP" )    { if ( e ) { e->setHP(value); } else { s->HP = samClampInt(value, 0, s->MAXHP); sync = JS_SYNC_ATTR; } }
@@ -430,11 +431,13 @@ namespace
 		else if ( n == "PER" )   { s->PER = samClampInt(value, SAMLua::ATTR_WIRE_MIN, MAX_PLAYER_STAT_VALUE); sync = JS_SYNC_ATTR; }
 		else if ( n == "CHR" )   { s->CHR = samClampInt(value, SAMLua::ATTR_WIRE_MIN, MAX_PLAYER_STAT_VALUE); sync = JS_SYNC_ATTR; }
 		else if ( n == "GOLD" )  { s->GOLD = (value < 0 ? 0 : value); sync = JS_SYNC_GOLD; }
+		else if ( n == "HUNGER" ) { s->HUNGER = samClampInt(value, 0, 1500); sync = JS_SYNC_HUNGER; } // engine clamps 0..1500
 		else if ( n == "LEVEL" || n == "LVL" ) { s->LVL = samClampInt(value, 1, 255); sync = JS_SYNC_ATTR; }
 		else if ( n == "EXP" )   { s->EXP = samClampInt(value, 0, 99); sync = JS_SYNC_ATTR; }
 		else { SAM_ERROR("JS", "sam_set_stat: unknown stat '" + name + "'."); return JS_NewBool(ctx, 0); }
 		if      ( sync == JS_SYNC_ATTR ) { SAMLua::flushStatToClient(player); }
 		else if ( sync == JS_SYNC_GOLD ) { SAMLua::flushGoldToClient(player); }
+		else if ( sync == JS_SYNC_HUNGER ) { serverUpdateHunger(player); } // engine's own 'HNGR' sender
 		SAM_INFO("JS", "Set stat " + n + " = " + std::to_string(value) + " on player " + std::to_string(player));
 		return JS_NewBool(ctx, 1);
 	}

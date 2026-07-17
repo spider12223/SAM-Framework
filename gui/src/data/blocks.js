@@ -11,7 +11,7 @@
  * tables the manifest doesn't enumerate — so they're transcribed from the source and
  * annotated with where to re-check them.
  */
-import { SAM_EVENTS } from '@/data/samApi.js';
+import { SAM_EVENTS, PLAYER_STATS } from '@/data/samApi.js';
 
 /** Bare effect names samEffectNameToId() accepts (sam_lua_runtime.cpp). Case-insensitive. */
 export const EFFECTS = [
@@ -24,8 +24,12 @@ export const SLOTS = [
   'WEAPON', 'SHIELD', 'HELMET', 'ARMOR', 'GLOVES', 'BOOTS', 'RING', 'AMULET', 'CLOAK', 'MASK',
 ];
 
-/** Attributes sam_get_stat / sam_set_stat accept (mirrors the manifest's value list). */
-export const STATS = ['STR', 'DEX', 'CON', 'INT', 'PER', 'CHR', 'HP', 'MAXHP', 'MP', 'MAXMP', 'GOLD', 'LEVEL', 'EXP'];
+/**
+ * Attributes sam_get_stat / sam_set_stat accept — taken from the manifest so this can't
+ * drift. HUNGER is 0..1500 (0 = starving); the tier edges are per-race, so scripts read
+ * the raw number and player.on_hunger_change tells you when a tier is crossed.
+ */
+export const STATS = PLAYER_STATS.filter((s) => s !== 'LVL'); // LVL is just an alias of LEVEL
 
 /**
  * Spells that are actually castable by a player — the engine's spell_t globals.
@@ -142,6 +146,24 @@ export const CONDITIONS = [
     id: 'chance', label: 'random chance', negatable: false,
     params: [{ name: 'percent', type: 'number', default: 25, min: 1, max: 100, label: '% of the time' }],
     lua: (p) => `math.random(100) <= ${Number(p.percent) || 0}`,
+  },
+  {
+    id: 'move_speed_cmp', label: 'move speed compares to', negatable: false,
+    params: [
+      { name: 'op', type: 'select', values: ['<', '<=', '==', '>=', '>'], default: '>' },
+      { name: 'value', type: 'number', default: 1, label: 'multiplier (1 = normal)' },
+    ],
+    lua: (p) => `sam_get_move_speed(player) ${p.op} ${Number(p.value) || 0}`,
+  },
+  {
+    id: 'time_played_cmp', label: 'time in this run compares to', negatable: false,
+    params: [
+      { name: 'op', type: 'select', values: ['<', '<=', '>=', '>'], default: '>' },
+      { name: 'seconds', type: 'number', default: 60, label: 'seconds' },
+    ],
+    // sam_get_time_played returns TICKS, not seconds — convert so the input reads naturally.
+    lua: (p) => `sam_get_time_played() ${p.op} ${Math.round((Number(p.seconds) || 0) * TICKS_PER_SECOND)}`,
+    note: 'Measured from the start of the run. 50 ticks = 1 second.',
   },
 ];
 

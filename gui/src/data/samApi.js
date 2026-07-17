@@ -15,7 +15,7 @@
 //   EFFECTS       — sam_apply_effect / sam_remove_effect / sam_has_effect / *_monster_effect
 //   EQUIP_SLOTS   — sam_get_equipped_item
 
-export const PLAYER_STATS = ["STR", "DEX", "CON", "INT", "PER", "CHR", "HP", "MAXHP", "MP", "MAXMP", "GOLD", "LEVEL", "LVL", "EXP"];
+export const PLAYER_STATS = ["STR", "DEX", "CON", "INT", "PER", "CHR", "HP", "MAXHP", "MP", "MAXMP", "GOLD", "HUNGER", "LEVEL", "LVL", "EXP"];
 export const MONSTER_STATS = ["STR", "DEX", "SPEED", "CON", "INT", "PER", "CHR", "HP", "MAXHP", "MP", "MAXMP", "LEVEL", "LVL"];
 export const EFFECTS = ["LEVITATING", "INVISIBLE", "CONFUSED", "POISONED", "BLEEDING", "ASLEEP", "PARALYZED", "DRUNK", "BLIND", "GREASY", "VOMITING", "WEBBED", "SLOW", "FAST"];
 export const EQUIP_SLOTS = ["WEAPON", "SHIELD", "HELMET", "ARMOR", "BREASTPLATE", "GLOVES", "BOOTS", "SHOES", "RING", "AMULET", "CLOAK", "MASK"];
@@ -44,10 +44,10 @@ export const SAM_FUNCTIONS = [
 
   // ---- Player state -----------------------------------------------------------
   { name: "sam_get_stat", category: "Player state", hostOnly: true,
-    params: [{ name: "player", type: "int" }, { name: "stat", type: "string", values: ["STR","DEX","CON","INT","PER","CHR","HP","MAXHP","MP","MAXMP","GOLD","LEVEL","LVL","EXP"] }],
+    params: [{ name: "player", type: "int" }, { name: "stat", type: "string", values: PLAYER_STATS }],
     returns: "the stat value (number; 0 on client/invalid)", desc: "Read a live player stat. Refused on a multiplayer client." },
   { name: "sam_set_stat", category: "Player state", hostOnly: true,
-    params: [{ name: "player", type: "int" }, { name: "stat", type: "string", values: ["STR","DEX","CON","INT","PER","CHR","HP","MAXHP","MP","MAXMP","GOLD","LEVEL","LVL","EXP"] }, { name: "value", type: "int" }],
+    params: [{ name: "player", type: "int" }, { name: "stat", type: "string", values: PLAYER_STATS }, { name: "value", type: "int" }],
     returns: "true on success (boolean)", desc: "Set a live player stat, bounded (HP never exceeds MAXHP, stats clamped, etc.). Syncs the change to the owning client." },
   { name: "sam_set_move_speed", category: "Player state", hostOnly: true,
     params: [{ name: "player", type: "int" }, { name: "mult", type: "number" }],
@@ -128,10 +128,10 @@ export const SAM_FUNCTIONS = [
 
   // ---- Monsters ---------------------------------------------------------------
   { name: "sam_get_monster_stat", category: "Monsters", hostOnly: false,
-    params: [{ name: "uid", type: "uid" }, { name: "stat", type: "string", values: ["STR","DEX","SPEED","CON","INT","PER","CHR","HP","MAXHP","MP","MAXMP","LEVEL","LVL"] }],
+    params: [{ name: "uid", type: "uid" }, { name: "stat", type: "string", values: MONSTER_STATS }],
     returns: "the stat value (number; 0 if not a monster)", desc: "Read a monster's stat by UID. DEX aliases SPEED." },
   { name: "sam_set_monster_stat", category: "Monsters", hostOnly: true,
-    params: [{ name: "uid", type: "uid" }, { name: "stat", type: "string", values: ["STR","DEX","SPEED","CON","INT","PER","CHR","HP","MAXHP","MP","MAXMP","LEVEL","LVL"] }, { name: "value", type: "int" }],
+    params: [{ name: "uid", type: "uid" }, { name: "stat", type: "string", values: MONSTER_STATS }, { name: "value", type: "int" }],
     returns: "true on success (boolean)", desc: "Set a monster's stat by UID (bounded)." },
   { name: "sam_apply_monster_effect", category: "Monsters", hostOnly: true,
     params: [{ name: "uid", type: "uid" }, { name: "effect", type: "string", values: EFFECTS }, { name: "ticks", type: "int" }],

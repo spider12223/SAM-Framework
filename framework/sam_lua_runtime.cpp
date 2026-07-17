@@ -342,7 +342,13 @@ namespace
 	// What sam_set_stat owes the client after a write. The flush itself is
 	// SAMLua::flushStatToClient/flushGoldToClient — public so the JS runtime calls the
 	// same code instead of growing a second copy that drifts out of step.
-	enum SamStatSync { SAM_SYNC_NONE, SAM_SYNC_ATTR, SAM_SYNC_GOLD };
+	enum SamStatSync { SAM_SYNC_NONE, SAM_SYNC_ATTR, SAM_SYNC_GOLD, SAM_SYNC_HUNGER };
+
+	// Hunger's own bounds, from the engine's clamps in actplayer.cpp (0 .. 1500).
+	// 0 is starving; the tier edges (hungry/weak/starving/oversatiated) are derived by
+	// getEntityHungerInterval and vary per race, so we clamp the raw value only.
+	const int SAM_HUNGER_MIN = 0;
+	const int SAM_HUNGER_MAX = 1500;
 
 	inline std::string samUpper(const char* in)
 	{
@@ -471,6 +477,7 @@ namespace
 		else if ( n == "MP" )    { v = s->MP; }
 		else if ( n == "MAXMP" ) { v = s->MAXMP; }
 		else if ( n == "GOLD" )  { v = s->GOLD; }
+		else if ( n == "HUNGER" ) { v = s->HUNGER; }
 		else if ( n == "LEVEL" || n == "LVL" ) { v = s->LVL; }
 		else if ( n == "EXP" )   { v = s->EXP; }
 		else { SAM_ERROR("LUA", std::string("sam_get_stat: unknown stat '") + (nameC ? nameC : "") + "'."); lua_pushinteger(Ls, 0); return 1; }
@@ -507,6 +514,7 @@ namespace
 		else if ( n == "PER" )   { s->PER = samClampInt(value, SAMLua::ATTR_WIRE_MIN, MAX_PLAYER_STAT_VALUE); sync = SAM_SYNC_ATTR; }
 		else if ( n == "CHR" )   { s->CHR = samClampInt(value, SAMLua::ATTR_WIRE_MIN, MAX_PLAYER_STAT_VALUE); sync = SAM_SYNC_ATTR; }
 		else if ( n == "GOLD" )  { s->GOLD = (value < 0 ? 0 : value); sync = SAM_SYNC_GOLD; }
+		else if ( n == "HUNGER" ) { s->HUNGER = samClampInt(value, SAM_HUNGER_MIN, SAM_HUNGER_MAX); sync = SAM_SYNC_HUNGER; }
 		else if ( n == "LEVEL" || n == "LVL" ) { s->LVL = samClampInt(value, 1, 255); sync = SAM_SYNC_ATTR; }
 		else if ( n == "EXP" )   { s->EXP = samClampInt(value, 0, 99); sync = SAM_SYNC_ATTR; }
 		else { SAM_ERROR("LUA", std::string("sam_set_stat: unknown stat '") + (nameC ? nameC : "") + "'."); lua_pushboolean(Ls, 0); return 1; }
@@ -515,6 +523,10 @@ namespace
 		// HP/MP are absent on purpose — setHP/setMP already emit UPHP/UPMP.
 		if      ( sync == SAM_SYNC_ATTR ) { SAMLua::flushStatToClient(player); }
 		else if ( sync == SAM_SYNC_GOLD ) { SAMLua::flushGoldToClient(player); }
+		// Hunger has its own engine sender ('HNGR'), and unlike ATTR it already does all
+		// the guarding itself (SERVER-only, skips the local/disconnected player), so this
+		// is just a call rather than another hand-inlined packet.
+		else if ( sync == SAM_SYNC_HUNGER ) { serverUpdateHunger(player); }
 		SAM_INFO("LUA", std::string("Set stat ") + n + " = " + std::to_string(value) + " on player " + std::to_string(player));
 		lua_pushboolean(Ls, 1);
 		return 1;

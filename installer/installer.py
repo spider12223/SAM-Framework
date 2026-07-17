@@ -34,7 +34,7 @@ import urllib.request
 # --------------------------------------------------------------------------- #
 #  Constants
 # --------------------------------------------------------------------------- #
-APP_VERSION = "1.2.2"
+APP_VERSION = "1.2.3"
 APP_TITLE = f"S.A.M Framework Installer v{APP_VERSION}"
 PAYLOAD_NAME = "sam_barony.exe"   # bundled S.A.M barony.exe (see --add-data)
 TS_PAYLOAD_NAME = "typescript.js" # bundled TypeScript compiler for .ts mod scripts
