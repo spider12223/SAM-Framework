@@ -52,10 +52,20 @@ function condExpr(row) {
   return row.negate ? `not (${expr})` : expr;
 }
 
-function actionCall(row) {
+/** An action is one or more lines — "for a while" needs an apply plus a revert timer. */
+function actionLines(row) {
   const def = findAction(row.id);
   if (!def) return null;
-  return def.lua(row.params || {});
+  const out = def.lua(row.params || {});
+  return Array.isArray(out) ? out : [out];
+}
+
+/** Does any action need the shared "unique timer id" counter declared above the handler? */
+function needsSeq(spec) {
+  return (spec.actions || []).some((row) => {
+    const def = findAction(row.id);
+    return typeof def?.needsSeq === 'function' && def.needsSeq(row.params || {});
+  });
 }
 
 /**
@@ -64,14 +74,24 @@ function actionCall(row) {
  * keeps everything one level deep no matter how many conditions you stack.
  */
 function ifBlock(conds, acts, indent = '  ') {
-  if (!acts.length) return [`${indent}-- (add an action)`];
-  if (!conds.length) return acts.map((a) => `${indent}${a}`);
+  const flat = acts.flat(); // an action can be several lines (e.g. a revert timer)
+  if (!flat.length) return [`${indent}-- (add an action)`];
+  if (!conds.length) return flat.map((a) => `${indent}${a}`);
   return [
     `${indent}if ${conds.join(' and ')} then`,
-    ...acts.map((a) => `${indent}  ${a}`),
+    ...flat.map((a) => `${indent}  ${a}`),
     `${indent}end`,
   ];
 }
+
+/** Declared above the handler when a temporary change needs unique timer ids. */
+const SEQ_PREAMBLE = [
+  '-- Counter for one-off timer ids. Each temporary change reverts on its own timer, so',
+  '-- two of them overlapping both undo themselves — a shared id would replace the first',
+  '-- revert and quietly leak the change.',
+  'local _tmp_seq = 0',
+  '',
+];
 
 /**
  * spec = {
@@ -85,7 +105,8 @@ export function generateLua(spec) {
   if (!t) return `${HEADER}\n-- Pick a trigger to start.`;
 
   const conds = (spec.conditions || []).map(condExpr).filter(Boolean);
-  const acts = (spec.actions || []).map(actionCall).filter(Boolean);
+  const acts = (spec.actions || []).map(actionLines).filter(Boolean);
+  const seq = needsSeq(spec) ? SEQ_PREAMBLE : [];
   const body = [];
 
   if (t.id === EVERY_SECONDS) {
@@ -98,6 +119,7 @@ export function generateLua(spec) {
       '-- Ticks arrive on their own on_tick(event) handler — never as an event through',
       '-- on_event. A tick carries no player, so this acts on the local host (player 0),',
       '-- which is you in single-player.',
+      ...seq,
       'function on_tick(event)',
       `  if event.tick_count % ${ticks} ~= 0 then return end`,
       '  local player = 0',
@@ -108,7 +130,7 @@ export function generateLua(spec) {
 
   const lines = [HEADER, ...comment(`Fires when ${t.whenFired}.`)];
   if (t.gotcha) lines.push('--', ...comment(`NOTE: ${t.gotcha}`));
-  lines.push('function on_event(event)', `  if event.name ~= ${JSON.stringify(t.id)} then return end`);
+  lines.push(...seq, 'function on_event(event)', `  if event.name ~= ${JSON.stringify(t.id)} then return end`);
   if (triggerHasPlayer(t)) {
     lines.push('  local player = event.player');
   } else {

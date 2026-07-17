@@ -62,7 +62,9 @@ function Row({ kind, row, options, onChange, onRemove }) {
   // the peek would teach a shape the script doesn't actually use.
   let code = '';
   try {
-    const expr = def?.lua(row.params || {});
+    const out = def?.lua(row.params || {});
+    // An action may be several lines ("for a while" adds a revert timer).
+    const expr = Array.isArray(out) ? out.join('\n') : out;
     code = kind === 'if' && row.negate ? `not (${expr})` : expr;
   } catch { code = '(pick options above)'; }
 

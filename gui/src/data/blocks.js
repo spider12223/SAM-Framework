@@ -93,6 +93,8 @@ const q = (s) => JSON.stringify(String(s ?? ''));
 export const MODES = ['flat', '% of max', '% of current'];
 /** Whether an HP change is allowed to be the thing that kills you. */
 export const KILL_MODES = ['can kill', 'cannot kill'];
+/** Whether a change sticks, or undoes itself on a timer. */
+export const DURATIONS = ['permanently', 'for a while'];
 
 /**
  * Build a HP/MP change. Handles solidius's two asks:
@@ -238,8 +240,29 @@ export const ACTIONS = [
     params: [
       { name: 'stat', type: 'select', values: STATS, default: 'STR' },
       { name: 'amount', type: 'number', default: 1, label: 'add this much' },
+      { name: 'duration', type: 'select', values: DURATIONS, default: 'permanently' },
+      { name: 'seconds', type: 'number', default: 5, min: 0.1, label: 'seconds (if temporary)' },
     ],
-    lua: (p) => `sam_set_stat(player, ${q(p.stat)}, sam_get_stat(player, ${q(p.stat)}) + (${Number(p.amount) || 0}))`,
+    needsSeq: (p) => p.duration === 'for a while',
+    lua: (p) => {
+      const stat = q(p.stat);
+      const amt = Number(p.amount) || 0;
+      const apply = `sam_set_stat(player, ${stat}, sam_get_stat(player, ${stat}) + (${amt}))`;
+      if (p.duration !== 'for a while') return apply;
+      const ticks = Math.max(1, Math.round((Number(p.seconds) || 1) * TICKS_PER_SECOND));
+      // Each application gets its OWN timer id. sam_set_timer replaces a timer with the
+      // same id, so a shared one would drop reverts: miss twice quickly and you'd get
+      // two -1s but only one +1 back, permanently leaking the stat.
+      return [
+        apply,
+        '_tmp_seq = _tmp_seq + 1',
+        `sam_set_timer("tmp_${p.stat}_" .. _tmp_seq, ${ticks}, function()`,
+        `  sam_set_stat(player, ${stat}, sam_get_stat(player, ${stat}) + (${-amt}))`,
+        'end)',
+      ];
+    },
+    note: '“For a while” undoes itself on a timer. Each application reverts independently, '
+        + 'so it stacks correctly if it fires again before the first one is up.',
   },
   {
     id: 'apply_effect', label: 'apply a status effect', category: 'Player',
