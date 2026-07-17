@@ -123,6 +123,7 @@ export default function ScriptEditor({ code, onCode, lang, onLang }) {
         {ModeTabs}
         <BlockBuilder
           hasExistingCode={!!(code ?? '').trim()}
+          onLiveCode={(generated) => { onCode(generated); onLang('lua'); }}
           onUseScript={(generated) => {
             onCode(generated);
             onLang('lua');      // the builder emits Lua

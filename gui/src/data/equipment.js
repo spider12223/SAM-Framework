@@ -41,9 +41,11 @@ export function equipSlotOf(type) {
   if (/TORCH|LANTERN|CRYSTAL_SHARD|LIGHT_SOURCE/.test(t)) return 'shield'; // offhand light
   if (/BOOTS|SHOES|LOAFERS|CLEAT|GREAVE/.test(t)) return 'boots';
   if (/GLOVES|GAUNTLET|BRACERS/.test(t) && !/SPIKED_GAUNTLET|KNUCKLE/.test(t)) return 'gloves';
-  if (/CLOAK|CAPE|PAULDRONS|BACKPACK|APRON/.test(t)) return 'cloak';
+  if (/CLOAK|CAPE|BACKPACK|APRON/.test(t)) return 'cloak';
   if (/HELM|^HAT_|HOOD|COIF|CROWN|CIRCLET|LAURELS|TURBAN|HEADDRESS|MITER|PHRYGIAN/.test(t)) return 'helmet';
-  if (/BREASTPLATE|TUNIC|DOUBLET|GAMBESON|HAUBERK|^ROBE|SUEDE|BREASTPIECE/.test(t)) return 'breastplate';
+  // Body armour. PAULDRONS and SHAWL are torso pieces (Barony's breastplate slot,
+  // entity.cpp checkEquipType), not a cloak — a tester caught iron pauldrons landing there.
+  if (/BREASTPLATE|BREASTPIECE|TUNIC|DOUBLET|GAMBESON|HAUBERK|^ROBE|SUEDE|PAULDRONS|SHAWL/.test(t)) return 'breastplate';
   if (/GLASSES|MONOCLE|EYEPATCH|BLINDFOLD|^MASK|_MASK/.test(t)) return 'mask';
   if (/^AMULET_/.test(t)) return 'amulet';
   if (/^RING_/.test(t)) return 'ring';

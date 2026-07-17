@@ -15,7 +15,7 @@
  * Everything offered is derived from the real API manifest (see data/blocks.js), so the
  * builder cannot produce a hook, function, or event field that doesn't exist.
  */
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import { Panel, Field, Select, TextInput, NumberInput, GoldButton } from '@/components/ui.jsx';
 import {
   TRIGGERS, allConditions, untilCandidates, findTrigger, findCondition, findAction, actionsFor,
@@ -238,7 +238,7 @@ function RuleEditor({ rule, index, total, conditions, onChange, onRemove }) {
   );
 }
 
-export default function BlockBuilder({ onUseScript, hasExistingCode }) {
+export default function BlockBuilder({ onUseScript, onLiveCode, hasExistingCode }) {
   const [rules, setRules] = useState(() => [newRule()]);
   const [custom, setCustom] = useState(() => loadBlocks());
   const [editing, setEditing] = useState(false);
@@ -251,6 +251,17 @@ export default function BlockBuilder({ onUseScript, hasExistingCode }) {
 
   const conditions = useMemo(() => allConditions(), [custom]);
   const lua = useMemo(() => generateLua({ rules }), [rules, custom]);
+
+  // Keep the script in sync with the blocks WITHOUT the user having to click "Use this
+  // script" (a tester built an ability, never clicked it, and saved a class with no Lua).
+  // The first render is skipped so merely opening this tab doesn't overwrite existing
+  // Advanced code with the starter block; the first real edit commits the blocks.
+  const firstSync = useRef(true);
+  useEffect(() => {
+    if (firstSync.current) { firstSync.current = false; return; }
+    onLiveCode?.(lua);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lua]);
 
   return (
     <div className="grid gap-4" style={{ gridTemplateColumns: 'minmax(0,1fr) minmax(0,22rem)' }}>

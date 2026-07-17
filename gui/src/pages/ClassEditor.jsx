@@ -116,23 +116,37 @@ export default function ClassEditor() {
   const editDef = editing?.kind === 'class' ? classes.find((c) => c.id === editing.id) : null;
   const existingScript = editDef ? scripts[editDef.id] : null;
 
-  const [name, setName] = useState(editDef?.name ?? '');
-  const [description, setDescription] = useState(editDef?.description ?? '');
+  // Draft autosave: an in-progress class lives only in this component's state and used to
+  // vanish on a refresh (a tester lost a whole class, script and all, that way). We now
+  // mirror it to localStorage in FORM shape and restore it on mount. An explicit "Edit this
+  // class" handoff (editDef) stays authoritative — a draft only restores a fresh/new class.
+  const DRAFT_KEY = useMemo(
+    () => `sam-draft:class:${editing?.kind === 'class' ? editing.id : 'new'}`,
+    [], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const draft = useMemo(() => {
+    if (editDef) return null;
+    try { return JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null'); } catch { return null; }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const [name, setName] = useState(draft?.name ?? editDef?.name ?? '');
+  const [description, setDescription] = useState(draft?.description ?? editDef?.description ?? '');
   const [attrs, setAttrs] = useState(() =>
-    Object.fromEntries(CORE_ATTRIBUTES.map((a) => [a, editDef?.stats?.[a] ?? 10]))
+    draft?.attrs ?? Object.fromEntries(CORE_ATTRIBUTES.map((a) => [a, editDef?.stats?.[a] ?? 10]))
   );
   const [offsets, setOffsets] = useState(() =>
-    Object.fromEntries(OFFSET_STATS.map((s) => [s, editDef?.stats?.[s] ?? 0]))
+    draft?.offsets ?? Object.fromEntries(OFFSET_STATS.map((s) => [s, editDef?.stats?.[s] ?? 0]))
   );
   const [skills, setSkills] = useState(() =>
-    Object.fromEntries(SKILLS.map((s) => [s, editDef?.skills?.[s] ?? 0]))
+    draft?.skills ?? Object.fromEntries(SKILLS.map((s) => [s, editDef?.skills?.[s] ?? 0]))
   );
   const [items, setItems] = useState(() =>
-    (editDef?.starting_items ?? []).map(entryFromJson)
+    draft?.items ?? (editDef?.starting_items ?? []).map(entryFromJson)
   );
-  const [spells, setSpells] = useState(editDef?.starting_spells ?? []);
+  const [spells, setSpells] = useState(draft?.spells ?? editDef?.starting_spells ?? []);
   const [spellError, setSpellError] = useState('');
   const [growth, setGrowth] = useState(() => {
+    if (draft?.growth) return draft.growth;
     const g = {};
     for (const a of editDef?.stat_growth?.strong_rolls ?? []) g[a] = 'strong';
     for (const a of editDef?.stat_growth?.weak_rolls ?? []) g[a] = 'weak';
@@ -141,15 +155,16 @@ export default function ClassEditor() {
   // Per-level HP/MP growth + regen. 3 is the engine's "default" row — which is exactly
   // what every custom class silently used before the growth lookup was fixed — so the
   // form starts there and only emits JSON once you change something.
-  const [hpMpGrowth, setHpMpGrowth] = useState(() => ({
+  const [hpMpGrowth, setHpMpGrowth] = useState(() => draft?.hpMpGrowth ?? ({
     HP: editDef?.hp_mp_growth?.HP ?? 3,
     MP: editDef?.hp_mp_growth?.MP ?? 3,
     HP_REGEN: editDef?.hp_mp_growth?.HP_REGEN ?? 3,
     MP_REGEN: editDef?.hp_mp_growth?.MP_REGEN ?? 3,
   }));
-  const [mpRegenBase, setMpRegenBase] = useState(editDef?.mp_regen?.base ?? 0);
-  const [mpRegenMult, setMpRegenMult] = useState(editDef?.mp_regen?.multiplier ?? 1);
+  const [mpRegenBase, setMpRegenBase] = useState(draft?.mpRegenBase ?? editDef?.mp_regen?.base ?? 0);
+  const [mpRegenMult, setMpRegenMult] = useState(draft?.mpRegenMult ?? editDef?.mp_regen?.multiplier ?? 1);
   const [mpRegenScaling, setMpRegenScaling] = useState(() => {
+    if (draft?.mpRegenScaling) return draft.mpRegenScaling;
     const s = {};
     for (const a of ROLL_STATS) s[a] = editDef?.mp_regen?.stat_scaling?.[a] ?? '';
     return s;
@@ -157,17 +172,17 @@ export default function ClassEditor() {
   // Per-race forced look. [{ race, head }] — kept as a list so the form can hold a
   // half-typed row without it becoming a JSON key.
   const [looks, setLooks] = useState(() =>
-    Object.entries(editDef?.appearance?.races ?? {}).map(([race, v]) => ({ race, head: v?.head ?? '' }))
+    draft?.looks ?? Object.entries(editDef?.appearance?.races ?? {}).map(([race, v]) => ({ race, head: v?.head ?? '' }))
   );
-  const [surviveShift, setSurviveShift] = useState(editDef?.appearance?.survive_shapeshift ?? false);
+  const [surviveShift, setSurviveShift] = useState(draft?.surviveShift ?? editDef?.appearance?.survive_shapeshift ?? false);
   // Preview-only: which body the rig draws. Not part of the class JSON — sex is the
   // player's own choice at character creation, and a class can't (and shouldn't) force it.
   const [previewSex, setPreviewSex] = useState('male');
-  const [gold, setGold] = useState(editDef?.gold ?? 0);
-  const [portrait, setPortrait] = useState({ path: editDef?.portrait ?? '', dataUrl: '' });
+  const [gold, setGold] = useState(draft?.gold ?? editDef?.gold ?? 0);
+  const [portrait, setPortrait] = useState(draft?.portrait ?? { path: editDef?.portrait ?? '', dataUrl: '' });
   const [portraitError, setPortraitError] = useState('');
-  const [scriptLang, setScriptLang] = useState(existingScript?.lang ?? 'lua');
-  const [scriptCode, setScriptCode] = useState(existingScript?.code ?? '');
+  const [scriptLang, setScriptLang] = useState(draft?.scriptLang ?? existingScript?.lang ?? 'lua');
+  const [scriptCode, setScriptCode] = useState(draft?.scriptCode ?? existingScript?.code ?? '');
   const [errors, setErrors] = useState([]);
   const [savedAs, setSavedAs] = useState('');
   const portraitRef = useRef(null);
@@ -177,6 +192,20 @@ export default function ClassEditor() {
     if (editing?.kind === 'class') dispatch({ type: 'clearEditing' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Mirror the whole in-progress form to localStorage on every change, so a refresh or a
+  // closed tab never loses unsaved work. portrait.dataUrl and scriptCode have no other
+  // durable home until "Save Class", so they must be in here.
+  useEffect(() => {
+    const d = { name, description, attrs, offsets, skills, items, spells, growth, hpMpGrowth,
+      mpRegenBase, mpRegenMult, mpRegenScaling, looks, surviveShift, gold, portrait, scriptLang, scriptCode };
+    try { localStorage.setItem(DRAFT_KEY, JSON.stringify(d)); }
+    catch { // a very large portrait can blow the quota — keep the rest, drop the image bytes
+      try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ ...d, portrait: { path: portrait.path, dataUrl: '' } })); } catch { /* give up quietly */ }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [name, description, attrs, offsets, skills, items, spells, growth, hpMpGrowth,
+    mpRegenBase, mpRegenMult, mpRegenScaling, looks, surviveShift, gold, portrait, scriptLang, scriptCode]);
 
   const namespace = meta.namespace || 'mymod';
   const classId = `${namespace}:${slugify(name)}`;
@@ -301,6 +330,8 @@ export default function ClassEditor() {
     }
     dispatch({ type: 'saveClass', def });
     dispatch({ type: 'saveScript', classId: def.id, lang: scriptLang, code: scriptCode });
+    // Committed to the mod (which is itself persisted) — the local draft is redundant now.
+    try { localStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
     setSavedAs(def.id);
   };
 
