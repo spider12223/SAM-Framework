@@ -59,6 +59,12 @@ static int s_nextClassId = SAM_CLASS_ID_BASE;
 static std::map<int, SAMClassStatPatch> s_classPatches;
 static std::map<int, std::set<int>> s_classPassives;
 
+// Hotbar pins a class asked for (player -> [{slot, item uid}]), recorded as applyLoadout
+// grants them. Barony's own ClassHotbarConfig_t::assignHotbarSlots() runs a few frames
+// LATER and zeroes every hotbar slot, so the pins have to be re-applied after it — see
+// reapplyHotbarPins(), called at the end of assignHotbarSlots.
+static std::map<int, std::vector<std::pair<int, Uint32>>> s_hotbarPins;
+
 static bool readWholeFile(const std::string& path, std::string& out)
 {
 	std::ifstream f(path.c_str(), std::ios::binary);
@@ -891,6 +897,7 @@ void SAMClasses::applyLoadout(int player)
 	if ( !isLocalPlayer && multiplayer == CLIENT && intro == false ) { return; }
 
 	auto& hotbar = players[player]->hotbar.slots();
+	s_hotbarPins[player].clear(); // rebuilt below; re-applied after assignHotbarSlots wipes the bar
 	int given = 0;
 	for ( const SAMStartingItem& si : def->startingItems )
 	{
@@ -944,6 +951,7 @@ void SAMClasses::applyLoadout(int player)
 				if ( si.hotbarSlot >= 0 && si.hotbarSlot < static_cast<int>(NUM_HOTBAR_SLOTS) )
 				{
 					hotbar[si.hotbarSlot].item = pickedUid;
+					s_hotbarPins[player].push_back({ si.hotbarSlot, pickedUid }); // re-applied later
 				}
 			}
 			free(item);
@@ -961,6 +969,36 @@ void SAMClasses::applyLoadout(int player)
 			+ (si.hotbarSlot >= 0 ? (" -> hotbar " + std::to_string(si.hotbarSlot)) : std::string()));
 	}
 	SAM_INFO(MOD, "Applied loadout for [" + def->id + "]: " + std::to_string(given) + " item stack(s).");
+}
+
+// Re-pin the class's hotbar items after Barony's ClassHotbarConfig_t::assignHotbarSlots()
+// has zeroed and rebuilt the bar (it runs a few frames after applyLoadout and would
+// otherwise erase every custom pin). Called at the end of assignHotbarSlots.
+void SAMClasses::reapplyHotbarPins(int player)
+{
+	if ( player < 0 || player >= MAXPLAYERS || !players[player] ) { return; }
+	// Only a currently-custom class has fresh pins. applyLoadout isn't called for a vanilla
+	// class, so without this guard a vanilla character following a custom-class game would
+	// re-apply the previous game's stale uids and clobber its correct vanilla hotbar.
+	if ( !getClass(client_classes[player]) ) { s_hotbarPins.erase(player); return; }
+	auto it = s_hotbarPins.find(player);
+	if ( it == s_hotbarPins.end() || it->second.empty() ) { return; }
+	auto& hotbar = players[player]->hotbar.slots();
+	for ( const auto& pin : it->second )
+	{
+		const int slot = pin.first;
+		const Uint32 uid = pin.second;
+		if ( slot < 0 || slot >= static_cast<int>(NUM_HOTBAR_SLOTS) ) { continue; }
+		// The default-layout pass may have auto-placed this same item in another slot;
+		// clear those so a pinned item isn't duplicated across the bar.
+		for ( int i = 0; i < static_cast<int>(NUM_HOTBAR_SLOTS); ++i )
+		{
+			if ( i != slot && hotbar[i].item == uid ) { hotbar[i].item = 0; }
+		}
+		hotbar[slot].item = uid;
+	}
+	SAM_DEBUG(MOD, "Re-applied " + std::to_string(it->second.size()) + " hotbar pin(s) for player "
+		+ std::to_string(player) + ".");
 }
 
 void SAMClasses::applySpells(int player)
