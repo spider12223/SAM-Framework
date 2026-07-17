@@ -10,6 +10,7 @@ import {
   CLASS_SPELL_REF_PATTERN, skillLabel, skillBaseAttr,
 } from '@/data/schemas.js';
 import { ITEM_ICONS } from '@/data/itemIcons.js';
+import { SPELLS } from '@/data/samApi.js';
 import { ALL_HEADS, APPEARANCE_RACES, headLabel } from '@/data/characterHeads.js';
 import CharacterBox from '@/components/CharacterBox.jsx';
 import { validate } from '@/lib/validate.js';
@@ -18,7 +19,7 @@ import { useMod } from '@/state/ModContext.jsx';
 import ScriptEditor from '@/components/ScriptEditor.jsx';
 import {
   Panel, Field, TextInput, NumberInput, GoldSlider, Stepper, GoldButton,
-  InventoryGrid, ItemIcon, ErrorList, SavedNote, BalanceHints,
+  InventoryGrid, ItemIcon, ErrorList, SavedNote, BalanceHints, SearchSelect,
 } from '@/components/ui.jsx';
 
 const MAX_PORTRAIT_BYTES = 256 * 1024; // portraits are 54x54 — anything big is a mistake
@@ -128,7 +129,6 @@ export default function ClassEditor() {
     (editDef?.starting_items ?? []).map((si) => ({ type: si.type, count: si.count ?? 1, equip: !!si.equip }))
   );
   const [spells, setSpells] = useState(editDef?.starting_spells ?? []);
-  const [spellDraft, setSpellDraft] = useState('');
   const [spellError, setSpellError] = useState('');
   const [growth, setGrowth] = useState(() => {
     const g = {};
@@ -196,8 +196,11 @@ export default function ClassEditor() {
     reader.readAsDataURL(file);
   };
 
+  // Called by the spell picker, and by the custom-spell shortcuts below it. The pattern
+  // check still matters: the picker's allowCustom lets you type a "namespace:spell" id,
+  // which is the one path where a typo can still get in.
   const addSpell = (raw) => {
-    const input = (typeof raw === 'string' ? raw : spellDraft).trim();
+    const input = String(raw ?? '').trim();
     if (!input) return;
     const s = input.includes(':') ? input.toLowerCase() : input.toUpperCase();
     if (!CLASS_SPELL_REF_PATTERN.test(s)) {
@@ -206,7 +209,6 @@ export default function ClassEditor() {
     }
     setSpellError('');
     setSpells((prev) => (prev.includes(s) ? prev : [...prev, s]));
-    setSpellDraft('');
   };
 
   const cycleGrowth = (attr) => {
@@ -446,15 +448,18 @@ export default function ClassEditor() {
               </span>
             ))}
           </div>
-          <div className="flex gap-2">
-            <TextInput
-              value={spellDraft}
-              onChange={setSpellDraft}
-              placeholder="SPELL_FORCEBOLT or mymod:spell"
-              onKeyDown={(e) => e.key === 'Enter' && addSpell()}
-            />
-            <GoldButton onClick={() => addSpell()}>Add</GoldButton>
-          </div>
+          {/*
+            Pick from the real castable spells rather than typing the name. Typing was a
+            silent-failure trap: the schema only checks the SPELL_[A-Z_]+ shape, so
+            "SPELL_FORCBOLT" validated, exported, loaded — and then resolved to nothing
+            in game. allowCustom keeps "mymod:spell" working for your own spells.
+          */}
+          <SearchSelect
+            options={SPELLS.filter((s) => !spells.includes(s))}
+            onPick={(s) => addSpell(s)}
+            placeholder="Search spells… (or type mymod:spell)"
+            allowCustom
+          />
           {spellError && <div className="sam-error text-sm mt-1">{spellError}</div>}
           {modSpells.length > 0 && (
             <div className="mt-3">

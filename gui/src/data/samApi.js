@@ -25,6 +25,14 @@ export const EFFECTS = ["ASLEEP", "POISONED", "STUNNED", "CONFUSED", "DRUNK", "I
 export const EQUIP_SLOTS = ["WEAPON", "SHIELD", "HELMET", "ARMOR", "BREASTPLATE", "GLOVES", "BOOTS", "SHOES", "RING", "AMULET", "CLOAK", "MASK"];
 
 /**
+ * Spells a PLAYER can actually cast — the engine's spell_t globals.
+ * Barony's items.json lists ~227 spell_* names, but most are monster-only and would
+ * silently do nothing from a script, so this is the subset that really works.
+ * Used by sam_cast_spell / sam_grant_spell and a class's starting_spells.
+ */
+export const SPELLS = ["SPELL_FORCEBOLT", "SPELL_MAGICMISSILE", "SPELL_FIREBALL", "SPELL_LIGHTNING", "SPELL_COLD", "SPELL_BLEED", "SPELL_POISON", "SPELL_STONEBLOOD", "SPELL_STRIKE", "SPELL_GHOST_BOLT", "SPELL_HEALING", "SPELL_EXTRAHEALING", "SPELL_CUREAILMENT", "SPELL_REMOVECURSE", "SPELL_SLEEP", "SPELL_CONFUSE", "SPELL_SLOW", "SPELL_SPEED", "SPELL_FEAR", "SPELL_WEAKNESS", "SPELL_CHARM", "SPELL_DOMINATE", "SPELL_INVISIBILITY", "SPELL_LEVITATION", "SPELL_FLUTTER", "SPELL_DASH", "SPELL_TELEPORTATION", "SPELL_DIG", "SPELL_OPENING", "SPELL_LOCKING", "SPELL_IDENTIFY", "SPELL_MAGICMAPPING", "SPELL_LIGHT", "SPELL_SALVAGE", "SPELL_SUMMON", "SPELL_SLIME_ACID", "SPELL_SLIME_FIRE", "SPELL_SLIME_METAL", "SPELL_SLIME_TAR", "SPELL_SLIME_WATER"];
+
+/**
  * Barony's own bound action names, as a script sees them. Reacting to one of these
  * follows whatever the player rebound it to — that's why you use these instead of a
  * raw key, and why a mod can't collide with someone's keybinds.

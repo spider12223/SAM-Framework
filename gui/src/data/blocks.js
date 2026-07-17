@@ -11,7 +11,7 @@
  * tables the manifest doesn't enumerate — so they're transcribed from the source and
  * annotated with where to re-check them.
  */
-import { SAM_EVENTS, PLAYER_STATS, EFFECTS as API_EFFECTS } from '@/data/samApi.js';
+import { SAM_EVENTS, PLAYER_STATS, EFFECTS as API_EFFECTS, SPELLS as API_SPELLS } from '@/data/samApi.js';
 
 /** Effect names the engine knows — from the manifest, so this can't drift from the
  *  runtime's table (it did: both sat at 14 of 135 for months). */
@@ -29,21 +29,8 @@ export const SLOTS = [
  */
 export const STATS = PLAYER_STATS.filter((s) => s !== 'LVL'); // LVL is just an alias of LEVEL
 
-/**
- * Spells that are actually castable by a player — the engine's spell_t globals.
- * Barony's items.json lists ~227 spell_* names, but most are monster-only and would
- * silently do nothing here, so this is the intersection that really works.
- */
-export const SPELLS = [
-  'SPELL_FORCEBOLT', 'SPELL_MAGICMISSILE', 'SPELL_FIREBALL', 'SPELL_LIGHTNING', 'SPELL_COLD',
-  'SPELL_BLEED', 'SPELL_POISON', 'SPELL_STONEBLOOD', 'SPELL_STRIKE', 'SPELL_GHOST_BOLT',
-  'SPELL_HEALING', 'SPELL_EXTRAHEALING', 'SPELL_CUREAILMENT', 'SPELL_REMOVECURSE',
-  'SPELL_SLEEP', 'SPELL_CONFUSE', 'SPELL_SLOW', 'SPELL_SPEED', 'SPELL_FEAR', 'SPELL_WEAKNESS',
-  'SPELL_CHARM', 'SPELL_DOMINATE', 'SPELL_INVISIBILITY', 'SPELL_LEVITATION', 'SPELL_FLUTTER',
-  'SPELL_DASH', 'SPELL_TELEPORTATION', 'SPELL_DIG', 'SPELL_OPENING', 'SPELL_LOCKING',
-  'SPELL_IDENTIFY', 'SPELL_MAGICMAPPING', 'SPELL_LIGHT', 'SPELL_SALVAGE', 'SPELL_SUMMON',
-  'SPELL_SLIME_ACID', 'SPELL_SLIME_FIRE', 'SPELL_SLIME_METAL', 'SPELL_SLIME_TAR', 'SPELL_SLIME_WATER',
-];
+/** Castable spells — from the manifest, so this can't drift into a second copy. */
+export const SPELLS = API_SPELLS;
 
 export const TICKS_PER_SECOND = 50; // the engine's tick rate; "every N seconds" -> N*50 ticks
 
