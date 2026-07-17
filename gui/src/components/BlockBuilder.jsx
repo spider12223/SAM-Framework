@@ -57,14 +57,13 @@ function Row({ kind, row, options, onChange, onRemove }) {
     const d = kind === 'if' ? findCondition(id) : findAction(id);
     onChange({ ...row, id, params: defaults(d), negate: false });
   };
-  // The same call the generator emits — shown as a guard for conditions so it reads the
-  // way it will actually appear in the script, not as a bare expression.
+  // Exactly what the generator emits for this brick — a positive test for a condition,
+  // the bare call for an action. Must stay in step with codegen.js's condExpr/ifBlock, or
+  // the peek would teach a shape the script doesn't actually use.
   let code = '';
   try {
     const expr = def?.lua(row.params || {});
-    code = kind === 'if'
-      ? (row.negate ? `if ${expr} then return end` : `if not (${expr}) then return end`)
-      : expr;
+    code = kind === 'if' && row.negate ? `not (${expr})` : expr;
   } catch { code = '(pick options above)'; }
 
   return (

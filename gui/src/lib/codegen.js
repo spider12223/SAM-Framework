@@ -32,19 +32,45 @@ function comment(text, width = 78) {
   return out;
 }
 
-/** Render one condition as a Lua early-return guard. */
-function guard(row) {
+/**
+ * Render one condition as a POSITIVE Lua expression.
+ *
+ * This used to emit early-return guards — `if not (sam_has_effect(...)) then return end`.
+ * That's idiomatic Lua and it was correct, but it's a double negative: the block says "is
+ * under an effect" and the code said "if NOT under the effect, leave". The first person to
+ * read their own generated script asked "if not is if it has or it has not?" — which is
+ * exactly the question the Basic tab exists to stop anyone having to ask. So conditions
+ * now read the same direction as the block that made them.
+ *
+ * `not (...)` keeps its parentheses on purpose: several conditions are comparisons
+ * (`a == b`), and `not a == b` parses as `(not a) == b` in Lua — silently wrong.
+ */
+function condExpr(row) {
   const def = findCondition(row.id);
   if (!def) return null;
   const expr = def.lua(row.params || {});
-  // negate flips the guard: "is under an effect" -> "is NOT under an effect"
-  return row.negate ? `  if ${expr} then return end` : `  if not (${expr}) then return end`;
+  return row.negate ? `not (${expr})` : expr;
 }
 
-function actionLine(row) {
+function actionCall(row) {
   const def = findAction(row.id);
   if (!def) return null;
-  return `  ${def.lua(row.params || {})}`;
+  return def.lua(row.params || {});
+}
+
+/**
+ * The IF + DO half: conditions joined with `and` into one positive test, actions inside.
+ * Reads the same direction as the blocks — "if under the effect, then remove it" — and
+ * keeps everything one level deep no matter how many conditions you stack.
+ */
+function ifBlock(conds, acts, indent = '  ') {
+  if (!acts.length) return [`${indent}-- (add an action)`];
+  if (!conds.length) return acts.map((a) => `${indent}${a}`);
+  return [
+    `${indent}if ${conds.join(' and ')} then`,
+    ...acts.map((a) => `${indent}  ${a}`),
+    `${indent}end`,
+  ];
 }
 
 /**
@@ -58,8 +84,8 @@ export function generateLua(spec) {
   const t = findTrigger(spec?.trigger?.id);
   if (!t) return `${HEADER}\n-- Pick a trigger to start.`;
 
-  const conds = (spec.conditions || []).map(guard).filter(Boolean);
-  const acts = (spec.actions || []).map(actionLine).filter(Boolean);
+  const conds = (spec.conditions || []).map(condExpr).filter(Boolean);
+  const acts = (spec.actions || []).map(actionCall).filter(Boolean);
   const body = [];
 
   if (t.id === EVERY_SECONDS) {
@@ -76,7 +102,7 @@ export function generateLua(spec) {
       `  if event.tick_count % ${ticks} ~= 0 then return end`,
       '  local player = 0',
     ];
-    body.push(...lines, ...conds, ...acts, 'end');
+    body.push(...lines, ...ifBlock(conds, acts), 'end');
     return body.join('\n') + '\n';
   }
 
@@ -89,7 +115,7 @@ export function generateLua(spec) {
     lines.push('  -- This event carries no player; in single-player the local host is you.');
     lines.push('  local player = 0');
   }
-  body.push(...lines, ...conds, ...acts, 'end');
+  body.push(...lines, ...ifBlock(conds, acts), 'end');
   return body.join('\n') + '\n';
 }
 
