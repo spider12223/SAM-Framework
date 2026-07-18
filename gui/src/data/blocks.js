@@ -50,7 +50,9 @@ export const TRIGGERS = [
     whenFired: 'repeatedly, on a timer',
     payload: [],
     params: [{ name: 'seconds', type: 'number', default: 5, min: 0.1, label: 'seconds' }],
-    gotcha: 'Runs on the tick handler, which carries no player — actions use the local host (player 0).',
+    gotcha: 'Runs on the tick handler. It repeats for every player who is in the game and alive, '
+      + 'so it works in multiplayer and stops on death. Add an "is playing a class" condition to '
+      + 'keep it to your class.',
   },
   ...SAM_EVENTS
     .filter((e) => e.name !== 'on_tick')
@@ -383,6 +385,18 @@ export const CONDITIONS = [
     phraseNeg: (p) => `${p.slot} is NOT empty`,
   },
   {
+    // solidius: abilities kept firing on a dead player (a per-second payout that ran on a
+    // corpse). HP hits 0 on death, so gate on it. Reads host-side HP — these ability
+    // scripts run on the host — so a dead OR absent player reads 0 and this is false.
+    id: 'player_alive', label: 'the player is alive', negatable: true,
+    lua: () => 'sam_get_stat(player, "HP") > 0',
+    phrase: () => 'the player is alive',
+    phraseNeg: () => 'the player is dead',
+    note: 'Add this to stop an ability firing after the player dies (e.g. a per-second '
+        + 'timer still paying out on a corpse). Leave it off for on-death / on-respawn '
+        + 'abilities, which are meant to run when HP is 0.',
+  },
+  {
     id: 'stat_cmp', label: 'stat compares to a value', negatable: false,
     params: [
       { name: 'stat', type: 'select', values: STATS, default: 'HP' },
@@ -411,13 +425,43 @@ export const CONDITIONS = [
     // solidius: react to the gold in THIS pickup, not the running total. on_gold_collected
     // carries `amount` (this pickup) and `total_gold` (the counter) — this reads `amount`.
     id: 'gold_amount_cmp', label: 'gold just picked up compares to', negatable: false,
-    needs: 'amount', pollable: false,
+    // Gate on `total_gold` (unique to the gold pickup) not `amount` — plenty of events
+    // carry an `amount` (xp, level-up), and "gold just picked up" has no meaning on those.
+    needs: 'total_gold', pollable: false,
     params: [
       { name: 'op', type: 'select', values: ['<', '<=', '==', '>=', '>'], default: '>=' },
       { name: 'value', type: 'number', default: 10 },
     ],
     lua: (p) => `(event.amount or 0) ${p.op} ${Number(p.value) || 0}`,
     phrase: (p) => `the gold just picked up is ${p.op} ${Number(p.value) || 0}`,
+  },
+  {
+    // solidius: "individual values for exp" — the XP from THIS kill, not the lifetime
+    // total that "stat compares to a value" reads. on_xp_gained carries `amount` (this
+    // gain) and `new_total`; this reads `amount`. Gated on `new_total` (unique to XP).
+    id: 'xp_amount_cmp', label: 'xp just gained compares to', negatable: false,
+    needs: 'new_total', pollable: false,
+    params: [
+      { name: 'op', type: 'select', values: ['<', '<=', '==', '>=', '>'], default: '>=' },
+      { name: 'value', type: 'number', default: 10 },
+    ],
+    lua: (p) => `(event.amount or 0) ${p.op} ${Number(p.value) || 0}`,
+    phrase: (p) => `the xp just gained is ${p.op} ${Number(p.value) || 0}`,
+  },
+  {
+    // solidius: "individual values for hunger" — the hunger value at THIS change, not a
+    // running compare. on_hunger_change carries `hunger` (the new raw value, ~0 starving
+    // to ~1500 full) and the tier it just crossed into.
+    id: 'hunger_now_cmp', label: 'hunger is now compares to', negatable: false,
+    needs: 'hunger', pollable: false,
+    params: [
+      { name: 'op', type: 'select', values: ['<', '<=', '==', '>=', '>'], default: '<=' },
+      { name: 'value', type: 'number', default: 250 },
+    ],
+    lua: (p) => `(event.hunger or 0) ${p.op} ${Number(p.value) || 0}`,
+    phrase: (p) => `hunger is now ${p.op} ${Number(p.value) || 0}`,
+    note: 'The raw hunger value (roughly 0 = starving, 1500 = full), read the moment it '
+        + 'crosses a tier edge — the event only fires on those edges.',
   },
   {
     // solidius: "reward the player for identifying [a specific item]". Works on any trigger

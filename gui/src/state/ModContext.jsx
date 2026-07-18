@@ -102,7 +102,12 @@ function reducer(state, action) {
     case 'saveScript': {
       const scripts = { ...state.scripts };
       if (action.code && action.code.trim()) {
-        scripts[action.classId] = { lang: action.lang, code: action.code };
+        // `blocks` is the visual block-builder's rule list — editor-only metadata so the
+        // Basic tab can restore the exact bricks on reopen (solidius: "the builder doesn't
+        // save"). It rides in GUI state / the draft only; the zip export ships just `code`.
+        const entry = { lang: action.lang, code: action.code };
+        if (Array.isArray(action.blocks) && action.blocks.length) entry.blocks = action.blocks;
+        scripts[action.classId] = entry;
       } else {
         delete scripts[action.classId];
       }

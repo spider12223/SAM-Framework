@@ -18,7 +18,7 @@ import { checkBalance } from '@/lib/balance.js';
 import { useMod } from '@/state/ModContext.jsx';
 import ScriptEditor from '@/components/ScriptEditor.jsx';
 import {
-  Panel, Field, TextInput, NumberInput, GoldSlider, Stepper, GoldButton,
+  Panel, Field, TextInput, NumberInput, Stepper, GoldButton,
   ItemIcon, ErrorList, SavedNote, BalanceHints, SearchSelect,
 } from '@/components/ui.jsx';
 import LoadoutBoard from '@/components/LoadoutBoard.jsx';
@@ -32,7 +32,16 @@ const MAX_PORTRAIT_BYTES = 256 * 1024; // portraits are 54x54 — anything big i
 const HPMP_GROWTH_KEYS = ['HP', 'MP', 'HP_REGEN', 'MP_REGEN'];
 const HPMP_GROWTH_LABELS = {
   HP: 'HP / level', MP: 'MP / level',
-  HP_REGEN: 'HP regen', MP_REGEN: 'MP regen',
+  HP_REGEN: 'HP regen speed', MP_REGEN: 'MP regen speed',
+};
+// solidius asked "what do HP/MP regen mean?" — they are not amounts, they set how fast HP/MP
+// come back ON THEIR OWN. Engine: regen_per_minute += value × (level − 1) × factor, so a
+// bigger number = faster passive recovery, and it ramps up with level (nothing at level 1).
+const HPMP_GROWTH_HINTS = {
+  HP: 'Max HP gained on each level-up.',
+  MP: 'Max MP gained on each level-up.',
+  HP_REGEN: 'How fast HP refills on its own. Higher = faster passive healing; it ramps up with level (no effect at level 1). 3 is vanilla.',
+  MP_REGEN: 'How fast MP refills on its own. Higher = faster passive mana recovery; it ramps up with level. 3 is vanilla.',
 };
 
 const ATTR_ICONS = { STR: '💪', DEX: '🪶', CON: '❤️', INT: '📖', PER: '👁️', CHR: '🎭' };
@@ -186,6 +195,9 @@ export default function ClassEditor() {
   const [portraitError, setPortraitError] = useState('');
   const [scriptLang, setScriptLang] = useState(draft?.scriptLang ?? existingScript?.lang ?? 'lua');
   const [scriptCode, setScriptCode] = useState(draft?.scriptCode ?? existingScript?.code ?? '');
+  // The visual block-builder's rule list, so reopening restores the bricks (not just the
+  // generated Lua). Editor-only — stripped from the exported mod. See ScriptEditor/BlockBuilder.
+  const [scriptBlocks, setScriptBlocks] = useState(draft?.scriptBlocks ?? existingScript?.blocks ?? null);
   const [errors, setErrors] = useState([]);
   const [savedAs, setSavedAs] = useState('');
   const portraitRef = useRef(null);
@@ -201,14 +213,14 @@ export default function ClassEditor() {
   // durable home until "Save Class", so they must be in here.
   useEffect(() => {
     const d = { name, description, attrs, offsets, skills, items, spells, growth, hpMpGrowth,
-      mpRegenBase, mpRegenMult, mpRegenScaling, looks, surviveShift, gold, portrait, scriptLang, scriptCode };
+      mpRegenBase, mpRegenMult, mpRegenScaling, looks, surviveShift, gold, portrait, scriptLang, scriptCode, scriptBlocks };
     try { localStorage.setItem(DRAFT_KEY, JSON.stringify(d)); }
     catch { // a very large portrait can blow the quota — keep the rest, drop the image bytes
       try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ ...d, portrait: { path: portrait.path, dataUrl: '' } })); } catch { /* give up quietly */ }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [name, description, attrs, offsets, skills, items, spells, growth, hpMpGrowth,
-    mpRegenBase, mpRegenMult, mpRegenScaling, looks, surviveShift, gold, portrait, scriptLang, scriptCode]);
+    mpRegenBase, mpRegenMult, mpRegenScaling, looks, surviveShift, gold, portrait, scriptLang, scriptCode, scriptBlocks]);
 
   const namespace = meta.namespace || 'mymod';
   const classId = `${namespace}:${slugify(name)}`;
@@ -334,7 +346,7 @@ export default function ClassEditor() {
       dispatch({ type: 'setAsset', path: portrait.path.trim(), dataUrl: portrait.dataUrl });
     }
     dispatch({ type: 'saveClass', def });
-    dispatch({ type: 'saveScript', classId: def.id, lang: scriptLang, code: scriptCode });
+    dispatch({ type: 'saveScript', classId: def.id, lang: scriptLang, code: scriptCode, blocks: scriptBlocks });
     // Committed to the mod (which is itself persisted) — the local draft is redundant now.
     try { localStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
     setSavedAs(def.id);
@@ -414,36 +426,65 @@ export default function ClassEditor() {
 
       {/* ------------------------------------------- attributes + skills */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-        <Panel title="Core Attributes">
-          <div className="text-xs mb-2" style={{ color: '#8a7749' }}>
-            Modifiers added to the race base (may be negative) — not final values. 0 = no change.
-            Vanilla classes net about 0 to +5 across all six, trading strengths for weaknesses.
-          </div>
-          {CORE_ATTRIBUTES.map((a) => (
-            <GoldSlider
-              key={a}
-              label={a}
-              icon={ATTR_ICONS[a]}
-              value={attrs[a]}
-              min={-10}
-              max={30}
-              inputMin={-50}
-              inputMax={100}
-              onChange={(v) => setAttrs((prev) => ({ ...prev, [a]: v }))}
-            />
-          ))}
-          <div className="sam-divider" />
-          <div className="grid grid-cols-2 gap-3">
-            {OFFSET_STATS.map((s) => (
-              <Field key={s} label={`${s} offset`}>
-                <NumberInput
-                  value={offsets[s]}
-                  onChange={(v) => setOffsets((prev) => ({ ...prev, [s]: v }))}
-                />
-              </Field>
-            ))}
-          </div>
-        </Panel>
+        <div className="space-y-4">
+          <Panel title="Core Attributes">
+            <div className="text-xs mb-2" style={{ color: '#8a7749' }}>
+              Modifiers added to the race base (may be negative) — not final values. 0 = no change.
+              Vanilla classes net about 0 to +5 across all six, trading strengths for weaknesses.
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              {CORE_ATTRIBUTES.map((a) => (
+                <Field key={a} label={`${ATTR_ICONS[a]} ${a}`}>
+                  <NumberInput
+                    value={attrs[a]}
+                    onChange={(v) => setAttrs((prev) => ({ ...prev, [a]: v }))}
+                  />
+                </Field>
+              ))}
+            </div>
+            <div className="sam-divider" />
+            <div className="grid grid-cols-2 gap-3">
+              {OFFSET_STATS.map((s) => (
+                <Field key={s} label={`${s} offset`} hint={`Flat ${s} added to this class's starting pool (before the per-level growth above).`}>
+                  <NumberInput
+                    value={offsets[s]}
+                    onChange={(v) => setOffsets((prev) => ({ ...prev, [s]: v }))}
+                  />
+                </Field>
+              ))}
+            </div>
+          </Panel>
+
+          {/* Stat growth lives with the attributes — it's the same idea: which of the six
+              roll high or low as you level. (solidius: put it in the space the sliders freed.) */}
+          <Panel title="Stat Growth">
+            <div className="text-xs mb-2" style={{ color: '#6b5a35' }}>
+              Which attributes tend to roll high or low on each level-up. Click to cycle:
+              neutral → <span className="sam-ok">strong roll</span> →{' '}
+              <span className="sam-error">weak roll</span>.
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {ROLL_STATS.map((a) => {
+                const state = growth[a];
+                return (
+                  <button
+                    key={a}
+                    type="button"
+                    className="sam-btn"
+                    style={{
+                      padding: '0.4rem 0.5rem',
+                      borderColor: state === 'strong' ? '#5a7a3a' : state === 'weak' ? '#a03327' : undefined,
+                      color: state === 'strong' ? '#9dc76a' : state === 'weak' ? '#e07a6a' : undefined,
+                    }}
+                    onClick={() => cycleGrowth(a)}
+                  >
+                    {ATTR_ICONS[a]} {a}{state === 'strong' ? ' ▲' : state === 'weak' ? ' ▼' : ''}
+                  </button>
+                );
+              })}
+            </div>
+          </Panel>
+        </div>
 
         <Panel title="Skill Levels" bodyClassName="max-h-[460px] overflow-y-auto">
           {SKILLS.map((s) => (
@@ -459,7 +500,6 @@ export default function ClassEditor() {
             />
           ))}
         </Panel>
-
       </div>
 
       {/* --------------------------------------- starting loadout (full width) */}
@@ -471,6 +511,8 @@ export default function ClassEditor() {
         categoryFor={itemCategory}
         categories={CATEGORIES}
         portraitUrl={portrait.dataUrl}
+        gold={gold}
+        onGold={setGold}
       />
 
       {/* --------------------------------------- spells + growth + gold */}
@@ -597,12 +639,13 @@ export default function ClassEditor() {
 
         <Panel title="HP / MP Growth">
           <div className="text-xs mb-2" style={{ color: '#6b5a35' }}>
-            Gained per level. Vanilla runs 1–5 (Wizard MP 5, Barbarian MP 2). 3 is the
-            engine default — leave them all at 3 and nothing is written to your JSON.
+            <b>HP/MP per level</b> is how much max HP/MP a level-up grants. <b>Regen speed</b> is
+            how fast HP/MP come back on their own (not an amount). Vanilla runs 1–5; 3 is the
+            engine default — leave all four at 3 and nothing is written to your JSON.
           </div>
           <div className="grid grid-cols-2 gap-3">
             {HPMP_GROWTH_KEYS.map((k) => (
-              <Field key={k} label={HPMP_GROWTH_LABELS[k]}>
+              <Field key={k} label={HPMP_GROWTH_LABELS[k]} hint={HPMP_GROWTH_HINTS[k]}>
                 <NumberInput
                   value={hpMpGrowth[k]}
                   min={0}
@@ -637,38 +680,6 @@ export default function ClassEditor() {
           </div>
         </Panel>
 
-        <Panel title="Stat Growth">
-          <div className="text-xs mb-2" style={{ color: '#6b5a35' }}>
-            Click to cycle: neutral → <span className="sam-ok">strong roll</span> →{' '}
-            <span className="sam-error">weak roll</span>
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-            {ROLL_STATS.map((a) => {
-              const state = growth[a];
-              return (
-                <button
-                  key={a}
-                  type="button"
-                  className="sam-btn"
-                  style={{
-                    padding: '0.4rem 0.5rem',
-                    borderColor: state === 'strong' ? '#5a7a3a' : state === 'weak' ? '#a03327' : undefined,
-                    color: state === 'strong' ? '#9dc76a' : state === 'weak' ? '#e07a6a' : undefined,
-                  }}
-                  onClick={() => cycleGrowth(a)}
-                >
-                  {ATTR_ICONS[a]} {a}{state === 'strong' ? ' ▲' : state === 'weak' ? ' ▼' : ''}
-                </button>
-              );
-            })}
-          </div>
-        </Panel>
-
-        <Panel title="Purse">
-          <Field label="Starting gold">
-            <NumberInput value={gold} min={0} onChange={(v) => setGold(v === '' ? 0 : Math.max(0, v))} />
-          </Field>
-        </Panel>
       </div>
 
       {/* ------------------------------------------------- behavior script */}
@@ -679,7 +690,8 @@ export default function ClassEditor() {
           Click a function, event, or snippet on the right to insert it; the{' '}
           <span className="sam-mono">API Reference</span> page has the full surface.
         </div>
-        <ScriptEditor code={scriptCode} onCode={setScriptCode} lang={scriptLang} onLang={setScriptLang} />
+        <ScriptEditor code={scriptCode} onCode={setScriptCode} lang={scriptLang} onLang={setScriptLang}
+          blocks={scriptBlocks} onBlocks={setScriptBlocks} />
       </Panel>
 
       {/* ------------------------------------------------------- save row */}

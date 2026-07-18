@@ -8,6 +8,7 @@ import { useMemo, useRef, useState } from 'react';
 import { SAM_FUNCTIONS, SAM_EVENTS } from '@/data/samApi.js';
 import { SNIPPETS } from '@/data/snippets.js';
 import { lintScript } from '@/lib/lintScript.js';
+import { generateLua } from '@/lib/codegen.js';
 import { GoldButton } from '@/components/ui.jsx';
 import BlockBuilder from '@/components/BlockBuilder.jsx';
 
@@ -45,13 +46,24 @@ function eventSkeleton(ev, lang) {
     : `if (event.name === "${ev.name}") {\n    \n}`;
 }
 
-export default function ScriptEditor({ code, onCode, lang, onLang, pathHint = 'classes/<class>' }) {
+export default function ScriptEditor({ code, onCode, lang, onLang, pathHint = 'classes/<class>', blocks, onBlocks }) {
   const taRef = useRef(null);
   const [tab, setTab] = useState('api'); // api | events | snippets
   const [query, setQuery] = useState('');
-  // Basic = build it from blocks; Advanced = write the code. Start on Basic only for a
-  // fresh script, so we never hide someone's existing work behind a builder.
-  const [mode, setMode] = useState(() => ((code ?? '').trim() ? 'advanced' : 'basic'));
+  // Basic = build it from blocks; Advanced = write the code. Prefer Basic when there are
+  // saved blocks to restore (so reopening shows the bricks, not raw Lua) — but ONLY if the
+  // saved code still matches what those blocks generate. If someone built blocks, switched to
+  // Advanced and hand-edited the Lua, the code has diverged and the blocks are no longer the
+  // source of truth: stay in Advanced so those edits stay visible and aren't regenerated over.
+  const [mode, setMode] = useState(() => {
+    const trimmed = (code ?? '').trim();
+    if (blocks && blocks.length) {
+      if (!trimmed) return 'basic';
+      try { if (trimmed === generateLua({ rules: blocks }).trim()) return 'basic'; } catch { /* fall through */ }
+      return 'advanced'; // code diverged from the blocks — keep the hand edits
+    }
+    return trimmed ? 'advanced' : 'basic';
+  });
 
   const insert = (text) => {
     const ta = taRef.current;
@@ -123,6 +135,8 @@ export default function ScriptEditor({ code, onCode, lang, onLang, pathHint = 'c
         {ModeTabs}
         <BlockBuilder
           hasExistingCode={!!(code ?? '').trim()}
+          initialRules={blocks}
+          onRules={onBlocks}
           onLiveCode={(generated) => { onCode(generated); onLang('lua'); }}
           onUseScript={(generated) => {
             onCode(generated);

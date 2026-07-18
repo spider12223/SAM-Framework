@@ -169,7 +169,7 @@ function DetailStrip({ entry, patch, onHotbar, iconFor, onRemove, category }) {
   );
 }
 
-export default function LoadoutBoard({ items, onChange, allTypes, iconFor, categoryFor, categories, portraitUrl }) {
+export default function LoadoutBoard({ items, onChange, allTypes, iconFor, categoryFor, categories, portraitUrl, gold, onGold }) {
   const [picker, setPicker] = useState(null); // { slot } for equip, { backpack:true } for pack
   const [selectedKey, setSelectedKey] = useState(null);
 
@@ -233,6 +233,15 @@ export default function LoadoutBoard({ items, onChange, allTypes, iconFor, categ
 
   return (
     <Panel title="Starting Loadout">
+      {onGold && (
+        <div className="flex items-center gap-2 mb-3">
+          <span className="sam-label" style={{ fontSize: '0.8rem' }}>💰 Starting gold</span>
+          <div style={{ width: 140 }}>
+            <NumberInput value={gold} min={0} onChange={(v) => onGold(v === '' ? 0 : Math.max(0, Number(v)))} aria-label="starting gold" />
+          </div>
+          <span className="text-xs" style={{ color: '#6b5a35' }}>Coins the class begins the run with.</span>
+        </div>
+      )}
       <div className="sam-loadout">
         {/* PAPERDOLL */}
         <div className="sam-paperdoll">

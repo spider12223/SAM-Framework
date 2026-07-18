@@ -382,6 +382,66 @@ check('event_item_category_is does NOT fire for a non-gem',
   { start: '{STR=10}', want: { STR: 10 } });
 
 // ---------------------------------------------------------------------------------
+// v1.3.1 (solidius): abilities kept firing after death (gold counter still ticking on a
+// corpse). The "player is alive" condition gates it, and the tick handler now skips dead
+// players on its own. samsim's stats are global (sam_get_stat ignores the player arg), so
+// the tick body runs once per living slot — an idempotent action (move_speed SET) makes
+// that observable without 4x-compounding.
+check('player_alive gate fires while alive',
+  [rule('player.on_hit',
+    [act('set_stat', { stat: 'STR', amount: 5, duration: 'permanently' })],
+    [{ id: 'player_alive', params: {} }])],
+  `S.fire('player.on_hit', {player=0})`,
+  { start: '{STR=10, HP=50}', want: { STR: 15 } });
+
+check('player_alive gate blocks when dead (HP 0)',
+  [rule('player.on_hit',
+    [act('set_stat', { stat: 'STR', amount: 5, duration: 'permanently' })],
+    [{ id: 'player_alive', params: {} }])],
+  `S.fire('player.on_hit', {player=0})`,
+  { start: '{STR=10, HP=0}', want: { STR: 10 } });
+
+check('a timer does NOT keep firing after death (HP 0 skips the tick guard)',
+  [rule('every_seconds', [act('move_speed', { mult: 2, duration: 'permanently' })])],
+  `S.seconds(2)`,
+  { start: '{HP=0}', want: { speed: '1.0' } });
+
+check('a timer DOES fire while alive',
+  [rule('every_seconds', [act('move_speed', { mult: 2, duration: 'permanently' })])],
+  `S.seconds(2)`,
+  { start: '{HP=50}', want: { speed: '2.0' } });
+
+// Event-level xp / hunger (solidius: "individual values for hunger and exp") — the amount
+// from THIS gain / the hunger at THIS change, distinct from the running-total stat compare.
+check('xp_amount_cmp fires on a big xp gain (reads event.amount)',
+  [rule('player.on_xp_gained',
+    [act('set_stat', { stat: 'STR', amount: 5, duration: 'permanently' })],
+    [{ id: 'xp_amount_cmp', params: { op: '>=', value: 10 } }])],
+  `S.fire('player.on_xp_gained', {player=0, amount=25, new_total=100})`,
+  { start: '{STR=10}', want: { STR: 15 } });
+
+check('xp_amount_cmp does NOT fire on a small xp gain',
+  [rule('player.on_xp_gained',
+    [act('set_stat', { stat: 'STR', amount: 5, duration: 'permanently' })],
+    [{ id: 'xp_amount_cmp', params: { op: '>=', value: 10 } }])],
+  `S.fire('player.on_xp_gained', {player=0, amount=3, new_total=50})`,
+  { start: '{STR=10}', want: { STR: 10 } });
+
+check('hunger_now_cmp fires when hunger is low',
+  [rule('player.on_hunger_change',
+    [act('set_stat', { stat: 'STR', amount: 5, duration: 'permanently' })],
+    [{ id: 'hunger_now_cmp', params: { op: '<=', value: 250 } }])],
+  `S.fire('player.on_hunger_change', {player=0, hunger=100})`,
+  { start: '{STR=10}', want: { STR: 15 } });
+
+check('hunger_now_cmp does NOT fire when well-fed',
+  [rule('player.on_hunger_change',
+    [act('set_stat', { stat: 'STR', amount: 5, duration: 'permanently' })],
+    [{ id: 'hunger_now_cmp', params: { op: '<=', value: 250 } }])],
+  `S.fire('player.on_hunger_change', {player=0, hunger=900})`,
+  { start: '{STR=10}', want: { STR: 10 } });
+
+// ---------------------------------------------------------------------------------
 // Guards the adversarial design panel demanded — these are pure-JS asserts, no Lua needed.
 // ---------------------------------------------------------------------------------
 function assert(name, cond) {
@@ -448,6 +508,28 @@ function assert(name, cond) {
     conditionsFor(monTrig).some((c) => c.id === 'monster_has_effect'));
   assert('monster_has_effect hidden under on_hit (no monster_uid)',
     !conditionsFor(hitTrig).some((c) => c.id === 'monster_has_effect'));
+
+  // v1.3.1 (solidius): "is alive" gate + event-level xp/hunger conditions, right gating.
+  const xpTrig = findTrigger('player.on_xp_gained');
+  const hungerTrig = findTrigger('player.on_hunger_change');
+  assert('player_alive codegen',
+    findCondition('player_alive').lua({}) === 'sam_get_stat(player, "HP") > 0');
+  assert('player_alive is a plain condition offered under every trigger',
+    conditionsFor(hitTrig).some((c) => c.id === 'player_alive')
+      && conditionsFor(goldTrig).some((c) => c.id === 'player_alive'));
+  assert('xp_amount_cmp offered under on_xp_gained',
+    conditionsFor(xpTrig).some((c) => c.id === 'xp_amount_cmp'));
+  assert('xp_amount_cmp hidden under on_hit (no new_total field)',
+    !conditionsFor(hitTrig).some((c) => c.id === 'xp_amount_cmp'));
+  assert('hunger_now_cmp offered under on_hunger_change',
+    conditionsFor(hungerTrig).some((c) => c.id === 'hunger_now_cmp'));
+  assert('hunger_now_cmp hidden under on_hit',
+    !conditionsFor(hitTrig).some((c) => c.id === 'hunger_now_cmp'));
+  // Retightened gold gate (needs total_gold): no longer leaks onto other amount-carrying events.
+  assert('gold_amount_cmp still offered under on_gold_collected',
+    conditionsFor(goldTrig).some((c) => c.id === 'gold_amount_cmp'));
+  assert('gold_amount_cmp no longer leaks onto on_xp_gained',
+    !conditionsFor(xpTrig).some((c) => c.id === 'gold_amount_cmp'));
 }
 
 // ---------------------------------------------------------------------------------

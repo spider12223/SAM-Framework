@@ -247,8 +247,12 @@ function RuleEditor({ rule, index, total, conditions, onChange, onRemove }) {
   );
 }
 
-export default function BlockBuilder({ onUseScript, onLiveCode, hasExistingCode }) {
-  const [rules, setRules] = useState(() => [newRule()]);
+export default function BlockBuilder({ onUseScript, onLiveCode, hasExistingCode, initialRules, onRules }) {
+  // Restore the exact bricks the user built last time (solidius: "the builder doesn't
+  // save"). The generated Lua was already persisted, but the visual rules were ephemeral,
+  // so reopening lost the blocks and dropped you into Advanced staring at raw Lua. The
+  // parent now hands the saved rule list back in via initialRules.
+  const [rules, setRules] = useState(() => (initialRules && initialRules.length ? initialRules : [newRule()]));
   const [custom, setCustom] = useState(() => loadBlocks());
   const [editing, setEditing] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -271,6 +275,16 @@ export default function BlockBuilder({ onUseScript, onLiveCode, hasExistingCode 
     onLiveCode?.(lua);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lua]);
+
+  // Report the rule list up so it persists alongside the generated code — this is what lets
+  // reopening restore the blocks. Same first-render skip as the code sync: just opening the
+  // tab shouldn't commit the starter block over a restored/empty state.
+  const firstRules = useRef(true);
+  useEffect(() => {
+    if (firstRules.current) { firstRules.current = false; return; }
+    onRules?.(rules);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rules]);
 
   return (
     <div className="grid gap-4" style={{ gridTemplateColumns: 'minmax(0,1fr) minmax(0,22rem)' }}>

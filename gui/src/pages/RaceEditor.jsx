@@ -38,6 +38,8 @@ export default function RaceEditor() {
     Object.fromEntries([...ATTRS, 'HP', 'MP'].map((a) => [a, editDef?.stat_modifiers?.[a] ?? 0])));
   const [scriptLang, setScriptLang] = useState(existingScript?.lang ?? 'lua');
   const [scriptCode, setScriptCode] = useState(existingScript?.code ?? '');
+  // Visual block-builder rules, so reopening restores the bricks. Editor-only (not exported).
+  const [scriptBlocks, setScriptBlocks] = useState(existingScript?.blocks ?? null);
   const [errors, setErrors] = useState([]);
   const [savedAs, setSavedAs] = useState('');
 
@@ -66,7 +68,7 @@ export default function RaceEditor() {
     if (!res.valid) { setErrors(res.errors); return; }
     setErrors([]);
     dispatch({ type: 'saveRace', def });
-    dispatch({ type: 'saveScript', classId: def.id, lang: scriptLang, code: scriptCode });
+    dispatch({ type: 'saveScript', classId: def.id, lang: scriptLang, code: scriptCode, blocks: scriptBlocks });
     setSavedAs(def.id);
   };
 
@@ -125,7 +127,8 @@ export default function RaceEditor() {
           in-game, with the same freedom class scripts have. React to any event hook and gate to this race with{' '}
           <span className="sam-mono">sam_get_race(player) == "{raceId}"</span>.
         </div>
-        <ScriptEditor code={scriptCode} onCode={setScriptCode} lang={scriptLang} onLang={setScriptLang} pathHint="races/<race>" />
+        <ScriptEditor code={scriptCode} onCode={setScriptCode} lang={scriptLang} onLang={setScriptLang} pathHint="races/<race>"
+          blocks={scriptBlocks} onBlocks={setScriptBlocks} />
       </Panel>
 
       <ErrorList errors={errors} />

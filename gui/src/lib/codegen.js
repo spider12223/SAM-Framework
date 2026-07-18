@@ -163,19 +163,23 @@ export function generateLua(spec) {
     if (eventRules.length) out.push('');
     out.push(
       '-- Ticks arrive on their own on_tick(event) handler — never as an event through',
-      '-- on_event. A tick carries no player, so this acts on the local host (player 0),',
-      '-- which is you in single-player.',
+      '-- on_event. A tick carries no player of its own, so we run the body for every',
+      '-- player who is actually in the game AND alive: sam_get_stat reads 0 for an empty',
+      '-- slot or a corpse, so the loop skips both. That is what makes a timer work in',
+      '-- multiplayer (each living player, host-authoritative) and stop paying out after a',
+      '-- player dies. To limit it to your own class, add an "is playing a class" condition.',
       'function on_tick(event)',
-      '  local player = 0',
+      '  for player = 0, 3 do',
+      '    if sam_get_stat(player, "HP") > 0 then',
     );
     for (const r of tickRules) {
       const secs = Number(r.trigger.params?.seconds) || 1;
       const ticks = Math.max(1, Math.round(secs * TICKS_PER_SECOND));
-      out.push(`  if event.tick_count % ${ticks} == 0 then -- every ${secs}s`);
-      out.push(...ruleBody(r, '    ', gen));
-      out.push('  end');
+      out.push(`      if event.tick_count % ${ticks} == 0 then -- every ${secs}s`);
+      out.push(...ruleBody(r, '        ', gen));
+      out.push('      end');
     }
-    out.push('end');
+    out.push('    end', '  end', 'end');
   }
 
   return out.join('\n') + '\n';
