@@ -340,12 +340,23 @@ namespace
 		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
 		if ( argc >= 2 ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
 		if ( argc >= 3 ) { JS_ToInt32(ctx, &ticks, argv[2]); }
+		int32_t strength = 0;
+		if ( argc >= 4 ) { JS_ToInt32(ctx, &strength, argv[3]); } // optional tier/magnitude
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_apply_effect refused: host only."); return JS_NewBool(ctx, 0); }
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity )
 		{ SAM_ERROR("JS", "sam_apply_effect: invalid player index " + std::to_string(player) + "."); return JS_NewBool(ctx, 0); }
 		const int eff = samEffectNameToId(name.c_str());
 		if ( eff < 0 ) { SAM_ERROR("JS", "sam_apply_effect: unknown effect '" + name + "'."); return JS_NewBool(ctx, 0); }
-		const bool ok = players[player]->entity->setEffect(eff, true, ticks, true);
+		bool ok;
+		if ( strength > 0 )
+		{
+			const Uint8 st = (Uint8)(strength > 255 ? 255 : strength);
+			ok = players[player]->entity->setEffect(eff, st, ticks, true, true, true); // overrideEffectStrength
+		}
+		else
+		{
+			ok = players[player]->entity->setEffect(eff, true, ticks, true);
+		}
 		SAM_INFO("JS", "Applied effect " + name + " to player " + std::to_string(player) + (ok ? "" : " (refused/immune)"));
 		return JS_NewBool(ctx, ok ? 1 : 0);
 	}
@@ -1243,6 +1254,92 @@ namespace
 		return JS_TRUE;
 	}
 
+	// sam_get_player_data(player, key) / sam_set_player_data(player, key, value) — per-player,
+	// in-memory, per-session scratch (cooldowns/flags/stacks). Shares SAMLua's store with Lua.
+	JSValue js_sam_get_player_data(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_UNDEFINED; }
+		int32_t player = -1; JS_ToInt32(ctx, &player, argv[0]);
+		const char* keyC = JS_ToCString(ctx, argv[1]);
+		const std::string key = keyC ? keyC : "";
+		if ( keyC ) { JS_FreeCString(ctx, keyC); }
+		if ( player < 0 || player >= MAXPLAYERS ) { return JS_UNDEFINED; }
+		const std::string js = SAMLua::playerDataGet(player, key);
+		if ( js.empty() ) { return JS_UNDEFINED; }
+		JSValue v = JS_ParseJSON(ctx, js.c_str(), js.size(), "sam_player_data");
+		if ( JS_IsException(v) ) { JS_FreeValue(ctx, v); return JS_UNDEFINED; }
+		return v;
+	}
+
+	JSValue js_sam_set_player_data(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 3 ) { return JS_FALSE; }
+		int32_t player = -1; JS_ToInt32(ctx, &player, argv[0]);
+		const char* keyC = JS_ToCString(ctx, argv[1]);
+		const std::string key = keyC ? keyC : "";
+		if ( keyC ) { JS_FreeCString(ctx, keyC); }
+		if ( player < 0 || player >= MAXPLAYERS ) { return JS_FALSE; }
+		JSValue jstr = JS_JSONStringify(ctx, argv[2], JS_UNDEFINED, JS_UNDEFINED);
+		std::string json = "null";
+		if ( !JS_IsException(jstr) && !JS_IsUndefined(jstr) )
+		{
+			const char* s = JS_ToCString(ctx, jstr);
+			if ( s ) { json = s; JS_FreeCString(ctx, s); }
+		}
+		JS_FreeValue(ctx, jstr);
+		SAMLua::playerDataSet(player, key, json);
+		return JS_TRUE;
+	}
+
+	// sam_get_effect_duration(player, "EFFECT") -> remaining ticks (0 if inactive, -1 permanent).
+	JSValue js_sam_get_effect_duration(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		std::string name; if ( argc >= 2 ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
+		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return JS_NewInt32(ctx, 0); }
+		const int eff = samEffectNameToId(name.c_str());
+		if ( eff < 0 || stats[player]->getEffectActive(eff) == 0 ) { return JS_NewInt32(ctx, 0); }
+		return JS_NewInt32(ctx, (int32_t)stats[player]->EFFECTS_TIMERS[eff]);
+	}
+
+	// sam_get_effect_strength(player, "EFFECT") -> strength/tier (0 if inactive).
+	JSValue js_sam_get_effect_strength(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		std::string name; if ( argc >= 2 ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
+		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return JS_NewInt32(ctx, 0); }
+		const int eff = samEffectNameToId(name.c_str());
+		if ( eff < 0 ) { return JS_NewInt32(ctx, 0); }
+		return JS_NewInt32(ctx, (int32_t)stats[player]->getEffectActive(eff));
+	}
+
+	// sam_get_effects(player) -> array of { name, ticks, strength } for every active effect.
+	JSValue js_sam_get_effects(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		JSValue arr = JS_NewArray(ctx);
+		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return arr; }
+		uint32_t n = 0;
+		for ( int id = 0; id < NUMEFFECTS; ++id )
+		{
+			const Uint8 strength = stats[player]->getEffectActive(id);
+			if ( strength == 0 ) { continue; }
+			std::string name = SAMLua::effectNameFromId(id);
+			if ( name.empty() ) { name = "EFFECT:" + std::to_string(id); }
+			JSValue o = JS_NewObject(ctx);
+			JS_SetPropertyStr(ctx, o, "name", JS_NewString(ctx, name.c_str()));
+			JS_SetPropertyStr(ctx, o, "ticks", JS_NewInt32(ctx, (int32_t)stats[player]->EFFECTS_TIMERS[id]));
+			JS_SetPropertyStr(ctx, o, "strength", JS_NewInt32(ctx, (int32_t)strength));
+			JS_SetPropertyUint32(ctx, arr, n++, o);
+		}
+		return arr;
+	}
+
 	// ---- v0.7.0 Feature 5: modify existing content (patch class/item/monster) -----
 #ifdef SAM_JS_HAVE_BARONY
 	int samJsResolveClass(JSContext* ctx, JSValueConst v)
@@ -1597,6 +1694,11 @@ namespace
 		JS_SetPropertyStr(ctx, g, "sam_deal_damage", JS_NewCFunction(ctx, js_sam_deal_damage, "sam_deal_damage", 2));
 		JS_SetPropertyStr(ctx, g, "sam_is_key_held", JS_NewCFunction(ctx, js_sam_is_key_held, "sam_is_key_held", 1));
 		// v0.7.0 Feature 4: monster / NPC scripting (UID-based, host-authoritative)
+		JS_SetPropertyStr(ctx, g, "sam_get_player_data", JS_NewCFunction(ctx, js_sam_get_player_data, "sam_get_player_data", 2));
+		JS_SetPropertyStr(ctx, g, "sam_set_player_data", JS_NewCFunction(ctx, js_sam_set_player_data, "sam_set_player_data", 3));
+		JS_SetPropertyStr(ctx, g, "sam_get_effect_duration", JS_NewCFunction(ctx, js_sam_get_effect_duration, "sam_get_effect_duration", 2));
+		JS_SetPropertyStr(ctx, g, "sam_get_effect_strength", JS_NewCFunction(ctx, js_sam_get_effect_strength, "sam_get_effect_strength", 2));
+		JS_SetPropertyStr(ctx, g, "sam_get_effects", JS_NewCFunction(ctx, js_sam_get_effects, "sam_get_effects", 1));
 		JS_SetPropertyStr(ctx, g, "sam_get_monster_stat", JS_NewCFunction(ctx, js_sam_get_monster_stat, "sam_get_monster_stat", 2));
 		JS_SetPropertyStr(ctx, g, "sam_set_monster_stat", JS_NewCFunction(ctx, js_sam_set_monster_stat, "sam_set_monster_stat", 3));
 		JS_SetPropertyStr(ctx, g, "sam_apply_monster_effect", JS_NewCFunction(ctx, js_sam_apply_monster_effect, "sam_apply_monster_effect", 3));

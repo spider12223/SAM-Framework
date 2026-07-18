@@ -417,6 +417,29 @@ export const CONDITIONS = [
     phrase: (p) => `time in the run is ${p.op} ${Number(p.seconds) || 0}s`,
     note: 'Measured from the start of the run. 50 ticks = 1 second.',
   },
+  {
+    id: 'effect_duration_cmp', label: 'effect time left compares to', negatable: false,
+    params: [
+      { name: 'effect', type: 'select', values: EFFECTS, default: 'SLOW' },
+      { name: 'op', type: 'select', values: ['<', '<=', '==', '>=', '>'], default: '>' },
+      { name: 'seconds', type: 'number', default: 3, label: 'seconds left' },
+    ],
+    // sam_get_effect_duration returns TICKS; enter seconds. 0 ticks means it is not active.
+    lua: (p) => `sam_get_effect_duration(player, ${q(p.effect)}) ${p.op} ${Math.round((Number(p.seconds) || 0) * TICKS_PER_SECOND)}`,
+    phrase: (p) => `${p.effect} time left is ${p.op} ${Number(p.seconds) || 0}s`,
+    note: 'Lets a buff or debuff scale/decay by how long it has left. 0 seconds = the effect is not active.',
+  },
+  {
+    id: 'effect_strength_cmp', label: 'effect strength compares to', negatable: false,
+    params: [
+      { name: 'effect', type: 'select', values: EFFECTS, default: 'POISONED' },
+      { name: 'op', type: 'select', values: ['<', '<=', '==', '>=', '>'], default: '>=' },
+      { name: 'value', type: 'number', default: 1, label: 'strength / tier' },
+    ],
+    lua: (p) => `sam_get_effect_strength(player, ${q(p.effect)}) ${p.op} ${Number(p.value) || 0}`,
+    phrase: (p) => `${p.effect} strength is ${p.op} ${Number(p.value) || 0}`,
+    note: 'For effects that carry a tier/magnitude. 0 means the effect is not active.',
+  },
 ];
 
 /**
@@ -516,8 +539,16 @@ export const ACTIONS = [
     params: [
       { name: 'effect', type: 'select', values: EFFECTS, default: 'FAST' },
       { name: 'ticks', type: 'number', default: 100, label: 'ticks (50 = 1 second)' },
+      { name: 'strength', type: 'number', default: 0, min: 0, label: 'strength/tier (0 = default)' },
     ],
-    lua: (p) => `sam_apply_effect(player, ${q(p.effect)}, ${Number(p.ticks) || 0})`,
+    lua: (p) => {
+      const s = Math.max(0, Math.trunc(Number(p.strength) || 0));
+      // Only pass the 4th arg when set, so the plain 3-arg call stays unchanged.
+      return s > 0
+        ? `sam_apply_effect(player, ${q(p.effect)}, ${Number(p.ticks) || 0}, ${s})`
+        : `sam_apply_effect(player, ${q(p.effect)}, ${Number(p.ticks) || 0})`;
+    },
+    note: 'Strength sets the tier for effects that have one (leave 0 for the normal effect).',
   },
   {
     id: 'remove_effect', label: 'remove a status effect', category: 'Player',

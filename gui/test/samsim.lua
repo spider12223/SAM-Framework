@@ -86,8 +86,31 @@ function sam_level_up(_, n)
   return true
 end
 function sam_has_effect(_, e) return state.effects[e] == true end
-function sam_apply_effect(_, e, _) state.effects[e] = true; return true end
-function sam_remove_effect(_, e) state.effects[e] = nil; return true end
+function sam_apply_effect(_, e, ticks, strength)
+  state.effects[e] = true
+  state.effect_ticks = state.effect_ticks or {}
+  state.effect_strength = state.effect_strength or {}
+  state.effect_ticks[e] = tonumber(ticks) or 0
+  local st = tonumber(strength) or 0
+  state.effect_strength[e] = st > 0 and st or 1   -- default tier is 1 when unspecified
+  return true
+end
+function sam_remove_effect(_, e)
+  state.effects[e] = nil
+  if state.effect_ticks then state.effect_ticks[e] = nil end
+  if state.effect_strength then state.effect_strength[e] = nil end
+  return true
+end
+function sam_get_effect_duration(_, e)
+  if state.effect_ticks and state.effect_ticks[e] ~= nil then return state.effect_ticks[e] end
+  return state.effects[e] and 9999 or 0            -- active-but-untracked -> large; inactive -> 0
+end
+function sam_get_effect_strength(_, e)
+  if state.effect_strength and state.effect_strength[e] ~= nil then return state.effect_strength[e] end
+  return state.effects[e] and 1 or 0
+end
+function sam_get_player_data(_, _) return nil end
+function sam_set_player_data(_, _, _) return true end
 function sam_message(_, t) table.insert(state.messages, t); return true end
 function sam_is_defending(_) return state.defending == true end
 function sam_get_class(_) return state.class or 'My Class' end

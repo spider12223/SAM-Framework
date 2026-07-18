@@ -143,6 +143,7 @@ namespace SAMLua
 	// WERE separate copies, and they drifted to the same wrong place: 14 names out of the
 	// engine's 135, so most real effects were unreachable from either language.
 	int effectIdFromName(const char* name);
+	std::string effectNameFromId(int id); // reverse: id -> canonical name ("CUSTOM:<id>" for 135..)
 
 	// ---- scripted stat writes: making them real on the client -------------------
 	//
@@ -167,6 +168,12 @@ namespace SAMLua
 	void monsterDataSet(unsigned uid, const std::string& key, const std::string& jsonValue);
 	std::string monsterDataGet(unsigned uid, const std::string& key);
 	void monsterDataClear();
+
+	// v1.2.9 — per-player scratch data (cooldowns/flags/stacks), shared with the JS runtime.
+	// In-memory, per session, cleared on new game/shutdown.
+	void playerDataSet(int player, const std::string& key, const std::string& jsonValue);
+	std::string playerDataGet(int player, const std::string& key);
+	void playerDataClear();
 
 	// Advance + fire any due per-script timers (Part 4). Call once per game tick,
 	// host-authoritative only.

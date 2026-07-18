@@ -305,6 +305,31 @@ check('level_up advances the level count times without a timer',
   { start: '{LVL=1}', want: { timers: 0 } });
 
 // ---------------------------------------------------------------------------------
+// v1.2.9: effect duration/strength conditions + apply_effect strength (solidius's
+// "downsides that scale by how much is left" / tiered effects).
+// ---------------------------------------------------------------------------------
+check('effect_duration_cmp blocks when the effect is absent (0s left)',
+  [rule('player.on_hit',
+    [act('set_stat', { stat: 'STR', amount: 5, duration: 'permanently' })],
+    [{ id: 'effect_duration_cmp', params: { effect: 'SLOW', op: '>', seconds: 2 } }])],
+  `S.fire('player.on_hit', {player=0})`,
+  { start: '{STR=10}', want: { STR: 10 } });   // no SLOW -> 0 ticks, not > 100
+
+check('effect_duration_cmp fires when enough time remains',
+  [rule('player.on_hit',
+    [act('set_stat', { stat: 'STR', amount: 5, duration: 'permanently' })],
+    [{ id: 'effect_duration_cmp', params: { effect: 'SLOW', op: '>', seconds: 2 } }])],
+  `sam_apply_effect(0, 'SLOW', 200) S.fire('player.on_hit', {player=0})`, // 200 ticks > 100
+  { start: '{STR=10}', want: { STR: 15 } });
+
+check('effect_strength_cmp reads the tier set by apply_effect strength',
+  [rule('player.on_hit',
+    [act('set_stat', { stat: 'STR', amount: 5, duration: 'permanently' })],
+    [{ id: 'effect_strength_cmp', params: { effect: 'POISONED', op: '>=', value: 3 } }])],
+  `sam_apply_effect(0, 'POISONED', 100, 3) S.fire('player.on_hit', {player=0})`,
+  { start: '{STR=10}', want: { STR: 15 } });
+
+// ---------------------------------------------------------------------------------
 // Guards the adversarial design panel demanded — these are pure-JS asserts, no Lua needed.
 // ---------------------------------------------------------------------------------
 function assert(name, cond) {
@@ -333,6 +358,13 @@ function assert(name, cond) {
     grant.lua({ item: 'IRON_DAGGER', beatitude: '-1', count: 3 }) === 'sam_grant_item(player, "IRON_DAGGER", -1, 4, 3)');
   assert('a count with no blessing still fills beatitude 0 before the count',
     grant.lua({ item: 'IRON_DAGGER', beatitude: '0', count: 2 }) === 'sam_grant_item(player, "IRON_DAGGER", 0, 4, 2)');
+
+  // apply_effect's optional strength must only emit the 4th arg when set.
+  const applyEff = findAction('apply_effect');
+  assert('apply_effect stays 3-arg when strength is 0',
+    applyEff.lua({ effect: 'FAST', ticks: 100, strength: 0 }) === 'sam_apply_effect(player, "FAST", 100)');
+  assert('apply_effect passes the 4th strength arg when set',
+    applyEff.lua({ effect: 'POISONED', ticks: 100, strength: 3 }) === 'sam_apply_effect(player, "POISONED", 100, 3)');
 }
 
 // ---------------------------------------------------------------------------------

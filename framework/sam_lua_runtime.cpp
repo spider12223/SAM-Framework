@@ -147,6 +147,12 @@ namespace
 	// cleared on runtime shutdown. Shared so the JS runtime reaches it through SAMLua.
 	std::map<unsigned, std::map<std::string, std::string>> g_monsterData;
 
+	// v1.2.9 — per-player scratch data (cooldowns, ability flags, stacks). Keyed by player
+	// index then key; JSON-string values like g_monsterData. In-memory, per session, cleared
+	// on shutdown — the right tool for a per-player cooldown you tick often, unlike the
+	// disk-backed, cross-run sam_save_data. Shared so the JS runtime reaches it via SAMLua.
+	std::map<std::string, std::string> g_playerData[MAXPLAYERS];
+
 	// ---- custom allocator (memory cap) ----------------------------------------
 
 	void* luaAlloc(void* ud, void* ptr, std::size_t osize, std::size_t nsize)
@@ -573,20 +579,33 @@ namespace
 		return 1;
 	}
 
-	// sam_apply_effect(player, "EFFECT", ticks) — apply a status effect for N ticks
-	// (50 ticks == 1s). setEffect auto-syncs the client. Returns false if immune.
+	// sam_apply_effect(player, "EFFECT", ticks[, strength]) — apply a status effect for N
+	// ticks (50 ticks == 1s). Optional strength sets the tier/magnitude for effects that
+	// carry one (GROWTH stacks, potion STR); omit it for the plain default. setEffect
+	// auto-syncs the client. Returns false if immune.
 	int lua_sam_apply_effect(lua_State* Ls)
 	{
 		SAMLogger::noteApiCall();
 		const int player = (int)luaL_checkinteger(Ls, 1);
 		const char* nameC = luaL_checkstring(Ls, 2);
 		const int ticks = (int)luaL_checkinteger(Ls, 3);
+		const int strength = lua_isnoneornil(Ls, 4) ? 0 : (int)luaL_checkinteger(Ls, 4);
 		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_apply_effect refused: host only."); lua_pushboolean(Ls, 0); return 1; }
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity )
 		{ SAM_ERROR("LUA", "sam_apply_effect: invalid player index " + std::to_string(player) + "."); lua_pushboolean(Ls, 0); return 1; }
 		const int eff = samEffectNameToId(nameC);
 		if ( eff < 0 ) { SAM_ERROR("LUA", std::string("sam_apply_effect: unknown effect '") + (nameC ? nameC : "") + "'."); lua_pushboolean(Ls, 0); return 1; }
-		const bool ok = players[player]->entity->setEffect(eff, true, ticks, true);
+		bool ok;
+		if ( strength > 0 )
+		{
+			const Uint8 st = (Uint8)(strength > 255 ? 255 : strength);
+			// value = explicit Uint8 strength, updateClients=true, guarantee=true, overrideEffectStrength=true.
+			ok = players[player]->entity->setEffect(eff, st, ticks, true, true, true);
+		}
+		else
+		{
+			ok = players[player]->entity->setEffect(eff, true, ticks, true);
+		}
 		SAM_INFO("LUA", std::string("Applied effect ") + (nameC ? nameC : "") + " to player " + std::to_string(player) + (ok ? "" : " (refused/immune)"));
 		lua_pushboolean(Ls, ok ? 1 : 0);
 		return 1;
@@ -879,7 +898,11 @@ namespace
 	static_assert(MAXPLAYERS == 4, "g_samMoveSpeed's initializer must cover every player slot");
 
 	const double SAM_MOVE_SPEED_MIN = 0.1;
-	const double SAM_MOVE_SPEED_MAX = 3.0;
+	// v1.2.9 — raised 3.0 -> 5.0. The engine hard-clamps final player velocity magnitude at
+	// 5.0 (actplayer.cpp), which for a boosted player we lift to a tunnel-safe 7.0; a ~4-5x
+	// multiplier is what actually reaches that new ceiling, so 3.0 was leaving real speed on
+	// the table for fast builds. Above ~5x the velocity clamp eats everything anyway.
+	const double SAM_MOVE_SPEED_MAX = 5.0;
 
 	// Order matters: NaN must be caught BEFORE the clamp, not by it. NaN compares false
 	// against everything, so `v < MIN ? MIN : (v > MAX ? MAX : v)` returns NaN unchanged
@@ -1039,6 +1062,65 @@ namespace
 		const int eff = samEffectNameToId(nameC);
 		if ( eff < 0 ) { SAM_WARN("LUA", std::string("sam_has_effect: unknown effect '") + (nameC ? nameC : "") + "'."); lua_pushboolean(Ls, 0); return 1; }
 		lua_pushboolean(Ls, stats[player]->getEffectActive(eff) != 0 ? 1 : 0);
+		return 1;
+	}
+
+	// sam_get_effect_duration(player, "EFFECT") -> remaining ticks (50 = 1s). 0 if the
+	// effect is not active; -1 for a permanent effect (no timer). Readable on clients
+	// (effects are synced), so a debuff can scale/decay by how much time is left.
+	int lua_sam_get_effect_duration(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const char* nameC = luaL_checkstring(Ls, 2);
+		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { lua_pushinteger(Ls, 0); return 1; }
+		const int eff = samEffectNameToId(nameC);
+		if ( eff < 0 || stats[player]->getEffectActive(eff) == 0 ) { lua_pushinteger(Ls, 0); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)stats[player]->EFFECTS_TIMERS[eff]);
+		return 1;
+	}
+
+	// sam_get_effect_strength(player, "EFFECT") -> strength/tier (0 if inactive). Some
+	// effects store a magnitude (GROWTH tiers, potion STR); this reads it. Client-readable.
+	int lua_sam_get_effect_strength(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const char* nameC = luaL_checkstring(Ls, 2);
+		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { lua_pushinteger(Ls, 0); return 1; }
+		const int eff = samEffectNameToId(nameC);
+		if ( eff < 0 ) { lua_pushinteger(Ls, 0); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)stats[player]->getEffectActive(eff));
+		return 1;
+	}
+
+	// sam_get_effects(player) -> array of { name, ticks, strength } for every active effect,
+	// so a mod can react to "any debuff" or strip buffs without polling ~130 names one by
+	// one. Includes custom pseudo-effect slots (135..) reported as "CUSTOM:<id>".
+	int lua_sam_get_effects(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		lua_newtable(Ls);
+		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return 1; } // empty array
+		int n = 0;
+		auto pushEntry = [&](const std::string& name, int id, Uint8 strength) {
+			lua_newtable(Ls);
+			lua_pushstring(Ls, name.c_str());                              lua_setfield(Ls, -2, "name");
+			lua_pushinteger(Ls, (lua_Integer)stats[player]->EFFECTS_TIMERS[id]); lua_setfield(Ls, -2, "ticks");
+			lua_pushinteger(Ls, (lua_Integer)strength);                    lua_setfield(Ls, -2, "strength");
+			lua_rawseti(Ls, -2, ++n);
+		};
+		for ( const auto& e : samEffectNames )
+		{
+			const Uint8 s = stats[player]->getEffectActive(e.id);
+			if ( s != 0 ) { pushEntry(e.name, e.id, s); }
+		}
+		for ( int id = 135; id < NUMEFFECTS; ++id ) // custom pseudo-effect slots, if any are live
+		{
+			const Uint8 s = stats[player]->getEffectActive(id);
+			if ( s != 0 ) { pushEntry("CUSTOM:" + std::to_string(id), id, s); }
+		}
 		return 1;
 	}
 
@@ -1640,6 +1722,38 @@ namespace
 		return 0;
 	}
 
+	// sam_get_player_data(player, key) -> value (nil if unset). Per-player, in-memory,
+	// per-session scratch — cooldowns, ability flags, stack counters. Cleared on new game;
+	// unlike sam_save_data it does not touch disk or persist across runs.
+	int lua_sam_get_player_data(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const char* keyC = luaL_checkstring(Ls, 2);
+		if ( player < 0 || player >= MAXPLAYERS ) { lua_pushnil(Ls); return 1; }
+		const std::string js = SAMLua::playerDataGet(player, keyC ? keyC : "");
+		if ( js.empty() ) { lua_pushnil(Ls); return 1; }
+		nlohmann::json j = nlohmann::json::parse(js, nullptr, false);
+		if ( j.is_discarded() ) { lua_pushnil(Ls); return 1; }
+		jsonToLua(Ls, j, 0);
+		return 1;
+	}
+
+	// sam_set_player_data(player, key, value) — store any primitive/table for a player.
+	int lua_sam_set_player_data(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const char* keyC = luaL_checkstring(Ls, 2);
+		if ( player < 0 || player >= MAXPLAYERS ) { return 0; }
+		nlohmann::json j = luaToJson(Ls, 3, 0);
+		// 'replace' handler: a non-UTF-8 Lua byte string must not make dump() throw a C++
+		// exception across the Lua C boundary (crash). Mirrors sam_set_monster_data.
+		SAMLua::playerDataSet(player, keyC ? keyC : "",
+			j.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace));
+		return 0;
+	}
+
 	// ---- v0.7.0 Feature 5: modify existing content (patch class/item/monster) -----
 #ifdef SAM_LUA_HAVE_BARONY
 	// Resolve arg `idx` (integer classnum or "namespace:class" string) -> class id, or -1.
@@ -2018,6 +2132,11 @@ namespace
 		lua_pushcfunction(L, lua_sam_set_monster_target);  lua_setglobal(L, "sam_set_monster_target");
 		lua_pushcfunction(L, lua_sam_get_monster_data);    lua_setglobal(L, "sam_get_monster_data");
 		lua_pushcfunction(L, lua_sam_set_monster_data);    lua_setglobal(L, "sam_set_monster_data");
+		lua_pushcfunction(L, lua_sam_get_player_data);     lua_setglobal(L, "sam_get_player_data");
+		lua_pushcfunction(L, lua_sam_set_player_data);     lua_setglobal(L, "sam_set_player_data");
+		lua_pushcfunction(L, lua_sam_get_effect_duration); lua_setglobal(L, "sam_get_effect_duration");
+		lua_pushcfunction(L, lua_sam_get_effect_strength); lua_setglobal(L, "sam_get_effect_strength");
+		lua_pushcfunction(L, lua_sam_get_effects);         lua_setglobal(L, "sam_get_effects");
 		// v0.7.0 Feature 5: modify existing content (revert on unload)
 		lua_pushcfunction(L, lua_sam_patch_class);         lua_setglobal(L, "sam_patch_class");
 		lua_pushcfunction(L, lua_sam_unpatch_class);       lua_setglobal(L, "sam_unpatch_class");
@@ -2547,6 +2666,20 @@ namespace SAMLua
 	}
 	void monsterDataClear() { g_monsterData.clear(); }
 
+	// v1.2.9 — per-player scratch-data accessors (JSON-string values), shared with the JS
+	// runtime and cleared on new game/shutdown.
+	void playerDataSet(int player, const std::string& key, const std::string& jsonValue)
+	{
+		if ( player >= 0 && player < MAXPLAYERS ) { g_playerData[player][key] = jsonValue; }
+	}
+	std::string playerDataGet(int player, const std::string& key)
+	{
+		if ( player < 0 || player >= MAXPLAYERS ) { return std::string(); }
+		auto kit = g_playerData[player].find(key);
+		return ( kit == g_playerData[player].end() ) ? std::string() : kit->second;
+	}
+	void playerDataClear() { for ( int i = 0; i < MAXPLAYERS; ++i ) { g_playerData[i].clear(); } }
+
 	void tickTimers()
 	{
 		if ( !L || g_timers.empty() ) { return; }
@@ -2613,6 +2746,7 @@ namespace SAMLua
 		}
 		g_timers.clear();
 		g_monsterData.clear(); // v0.7.0 F4: drop per-monster scratch data on teardown
+		for ( int i = 0; i < MAXPLAYERS; ++i ) { g_playerData[i].clear(); } // v1.2.9: per-player scratch
 		for ( auto& s : g_scripts )
 		{
 			if ( s.callbackRef != LUA_NOREF )
@@ -2674,6 +2808,16 @@ namespace SAMLua
 #else
 		(void)name; return -1;
 #endif
+	}
+
+	// Reverse of effectIdFromName: canonical name for an effect id (vanilla name, or
+	// "CUSTOM:<id>" for the 135.. pseudo-effect slots), empty for an unnamed slot. Shared
+	// so the JS runtime's sam_get_effects can label effects without its own table.
+	std::string effectNameFromId(int id)
+	{
+		for ( const auto& e : samEffectNames ) { if ( e.id == id ) { return e.name; } }
+		if ( id >= 135 && id < NUMEFFECTS ) { return "CUSTOM:" + std::to_string(id); }
+		return std::string();
 	}
 
 	double getMoveSpeedMult(int player)
