@@ -17,7 +17,7 @@ import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { generateLua } from '../src/lib/codegen.js';
-import { untilCandidates, findAction, ENGINE_WRITTEN_STATS } from '../src/data/blocks.js';
+import { untilCandidates, findAction, ENGINE_WRITTEN_STATS, conditionsFor, findTrigger } from '../src/data/blocks.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const TMP = join(HERE, '.tmp');
@@ -329,6 +329,43 @@ check('effect_strength_cmp reads the tier set by apply_effect strength',
   `sam_apply_effect(0, 'POISONED', 100, 3) S.fire('player.on_hit', {player=0})`,
   { start: '{STR=10}', want: { STR: 15 } });
 
+// stat_cmp "% of max" (solidius): compare HP/MP to a fraction of MAX, not a flat number.
+check('stat_cmp % of max fires when HP is below 10% of max',
+  [rule('player.on_hit',
+    [act('set_stat', { stat: 'STR', amount: 5, duration: 'permanently' })],
+    [{ id: 'stat_cmp', params: { stat: 'HP', op: '<', value: 10, unit: '% of max' } }])],
+  `S.fire('player.on_hit', {player=0})`,
+  { start: '{MAXHP=100, HP=5, STR=10}', want: { STR: 15 } });   // 5 < 100*0.1
+
+check('stat_cmp % of max does NOT fire at half HP',
+  [rule('player.on_hit',
+    [act('set_stat', { stat: 'STR', amount: 5, duration: 'permanently' })],
+    [{ id: 'stat_cmp', params: { stat: 'HP', op: '<', value: 10, unit: '% of max' } }])],
+  `S.fire('player.on_hit', {player=0})`,
+  { start: '{MAXHP=100, HP=50, STR=10}', want: { STR: 10 } });   // 50 < 10 is false
+
+// Event-field conditions (solidius): react to THIS pickup's gold / the identified item.
+check('gold_amount_cmp fires on a big pickup (reads event.amount, not the total)',
+  [rule('player.on_gold_collected',
+    [act('set_stat', { stat: 'STR', amount: 5, duration: 'permanently' })],
+    [{ id: 'gold_amount_cmp', params: { op: '>=', value: 10 } }])],
+  `S.fire('player.on_gold_collected', {player=0, amount=25})`,
+  { start: '{STR=10}', want: { STR: 15 } });
+
+check('gold_amount_cmp does NOT fire on a small pickup',
+  [rule('player.on_gold_collected',
+    [act('set_stat', { stat: 'STR', amount: 5, duration: 'permanently' })],
+    [{ id: 'gold_amount_cmp', params: { op: '>=', value: 10 } }])],
+  `S.fire('player.on_gold_collected', {player=0, amount=3})`,
+  { start: '{STR=10}', want: { STR: 10 } });
+
+check('event_item_is matches the identified item',
+  [rule('player.on_item_identified',
+    [act('set_stat', { stat: 'STR', amount: 5, duration: 'permanently' })],
+    [{ id: 'event_item_is', params: { item: 'GEM_DIAMOND' } }])],
+  `S.fire('player.on_item_identified', {player=0, item_type='GEM_DIAMOND'})`,
+  { start: '{STR=10}', want: { STR: 15 } });
+
 // ---------------------------------------------------------------------------------
 // Guards the adversarial design panel demanded — these are pure-JS asserts, no Lua needed.
 // ---------------------------------------------------------------------------------
@@ -365,6 +402,21 @@ function assert(name, cond) {
     applyEff.lua({ effect: 'FAST', ticks: 100, strength: 0 }) === 'sam_apply_effect(player, "FAST", 100)');
   assert('apply_effect passes the 4th strength arg when set',
     applyEff.lua({ effect: 'POISONED', ticks: 100, strength: 3 }) === 'sam_apply_effect(player, "POISONED", 100, 3)');
+
+  // Event-field conditions are only offered under a trigger that carries the field.
+  const goldTrig = findTrigger('player.on_gold_collected');
+  const hitTrig = findTrigger('player.on_hit');
+  assert('gold_amount_cmp is offered under on_gold_collected',
+    conditionsFor(goldTrig).some((c) => c.id === 'gold_amount_cmp'));
+  assert('gold_amount_cmp is hidden under on_hit (no amount field)',
+    !conditionsFor(hitTrig).some((c) => c.id === 'gold_amount_cmp'));
+  assert('event_item_is is hidden under on_gold_collected (no item_type)',
+    !conditionsFor(goldTrig).some((c) => c.id === 'event_item_is'));
+  assert('a plain condition (stat_cmp) is still offered everywhere',
+    conditionsFor(hitTrig).some((c) => c.id === 'stat_cmp'));
+  // Event-field conditions must NOT be offered as until-conditions (event is stale in a timer).
+  assert('gold_amount_cmp is not an until-candidate',
+    !untilCandidates().some((c) => c.id === 'gold_amount_cmp'));
 }
 
 // ---------------------------------------------------------------------------------

@@ -131,8 +131,11 @@ export default function ClassEditor() {
 
   const [name, setName] = useState(draft?.name ?? editDef?.name ?? '');
   const [description, setDescription] = useState(draft?.description ?? editDef?.description ?? '');
+  // Attributes are MODIFIERS on the race base (schema: "stat->STR += n"), so 0 = no change —
+  // NOT absolute values. Default a new class to 0 (was 10, which silently made every class
+  // +60 to all attributes, far above vanilla's ~0-5 net). Editing keeps the class's stored deltas.
   const [attrs, setAttrs] = useState(() =>
-    draft?.attrs ?? Object.fromEntries(CORE_ATTRIBUTES.map((a) => [a, editDef?.stats?.[a] ?? 10]))
+    draft?.attrs ?? Object.fromEntries(CORE_ATTRIBUTES.map((a) => [a, editDef?.stats?.[a] ?? 0]))
   );
   const [offsets, setOffsets] = useState(() =>
     draft?.offsets ?? Object.fromEntries(OFFSET_STATS.map((s) => [s, editDef?.stats?.[s] ?? 0]))
@@ -254,9 +257,11 @@ export default function ClassEditor() {
     // Coerce '' (a value box the user cleared mid-edit) to 0 — a delta of 0 is "no change",
     // and it keeps a non-numeric out of the exported JSON.
     const num = (v) => (v === '' || v === undefined ? 0 : Number(v));
+    // These are MODIFIERS on the race base (schema), so 0 = "no change" — omit zeros so a
+    // neutral class exports a clean stats block instead of a wall of +0s (matches vanilla).
     const stats = {};
-    for (const a of CORE_ATTRIBUTES) stats[a] = num(attrs[a]);
-    for (const s of OFFSET_STATS) stats[s] = num(offsets[s]);
+    for (const a of CORE_ATTRIBUTES) { const v = num(attrs[a]); if (v !== 0) stats[a] = v; }
+    for (const s of OFFSET_STATS) { const v = num(offsets[s]); if (v !== 0) stats[s] = v; }
 
     const nonzeroSkills = Object.fromEntries(
       Object.entries(skills).map(([k, v]) => [k, num(v)]).filter(([, v]) => v > 0)
@@ -410,6 +415,10 @@ export default function ClassEditor() {
       {/* ------------------------------------------- attributes + skills */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
         <Panel title="Core Attributes">
+          <div className="text-xs mb-2" style={{ color: '#8a7749' }}>
+            Modifiers added to the race base (may be negative) — not final values. 0 = no change.
+            Vanilla classes net about 0 to +5 across all six, trading strengths for weaknesses.
+          </div>
           {CORE_ATTRIBUTES.map((a) => (
             <GoldSlider
               key={a}

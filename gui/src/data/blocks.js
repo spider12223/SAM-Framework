@@ -366,9 +366,47 @@ export const CONDITIONS = [
       { name: 'stat', type: 'select', values: STATS, default: 'HP' },
       { name: 'op', type: 'select', values: ['<', '<=', '==', '>=', '>'], default: '<' },
       { name: 'value', type: 'number', default: 10 },
+      // Only HP and MP have a MAX to take a percentage of, so the unit picker is hidden
+      // for every other stat (which can only be compared to a flat number).
+      { name: 'unit', type: 'select', values: ['flat', '% of max'], default: 'flat',
+        label: 'as', showIf: (p) => p.stat === 'HP' || p.stat === 'MP' },
     ],
-    lua: (p) => `sam_get_stat(player, ${q(p.stat)}) ${p.op} ${Number(p.value) || 0}`,
-    phrase: (p) => `${p.stat} ${p.op} ${Number(p.value) || 0}`,
+    lua: (p) => {
+      const v = Number(p.value) || 0;
+      const maxOf = { HP: 'MAXHP', MP: 'MAXMP' };
+      if (p.unit === '% of max' && maxOf[p.stat]) {
+        // e.g. HP below 10% of max: sam_get_stat(HP) < sam_get_stat(MAXHP) * 0.1
+        return `sam_get_stat(player, ${q(p.stat)}) ${p.op} (sam_get_stat(player, ${q(maxOf[p.stat])}) * ${v / 100})`;
+      }
+      return `sam_get_stat(player, ${q(p.stat)}) ${p.op} ${v}`;
+    },
+    phrase: (p) => {
+      const pct = p.unit === '% of max' && (p.stat === 'HP' || p.stat === 'MP');
+      return `${p.stat} ${p.op} ${Number(p.value) || 0}${pct ? '% of max' : ''}`;
+    },
+  },
+  {
+    // solidius: react to the gold in THIS pickup, not the running total. on_gold_collected
+    // carries `amount` (this pickup) and `total_gold` (the counter) — this reads `amount`.
+    id: 'gold_amount_cmp', label: 'gold just picked up compares to', negatable: false,
+    needs: 'amount', pollable: false,
+    params: [
+      { name: 'op', type: 'select', values: ['<', '<=', '==', '>=', '>'], default: '>=' },
+      { name: 'value', type: 'number', default: 10 },
+    ],
+    lua: (p) => `(event.amount or 0) ${p.op} ${Number(p.value) || 0}`,
+    phrase: (p) => `the gold just picked up is ${p.op} ${Number(p.value) || 0}`,
+  },
+  {
+    // solidius: "reward the player for identifying [a specific item]". Works on any trigger
+    // that carries an item_type (on_item_identified, on_item_dropped, on_item_broken).
+    id: 'event_item_is', label: "the event's item is a specific item", negatable: true,
+    needs: 'item_type', pollable: false,
+    params: [{ name: 'item', type: 'text', default: 'GEM_DIAMOND', label: 'item name or ns:item' }],
+    lua: (p) => `event.item_type == sam_item_id(${q(p.item)})`,
+    phrase: (p) => `the item is ${p.item}`,
+    phraseNeg: (p) => `the item is NOT ${p.item}`,
+    note: 'Matches one exact item. (There is no "is a GEM" category check yet — that needs an engine addition.)',
   },
   {
     id: 'class_is', label: 'is playing a class', negatable: true,
@@ -702,6 +740,17 @@ export function actionsFor(trigger) {
   return [...ACTIONS, ...CUSTOM_ACTIONS].filter((a) => {
     if (a.onlyOn && !a.onlyOn.includes(trigger?.id)) return false;
     if (a.needs && !fields.includes(a.needs)) return false;
+    return true;
+  });
+}
+
+/** Conditions valid for a trigger: an event-field condition (needs) is hidden unless the
+ *  trigger carries that field. Conditions without `needs` show for every trigger, as before. */
+export function conditionsFor(trigger) {
+  const fields = triggerFields(trigger);
+  return allConditions().filter((c) => {
+    if (c.onlyOn && !c.onlyOn.includes(trigger?.id)) return false;
+    if (c.needs && !fields.includes(c.needs)) return false;
     return true;
   });
 }

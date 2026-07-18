@@ -18,7 +18,7 @@
 import { useMemo, useState, useEffect, useRef } from 'react';
 import { Panel, Field, Select, TextInput, NumberInput, GoldButton } from '@/components/ui.jsx';
 import {
-  TRIGGERS, allConditions, untilCandidates, findTrigger, findCondition, findAction, actionsFor,
+  TRIGGERS, allConditions, untilCandidates, findTrigger, findCondition, findAction, actionsFor, conditionsFor,
   EVERY_SECONDS, registerCustom,
 } from '@/data/blocks.js';
 import { generateLua, describeRule } from '@/lib/codegen.js';
@@ -167,16 +167,25 @@ function Row({ kind, row, options, onChange, onRemove }) {
 function RuleEditor({ rule, index, total, conditions, onChange, onRemove }) {
   const trigger = findTrigger(rule.trigger.id);
   const availableActions = useMemo(() => actionsFor(trigger), [trigger, conditions]);
+  // Event-field conditions (e.g. "gold just picked up") only make sense under a trigger that
+  // carries that field, so filter them the same way actions are filtered.
+  const availableConditions = useMemo(() => conditionsFor(trigger), [trigger]);
 
-  // Changing the trigger can strip actions needing an event field the new one lacks
+  // Changing the trigger can strip actions/conditions needing an event field the new one lacks
   // (e.g. "damage the target" needs target_uid). Drop them rather than emit a nil read.
   const setTrigger = (id) => {
     const t = findTrigger(id);
-    const ok = actionsFor(t).map((a) => a.id);
-    onChange({ ...rule, trigger: { id, params: defaults(t) }, actions: rule.actions.filter((a) => ok.includes(a.id)) });
+    const okA = actionsFor(t).map((a) => a.id);
+    const okC = conditionsFor(t).map((c) => c.id);
+    onChange({
+      ...rule,
+      trigger: { id, params: defaults(t) },
+      actions: rule.actions.filter((a) => okA.includes(a.id)),
+      conditions: rule.conditions.filter((c) => okC.includes(c.id)),
+    });
   };
   const addRow = (kind) => {
-    const list = kind === 'if' ? conditions : availableActions;
+    const list = kind === 'if' ? availableConditions : availableActions;
     const first = list[0];
     if (!first) return;
     const row = { id: first.id, params: defaults(first), negate: false };
@@ -217,7 +226,7 @@ function RuleEditor({ rule, index, total, conditions, onChange, onRemove }) {
         <div className="text-xs mb-2" style={{ color: '#6b5a35' }}>No conditions — it fires every time.</div>
       )}
       {rule.conditions.map((row, i) => (
-        <Row key={i} kind="if" row={row} options={conditions}
+        <Row key={i} kind="if" row={row} options={availableConditions}
           onChange={(r) => patch('if', i, r)} onRemove={() => drop('if', i)} />
       ))}
       <GoldButton onClick={() => addRow('if')}>+ Add condition</GoldButton>

@@ -24,10 +24,12 @@ function checkClass(def) {
   const stats = def.stats ?? {};
   const coreVals = CORE_ATTRIBUTES.map((a) => stats[a] ?? 0);
   const total = coreVals.reduce((s, v) => s + v, 0);
-  // Vanilla classes hover around 60 total core points (10 avg).
-  if (total > 72) out.push(hint('warn', `Core attributes total ${total} — vanilla classes sit near 60. This class may trivialize the early game.`));
-  const maxed = CORE_ATTRIBUTES.filter((a) => (stats[a] ?? 0) >= 18);
-  if (maxed.length >= 3) out.push(hint('warn', `${maxed.length} attributes at 18+ (${maxed.join(', ')}) — vanilla tops one or two.`));
+  // These are MODIFIERS on the race base (schema: "stat->STR += n" in initClassStats), NOT
+  // absolute attribute values. Vanilla classes net roughly 0 to +5 across the six and trade
+  // strengths for weaknesses (e.g. +INT / -STR); the biggest single modifier in vanilla is +3.
+  if (total > 12) out.push(hint('warn', `Attribute modifiers net +${total} — vanilla classes net about 0 to +5 (they trade strengths for weaknesses), so this is a large flat buff.`));
+  const bigBuffs = CORE_ATTRIBUTES.filter((a) => (stats[a] ?? 0) >= 6);
+  if (bigBuffs.length) out.push(hint('warn', `${bigBuffs.join(', ')} at +6 or more — vanilla tops out near +3 in a class's focus attribute.`));
   const hpmp = (stats.HP ?? 0) + (stats.MP ?? 0);
   if (hpmp > 30) out.push(hint('warn', `HP+MP offsets total +${hpmp} — vanilla offsets stay within ±20 combined.`));
   const skillTotal = Object.values(def.skills ?? {}).reduce((s, v) => s + v, 0);
