@@ -755,7 +755,7 @@
             "type": "integer",
             "minimum": 0,
             "default": 0,
-            "description": "Appearance/variant number selecting among model & name variations. Use 0 unless a specific variant is needed."
+            "description": "Appearance/variant number selecting among model & name variations. For a READABLE_BOOK this is the book index (0-33 in vanilla), choosing which book it is. Use 0 unless a specific variant is needed."
           },
           "identified": {
             "type": "boolean",

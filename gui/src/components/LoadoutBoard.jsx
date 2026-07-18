@@ -20,6 +20,7 @@ import {
   BLESSING_MIN, BLESSING_MAX, blessingLabel, STATUSES, newEntry,
   statusStyleFor, statusWord,
 } from '@/data/equipment.js';
+import { BOOKS, bookTitle } from '@/data/books.js';
 
 /** Which paperdoll slot an entry occupies: its item's natural slot, or its stored hint. */
 const slotOfEntry = (it) => equipSlotOf(it.type) || it._slot || null;
@@ -119,7 +120,10 @@ function DetailStrip({ entry, patch, onHotbar, iconFor, onRemove, category }) {
   const style = statusStyleFor(category);              // category-appropriate word for Status
   const word = statusWord(category, entry.status);     // e.g. potion -> "bubbly"
   const bWord = (Number(entry.beatitude) || 0) !== 0 ? `${blessingLabel(entry.beatitude).toLowerCase()} ` : '';
-  const plain = `${bWord}${word} ${entry.type}${entry.identified ? '' : ', unidentified'}`;
+  const isBook = category === 'BOOK';                  // READABLE_BOOK: appearance picks the book
+  const plain = isBook
+    ? `${bWord}${word} ${entry.type} — "${bookTitle(entry.appearance)}"${entry.identified ? '' : ', unidentified'}`
+    : `${bWord}${word} ${entry.type}${entry.identified ? '' : ', unidentified'}`;
   return (
     <div className="sam-well sam-detailstrip">
       <div className="flex items-center gap-2 mb-3">
@@ -150,6 +154,13 @@ function DetailStrip({ entry, patch, onHotbar, iconFor, onRemove, category }) {
             <div className="sam-label mb-1" style={{ fontSize: '0.72rem' }}>Hotbar</div>
             <Select value={String(entry.hotbar_slot)} onChange={(v) => onHotbar(Number(v))}
               options={[{ value: '-1', label: 'in pack' }, ...Array.from({ length: 10 }, (_, i) => ({ value: String(i), label: `slot ${i === 9 ? 0 : i + 1}` }))]} />
+          </div>
+        )}
+        {isBook && (
+          <div style={{ gridColumn: '1 / -1' }}>
+            <div className="sam-label mb-1" style={{ fontSize: '0.72rem' }} title="Which readable book this is — the engine picks it by the item's appearance index.">Book / Contents</div>
+            <Select value={String(entry.appearance || 0)} onChange={(v) => patch({ appearance: Number(v) })}
+              options={BOOKS.map((title, i) => ({ value: String(i), label: title }))} />
           </div>
         )}
       </div>

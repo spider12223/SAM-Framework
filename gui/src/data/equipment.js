@@ -36,16 +36,21 @@ export const findSlot = (id) => EQUIP_SLOTS.find((s) => s.id === id);
 export function equipSlotOf(type) {
   const t = String(type || '');
   if (t.includes(':')) return null;                                  // custom item: no fixed slot
+  // Magic / consumable categories are never paperdoll ARMOUR, even when their NAME contains an
+  // armour word — SPELLBOOK_FLAME_CLOAK is a spellbook, not a cloak (a tester caught it in the
+  // cloak slot). Route them to the backpack instead of matching an armour keyword below.
+  if (/^SPELLBOOK_|^SCROLL_|^TOME_/.test(t)) return null;
   if (/^MAGICSTAFF_/.test(t)) return 'weapon';
   if (/SHIELD|SCUTUM|BUCKLER/.test(t)) return 'shield';
   if (/TORCH|LANTERN|CRYSTAL_SHARD|LIGHT_SOURCE/.test(t)) return 'shield'; // offhand light
   if (/BOOTS|SHOES|LOAFERS|CLEAT|GREAVE/.test(t)) return 'boots';
   if (/GLOVES|GAUNTLET|BRACERS/.test(t) && !/SPIKED_GAUNTLET|KNUCKLE/.test(t)) return 'gloves';
-  if (/CLOAK|CAPE|BACKPACK|APRON/.test(t)) return 'cloak';
+  if (/CLOAK|CAPE|BACKPACK/.test(t)) return 'cloak';
   if (/HELM|^HAT_|HOOD|COIF|CROWN|CIRCLET|LAURELS|TURBAN|HEADDRESS|MITER|PHRYGIAN/.test(t)) return 'helmet';
   // Body armour. PAULDRONS and SHAWL are torso pieces (Barony's breastplate slot,
   // entity.cpp checkEquipType), not a cloak — a tester caught iron pauldrons landing there.
-  if (/BREASTPLATE|BREASTPIECE|TUNIC|DOUBLET|GAMBESON|HAUBERK|^ROBE|SUEDE|PAULDRONS|SHAWL/.test(t)) return 'breastplate';
+  // An APRON (MACHINIST_APRON, real equip_slot "torso") is body armour for the same reason.
+  if (/BREASTPLATE|BREASTPIECE|TUNIC|DOUBLET|GAMBESON|HAUBERK|^ROBE|SUEDE|PAULDRONS|SHAWL|APRON/.test(t)) return 'breastplate';
   if (/GLASSES|MONOCLE|EYEPATCH|BLINDFOLD|^MASK|_MASK/.test(t)) return 'mask';
   if (/^AMULET_/.test(t)) return 'amulet';
   if (/^RING_/.test(t)) return 'ring';
@@ -121,7 +126,7 @@ const rndKey = () => Math.random().toString(36).slice(2, 9);
 export function newEntry(type, equip, slot) {
   return {
     _key: rndKey(), type, count: 1, equip: !!equip,
-    beatitude: 0, status: 'SERVICABLE', identified: true, hotbar_slot: -1,
+    beatitude: 0, status: 'SERVICABLE', identified: true, hotbar_slot: -1, appearance: 0,
     ...(slot ? { _slot: slot } : {}),
   };
 }
@@ -133,6 +138,7 @@ export function entryFromJson(si) {
     count: si.count ?? 1, equip: !!si.equip,
     beatitude: si.beatitude ?? 0, status: si.status ?? 'SERVICABLE',
     identified: si.identified ?? true, hotbar_slot: si.hotbar_slot ?? -1,
+    appearance: si.appearance ?? 0, // READABLE_BOOK: which book (index into BOOKS)
   };
 }
 
@@ -147,5 +153,8 @@ export function entryToJson(it) {
   if (it.status && it.status !== 'SERVICABLE') e.status = it.status;
   if (it.identified === false) e.identified = false;
   if (Number(it.hotbar_slot) >= 0) e.hotbar_slot = Number(it.hotbar_slot);
+  // appearance selects a book for READABLE_BOOK (and the variant for a few other items); the
+  // engine already reads it from starting_items. Omit the default so classes stay byte-identical.
+  if (Number(it.appearance) > 0) e.appearance = Number(it.appearance);
   return e;
 }
