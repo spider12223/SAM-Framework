@@ -352,9 +352,28 @@ export const CONDITIONS = [
       { name: 'slot', type: 'select', values: SLOTS, default: 'SHIELD' },
       { name: 'item', type: 'text', default: 'IRON_SHIELD', label: 'item name or ns:item' },
     ],
-    lua: (p) => `sam_get_equipped_item_id(player, ${q(p.slot)}) == sam_item_id(${q(p.item)})`,
-    phrase: (p) => `${p.slot} is ${p.item}`,
-    phraseNeg: (p) => `${p.slot} is NOT ${p.item}`,
+    // A blank item name used to compile to `equipped == sam_item_id("")`, which is
+    // `equipped == nil` — i.e. it silently became "the slot is empty". Guard it: an
+    // empty name never matches (use "has a slot empty" for that intent instead).
+    lua: (p) => {
+      const item = (p.item || '').trim();
+      return item ? `sam_get_equipped_item_id(player, ${q(p.slot)}) == sam_item_id(${q(item)})` : 'false';
+    },
+    phrase: (p) => `${p.slot} is ${(p.item || '').trim() || '(no item set)'}`,
+    phraseNeg: (p) => `${p.slot} is NOT ${(p.item || '').trim() || '(no item set)'}`,
+    note: 'Fill in the item name. A blank name never matches — to check for an empty slot use "has a slot empty", and to match a whole kind use "has an item category equipped".',
+  },
+  {
+    id: 'equipped_category_is', label: 'has an item category equipped', negatable: true,
+    params: [
+      { name: 'slot', type: 'select', values: SLOTS, default: 'SHIELD' },
+      { name: 'category', type: 'select', values: ITEM_CATEGORIES, default: 'ARMOR' },
+    ],
+    // Reads the equipped item's id, then its category. An empty slot -> nil id ->
+    // sam_get_item_category(nil) returns nil, so the comparison is safely false.
+    lua: (p) => `sam_get_item_category(sam_get_equipped_item_id(player, ${q(p.slot)})) == ${q(p.category)}`,
+    phrase: (p) => `${p.slot} is a ${p.category}`,
+    phraseNeg: (p) => `${p.slot} is NOT a ${p.category}`,
   },
   {
     id: 'slot_empty', label: 'has a slot empty', negatable: true,
