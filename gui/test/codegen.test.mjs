@@ -286,6 +286,25 @@ check('two DIFFERENT one-at-a-time abilities do not share a lock',
   { start: '{STR=10, DEX=10}', want: { STR: 10, timers: 0 } });
 
 // ---------------------------------------------------------------------------------
+// v1.2.8: additive move speed stacks (solidius), real level-up (Pizza).
+// ---------------------------------------------------------------------------------
+check('add_move_speed stacks onto the current multiplier',
+  [rule('player.on_hit', [act('add_move_speed', { delta: 0.1 })])],
+  `S.fire('player.on_hit', {player=0}) S.fire('player.on_hit', {player=0})`,
+  { want: { speed: '1.2' } });   // 1.0 + 0.1 + 0.1, not a SET to 0.1
+
+check('add_move_speed clamps at the 3.0 cap',
+  [rule('player.on_hit', [act('add_move_speed', { delta: 5 })])],
+  `S.fire('player.on_hit', {player=0})`,
+  { want: { speed: '3.0' } });
+
+check('level_up advances the level count times without a timer',
+  [rule('player.on_hit', [act('level_up', { count: 2 })])],
+  `S.fire('player.on_hit', {player=0})
+   assert(S.state().stats.LVL == 3, 'two levels: 1 -> 3')`,
+  { start: '{LVL=1}', want: { timers: 0 } });
+
+// ---------------------------------------------------------------------------------
 // Guards the adversarial design panel demanded — these are pure-JS asserts, no Lua needed.
 // ---------------------------------------------------------------------------------
 function assert(name, cond) {
@@ -302,6 +321,18 @@ function assert(name, cond) {
   assert('permanent change to HP does NOT warn', !setStat.warn({ stat: 'HP', duration: 'permanently' }));
   assert('every engine-written stat warns when timed',
     ENGINE_WRITTEN_STATS.every((s) => !!setStat.warn({ stat: s, duration: 'fading away' })));
+
+  // grant_item's optional beatitude/status/count must only emit the args it needs, so a
+  // plain grant stays the simple 2-arg call and never regresses.
+  const grant = findAction('grant_item');
+  assert('plain grant emits the 2-arg form',
+    grant.lua({ item: 'IRON_DAGGER', beatitude: '0', count: 1 }) === 'sam_grant_item(player, "IRON_DAGGER")');
+  assert('blessed grant passes just the beatitude',
+    grant.lua({ item: 'IRON_DAGGER', beatitude: '2', count: 1 }) === 'sam_grant_item(player, "IRON_DAGGER", 2)');
+  assert('cursed multi-grant passes beatitude, status filler (4), and count',
+    grant.lua({ item: 'IRON_DAGGER', beatitude: '-1', count: 3 }) === 'sam_grant_item(player, "IRON_DAGGER", -1, 4, 3)');
+  assert('a count with no blessing still fills beatitude 0 before the count',
+    grant.lua({ item: 'IRON_DAGGER', beatitude: '0', count: 2 }) === 'sam_grant_item(player, "IRON_DAGGER", 0, 4, 2)');
 }
 
 // ---------------------------------------------------------------------------------

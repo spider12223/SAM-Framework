@@ -428,8 +428,29 @@ export const CONDITIONS = [
 export const ACTIONS = [
   {
     id: 'grant_item', label: 'give an item', category: 'Rewards',
-    params: [{ name: 'item', type: 'text', default: 'FOOD_BREAD', label: 'item name or ns:item' }],
-    lua: (p) => `sam_grant_item(player, ${q(p.item)})`,
+    params: [
+      { name: 'item', type: 'text', default: 'FOOD_BREAD', label: 'item name or ns:item' },
+      {
+        name: 'beatitude', type: 'select',
+        values: ['0', '1', '2', '3', '-1', '-2', '-3'],
+        labels: ['plain (uncursed)', 'blessed +1', 'blessed +2', 'blessed +3',
+                 'cursed −1', 'cursed −2', 'cursed −3'],
+        default: '0', label: 'blessing',
+      },
+      { name: 'count', type: 'number', default: 1, min: 1, label: 'how many' },
+    ],
+    lua: (p) => {
+      const b = Math.trunc(Number(p.beatitude) || 0);
+      const c = Math.max(1, Math.trunc(Number(p.count) || 1));
+      const args = ['player', q(p.item)];
+      // Only pass the trailing args we need: beatitude when blessed/cursed or a count is
+      // set; status (4 = EXCELLENT) is only required as a positional filler before count.
+      if (b !== 0 || c !== 1) { args.push(String(b)); }
+      if (c !== 1) { args.push('4', String(c)); }
+      return `sam_grant_item(${args.join(', ')})`;
+    },
+    note: 'Blessing makes it blessed (+) or cursed (−), exactly like a scroll of enchant '
+        + 'would. Works on custom "namespace:item" gear too.',
   },
   {
     id: 'grant_gold', label: 'give gold', category: 'Rewards',
@@ -528,6 +549,27 @@ export const ACTIONS = [
     note: 'Move speed is one slider per player, not a stack — so unlike a stat, re-applying '
         + 'REFRESHES the timer instead of queuing a second revert, and two speed abilities '
         + 'will override each other (the most recent wins). 3 is the engine cap; it clamps.',
+  },
+  {
+    id: 'add_move_speed', label: 'add to move speed', category: 'Player',
+    params: [
+      { name: 'delta', type: 'number', default: 0.1, min: -3, max: 3, label: 'add this much (can be negative)' },
+    ],
+    lua: (p) => `sam_add_move_speed(player, ${Number(p.delta) || 0})`,
+    note: 'Unlike "set move speed", this ADDS onto whatever the multiplier already is, so '
+        + 'stacking abilities build up: if one sets it to 2.0, this adds on top (e.g. +0.1 → '
+        + '2.1). The result is clamped to 0.1–3. There is no auto-revert — it stays until '
+        + 'you set or add again.',
+  },
+  {
+    id: 'level_up', label: 'level the player up', category: 'Player',
+    params: [
+      { name: 'count', type: 'number', default: 1, min: 1, max: 255, label: 'how many levels' },
+    ],
+    lua: (p) => `sam_level_up(player, ${Math.max(1, Math.trunc(Number(p.count) || 1))})`,
+    note: 'A REAL level-up: attribute rolls, HP/MP gain, the level-up screen and sound, full '
+        + 'client sync — the actual benefits. (Bumping the LEVEL stat directly just changes the '
+        + 'number and gives nothing.) Fires the "on level up" hook once per level.',
   },
   {
     id: 'damage_target', label: 'damage the target', category: 'Combat',

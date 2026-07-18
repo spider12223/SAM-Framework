@@ -247,6 +247,60 @@ static void deepCopyImages(list_t& dest, const list_t& src)
 	}
 }
 
+// The sanitized "tooltip_sam_<id>" key for a custom item (same derivation everywhere).
+static std::string samTooltipKeyFor(const std::string& itemStrId)
+{
+	std::string ttKey = "tooltip_sam_";
+	for ( char c : itemStrId )
+	{
+		const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
+		ttKey += ok ? c : '_';
+	}
+	return ttKey;
+}
+
+#ifndef EDITOR
+// Give a custom item a REAL hover tooltip. The key: clone the vanilla CATEGORY template
+// (tooltip_sword, tooltip_armor_breastpiece, tooltip_potion_water, ...) — NOT the bare
+// "tooltip_default". Only the category template carries the ATK / stat-bonus / durability
+// rows and the weight+value footer, so cloning tooltip_default (as we used to) left the
+// item with none of its details. We pick the same vanilla item we already clone visuals
+// from, so the tooltip layout matches the item's kind. This is called at registration
+// AND re-called after any vanilla tooltip reload (readTooltipsFromFile) clears the map.
+static void injectCustomTooltip(int id, const SAMItemDef& def)
+{
+	const Category cat = categoryFromName(def.category);
+	const ItemEquippableSlot eslot = slotFromName(def.slot);
+	const ItemType tmpl = (eslot != NO_EQUIP) ? templateForSlot(eslot) : templateForCategory(cat);
+
+	std::string srcKey = (tmpl >= 0 && tmpl < NUMITEMS) ? items[tmpl].tooltip : std::string();
+	if ( srcKey.empty() || !ItemTooltips.tooltips.count(srcKey) )
+	{
+		srcKey = "tooltip_default";
+	}
+	if ( !ItemTooltips.tooltips.count(srcKey) )
+	{
+		items[id].tooltip = "tooltip_default"; // tooltips not loaded yet; nothing to clone
+		return;
+	}
+
+	// Copy the fully-resolved category template (its templates are already expanded into
+	// concrete lines at parse time), then swap in the item's own description if it has one.
+	auto ttCopy = ItemTooltips.tooltips[srcKey];
+	if ( !def.description.empty() )
+	{
+		ttCopy.descriptionText.clear();
+		std::istringstream bs(def.description);
+		std::string bl;
+		while ( std::getline(bs, bl) ) { ttCopy.descriptionText.push_back(bl); }
+		if ( ttCopy.descriptionText.empty() ) { ttCopy.descriptionText.push_back(def.description); }
+	}
+	const std::string ttKey = samTooltipKeyFor(def.id);
+	ItemTooltips.tooltips[ttKey] = std::move(ttCopy);
+	items[id].tooltip = ttKey;
+}
+#endif
+
 // Write one parsed def into its reserved items[] slot. Returns false if full.
 static bool registerItem(SAMItemDef def)
 {
@@ -355,32 +409,7 @@ static bool registerItem(SAMItemDef def)
 	slot.gold_value = def.goldValue;
 	slot.level = def.level;
 #ifndef EDITOR
-	// Give the custom item a REAL hover tooltip instead of the "tooltip_default"
-	// placeholder ("this item does not have a tooltip yet"). Clone tooltip_default so
-	// we inherit its colors/layout (a bare struct renders text invisible), then swap in
-	// the item's own description. Mirrors how sam_spells injects into spellItems.
-	if ( ItemTooltips.tooltips.count("tooltip_default") )
-	{
-		std::string ttKey = "tooltip_sam_";
-		for ( char c : def.id )
-		{
-			const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
-			ttKey += ok ? c : '_';
-		}
-		auto ttCopy = ItemTooltips.tooltips["tooltip_default"]; // copy first (avoid map-rehash invalidation)
-		ttCopy.descriptionText.clear();
-		const std::string body = def.description.empty() ? def.nameIdentified : def.description;
-		std::istringstream bs(body);
-		std::string bl;
-		while ( std::getline(bs, bl) ) { ttCopy.descriptionText.push_back(bl); }
-		if ( ttCopy.descriptionText.empty() ) { ttCopy.descriptionText.push_back(body); }
-		ItemTooltips.tooltips[ttKey] = std::move(ttCopy);
-		slot.tooltip = ttKey;
-	}
-	else
-	{
-		slot.tooltip = "tooltip_default";
-	}
+	injectCustomTooltip(id, def);
 #else
 	slot.tooltip = "tooltip_default";
 #endif
@@ -579,6 +608,38 @@ void SAMItems::clear()
 	}
 	s_registry.clear();
 	s_nextItemId = SAM_ITEM_ID_BASE;
+}
+
+// A vanilla data reload (initGameDatafiles) rewrites the built-in item range and, worse,
+// readTooltipsFromFile CLEARS the entire tooltip map — wiping every "tooltip_sam_*" we
+// injected, which is exactly why custom items lost their ATK / weight / value rows and
+// showed "This item does not have a tooltip yet!". Re-stamp our reserved slots and
+// re-inject their tooltips from the registry. Idempotent; runs right after the vanilla
+// item/tooltip reads in initGameDatafiles.
+void SAMItems::reapplyAfterDataReload()
+{
+#ifndef EDITOR
+	for ( const auto& kv : s_registry )
+	{
+		const int id = kv.first;
+		const SAMItemDef& def = kv.second;
+		if ( id < 0 || id >= NUM_ITEM_SLOTS ) { continue; }
+		ItemGeneric& slot = items[id];
+		slot.weight = def.weight;
+		slot.gold_value = def.goldValue;
+		slot.level = def.level;
+		slot.category = categoryFromName(def.category);
+		slot.item_slot = slotFromName(def.slot);
+		slot.attributes.clear();
+		for ( const auto& a : def.attributes ) { slot.attributes[a.first] = a.second; }
+		injectCustomTooltip(id, def);
+	}
+	if ( !s_registry.empty() )
+	{
+		SAM_INFO(MOD, "Re-applied " + std::to_string(s_registry.size())
+			+ " custom item(s) after a vanilla data reload (tooltips restored).");
+	}
+#endif
 }
 
 int SAMItems::count()

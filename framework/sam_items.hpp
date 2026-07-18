@@ -120,4 +120,10 @@ public:
 	// matters and why growing the model tables is only safe at that exact point.
 	// No-op when no item ships a model.
 	static void registerModModels();
+
+	// Re-stamp custom item slots and re-inject their tooltips after a vanilla data
+	// reload. initGameDatafiles' readTooltipsFromFile clears the whole tooltip map,
+	// wiping our "tooltip_sam_*" entries; call this right after those reads so custom
+	// items keep their ATK / weight / value rows and real hover tooltip. Idempotent.
+	static void reapplyAfterDataReload();
 };

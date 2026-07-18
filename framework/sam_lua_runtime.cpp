@@ -293,21 +293,40 @@ namespace
 			return 1;
 		}
 
-		// Resolve "IRON_DAGGER" -> ItemType via Barony's name map (case-insensitive),
-		// exactly as the class starting-loadout does.
-		std::string lower = itemName;
-		for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
-		auto it = ItemTooltips.itemNameStringToItemID.find(lower);
-		if ( it == ItemTooltips.itemNameStringToItemID.end() )
+		// Resolve a custom "namespace:item" id first, else a vanilla name (case-insensitive),
+		// so scripts can grant modded gear the same as vanilla.
+		int resolvedType = -1;
+		if ( itemName.find(':') != std::string::npos )
 		{
-			SAM_ERROR("LUA", "sam_grant_item: unknown item type '" + itemName
-				+ "' (expected a vanilla name like \"IRON_DAGGER\") — nothing granted.");
+			resolvedType = SAMItems::itemIdForIdString(itemName);
+		}
+		if ( resolvedType < 0 )
+		{
+			std::string lower = itemName;
+			for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
+			auto it = ItemTooltips.itemNameStringToItemID.find(lower);
+			if ( it != ItemTooltips.itemNameStringToItemID.end() ) { resolvedType = it->second; }
+		}
+		if ( resolvedType < 0 )
+		{
+			SAM_ERROR("LUA", "sam_grant_item: unknown item '" + itemName
+				+ "' (expected a vanilla name like \"IRON_DAGGER\" or a custom \"namespace:item\") — nothing granted.");
 			lua_pushboolean(Ls, 0);
 			return 1;
 		}
-		const ItemType type = static_cast<ItemType>(it->second);
+		const ItemType type = static_cast<ItemType>(resolvedType);
 
-		Item* item = newItem(type, EXCELLENT, 0, 1, 0, true, nullptr);
+		// Optional trailing args: beatitude (blessed +N / cursed -N), status (0=BROKEN .. 4=
+		// EXCELLENT), count. Keeping the 2-arg form (plain, uncursed) working unchanged.
+		const Sint16 beatitude = (Sint16)luaL_optinteger(Ls, 3, 0);
+		int statusArg = (int)luaL_optinteger(Ls, 4, (int)EXCELLENT);
+		if ( statusArg < (int)BROKEN ) { statusArg = (int)BROKEN; }
+		if ( statusArg > (int)EXCELLENT ) { statusArg = (int)EXCELLENT; }
+		const Status status = (Status)statusArg;
+		const int countArg = (int)luaL_optinteger(Ls, 5, 1);
+		const Sint16 count = (Sint16)(countArg < 1 ? 1 : countArg);
+
+		Item* item = newItem(type, status, beatitude, count, 0, true, nullptr);
 		if ( !item )
 		{
 			SAM_ERROR("LUA", "sam_grant_item: newItem failed for '" + itemName + "'.");
@@ -652,7 +671,9 @@ namespace
 		else if ( n == "GOLD" )  { s->GOLD = (value < 0 ? 0 : value); sync = SAM_SYNC_GOLD; }
 		else if ( n == "HUNGER" ) { s->HUNGER = samClampInt(value, SAM_HUNGER_MIN, SAM_HUNGER_MAX); sync = SAM_SYNC_HUNGER; }
 		else if ( n == "LEVEL" || n == "LVL" ) { s->LVL = samClampInt(value, 1, 255); sync = SAM_SYNC_ATTR; }
-		else if ( n == "EXP" )   { s->EXP = samClampInt(value, 0, 99); sync = SAM_SYNC_ATTR; }
+		// EXP up to 255 (its wire byte): 100+ triggers the engine's real level-up on the
+		// host's next tick. The old 0..99 cap silently made leveling-by-EXP impossible.
+		else if ( n == "EXP" )   { s->EXP = samClampInt(value, 0, 255); sync = SAM_SYNC_ATTR; }
 		else { SAM_ERROR("LUA", std::string("sam_set_stat: unknown stat '") + (nameC ? nameC : "") + "'."); lua_pushboolean(Ls, 0); return 1; }
 		// Without this the write lands host-side only and the client's sheet silently
 		// disagrees until some unrelated event happens to fire an ATTR of its own.
@@ -689,6 +710,43 @@ namespace
 		SAMLogger::noteApiCall();
 		const int player = (int)luaL_checkinteger(Ls, 1);
 		lua_pushnumber(Ls, (lua_Number)SAMLua::getMoveSpeedMult(player));
+		return 1;
+	}
+
+	// sam_add_move_speed(player, delta) — ADD to the current multiplier (set only sets).
+	// Host-only; clamped to [0.1, 3.0] and synced like set. So two abilities can each add
+	// their own share instead of overwriting each other.
+	int lua_sam_add_move_speed(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const double delta = (double)luaL_checknumber(Ls, 2);
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_add_move_speed refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		if ( player < 0 || player >= MAXPLAYERS )
+		{ SAM_ERROR("LUA", "sam_add_move_speed: invalid player index " + std::to_string(player) + "."); lua_pushboolean(Ls, 0); return 1; }
+		SAMLua::setMoveSpeedMult(player, SAMLua::getMoveSpeedMult(player) + delta); // setter clamps + syncs
+		lua_pushnumber(Ls, (lua_Number)SAMLua::getMoveSpeedMult(player));
+		return 1;
+	}
+
+	// sam_level_up(player [, count]) — run the engine's real level-up path `count` times.
+	// Host-only. Adds 100*count EXP; the host's Entity::handleEffects drains 100/tick and
+	// runs the FULL vanilla level-up (attribute rolls, HP/MP, level-up screen/sound, the
+	// ATTR/LVLI packets, and one player.on_level_up per level). No code duplication, no
+	// manual flush — the engine owns it. Since EXP is always 0..99 between levels, this
+	// grants exactly `count` levels.
+	int lua_sam_level_up(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const int count = lua_isnoneornil(Ls, 2) ? 1 : (int)luaL_checkinteger(Ls, 2);
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_level_up refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !stats[player] )
+		{ SAM_ERROR("LUA", "sam_level_up: invalid player index " + std::to_string(player) + "."); lua_pushboolean(Ls, 0); return 1; }
+		const int levels = samClampInt(count, 1, 255);
+		stats[player]->EXP += 100 * levels;
+		SAM_INFO("LUA", "Queued " + std::to_string(levels) + " level-up(s) for player " + std::to_string(player) + ".");
+		lua_pushboolean(Ls, 1);
 		return 1;
 	}
 
@@ -1989,6 +2047,10 @@ namespace
 		lua_setglobal(L, "sam_set_move_speed");
 		lua_pushcfunction(L, lua_sam_get_move_speed);
 		lua_setglobal(L, "sam_get_move_speed");
+		lua_pushcfunction(L, lua_sam_add_move_speed);
+		lua_setglobal(L, "sam_add_move_speed");
+		lua_pushcfunction(L, lua_sam_level_up);
+		lua_setglobal(L, "sam_level_up");
 		lua_pushcfunction(L, lua_sam_get_floor);
 		lua_setglobal(L, "sam_get_floor");
 		lua_pushcfunction(L, lua_sam_spawn_item);

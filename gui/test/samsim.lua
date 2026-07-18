@@ -75,6 +75,16 @@ function sam_set_move_speed(_, m)
   state.move_speed = clamp(m, 0.1, 3.0) + 0.0
   return true
 end
+function sam_add_move_speed(_, d)
+  d = tonumber(d) or 0
+  state.move_speed = clamp(state.move_speed + d, 0.1, 3.0) + 0.0  -- additive, same clamp as set
+  return state.move_speed
+end
+function sam_level_up(_, n)
+  n = math.max(1, math.floor(tonumber(n) or 1))
+  state.stats.LVL = clamp((state.stats.LVL or 1) + n, 1, 255)     -- engine grants real benefits; sim tracks the level
+  return true
+end
 function sam_has_effect(_, e) return state.effects[e] == true end
 function sam_apply_effect(_, e, _) state.effects[e] = true; return true end
 function sam_remove_effect(_, e) state.effects[e] = nil; return true end

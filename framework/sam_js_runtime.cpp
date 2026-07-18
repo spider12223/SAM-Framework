@@ -236,16 +236,36 @@ namespace
 			SAM_ERROR("JS", "sam_grant_item: invalid player index " + std::to_string(player) + ".");
 			return JS_NewBool(ctx, 0);
 		}
-		std::string lower = name;
-		for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
-		auto it = ItemTooltips.itemNameStringToItemID.find(lower);
-		if ( it == ItemTooltips.itemNameStringToItemID.end() )
+		// Resolve a custom "namespace:item" id first, else a vanilla name (case-insensitive).
+		int resolvedType = -1;
+		if ( name.find(':') != std::string::npos ) { resolvedType = SAMItems::itemIdForIdString(name); }
+		if ( resolvedType < 0 )
 		{
-			SAM_ERROR("JS", "sam_grant_item: unknown item type '" + name + "' — nothing granted.");
+			std::string lower = name;
+			for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
+			auto it = ItemTooltips.itemNameStringToItemID.find(lower);
+			if ( it != ItemTooltips.itemNameStringToItemID.end() ) { resolvedType = it->second; }
+		}
+		if ( resolvedType < 0 )
+		{
+			SAM_ERROR("JS", "sam_grant_item: unknown item '" + name
+				+ "' (expected a vanilla name like \"IRON_DAGGER\" or a custom \"namespace:item\") — nothing granted.");
 			return JS_NewBool(ctx, 0);
 		}
-		const ItemType type = static_cast<ItemType>(it->second);
-		Item* item = newItem(type, EXCELLENT, 0, 1, 0, true, nullptr);
+		const ItemType type = static_cast<ItemType>(resolvedType);
+
+		// Optional trailing args: beatitude (blessed +N / cursed -N), status (0=BROKEN .. 4=
+		// EXCELLENT), count. The 2-arg call (plain, uncursed, one item) is unchanged.
+		int32_t beatitudeArg = 0, statusArg = (int)EXCELLENT, countArg = 1;
+		if ( argc >= 3 ) { JS_ToInt32(ctx, &beatitudeArg, argv[2]); }
+		if ( argc >= 4 ) { JS_ToInt32(ctx, &statusArg, argv[3]); }
+		if ( argc >= 5 ) { JS_ToInt32(ctx, &countArg, argv[4]); }
+		const Sint16 beatitude = (Sint16)beatitudeArg;
+		if ( statusArg < (int)BROKEN ) { statusArg = (int)BROKEN; }
+		if ( statusArg > (int)EXCELLENT ) { statusArg = (int)EXCELLENT; }
+		const Status status = (Status)statusArg;
+		const Sint16 count = (Sint16)(countArg < 1 ? 1 : countArg);
+		Item* item = newItem(type, status, beatitude, count, 0, true, nullptr);
 		if ( !item ) { return JS_NewBool(ctx, 0); }
 		if ( players[player]->isLocalPlayer() )
 		{
@@ -411,7 +431,9 @@ namespace
 		else if ( n == "GOLD" )  { s->GOLD = (value < 0 ? 0 : value); sync = JS_SYNC_GOLD; }
 		else if ( n == "HUNGER" ) { s->HUNGER = samClampInt(value, 0, 1500); sync = JS_SYNC_HUNGER; } // engine clamps 0..1500
 		else if ( n == "LEVEL" || n == "LVL" ) { s->LVL = samClampInt(value, 1, 255); sync = JS_SYNC_ATTR; }
-		else if ( n == "EXP" )   { s->EXP = samClampInt(value, 0, 99); sync = JS_SYNC_ATTR; }
+		// EXP up to 255 (its wire byte): 100+ triggers the engine's real level-up on the
+		// host's next tick. The old 0..99 cap silently made leveling-by-EXP impossible.
+		else if ( n == "EXP" )   { s->EXP = samClampInt(value, 0, 255); sync = JS_SYNC_ATTR; }
 		else { SAM_ERROR("JS", "sam_set_stat: unknown stat '" + name + "'."); return JS_NewBool(ctx, 0); }
 		if      ( sync == JS_SYNC_ATTR ) { SAMLua::flushStatToClient(player); }
 		else if ( sync == JS_SYNC_GOLD ) { SAMLua::flushGoldToClient(player); }
@@ -443,6 +465,44 @@ namespace
 		int32_t player = -1;
 		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
 		return JS_NewFloat64(ctx, SAMLua::getMoveSpeedMult(player));
+	}
+
+	// sam_add_move_speed(player, delta) -> new multiplier. Additive counterpart to the
+	// set-only sam_set_move_speed: stacks onto whatever the multiplier already is.
+	JSValue js_sam_add_move_speed(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1;
+		double delta = 0.0;
+		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( argc >= 2 ) { JS_ToFloat64(ctx, &delta, argv[1]); }
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_add_move_speed refused: host only."); return JS_NewBool(ctx, 0); }
+		if ( player < 0 || player >= MAXPLAYERS )
+		{ SAM_ERROR("JS", "sam_add_move_speed: invalid player index " + std::to_string(player) + "."); return JS_NewBool(ctx, 0); }
+		SAMLua::setMoveSpeedMult(player, SAMLua::getMoveSpeedMult(player) + delta);
+		return JS_NewFloat64(ctx, SAMLua::getMoveSpeedMult(player));
+	}
+
+	// sam_level_up(player[, count]) — queue count real engine level-ups (default 1) by
+	// crediting EXP; the host's handleEffects grants them one/tick with full benefits.
+	JSValue js_sam_level_up(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1, count = 1;
+		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( argc >= 2 ) { JS_ToInt32(ctx, &count, argv[1]); }
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_level_up refused: host only."); return JS_NewBool(ctx, 0); }
+#ifdef SAM_JS_HAVE_BARONY
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !stats[player] )
+		{ SAM_ERROR("JS", "sam_level_up: invalid player index " + std::to_string(player) + "."); return JS_NewBool(ctx, 0); }
+		const int levels = samClampInt(count, 1, 255);
+		stats[player]->EXP += 100 * levels;
+		SAM_INFO("JS", "Queued " + std::to_string(levels) + " level-up(s) for player " + std::to_string(player) + ".");
+		return JS_NewBool(ctx, 1);
+#else
+		(void)player; (void)count;
+		return JS_NewBool(ctx, 1);
+#endif
 	}
 
 	JSValue js_sam_get_floor(JSContext* ctx, JSValueConst /*this_val*/, int /*argc*/, JSValueConst* /*argv*/)
@@ -1563,7 +1623,9 @@ namespace
 		JS_SetPropertyStr(ctx, g, "sam_get_stat", JS_NewCFunction(ctx, js_sam_get_stat, "sam_get_stat", 2));
 		JS_SetPropertyStr(ctx, g, "sam_set_stat", JS_NewCFunction(ctx, js_sam_set_stat, "sam_set_stat", 3));
 		JS_SetPropertyStr(ctx, g, "sam_set_move_speed", JS_NewCFunction(ctx, js_sam_set_move_speed, "sam_set_move_speed", 2));
+		JS_SetPropertyStr(ctx, g, "sam_add_move_speed", JS_NewCFunction(ctx, js_sam_add_move_speed, "sam_add_move_speed", 2));
 		JS_SetPropertyStr(ctx, g, "sam_get_move_speed", JS_NewCFunction(ctx, js_sam_get_move_speed, "sam_get_move_speed", 1));
+		JS_SetPropertyStr(ctx, g, "sam_level_up", JS_NewCFunction(ctx, js_sam_level_up, "sam_level_up", 2));
 		JS_SetPropertyStr(ctx, g, "sam_get_floor", JS_NewCFunction(ctx, js_sam_get_floor, "sam_get_floor", 0));
 		JS_SetPropertyStr(ctx, g, "sam_spawn_item", JS_NewCFunction(ctx, js_sam_spawn_item, "sam_spawn_item", 3));
 		JS_SetPropertyStr(ctx, g, "sam_item_id", JS_NewCFunction(ctx, js_sam_item_id, "sam_item_id", 1));
