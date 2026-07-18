@@ -122,10 +122,10 @@ export default function RaceEditor() {
       <Panel title="Behavior Script (optional)">
         <div className="text-xs mb-2" style={{ color: '#8a7749' }}>
           Ships as <span className="sam-mono">races/{slugify(name)}.{scriptLang}</span> next to the race JSON and auto-loads
-          in-game — the same freedom class scripts have. React to any event hook and gate to this race with{' '}
+          in-game, with the same freedom class scripts have. React to any event hook and gate to this race with{' '}
           <span className="sam-mono">sam_get_race(player) == "{raceId}"</span>.
         </div>
-        <ScriptEditor code={scriptCode} onCode={setScriptCode} lang={scriptLang} onLang={setScriptLang} />
+        <ScriptEditor code={scriptCode} onCode={setScriptCode} lang={scriptLang} onLang={setScriptLang} pathHint="races/<race>" />
       </Panel>
 
       <ErrorList errors={errors} />

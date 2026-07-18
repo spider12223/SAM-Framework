@@ -290,7 +290,7 @@ export default function BlockBuilder({ onUseScript, onLiveCode, hasExistingCode 
         <div className="flex items-center gap-2">
           <GoldButton onClick={() => setRules((rs) => [...rs, newRule()])}>+ Add another ability</GoldButton>
           <span className="text-xs" style={{ color: '#6b5a35' }}>
-            A class can have as many as you like — they all go into one script.
+            Add as many as you like; they all go into one script.
           </span>
         </div>
 

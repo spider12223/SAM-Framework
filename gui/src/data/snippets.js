@@ -9,7 +9,7 @@ export const SNIPPETS = [
   {
     title: 'Starter skeleton',
     desc: 'The two entry points: on_event(event) dispatched by event.name, and on_tick(event).',
-    lua: `-- Behavior for this class. Both handlers are optional.
+    lua: `-- Behavior script. Both handlers are optional.
 function on_event(event)
     if event.name == "player.on_hit" then
         -- event.player, event.target_uid, event.damage
@@ -21,7 +21,7 @@ end
 function on_tick(event)
     -- runs every game tick (50/sec). event.tick_count is available.
 end`,
-    js: `// Behavior for this class. Both handlers are optional.
+    js: `// Behavior script. Both handlers are optional.
 function on_event(event) {
     if (event.name === "player.on_hit") {
         // event.player, event.target_uid, event.damage

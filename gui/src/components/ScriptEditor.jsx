@@ -45,7 +45,7 @@ function eventSkeleton(ev, lang) {
     : `if (event.name === "${ev.name}") {\n    \n}`;
 }
 
-export default function ScriptEditor({ code, onCode, lang, onLang }) {
+export default function ScriptEditor({ code, onCode, lang, onLang, pathHint = 'classes/<class>' }) {
   const taRef = useRef(null);
   const [tab, setTab] = useState('api'); // api | events | snippets
   const [query, setQuery] = useState('');
@@ -158,7 +158,7 @@ export default function ScriptEditor({ code, onCode, lang, onLang }) {
             ))}
           </div>
           <span className="text-xs ml-auto" style={{ color: '#6b5a35' }}>
-            ships as <span className="sam-mono">classes/&lt;class&gt;.{lang}</span>
+            ships as <span className="sam-mono">{pathHint}.{lang}</span>
           </span>
         </div>
         <textarea
