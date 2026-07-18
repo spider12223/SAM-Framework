@@ -140,6 +140,31 @@ static Category categoryFromName(const std::string& n)
 	return WEAPON; // fallback
 }
 
+// Reverse of categoryFromName: Category enum value -> name string. Exposed via SAMItems so
+// scripts (sam_get_item_category) can read an item's category, e.g. "reward identifying a GEM".
+std::string SAMItems::categoryName(int category)
+{
+	switch ( (Category)category )
+	{
+		case WEAPON:     return "WEAPON";
+		case ARMOR:      return "ARMOR";
+		case AMULET:     return "AMULET";
+		case POTION:     return "POTION";
+		case SCROLL:     return "SCROLL";
+		case MAGICSTAFF: return "MAGICSTAFF";
+		case RING:       return "RING";
+		case SPELLBOOK:  return "SPELLBOOK";
+		case GEM:        return "GEM";
+		case THROWN:     return "THROWN";
+		case TOOL:       return "TOOL";
+		case FOOD:       return "FOOD";
+		case BOOK:       return "BOOK";
+		case SPELL_CAT:  return "SPELL_CAT";
+		case TOME_SPELL: return "TOME_SPELL";
+		default:         return "";
+	}
+}
+
 static ItemEquippableSlot slotFromName(const std::string& n)
 {
 	if ( n == "EQUIPPABLE_IN_SLOT_WEAPON" ) { return EQUIPPABLE_IN_SLOT_WEAPON; }

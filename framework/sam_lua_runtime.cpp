@@ -1124,6 +1124,36 @@ namespace
 		return 1;
 	}
 
+	// sam_get_item_category(item) -> category name ("WEAPON"/"ARMOR"/"GEM"/...), or nil.
+	// `item` is a numeric item id (e.g. an event's item_type) OR a name (vanilla or "ns:item").
+	// Lets a script react by category, e.g. reward identifying any GEM.
+	int lua_sam_get_item_category(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		int type = -1;
+		if ( lua_isnumber(Ls, 1) )
+		{
+			type = (int)lua_tointeger(Ls, 1);
+		}
+		else if ( lua_isstring(Ls, 1) )
+		{
+			const std::string name = lua_tostring(Ls, 1);
+			if ( name.find(':') != std::string::npos ) { type = SAMItems::itemIdForIdString(name); }
+			if ( type < 0 )
+			{
+				std::string lower = name;
+				for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
+				auto it = ItemTooltips.itemNameStringToItemID.find(lower);
+				if ( it != ItemTooltips.itemNameStringToItemID.end() ) { type = it->second; }
+			}
+		}
+		if ( type < 0 || type >= NUM_ITEM_SLOTS ) { lua_pushnil(Ls); return 1; }
+		const std::string cat = SAMItems::categoryName((int)items[type].category);
+		if ( cat.empty() ) { lua_pushnil(Ls); return 1; }
+		lua_pushstring(Ls, cat.c_str());
+		return 1;
+	}
+
 	// Resolve a player's class to a display name. playerClassLangEntry (editor.cpp) is NOT
 	// SAM-aware: for a custom id (>= SAM_CLASS_ID_BASE) it computes a bogus lang index
 	// (3223 + id - CLASS_CONJURER) and returns an unrelated string, so a script gating on
@@ -1552,6 +1582,25 @@ namespace
 		return 1;
 #else
 		(void)uid; (void)nameC; lua_pushinteger(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_monster_has_effect(uid, "EFFECT") -> boolean. The monster counterpart of
+	// sam_has_effect — e.g. "when a monster takes damage AND it has POISONED".
+	int lua_sam_monster_has_effect(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const char* nameC = luaL_checkstring(Ls, 2);
+#ifdef SAM_LUA_HAVE_BARONY
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { lua_pushboolean(Ls, 0); return 1; }
+		const int eff = samEffectNameToId(nameC);
+		if ( eff < 0 ) { SAM_WARN("LUA", std::string("sam_monster_has_effect: unknown effect '") + (nameC ? nameC : "") + "'."); lua_pushboolean(Ls, 0); return 1; }
+		lua_pushboolean(Ls, e->getStats()->getEffectActive(eff) != 0 ? 1 : 0);
+		return 1;
+#else
+		(void)uid; (void)nameC; lua_pushboolean(Ls, 0); return 1;
 #endif
 	}
 
@@ -2124,6 +2173,8 @@ namespace
 		lua_pushcfunction(L, lua_sam_is_key_held);
 		lua_setglobal(L, "sam_is_key_held");
 		lua_pushcfunction(L, lua_sam_get_monster_stat);    lua_setglobal(L, "sam_get_monster_stat");
+		lua_pushcfunction(L, lua_sam_monster_has_effect);  lua_setglobal(L, "sam_monster_has_effect");
+		lua_pushcfunction(L, lua_sam_get_item_category);   lua_setglobal(L, "sam_get_item_category");
 		lua_pushcfunction(L, lua_sam_set_monster_stat);    lua_setglobal(L, "sam_set_monster_stat");
 		lua_pushcfunction(L, lua_sam_apply_monster_effect); lua_setglobal(L, "sam_apply_monster_effect");
 		lua_pushcfunction(L, lua_sam_kill_monster);        lua_setglobal(L, "sam_kill_monster");

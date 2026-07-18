@@ -81,6 +81,9 @@ export const MODES = ['flat', '% of max', '% of current'];
 /** Whether an HP change is allowed to be the thing that kills you. */
 export const KILL_MODES = ['can kill', 'cannot kill'];
 
+/** Item categories a modder is likely to gate on (Barony's Category names). */
+export const ITEM_CATEGORIES = ['WEAPON', 'ARMOR', 'AMULET', 'RING', 'POTION', 'SCROLL', 'SPELLBOOK', 'MAGICSTAFF', 'GEM', 'THROWN', 'TOOL', 'FOOD', 'BOOK'];
+
 /**
  * How a change ENDS. Every one of these is a real question a modder asked out loud:
  *   "how to make an action temporal, aka the thing it changes is not infinite"   -> for a while
@@ -406,7 +409,25 @@ export const CONDITIONS = [
     lua: (p) => `event.item_type == sam_item_id(${q(p.item)})`,
     phrase: (p) => `the item is ${p.item}`,
     phraseNeg: (p) => `the item is NOT ${p.item}`,
-    note: 'Matches one exact item. (There is no "is a GEM" category check yet — that needs an engine addition.)',
+    note: 'Matches one exact item. Use "is a category" below to match a whole kind (any GEM, any POTION…).',
+  },
+  {
+    // solidius: "reward the player for identifying GEMS" — match a whole category, not one item.
+    id: 'event_item_category_is', label: "the event's item is a category", negatable: true,
+    needs: 'item_type', pollable: false,
+    params: [{ name: 'category', type: 'select', values: ITEM_CATEGORIES, default: 'GEM' }],
+    lua: (p) => `sam_get_item_category(event.item_type) == ${q(p.category)}`,
+    phrase: (p) => `the item is a ${p.category}`,
+    phraseNeg: (p) => `the item is NOT a ${p.category}`,
+  },
+  {
+    // solidius: on a monster event (on_monster_damaged/died), ask about the MONSTER, not the player.
+    id: 'monster_has_effect', label: 'the monster has an effect', negatable: true,
+    needs: 'monster_uid', pollable: false,
+    params: [{ name: 'effect', type: 'select', values: EFFECTS, default: 'POISONED' }],
+    lua: (p) => `sam_monster_has_effect(event.monster_uid, ${q(p.effect)})`,
+    phrase: (p) => `the monster has ${p.effect}`,
+    phraseNeg: (p) => `the monster does NOT have ${p.effect}`,
   },
   {
     id: 'class_is', label: 'is playing a class', negatable: true,

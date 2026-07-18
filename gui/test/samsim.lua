@@ -125,6 +125,16 @@ function sam_kill_monster() return true end
 function sam_modify_damage() return true end
 function sam_get_equipped_item_id() return nil end
 function sam_item_id(n) return n end
+-- test heuristic: infer a category from a name that contains a category word (real engine reads items[].category)
+function sam_get_item_category(t)
+  t = tostring(t or '')
+  for _, c in ipairs({'WEAPON','ARMOR','AMULET','RING','POTION','SCROLL','SPELLBOOK','MAGICSTAFF','GEM','THROWN','TOOL','FOOD','BOOK'}) do
+    if t:find(c, 1, true) then return c end
+  end
+  return nil
+end
+function S.setMonsterEffect(e, v) state.monster_effects = state.monster_effects or {}; state.monster_effects[e] = v end
+function sam_monster_has_effect(_, e) return (state.monster_effects or {})[e] == true end
 
 local function removeTimer(id)
   for i, t in ipairs(timers) do

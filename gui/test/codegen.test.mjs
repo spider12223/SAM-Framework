@@ -17,7 +17,7 @@ import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { generateLua } from '../src/lib/codegen.js';
-import { untilCandidates, findAction, ENGINE_WRITTEN_STATS, conditionsFor, findTrigger } from '../src/data/blocks.js';
+import { untilCandidates, findAction, ENGINE_WRITTEN_STATS, conditionsFor, findTrigger, findCondition } from '../src/data/blocks.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const TMP = join(HERE, '.tmp');
@@ -366,6 +366,21 @@ check('event_item_is matches the identified item',
   `S.fire('player.on_item_identified', {player=0, item_type='GEM_DIAMOND'})`,
   { start: '{STR=10}', want: { STR: 15 } });
 
+// v1.2.10: item-category condition (identify any GEM) — uses sam_get_item_category.
+check('event_item_category_is fires for a gem',
+  [rule('player.on_item_identified',
+    [act('set_stat', { stat: 'STR', amount: 5, duration: 'permanently' })],
+    [{ id: 'event_item_category_is', params: { category: 'GEM' } }])],
+  `S.fire('player.on_item_identified', {player=0, item_type='GEM_DIAMOND'})`,
+  { start: '{STR=10}', want: { STR: 15 } });
+
+check('event_item_category_is does NOT fire for a non-gem',
+  [rule('player.on_item_identified',
+    [act('set_stat', { stat: 'STR', amount: 5, duration: 'permanently' })],
+    [{ id: 'event_item_category_is', params: { category: 'GEM' } }])],
+  `S.fire('player.on_item_identified', {player=0, item_type='IRON_SWORD'})`,
+  { start: '{STR=10}', want: { STR: 10 } });
+
 // ---------------------------------------------------------------------------------
 // Guards the adversarial design panel demanded — these are pure-JS asserts, no Lua needed.
 // ---------------------------------------------------------------------------------
@@ -417,6 +432,22 @@ function assert(name, cond) {
   // Event-field conditions must NOT be offered as until-conditions (event is stale in a timer).
   assert('gold_amount_cmp is not an until-candidate',
     !untilCandidates().some((c) => c.id === 'gold_amount_cmp'));
+
+  // v1.2.10 category + monster-effect conditions: correct codegen + trigger gating.
+  const identTrig = findTrigger('player.on_item_identified');
+  const monTrig = findTrigger('on_monster_damaged');
+  assert('event_item_category_is codegen',
+    findCondition('event_item_category_is').lua({ category: 'GEM' }) === 'sam_get_item_category(event.item_type) == "GEM"');
+  assert('monster_has_effect codegen',
+    findCondition('monster_has_effect').lua({ effect: 'POISONED' }) === 'sam_monster_has_effect(event.monster_uid, "POISONED")');
+  assert('event_item_category_is offered under on_item_identified',
+    conditionsFor(identTrig).some((c) => c.id === 'event_item_category_is'));
+  assert('event_item_category_is hidden under on_hit',
+    !conditionsFor(hitTrig).some((c) => c.id === 'event_item_category_is'));
+  assert('monster_has_effect offered under on_monster_damaged',
+    conditionsFor(monTrig).some((c) => c.id === 'monster_has_effect'));
+  assert('monster_has_effect hidden under on_hit (no monster_uid)',
+    !conditionsFor(hitTrig).some((c) => c.id === 'monster_has_effect'));
 }
 
 // ---------------------------------------------------------------------------------

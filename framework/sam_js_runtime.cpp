@@ -1077,6 +1077,60 @@ namespace
 #endif
 	}
 
+	// sam_monster_has_effect(uid, "EFFECT") -> boolean. Monster counterpart of sam_has_effect.
+	JSValue js_sam_monster_has_effect(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_NewBool(ctx, 0); }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+		const char* nameC = JS_ToCString(ctx, argv[1]);
+#ifdef SAM_JS_HAVE_BARONY
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { if ( nameC ) { JS_FreeCString(ctx, nameC); } return JS_NewBool(ctx, 0); }
+		const int eff = samEffectNameToId(nameC ? nameC : "");
+		if ( nameC ) { JS_FreeCString(ctx, nameC); }
+		if ( eff < 0 ) { return JS_NewBool(ctx, 0); }
+		return JS_NewBool(ctx, e->getStats()->getEffectActive(eff) != 0 ? 1 : 0);
+#else
+		(void)uid; if ( nameC ) { JS_FreeCString(ctx, nameC); } return JS_NewBool(ctx, 0);
+#endif
+	}
+
+	// sam_get_item_category(item) -> category name string, or undefined. `item` is an int id
+	// (e.g. an event's item_type) or a name (vanilla or "ns:item").
+	JSValue js_sam_get_item_category(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_UNDEFINED; }
+#ifdef SAM_JS_HAVE_BARONY
+		int type = -1;
+		if ( JS_IsNumber(argv[0]) )
+		{
+			int32_t t = -1; JS_ToInt32(ctx, &t, argv[0]); type = t;
+		}
+		else
+		{
+			const char* s = JS_ToCString(ctx, argv[0]);
+			std::string name = s ? s : "";
+			if ( s ) { JS_FreeCString(ctx, s); }
+			if ( name.find(':') != std::string::npos ) { type = SAMItems::itemIdForIdString(name); }
+			if ( type < 0 )
+			{
+				std::string lower = name;
+				for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
+				auto it = ItemTooltips.itemNameStringToItemID.find(lower);
+				if ( it != ItemTooltips.itemNameStringToItemID.end() ) { type = it->second; }
+			}
+		}
+		if ( type < 0 || type >= NUM_ITEM_SLOTS ) { return JS_UNDEFINED; }
+		const std::string cat = SAMItems::categoryName((int)items[type].category);
+		if ( cat.empty() ) { return JS_UNDEFINED; }
+		return JS_NewString(ctx, cat.c_str());
+#else
+		return JS_UNDEFINED;
+#endif
+	}
+
 	JSValue js_sam_set_monster_stat(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
@@ -1700,6 +1754,8 @@ namespace
 		JS_SetPropertyStr(ctx, g, "sam_get_effect_strength", JS_NewCFunction(ctx, js_sam_get_effect_strength, "sam_get_effect_strength", 2));
 		JS_SetPropertyStr(ctx, g, "sam_get_effects", JS_NewCFunction(ctx, js_sam_get_effects, "sam_get_effects", 1));
 		JS_SetPropertyStr(ctx, g, "sam_get_monster_stat", JS_NewCFunction(ctx, js_sam_get_monster_stat, "sam_get_monster_stat", 2));
+		JS_SetPropertyStr(ctx, g, "sam_monster_has_effect", JS_NewCFunction(ctx, js_sam_monster_has_effect, "sam_monster_has_effect", 2));
+		JS_SetPropertyStr(ctx, g, "sam_get_item_category", JS_NewCFunction(ctx, js_sam_get_item_category, "sam_get_item_category", 1));
 		JS_SetPropertyStr(ctx, g, "sam_set_monster_stat", JS_NewCFunction(ctx, js_sam_set_monster_stat, "sam_set_monster_stat", 3));
 		JS_SetPropertyStr(ctx, g, "sam_apply_monster_effect", JS_NewCFunction(ctx, js_sam_apply_monster_effect, "sam_apply_monster_effect", 3));
 		JS_SetPropertyStr(ctx, g, "sam_kill_monster", JS_NewCFunction(ctx, js_sam_kill_monster, "sam_kill_monster", 1));

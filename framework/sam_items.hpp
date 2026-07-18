@@ -126,4 +126,8 @@ public:
 	// wiping our "tooltip_sam_*" entries; call this right after those reads so custom
 	// items keep their ATK / weight / value rows and real hover tooltip. Idempotent.
 	static void reapplyAfterDataReload();
+
+	// Name of a Category enum value ("WEAPON", "ARMOR", "GEM", ...), or "" if unknown.
+	// Reverse of the internal categoryFromName; lets scripts read an item's category.
+	static std::string categoryName(int category);
 };

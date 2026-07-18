@@ -109,6 +109,10 @@ export const SAM_FUNCTIONS = [
     params: [{ name: "name", type: "string", values: ["vanilla ITEM name", "\"namespace:item\" (custom)"] }],
     returns: "the item's numeric type id (int), or nil/null if unknown",
     desc: "Resolve an item's numeric type id — compare it against event fields like on_block's shield_type to react only to a specific item. Accepts a vanilla name or a custom \"namespace:item\"." },
+  { name: "sam_get_item_category", category: "Rewards", hostOnly: false,
+    params: [{ name: "item", type: "any", values: ["numeric item id (e.g. an event's item_type)", "vanilla name", "\"namespace:item\""] }],
+    returns: "the category name (string) e.g. \"GEM\", or nil/undefined if unknown",
+    desc: "The category of an item (WEAPON / ARMOR / GEM / POTION / SCROLL / SPELLBOOK / …). Pass an event's item_type to react by category — e.g. reward the player for identifying any GEM." },
 
   // ---- Status effects ---------------------------------------------------------
   { name: "sam_apply_effect", category: "Status effects", hostOnly: true,
@@ -166,6 +170,9 @@ export const SAM_FUNCTIONS = [
   { name: "sam_set_monster_stat", category: "Monsters", hostOnly: true,
     params: [{ name: "uid", type: "uid" }, { name: "stat", type: "string", values: MONSTER_STATS }, { name: "value", type: "int" }],
     returns: "true on success (boolean)", desc: "Set a monster's stat by UID (bounded)." },
+  { name: "sam_monster_has_effect", category: "Monsters", hostOnly: false,
+    params: [{ name: "uid", type: "uid" }, { name: "effect", type: "string", values: EFFECTS }],
+    returns: "whether the monster has the effect (boolean)", desc: "The monster counterpart of sam_has_effect — e.g. react when a monster you just hit is POISONED. Pass a monster UID (from a monster event or sam_get_nearby_entities)." },
   { name: "sam_apply_monster_effect", category: "Monsters", hostOnly: true,
     params: [{ name: "uid", type: "uid" }, { name: "effect", type: "string", values: EFFECTS }, { name: "ticks", type: "int" }],
     returns: "true unless immune (boolean)", desc: "Apply a status effect to a monster by UID for N ticks." },
