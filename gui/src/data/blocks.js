@@ -581,7 +581,16 @@ export const ACTIONS = [
     id: 'set_stat', label: 'change a stat', category: 'Player',
     params: [
       { name: 'stat', type: 'select', values: STATS, default: 'STR' },
-      { name: 'amount', type: 'number', default: 1, label: 'add this much' },
+      // How the amount is worked out. "% of current" scales with the stat's live value;
+      // the "higher/lower of" modes (solidius's ask) take a flat number AND a percent and
+      // keep whichever is bigger / smaller, so e.g. "+1 STR, or +25% of current, whichever
+      // is higher" gives at least 1 but scales up on a strong character.
+      { name: 'mode', type: 'select', label: 'how much',
+        values: ['flat', '% of current', 'higher of flat or %', 'lower of flat or %'], default: 'flat' },
+      { name: 'amount', type: 'number', default: 1, label: 'flat amount',
+        showIf: (p) => p.mode !== '% of current' },
+      { name: 'percent', type: 'number', default: 25, label: '% of current',
+        showIf: (p) => p.mode && p.mode !== 'flat' },
       ...durationParams({ additive: true }),
     ],
     // 'one at a time' keys off a file-scope _active table, not the _tmp_seq counter, so it
@@ -591,19 +600,30 @@ export const ACTIONS = [
     lua: (p, gen) => {
       const stat = q(p.stat);
       const amt = Number(p.amount) || 0;
+      const pct = Number(p.percent) || 0;
       const read = `sam_get_stat(player, ${stat})`;
+      // The delta is worked out from the base value at apply time (the live stat, or the
+      // measured _before for a timed change), so a percentage scales off the real value.
+      const deltaOf = (base) => {
+        const pctDelta = `math.floor(${base} * ${pct} / 100)`;
+        if (p.mode === '% of current') return pctDelta;
+        if (p.mode === 'higher of flat or %') return `math.max(${amt}, ${pctDelta})`;
+        if (p.mode === 'lower of flat or %') return `math.min(${amt}, ${pctDelta})`;
+        return `${amt}`; // flat (also the default for older saved blocks with no mode)
+      };
       return temporal({
         p,
         gen,
         read,
         write: (v) => `sam_set_stat(player, ${stat}, ${v})`,
-        apply: (base) => `sam_set_stat(player, ${stat}, ${base} + (${amt}))`,
+        apply: (base) => `sam_set_stat(player, ${stat}, ${base} + (${deltaOf(base)}))`,
         idPrefix: `tmp_${p.stat}`,
       });
     },
-    note: 'Each application reverts on its own timer, so overlapping buffs stack and unstack '
-        + 'correctly. It hands back what the game ACTUALLY gave you: attributes stop at 248, '
-        + 'so a +100 on a strong character adds less than 100 — and gives back less than 100.',
+    note: 'Set "how much" to a flat number, a % of the current value, or the higher/lower of '
+        + 'both (e.g. "+1 or +25%, whichever is higher"). Each application reverts on its own '
+        + 'timer, so overlapping buffs stack and unstack correctly, and it hands back what the '
+        + 'game ACTUALLY gave you (attributes cap at 248, so a huge + adds and refunds less).',
     // The engine writes HP/MP/GOLD/EXP/HUNGER on its own. A timed revert of one fights it:
     // it subtracts what it added against a number that has since moved for other reasons.
     warn: (p) => (p.duration && p.duration !== 'permanently' && ENGINE_WRITTEN_STATS.includes(p.stat)
