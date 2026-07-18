@@ -1,0 +1,69 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://spider12223.github.io/SAM-Framework/schemas/effect.schema.json",
+  "title": "S.A.M Custom Status Effect",
+  "description": "A mod-defined status effect with real engine mechanics. Registered into a reserved effect slot (135-159); applies flat attribute modifiers, a move-speed multiplier and per-second HP/MP deltas while active, and shows on the HUD. Apply it in-game via sam_apply_effect(player, \"namespace:effect\", ticks).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "name"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+:[a-z0-9_]+$",
+      "description": "Unique id in \"namespace:effect\" form, e.g. \"mymod:frostbite\"."
+    },
+    "name": {
+      "type": "string",
+      "description": "Display name shown on the HUD, e.g. \"Frostbite\"."
+    },
+    "tooltip": {
+      "type": "string",
+      "description": "Short description shown in the effect's HUD tooltip."
+    },
+    "icon": {
+      "type": "string",
+      "description": "Optional mod-relative PNG for the HUD icon (a generic icon is used if omitted)."
+    },
+    "duration_ticks": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Default duration in ticks (50 ticks = 1 second). 0 means the caller supplies the duration. sam_apply_effect's ticks argument overrides this."
+    },
+    "stat_modifiers": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Flat attribute modifiers applied while the effect is active (may be negative).",
+      "properties": {
+        "STR": { "type": "integer" },
+        "DEX": { "type": "integer" },
+        "CON": { "type": "integer" },
+        "INT": { "type": "integer" },
+        "PER": { "type": "integer" },
+        "CHR": { "type": "integer" }
+      }
+    },
+    "move_speed_mult": {
+      "type": "number",
+      "minimum": 0.1,
+      "default": 1.0,
+      "description": "Move-speed multiplier while active. 1.0 = no change, 0.8 = 20% slower, 1.5 = 50% faster. Clamped by the engine's speed cap."
+    },
+    "hp_per_second": {
+      "type": "integer",
+      "default": 0,
+      "description": "HP change each second while active. Negative drains (can kill), positive heals. 0 = none."
+    },
+    "mp_per_second": {
+      "type": "integer",
+      "default": 0,
+      "description": "MP change each second while active. Negative drains, positive restores. 0 = none."
+    },
+    "hud_hidden": {
+      "type": "boolean",
+      "default": false,
+      "description": "If true, the effect works but does not show an icon on the status bar."
+    }
+  }
+}
