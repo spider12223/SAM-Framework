@@ -114,6 +114,15 @@
         "description": "Path to a spell JSON file conforming to spell.schema.json."
       }
     },
+    "effects": {
+      "type": "array",
+      "description": "Relative paths (from the mod folder) to custom status effect definition JSON files provided by this mod. The effect loader registers each into a reserved engine effect slot (135-159) so it can be applied by 'namespace:effect' (e.g. via sam_apply_effect) and carries real mechanics: flat attribute modifiers, a move-speed multiplier and per-second HP/MP deltas while active, plus a HUD icon. Each file conforms to effect.schema.json.",
+      "items": {
+        "type": "string",
+        "pattern": "\\.json$",
+        "description": "Path to an effect JSON file conforming to effect.schema.json."
+      }
+    },
     "plugins": {
       "type": "array",
       "description": "PLANNED — the S.A.M plugin system is not yet implemented; declared .dll files are counted but NOT loaded. Leave this empty for now. (Relative paths to compiled plugin .dll files.)",

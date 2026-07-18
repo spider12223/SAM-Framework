@@ -67,6 +67,7 @@ extern "C" {
 #	include "engine/audio/sound.hpp" // playSoundPlayer, numsounds
 #	include "files.hpp"     // outputdir (savegames base dir for persistent mod data)
 #	include "sam_items.hpp" // SAMItems::itemIdForIdString (custom item names in queries)
+#	include "sam_effects.hpp" // custom status effects (resolve "ns:effect" ids)
 #	include "sam_classes.hpp" // v0.7.0 F5: SAMClasses::patchClass / addClassPassive
 #	include "sam_monster_patches.hpp" // v0.7.0 F5: SAMMonsterPatch::set
 #	include "sam_spells.hpp"  // custom-spell registry (sam_grant_spell)
@@ -532,6 +533,15 @@ namespace
 	int samEffectNameToId(const char* nameIn)
 	{
 		const std::string n = samUpper(nameIn);
+#ifdef SAM_LUA_HAVE_BARONY
+		// A registered custom effect id ("namespace:effect", case-sensitive) resolves to its
+		// assigned slot 135..159. Checked first so a mod effect wins over any vanilla name.
+		if ( nameIn )
+		{
+			const int customSlot = SAMEffects::idForName(nameIn);
+			if ( customSlot >= 0 ) { return customSlot; }
+		}
+#endif
 		for ( const auto& e : samEffectNames )
 		{
 			if ( n == e.name ) { return e.id; }

@@ -12,6 +12,7 @@
 #include "sam_workshop.hpp"
 #include "sam_classes.hpp"
 #include "sam_items.hpp"
+#include "sam_effects.hpp"
 #include "sam_monster_patches.hpp" // v0.7.0 F5 monster stat overrides — both builds
 #ifndef EDITOR
 #include "sam_sync.hpp"    // multiplayer sync — game build only (not in EDITOR_SOURCES)
@@ -48,6 +49,7 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 	// every Play, so appending would double-register).
 	SAMClasses::clear();
 	SAMItems::clear();
+	SAMEffects::clear(); // drop custom status effects -> vanilla
 	SAMMonsterPatch::clear(); // v0.7.0 F5: drop any prior monster stat overrides
 #ifndef EDITOR
 	SAMSpells::clear(); // custom-spell registry — rebuild fresh each load
@@ -117,6 +119,7 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 		// Register the mod's classes and items into the runtime registries.
 		SAMClasses::loadFromManifest(m);
 		SAMItems::loadFromManifest(m);
+		SAMEffects::loadFromManifest(m); // custom status effects into slots 135..159
 
 #ifndef EDITOR
 		// Custom spells (Session 1: metadata registry only — no in-engine spell yet).
@@ -250,6 +253,7 @@ void SAMLoader::unload()
 	SAMWorkshop::clear();
 	SAMClasses::clear();       // also reverts sam_patch_class + class passives (F5)
 	SAMItems::clear();         // also reverts sam_patch_item overrides (F5)
+	SAMEffects::clear();       // drop custom status effects
 	SAMMonsterPatch::clear();  // reverts sam_patch_monster overrides (F5)
 #ifndef EDITOR
 	SAMSpells::clear();   // drop the custom-spell registry

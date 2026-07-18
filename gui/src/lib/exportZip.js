@@ -27,6 +27,7 @@ const CLASS_SCHEMA = `${SCHEMA_BASE}/class.schema.json`;
 const ITEM_SCHEMA = `${SCHEMA_BASE}/item.schema.json`;
 const MONSTER_SCHEMA = `${SCHEMA_BASE}/monster.schema.json`;
 const SPELL_SCHEMA = `${SCHEMA_BASE}/spell.schema.json`;
+const EFFECT_SCHEMA = `${SCHEMA_BASE}/effect.schema.json`;
 const PATCH_SCHEMA = `${SCHEMA_BASE}/patch.schema.json`;
 
 /** "sam_test:shadow_knight" -> "shadow_knight" (file stem from the id). */
@@ -43,19 +44,20 @@ export function patchStem(target, fallback) {
 }
 
 /** Manifest-relative paths for each collection, exactly as the zip lays them out. */
-export function contentPaths(classes, items, monsters, spells = [], patches = []) {
+export function contentPaths(classes, items, monsters, spells = [], patches = [], effects = []) {
   return {
     classPaths: classes.map((c, i) => `classes/${fileStem(c.id, `class_${i + 1}`)}.json`),
     itemPaths: items.map((it, i) => `items/${fileStem(it.id, `item_${i + 1}`)}.json`),
     monsterPaths: (monsters ?? []).map((m, i) => `monsters/${fileStem(m.id, `monster_${i + 1}`)}.json`),
     spellPaths: (spells ?? []).map((s, i) => `spells/${fileStem(s.id, `spell_${i + 1}`)}.json`),
+    effectPaths: (effects ?? []).map((e, i) => `effects/${fileStem(e.id, `effect_${i + 1}`)}.json`),
     patchPaths: (patches ?? []).map((p, i) => `patches/${patchStem(p.target, `patch_${i + 1}`)}.json`),
   };
 }
 
 /** The mod.json object (sans $schema — callers stamp it when writing). */
 export function buildManifest(meta, paths) {
-  const { classPaths, itemPaths, monsterPaths, spellPaths, patchPaths } = paths;
+  const { classPaths, itemPaths, monsterPaths, spellPaths, effectPaths, patchPaths } = paths;
   const manifest = {
     namespace: meta.namespace,
     name: meta.name,
@@ -73,6 +75,7 @@ export function buildManifest(meta, paths) {
   if (patchPaths && patchPaths.length) manifest.patches = patchPaths;
   if (monsterPaths && monsterPaths.length) manifest.monsters = monsterPaths;
   if (spellPaths && spellPaths.length) manifest.spells = spellPaths;
+  if (effectPaths && effectPaths.length) manifest.effects = effectPaths;
   manifest.plugins = [];
   manifest.description = meta.description ?? '';
   return manifest;
@@ -94,10 +97,10 @@ export function scriptPathFor(classDef, i, scripts) {
  */
 export function buildModFiles(mod) {
   const {
-    meta, classes = [], items = [], monsters = [], spells = [], patches = [],
+    meta, classes = [], items = [], monsters = [], spells = [], effects = [], patches = [],
     scripts = {}, assets = {},
   } = mod;
-  const paths = contentPaths(classes, items, monsters, spells, patches);
+  const paths = contentPaths(classes, items, monsters, spells, patches, effects);
   const manifest = buildManifest(meta, paths);
 
   const files = [
@@ -118,6 +121,10 @@ export function buildModFiles(mod) {
     ...spells.map((s, i) => ({
       path: paths.spellPaths[i],
       text: JSON.stringify({ $schema: SPELL_SCHEMA, ...s }, null, 2) + '\n',
+    })),
+    ...effects.map((e, i) => ({
+      path: paths.effectPaths[i],
+      text: JSON.stringify({ $schema: EFFECT_SCHEMA, ...e }, null, 2) + '\n',
     })),
     ...patches.map((p, i) => ({
       path: paths.patchPaths[i],

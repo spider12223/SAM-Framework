@@ -36,7 +36,7 @@ function cloneWithNewId(def, existingIds) {
 }
 
 export default function ModBuilder() {
-  const { meta, classes, items, monsters, spells, patches, scripts, assets, baseline, dispatch } = useMod();
+  const { meta, classes, items, monsters, spells, effects, patches, scripts, assets, baseline, dispatch } = useMod();
   const navigate = useNavigate();
   const [errors, setErrors] = useState([]);
   const [savedAs, setSavedAs] = useState('');
@@ -49,15 +49,15 @@ export default function ModBuilder() {
   const zipRef = useRef(null);
 
   const setMeta = (patch) => dispatch({ type: 'setMeta', patch });
-  const mod = { meta, classes, items, monsters, spells, patches, scripts, assets };
+  const mod = { meta, classes, items, monsters, spells, effects, patches, scripts, assets };
 
   const namespaceBad = meta.namespace !== '' && !NAMESPACE_PATTERN.test(meta.namespace);
   const versionBad = meta.version !== '' && !VERSION_PATTERN.test(meta.version);
   const fwBad = meta.framework_min_version !== '' && !VERSION_PATTERN.test(meta.framework_min_version);
 
   const paths = useMemo(
-    () => contentPaths(classes, items, monsters, spells, patches),
-    [classes, items, monsters, spells, patches]
+    () => contentPaths(classes, items, monsters, spells, patches, effects),
+    [classes, items, monsters, spells, patches, effects]
   );
 
   const collectErrors = () => {
@@ -70,6 +70,7 @@ export default function ModBuilder() {
     items.forEach((it, i) => push(paths.itemPaths[i], validate('item', it)));
     monsters.forEach((m, i) => push(paths.monsterPaths[i], validate('monster', m)));
     spells.forEach((s, i) => push(paths.spellPaths[i], validate('spell', s)));
+    effects.forEach((e, i) => push(paths.effectPaths[i], validate('effect', e)));
     patches.forEach((p, i) => push(paths.patchPaths[i], validate('patch', p)));
     return all;
   };
@@ -92,14 +93,14 @@ export default function ModBuilder() {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    const hasContent = classes.length || items.length || monsters.length || spells.length || patches.length || meta.name.trim() || meta.namespace.trim();
+    const hasContent = classes.length || items.length || monsters.length || spells.length || effects.length || patches.length || meta.name.trim() || meta.namespace.trim();
     if (hasContent && !window.confirm('Importing replaces the current mod in this session. Continue?')) return;
     setErrors([]); setNotice(''); setImportReport([]); setSavedAs('');
     try {
       const r = await parseModZip(file);
       dispatch({ type: 'loadMod', ...r });
       dispatch({ type: 'setBaseline' });
-      setNotice(`Imported ${r.meta.name || r.meta.namespace || 'mod'}: ${r.classes.length} class(es), ${r.items.length} item(s), ${r.monsters.length} monster(s), ${r.spells.length} spell(s), ${r.patches.length} patch(es), ${Object.keys(r.scripts).length} script(s).`);
+      setNotice(`Imported ${r.meta.name || r.meta.namespace || 'mod'}: ${r.classes.length} class(es), ${r.items.length} item(s), ${r.monsters.length} monster(s), ${r.spells.length} spell(s), ${r.effects.length} effect(s), ${r.patches.length} patch(es), ${Object.keys(r.scripts).length} script(s).`);
       setImportReport(r.report);
     } catch (err) {
       setErrors([{ path: 'import', message: err.message }]);
@@ -167,9 +168,9 @@ export default function ModBuilder() {
   const diffRows = useMemo(() => {
     if (!baseline) return null;
     const a = canonicalize(baseline);
-    const b = canonicalize({ meta, classes, items, monsters, spells, patches });
+    const b = canonicalize({ meta, classes, items, monsters, spells, effects, patches });
     return collapseHunks(diffLines(a, b));
-  }, [baseline, meta, classes, items, monsters, spells, patches]);
+  }, [baseline, meta, classes, items, monsters, spells, effects, patches]);
   const summary = diffRows ? diffSummary(diffRows) : null;
 
   return (
@@ -277,7 +278,7 @@ export default function ModBuilder() {
         </Panel>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
         <Panel title="Bundled Spells">
           <div className="space-y-2">
             {spells.length === 0 && <EmptyHint where="/spell-editor" what="spells" />}
@@ -286,6 +287,17 @@ export default function ModBuilder() {
                 onEdit={() => edit('spell', def.id, '/spell-editor')}
                 onClone={() => clone(def, 'saveSpell', spells)}
                 onRemove={() => dispatch({ type: 'removeSpell', id: def.id })} />
+            ))}
+          </div>
+        </Panel>
+        <Panel title="Bundled Effects">
+          <div className="space-y-2">
+            {effects.length === 0 && <EmptyHint where="/effect-editor" what="effects" />}
+            {effects.map((def) => (
+              <ItemRow key={def.id} icon="🌀" name={def.name} sub={effectSub(def)}
+                onEdit={() => edit('effect', def.id, '/effect-editor')}
+                onClone={() => clone(def, 'saveEffect', effects)}
+                onRemove={() => dispatch({ type: 'removeEffect', id: def.id })} />
             ))}
           </div>
         </Panel>
@@ -390,6 +402,7 @@ export default function ModBuilder() {
 ├─ items/*.json
 ├─ monsters/*.json
 ├─ spells/*.json
+├─ effects/*.json
 ├─ patches/*.json
 └─ portraits/*.png  (uploaded art)`}
         </pre>
@@ -399,6 +412,19 @@ export default function ModBuilder() {
       </Panel>
     </div>
   );
+}
+
+/** One-line summary of what an effect does, for the Mod Builder row. */
+function effectSub(def) {
+  const bits = [];
+  const sm = def.stat_modifiers ?? {};
+  for (const k of ['STR', 'DEX', 'CON', 'INT', 'PER', 'CHR']) {
+    if (sm[k]) bits.push(`${sm[k] > 0 ? '+' : ''}${sm[k]} ${k}`);
+  }
+  if (def.move_speed_mult && def.move_speed_mult !== 1) bits.push(`×${def.move_speed_mult} spd`);
+  if (def.hp_per_second) bits.push(`${def.hp_per_second > 0 ? '+' : ''}${def.hp_per_second} HP/s`);
+  if (def.mp_per_second) bits.push(`${def.mp_per_second > 0 ? '+' : ''}${def.mp_per_second} MP/s`);
+  return bits.length ? `${def.id} · ${bits.join(', ')}` : def.id;
 }
 
 function EmptyHint({ where, what }) {

@@ -108,6 +108,7 @@ export async function parseModZip(file) {
     items: manifest.items ?? [],
     monsters: manifest.monsters ?? [],
     spells: manifest.spells ?? [],
+    effects: manifest.effects ?? [],
     patches: manifest.patches ?? [],
   };
 
@@ -143,6 +144,11 @@ export async function parseModZip(file) {
     const def = await readDef(zip, p, 'spell', report);
     if (def) spells.push(def);
   }
+  const effects = [];
+  for (const p of declared.effects) {
+    const def = await readDef(zip, p, 'effect', report);
+    if (def) effects.push(def);
+  }
   const patches = [];
   for (const p of declared.patches) {
     const def = await readDef(zip, p, 'patch', report);
@@ -153,7 +159,7 @@ export async function parseModZip(file) {
   const declaredSet = new Set([
     'mod.json',
     ...declared.classes, ...declared.items, ...declared.monsters,
-    ...declared.spells, ...declared.patches,
+    ...declared.spells, ...declared.effects, ...declared.patches,
     ...scriptPaths,
   ]);
   const assets = {};
@@ -173,5 +179,5 @@ export async function parseModZip(file) {
     assets[relPath] = `data:${mime};base64,${base64}`;
   }
 
-  return { meta, classes, items, monsters, spells, patches, scripts, assets, report };
+  return { meta, classes, items, monsters, spells, effects, patches, scripts, assets, report };
 }

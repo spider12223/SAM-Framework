@@ -35,6 +35,7 @@ const initialState = {
   items: [],     // item.schema.json-shaped objects
   monsters: [],  // monster.schema.json-shaped objects
   spells: [],    // spell.schema.json-shaped objects
+  effects: [],   // effect.schema.json-shaped objects (custom status effects)
   patches: [],   // patch.schema.json-shaped objects
   scripts: {},   // classId -> { lang, code }
   assets: {},    // 'portraits/x.png' -> 'data:image/png;base64,...'
@@ -71,6 +72,10 @@ function reducer(state, action) {
       return { ...state, spells: upsert(state.spells, action.def) };
     case 'removeSpell':
       return { ...state, spells: state.spells.filter((s) => s.id !== action.id) };
+    case 'saveEffect':
+      return { ...state, effects: upsert(state.effects, action.def) };
+    case 'removeEffect':
+      return { ...state, effects: state.effects.filter((e) => e.id !== action.id) };
     case 'savePatch': {
       // Patches have no id; key them by target (one merged op-list per file).
       const i = state.patches.findIndex((p) => p.target === action.def.target);
@@ -110,6 +115,7 @@ function reducer(state, action) {
         items: action.items ?? [],
         monsters: action.monsters ?? [],
         spells: action.spells ?? [],
+        effects: action.effects ?? [],
         patches: action.patches ?? [],
         scripts: action.scripts ?? {},
         assets: action.assets ?? {},
@@ -124,6 +130,7 @@ function reducer(state, action) {
           items: state.items,
           monsters: state.monsters,
           spells: state.spells,
+          effects: state.effects,
           patches: state.patches,
         }),
       };
@@ -159,6 +166,7 @@ function persist(state) {
     items: state.items,
     monsters: state.monsters,
     spells: state.spells,
+    effects: state.effects,
     patches: state.patches,
     scripts: state.scripts,
     assets: state.assets,

@@ -4,7 +4,7 @@
  */
 import Ajv from 'ajv';
 import {
-  modSchema, classSchema, itemSchema, monsterSchema, spellSchema, patchSchema,
+  modSchema, classSchema, itemSchema, monsterSchema, spellSchema, patchSchema, effectSchema,
 } from '@/data/schemas.js';
 
 const ajv = new Ajv({ allErrors: true, strict: false });
@@ -16,6 +16,7 @@ const validators = {
   monster: ajv.compile(monsterSchema),
   spell: ajv.compile(spellSchema),
   patch: ajv.compile(patchSchema),
+  effect: ajv.compile(effectSchema),
 };
 
 export const SCHEMA_KINDS = Object.keys(validators);
