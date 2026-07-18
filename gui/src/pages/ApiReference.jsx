@@ -11,7 +11,7 @@ import { callSignature } from '@/components/ScriptEditor.jsx';
 import { Panel } from '@/components/ui.jsx';
 
 const CATEGORY_ORDER = [
-  'Logging', 'Player state', 'Rewards', 'Status effects', 'Inventory', 'Entities',
+  'Logging', 'Player state', 'Rewards', 'Status effects', 'Inventory', 'World', 'Entities',
   'Damage', 'Monsters', 'Live patching', 'Spells', 'Persistence', 'Timers',
   'Custom events', 'Input',
 ];

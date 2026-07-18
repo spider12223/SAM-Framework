@@ -13,6 +13,8 @@
 #include "sam_classes.hpp"
 #include "sam_items.hpp"
 #include "sam_effects.hpp"
+#include "sam_races.hpp"
+#include "sam_sounds.hpp"
 #include "sam_monster_patches.hpp" // v0.7.0 F5 monster stat overrides — both builds
 #ifndef EDITOR
 #include "sam_sync.hpp"    // multiplayer sync — game build only (not in EDITOR_SOURCES)
@@ -50,6 +52,8 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 	SAMClasses::clear();
 	SAMItems::clear();
 	SAMEffects::clear(); // drop custom status effects -> vanilla
+	SAMRaces::clear(); // drop custom playable races -> vanilla
+	SAMSounds::clear(); // drop staged custom sounds (engine table reset on next append)
 	SAMMonsterPatch::clear(); // v0.7.0 F5: drop any prior monster stat overrides
 #ifndef EDITOR
 	SAMSpells::clear(); // custom-spell registry — rebuild fresh each load
@@ -120,6 +124,8 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 		SAMClasses::loadFromManifest(m);
 		SAMItems::loadFromManifest(m);
 		SAMEffects::loadFromManifest(m); // custom status effects into slots 135..159
+		SAMRaces::loadFromManifest(m); // custom playable races into ids 200..255
+		SAMSounds::loadFromManifest(m); // stage custom sounds (appended after vanilla reload)
 
 #ifndef EDITOR
 		// Custom spells (Session 1: metadata registry only — no in-engine spell yet).
@@ -198,6 +204,11 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 			samScriptBaseId(itemRel, scriptBase, scriptId);
 			loadCompanionScripts(scriptBase, scriptId, "item");
 		}
+		for ( const std::string& raceRel : m.races )
+		{
+			samScriptBaseId(raceRel, scriptBase, scriptId);
+			loadCompanionScripts(scriptBase, scriptId, "race");
+		}
 		// Mod-level entry point: <modroot>/main.{ts,js,lua} — for mods that want one
 		// behavior file regardless of how many classes/items they ship (or none).
 		loadCompanionScripts("main", m.ns + ":main", "mod");
@@ -254,6 +265,8 @@ void SAMLoader::unload()
 	SAMClasses::clear();       // also reverts sam_patch_class + class passives (F5)
 	SAMItems::clear();         // also reverts sam_patch_item overrides (F5)
 	SAMEffects::clear();       // drop custom status effects
+	SAMRaces::clear();         // drop custom playable races
+	SAMSounds::clear();        // drop staged custom sounds
 	SAMMonsterPatch::clear();  // reverts sam_patch_monster overrides (F5)
 #ifndef EDITOR
 	SAMSpells::clear();   // drop the custom-spell registry

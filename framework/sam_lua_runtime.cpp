@@ -68,6 +68,8 @@ extern "C" {
 #	include "files.hpp"     // outputdir (savegames base dir for persistent mod data)
 #	include "sam_items.hpp" // SAMItems::itemIdForIdString (custom item names in queries)
 #	include "sam_effects.hpp" // custom status effects (resolve "ns:effect" ids)
+#	include "sam_sounds.hpp" // custom sounds (resolve "ns:sound" ids in sam_play_sound)
+#	include "sam_races.hpp" // custom races (sam_get_race id lookup)
 #	include "sam_classes.hpp" // v0.7.0 F5: SAMClasses::patchClass / addClassPassive
 #	include "sam_monster_patches.hpp" // v0.7.0 F5: SAMMonsterPatch::set
 #	include "sam_spells.hpp"  // custom-spell registry (sam_grant_spell)
@@ -848,11 +850,23 @@ namespace
 		return 1;
 	}
 
-	// sam_play_sound(soundId[, vol]) — play a sound for all connected players.
+	// sam_play_sound(soundId[, vol]) — play a sound for all connected players. soundId is
+	// a vanilla numeric index OR the "namespace:sound" id of a custom sound.
 	int lua_sam_play_sound(lua_State* Ls)
 	{
 		SAMLogger::noteApiCall();
-		const int soundId = (int)luaL_checkinteger(Ls, 1);
+		int soundId = -1;
+		if ( lua_type(Ls, 1) == LUA_TSTRING )
+		{
+			const char* nm = lua_tostring(Ls, 1);
+			soundId = SAMSounds::soundIndexForId(nm ? nm : "");
+			if ( soundId < 0 )
+			{ SAM_ERROR("LUA", std::string("sam_play_sound: unknown sound name '") + (nm ? nm : "") + "'."); lua_pushboolean(Ls, 0); return 1; }
+		}
+		else
+		{
+			soundId = (int)luaL_checkinteger(Ls, 1);
+		}
 		int vol = 128;
 		if ( lua_gettop(Ls) >= 2 && !lua_isnoneornil(Ls, 2) ) { vol = (int)luaL_checkinteger(Ls, 2); }
 		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_play_sound refused: host only."); lua_pushboolean(Ls, 0); return 1; }
@@ -1188,6 +1202,31 @@ namespace
 		const int player = (int)luaL_checkinteger(Ls, 1);
 		if ( player < 0 || player >= MAXPLAYERS ) { lua_pushnil(Ls); return 1; }
 		lua_pushstring(Ls, samClassName(player));
+		return 1;
+	}
+
+	// The race identifier for a player: a custom race's "namespace:race" id, or the
+	// vanilla race's name ("human", "skeleton", "goatman", ...). Lets a race behavior
+	// script gate its logic to players of that race.
+	const char* samRaceName(int player)
+	{
+		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return ""; }
+		const int race = stats[player]->playerRace;
+		if ( race >= SAM_RACE_ID_BASE )
+		{
+			const SAMRaceDef* def = SAMRaces::get(race);
+			return def ? def->id.c_str() : "";
+		}
+		const int mon = (int)getMonsterFromPlayerRace(race);
+		if ( mon >= 0 && mon < NUMMONSTERS ) { return monstertypename[mon]; }
+		return "";
+	}
+	int lua_sam_get_race(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		if ( player < 0 || player >= MAXPLAYERS ) { lua_pushnil(Ls); return 1; }
+		lua_pushstring(Ls, samRaceName(player));
 		return 1;
 	}
 
@@ -1562,6 +1601,149 @@ namespace
 		for ( char& c : want ) { c = (char)std::tolower((unsigned char)c); }
 		for ( int i = 0; i < NUMMONSTERS; ++i ) { if ( want == monstertypename[i] ) { return i; } }
 		return -1;
+	}
+
+	// ---- v2 world-ops: position / teleport / spawn / inventory -----------------
+	// All positions are MAP TILE coordinates (integers), matching sam_spawn_item and
+	// how the engine's teleport() reads coords. Tile centre in pixels = tile*16 + 8.
+
+	// sam_get_player_uid(player) -> entity uid | nil. Bridges player index -> a uid so
+	// the uid-based world-ops below (get/set position) can act on a player's body.
+	int lua_sam_get_player_uid(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity )
+		{ lua_pushnil(Ls); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)players[player]->entity->getUID());
+		return 1;
+	}
+
+	// sam_get_position(uid) -> tileX, tileY | nil. Any live entity (player/monster/item).
+	int lua_sam_get_position(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		Entity* e = uidToEntity((Sint32)uid);
+		if ( !e ) { lua_pushnil(Ls); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)((int)e->x >> 4)); // pixel -> tile
+		lua_pushinteger(Ls, (lua_Integer)((int)e->y >> 4));
+		return 2;
+	}
+
+	// sam_set_position(uid, tileX, tileY) -> boolean. Players go through the safe
+	// teleport() path (obstacle + MFLAG_DISABLETELEPORT guards + TELE packet) so they
+	// can't tunnel into walls; other entities move by x/y + UPDATENEEDED (the server's
+	// per-frame broadcast picks it up — no new packet). Host only.
+	int lua_sam_set_position(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const int tx = (int)luaL_checkinteger(Ls, 2);
+		const int ty = (int)luaL_checkinteger(Ls, 3);
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_set_position refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		Entity* e = uidToEntity((Sint32)uid);
+		if ( !e ) { SAM_WARN("LUA", "sam_set_position: no entity uid " + std::to_string(uid) + "."); lua_pushboolean(Ls, 0); return 1; }
+		if ( tx < 0 || tx >= (int)map.width || ty < 0 || ty >= (int)map.height )
+		{ SAM_ERROR("LUA", "sam_set_position: tile (" + std::to_string(tx) + "," + std::to_string(ty) + ") out of bounds."); lua_pushboolean(Ls, 0); return 1; }
+		if ( e->behavior == &actPlayer )
+		{
+			const bool ok = e->teleport(tx, ty); // may refuse (walls / minotaur level / map flag)
+			lua_pushboolean(Ls, ok ? 1 : 0);
+			return 1;
+		}
+		e->x = (double)(tx * 16 + 8);
+		e->y = (double)(ty * 16 + 8);
+		e->flags[UPDATENEEDED] = true;
+		e->flags[NOUPDATE] = false;
+		TileEntityList.updateEntity(*e); // re-bucket in the spatial grid, as teleport() does
+		lua_pushboolean(Ls, 1);
+		return 1;
+	}
+
+	// sam_spawn_monster(tileX, tileY, "name" [, shopType]) -> uid | nil. Whitelisted to
+	// the Monster enum (name resolved case-insensitively). shopType (0-14) only applies
+	// to "shopkeeper" and picks the store kind. Host only; net replication is done by
+	// summonMonster itself (the SUMM packet). Returns the new monster's uid so scripts
+	// can move / query it afterwards.
+	int lua_sam_spawn_monster(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int tx = (int)luaL_checkinteger(Ls, 1);
+		const int ty = (int)luaL_checkinteger(Ls, 2);
+		const char* nameC = luaL_checkstring(Ls, 3);
+		const std::string monName = nameC ? nameC : "";
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_spawn_monster refused: host only."); lua_pushnil(Ls); return 1; }
+		const int creature = samMonsterNameToId(nameC);
+		if ( creature <= 0 ) { SAM_ERROR("LUA", "sam_spawn_monster: unknown monster '" + monName + "'."); lua_pushnil(Ls); return 1; }
+		if ( tx < 0 || tx >= (int)map.width || ty < 0 || ty >= (int)map.height )
+		{ SAM_ERROR("LUA", "sam_spawn_monster: tile (" + std::to_string(tx) + "," + std::to_string(ty) + ") out of bounds."); lua_pushnil(Ls); return 1; }
+		Entity* e = summonMonster(static_cast<Monster>(creature), tx * 16 + 8, ty * 16 + 8); // pixel coords
+		if ( !e ) { SAM_ERROR("LUA", "sam_spawn_monster: spawn failed (blocked tile?)."); lua_pushnil(Ls); return 1; }
+		if ( !lua_isnoneornil(Ls, 4) && creature == SHOPKEEPER )
+		{
+			int shopType = (int)luaL_optinteger(Ls, 4, 0);
+			if ( shopType < 0 ) { shopType = 0; }
+			if ( shopType > 14 ) { shopType = 14; }
+			if ( Stat* s = e->getStats() ) { s->MISC_FLAGS[STAT_FLAG_NPC] = 1 + shopType; }
+		}
+		SAM_INFO("LUA", "Spawned monster " + monName + " at (" + std::to_string(tx) + "," + std::to_string(ty) + ")");
+		lua_pushinteger(Ls, (lua_Integer)e->getUID());
+		return 1;
+	}
+
+	// sam_get_inventory(player) -> array of { uid, type, name, count, beatitude, status,
+	// identified, equipped }. Returns an empty table for an invalid player. Reader.
+	int lua_sam_get_inventory(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		lua_newtable(Ls);
+		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return 1; }
+		int idx = 1;
+		for ( node_t* node = stats[player]->inventory.first; node != nullptr; node = node->next )
+		{
+			Item* it = (Item*)node->element;
+			if ( !it ) { continue; }
+			lua_newtable(Ls);
+			lua_pushinteger(Ls, (lua_Integer)it->uid);        lua_setfield(Ls, -2, "uid");
+			lua_pushinteger(Ls, (lua_Integer)it->type);       lua_setfield(Ls, -2, "type");
+			if ( (int)it->type >= 0 && (int)it->type < NUMITEMS ) { lua_pushstring(Ls, itemNameStrings[(int)it->type + 2]); }
+			else { lua_pushstring(Ls, "custom"); }
+			lua_setfield(Ls, -2, "name");
+			lua_pushinteger(Ls, (lua_Integer)it->count);      lua_setfield(Ls, -2, "count");
+			lua_pushinteger(Ls, (lua_Integer)it->beatitude);  lua_setfield(Ls, -2, "beatitude");
+			lua_pushinteger(Ls, (lua_Integer)it->status);     lua_setfield(Ls, -2, "status");
+			lua_pushboolean(Ls, it->identified ? 1 : 0);      lua_setfield(Ls, -2, "identified");
+			lua_pushboolean(Ls, (itemSlot(stats[player], it) != nullptr) ? 1 : 0); lua_setfield(Ls, -2, "equipped");
+			lua_rawseti(Ls, -2, idx++);
+		}
+		return 1;
+	}
+
+	// sam_remove_item(itemUid) -> boolean. Removes an inventory item by its uid. Refuses
+	// an EQUIPPED item (freeing it would dangle stats[p]->weapon etc. -> crash) — unequip
+	// first. Consumes the whole stack via consumeItem. Host only.
+	int lua_sam_remove_item(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_remove_item refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		Item* it = uidToItem((Uint32)uid);
+		if ( !it ) { SAM_WARN("LUA", "sam_remove_item: no item uid " + std::to_string(uid) + "."); lua_pushboolean(Ls, 0); return 1; }
+		int owner = -1;
+		for ( int p = 0; p < MAXPLAYERS; ++p )
+		{
+			if ( !stats[p] ) { continue; }
+			if ( itemSlot(stats[p], it) != nullptr )
+			{ SAM_WARN("LUA", "sam_remove_item: item uid " + std::to_string(uid) + " is equipped; unequip first."); lua_pushboolean(Ls, 0); return 1; }
+			for ( node_t* n = stats[p]->inventory.first; n; n = n->next ) { if ( (Item*)n->element == it ) { owner = p; break; } }
+		}
+		Item* ref = it;
+		while ( ref ) { consumeItem(ref, owner >= 0 ? owner : 0); } // decrements + frees the whole stack
+		SAM_INFO("LUA", "Removed item uid " + std::to_string(uid) + ".");
+		lua_pushboolean(Ls, 1);
+		return 1;
 	}
 #endif
 
@@ -2261,10 +2443,26 @@ namespace
 		lua_setglobal(L, "sam_has_effect");
 		lua_pushcfunction(L, lua_sam_get_class);
 		lua_setglobal(L, "sam_get_class");
+		lua_pushcfunction(L, lua_sam_get_race);
+		lua_setglobal(L, "sam_get_race");
 		lua_pushcfunction(L, lua_sam_get_kills);
 		lua_setglobal(L, "sam_get_kills");
 		lua_pushcfunction(L, lua_sam_get_time_played);
 		lua_setglobal(L, "sam_get_time_played");
+
+		// v2 world-ops: position / teleport / spawn / inventory.
+		lua_pushcfunction(L, lua_sam_get_player_uid);
+		lua_setglobal(L, "sam_get_player_uid");
+		lua_pushcfunction(L, lua_sam_get_position);
+		lua_setglobal(L, "sam_get_position");
+		lua_pushcfunction(L, lua_sam_set_position);
+		lua_setglobal(L, "sam_set_position");
+		lua_pushcfunction(L, lua_sam_spawn_monster);
+		lua_setglobal(L, "sam_spawn_monster");
+		lua_pushcfunction(L, lua_sam_get_inventory);
+		lua_setglobal(L, "sam_get_inventory");
+		lua_pushcfunction(L, lua_sam_remove_item);
+		lua_setglobal(L, "sam_remove_item");
 #endif
 	}
 

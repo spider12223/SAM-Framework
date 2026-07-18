@@ -36,6 +36,8 @@ const initialState = {
   monsters: [],  // monster.schema.json-shaped objects
   spells: [],    // spell.schema.json-shaped objects
   effects: [],   // effect.schema.json-shaped objects (custom status effects)
+  races: [],     // race.schema.json-shaped objects (custom playable races)
+  sounds: [],    // sound.schema.json-shaped objects (custom sounds; .ogg lives in assets)
   patches: [],   // patch.schema.json-shaped objects
   scripts: {},   // classId -> { lang, code }
   assets: {},    // 'portraits/x.png' -> 'data:image/png;base64,...'
@@ -76,6 +78,17 @@ function reducer(state, action) {
       return { ...state, effects: upsert(state.effects, action.def) };
     case 'removeEffect':
       return { ...state, effects: state.effects.filter((e) => e.id !== action.id) };
+    case 'saveRace':
+      return { ...state, races: upsert(state.races, action.def) };
+    case 'removeRace': {
+      const scripts = { ...state.scripts };
+      delete scripts[action.id]; // a race's behavior script goes with it
+      return { ...state, races: state.races.filter((r) => r.id !== action.id), scripts };
+    }
+    case 'saveSound':
+      return { ...state, sounds: upsert(state.sounds, action.def) };
+    case 'removeSound':
+      return { ...state, sounds: state.sounds.filter((s) => s.id !== action.id) };
     case 'savePatch': {
       // Patches have no id; key them by target (one merged op-list per file).
       const i = state.patches.findIndex((p) => p.target === action.def.target);
@@ -116,6 +129,8 @@ function reducer(state, action) {
         monsters: action.monsters ?? [],
         spells: action.spells ?? [],
         effects: action.effects ?? [],
+        races: action.races ?? [],
+        sounds: action.sounds ?? [],
         patches: action.patches ?? [],
         scripts: action.scripts ?? {},
         assets: action.assets ?? {},
@@ -131,6 +146,8 @@ function reducer(state, action) {
           monsters: state.monsters,
           spells: state.spells,
           effects: state.effects,
+          races: state.races,
+          sounds: state.sounds,
           patches: state.patches,
         }),
       };
@@ -167,6 +184,8 @@ function persist(state) {
     monsters: state.monsters,
     spells: state.spells,
     effects: state.effects,
+    races: state.races,
+    sounds: state.sounds,
     patches: state.patches,
     scripts: state.scripts,
     assets: state.assets,

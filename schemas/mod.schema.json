@@ -123,6 +123,24 @@
         "description": "Path to an effect JSON file conforming to effect.schema.json."
       }
     },
+    "races": {
+      "type": "array",
+      "description": "Relative paths (from the mod folder) to custom playable-race definition JSON files provided by this mod. The race loader registers each into a reserved race id (200-255); the race then appears in the character-select picker, renders as its chosen existing monster body in both views, and applies flat attribute/HP/MP bonuses at character creation. Each file conforms to race.schema.json.",
+      "items": {
+        "type": "string",
+        "pattern": "\\.json$",
+        "description": "Path to a race JSON file conforming to race.schema.json."
+      }
+    },
+    "sounds": {
+      "type": "array",
+      "description": "Relative paths (from the mod folder) to custom sound definition JSON files provided by this mod. The sound loader FMOD-loads each file and appends it onto the engine sound table so it can be played by its 'namespace:sound' id via sam_play_sound. Each file conforms to sound.schema.json.",
+      "items": {
+        "type": "string",
+        "pattern": "\\.json$",
+        "description": "Path to a sound JSON file conforming to sound.schema.json."
+      }
+    },
     "plugins": {
       "type": "array",
       "description": "PLANNED — the S.A.M plugin system is not yet implemented; declared .dll files are counted but NOT loaded. Leave this empty for now. (Relative paths to compiled plugin .dll files.)",

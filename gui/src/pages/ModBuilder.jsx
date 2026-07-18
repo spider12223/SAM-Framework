@@ -36,7 +36,7 @@ function cloneWithNewId(def, existingIds) {
 }
 
 export default function ModBuilder() {
-  const { meta, classes, items, monsters, spells, effects, patches, scripts, assets, baseline, dispatch } = useMod();
+  const { meta, classes, items, monsters, spells, effects, races, sounds, patches, scripts, assets, baseline, dispatch } = useMod();
   const navigate = useNavigate();
   const [errors, setErrors] = useState([]);
   const [savedAs, setSavedAs] = useState('');
@@ -49,15 +49,15 @@ export default function ModBuilder() {
   const zipRef = useRef(null);
 
   const setMeta = (patch) => dispatch({ type: 'setMeta', patch });
-  const mod = { meta, classes, items, monsters, spells, effects, patches, scripts, assets };
+  const mod = { meta, classes, items, monsters, spells, effects, races, sounds, patches, scripts, assets };
 
   const namespaceBad = meta.namespace !== '' && !NAMESPACE_PATTERN.test(meta.namespace);
   const versionBad = meta.version !== '' && !VERSION_PATTERN.test(meta.version);
   const fwBad = meta.framework_min_version !== '' && !VERSION_PATTERN.test(meta.framework_min_version);
 
   const paths = useMemo(
-    () => contentPaths(classes, items, monsters, spells, patches, effects),
-    [classes, items, monsters, spells, patches, effects]
+    () => contentPaths(classes, items, monsters, spells, patches, effects, races, sounds),
+    [classes, items, monsters, spells, patches, effects, races, sounds]
   );
 
   const collectErrors = () => {
@@ -71,6 +71,8 @@ export default function ModBuilder() {
     monsters.forEach((m, i) => push(paths.monsterPaths[i], validate('monster', m)));
     spells.forEach((s, i) => push(paths.spellPaths[i], validate('spell', s)));
     effects.forEach((e, i) => push(paths.effectPaths[i], validate('effect', e)));
+    races.forEach((r, i) => push(paths.racePaths[i], validate('race', r)));
+    sounds.forEach((s, i) => push(paths.soundPaths[i], validate('sound', s)));
     patches.forEach((p, i) => push(paths.patchPaths[i], validate('patch', p)));
     return all;
   };
@@ -93,14 +95,14 @@ export default function ModBuilder() {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    const hasContent = classes.length || items.length || monsters.length || spells.length || effects.length || patches.length || meta.name.trim() || meta.namespace.trim();
+    const hasContent = classes.length || items.length || monsters.length || spells.length || effects.length || races.length || sounds.length || patches.length || meta.name.trim() || meta.namespace.trim();
     if (hasContent && !window.confirm('Importing replaces the current mod in this session. Continue?')) return;
     setErrors([]); setNotice(''); setImportReport([]); setSavedAs('');
     try {
       const r = await parseModZip(file);
       dispatch({ type: 'loadMod', ...r });
       dispatch({ type: 'setBaseline' });
-      setNotice(`Imported ${r.meta.name || r.meta.namespace || 'mod'}: ${r.classes.length} class(es), ${r.items.length} item(s), ${r.monsters.length} monster(s), ${r.spells.length} spell(s), ${r.effects.length} effect(s), ${r.patches.length} patch(es), ${Object.keys(r.scripts).length} script(s).`);
+      setNotice(`Imported ${r.meta.name || r.meta.namespace || 'mod'}: ${r.classes.length} class(es), ${r.items.length} item(s), ${r.monsters.length} monster(s), ${r.spells.length} spell(s), ${r.effects.length} effect(s), ${r.races.length} race(s), ${r.sounds.length} sound(s), ${r.patches.length} patch(es), ${Object.keys(r.scripts).length} script(s).`);
       setImportReport(r.report);
     } catch (err) {
       setErrors([{ path: 'import', message: err.message }]);
@@ -168,9 +170,9 @@ export default function ModBuilder() {
   const diffRows = useMemo(() => {
     if (!baseline) return null;
     const a = canonicalize(baseline);
-    const b = canonicalize({ meta, classes, items, monsters, spells, effects, patches });
+    const b = canonicalize({ meta, classes, items, monsters, spells, effects, races, sounds, patches });
     return collapseHunks(diffLines(a, b));
-  }, [baseline, meta, classes, items, monsters, spells, effects, patches]);
+  }, [baseline, meta, classes, items, monsters, spells, effects, races, sounds, patches]);
   const summary = diffRows ? diffSummary(diffRows) : null;
 
   return (
@@ -301,6 +303,28 @@ export default function ModBuilder() {
             ))}
           </div>
         </Panel>
+        <Panel title="Bundled Races">
+          <div className="space-y-2">
+            {races.length === 0 && <EmptyHint where="/race-editor" what="races" />}
+            {races.map((def) => (
+              <ItemRow key={def.id} icon={scripts[def.id] ? '🧬📜' : '🧬'} name={def.name} sub={raceSub(def, scripts)}
+                onEdit={() => edit('race', def.id, '/race-editor')}
+                onClone={() => clone(def, 'saveRace', races)}
+                onRemove={() => dispatch({ type: 'removeRace', id: def.id })} />
+            ))}
+          </div>
+        </Panel>
+        <Panel title="Bundled Sounds">
+          <div className="space-y-2">
+            {sounds.length === 0 && <EmptyHint where="/sound-editor" what="sounds" />}
+            {sounds.map((def) => (
+              <ItemRow key={def.id} icon="🔊" name={def.id.split(':')[1] || def.id} sub={soundSub(def, assets)}
+                onEdit={() => edit('sound', def.id, '/sound-editor')}
+                onClone={() => clone(def, 'saveSound', sounds)}
+                onRemove={() => dispatch({ type: 'removeSound', id: def.id })} />
+            ))}
+          </div>
+        </Panel>
         <Panel title="Bundled Patches">
           <div className="space-y-2">
             {patches.length === 0 && <EmptyHint where="/patch-editor" what="patches" />}
@@ -403,6 +427,8 @@ export default function ModBuilder() {
 ├─ monsters/*.json
 ├─ spells/*.json
 ├─ effects/*.json
+├─ races/*.json
+├─ sounds/*.json    sounds/*.ogg
 ├─ patches/*.json
 └─ portraits/*.png  (uploaded art)`}
         </pre>
@@ -412,6 +438,26 @@ export default function ModBuilder() {
       </Panel>
     </div>
   );
+}
+
+/** One-line summary of a sound, for the Mod Builder row. Flags a missing .ogg. */
+function soundSub(def, assets) {
+  const have = assets && assets[def.file];
+  const bits = [def.file || '(no file)'];
+  if (def.loop) bits.push('loop');
+  if (!have) bits.push('⚠ audio not bundled');
+  return `${def.id} · ${bits.join(', ')}`;
+}
+
+/** One-line summary of a race, for the Mod Builder row. */
+function raceSub(def, scripts) {
+  const bits = [`body: ${def.host_body ?? '?'}`];
+  const sm = def.stat_modifiers ?? {};
+  for (const k of ['STR', 'DEX', 'CON', 'INT', 'PER', 'CHR', 'HP', 'MP']) {
+    if (sm[k]) bits.push(`${sm[k] > 0 ? '+' : ''}${sm[k]} ${k}`);
+  }
+  if (scripts && scripts[def.id]) bits.push(`${scripts[def.id].lang} script`);
+  return `${def.id} · ${bits.join(', ')}`;
 }
 
 /** One-line summary of what an effect does, for the Mod Builder row. */

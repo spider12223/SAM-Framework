@@ -1,0 +1,49 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://spider12223.github.io/SAM-Framework/schemas/race.schema.json",
+  "title": "S.A.M Custom Playable Race",
+  "description": "A mod-defined playable race that rides an existing monster body. Registered into a reserved race id (200-255); appears in the character-select race picker, renders as its host body in both third- and first-person, and applies flat attribute/HP/MP bonuses at character creation. A vanilla or mod-less client that loads such a character plays it as Human (graceful degrade).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "name", "host_body"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+:[a-z0-9_]+$",
+      "description": "Unique id in \"namespace:race\" form, e.g. \"mymod:frostborn\"."
+    },
+    "name": {
+      "type": "string",
+      "description": "Display name shown in the character-select race picker, e.g. \"Frostborn\"."
+    },
+    "host_body": {
+      "type": "string",
+      "enum": [
+        "human", "skeleton", "vampire", "succubus", "incubus", "goblin",
+        "automaton", "insectoid", "goatman", "gnome", "gremlin", "dryad",
+        "myconid", "salamander", "troll", "spider", "imp", "rat"
+      ],
+      "description": "The existing monster body this race renders as. Only these 18 bodies have a proper first-person arm, so both views are correct."
+    },
+    "description": {
+      "type": "string",
+      "description": "Short flavour text for the race (shown in the picker's info panel)."
+    },
+    "stat_modifiers": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Flat attribute / HP / MP bonuses added at character creation (may be negative). Vanilla races give no attribute bonuses, so these are the race's whole stat identity.",
+      "properties": {
+        "STR": { "type": "integer" },
+        "DEX": { "type": "integer" },
+        "CON": { "type": "integer" },
+        "INT": { "type": "integer" },
+        "PER": { "type": "integer" },
+        "CHR": { "type": "integer" },
+        "HP": { "type": "integer" },
+        "MP": { "type": "integer" }
+      }
+    }
+  }
+}

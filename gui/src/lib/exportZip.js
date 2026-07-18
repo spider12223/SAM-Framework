@@ -28,6 +28,8 @@ const ITEM_SCHEMA = `${SCHEMA_BASE}/item.schema.json`;
 const MONSTER_SCHEMA = `${SCHEMA_BASE}/monster.schema.json`;
 const SPELL_SCHEMA = `${SCHEMA_BASE}/spell.schema.json`;
 const EFFECT_SCHEMA = `${SCHEMA_BASE}/effect.schema.json`;
+const RACE_SCHEMA = `${SCHEMA_BASE}/race.schema.json`;
+const SOUND_SCHEMA = `${SCHEMA_BASE}/sound.schema.json`;
 const PATCH_SCHEMA = `${SCHEMA_BASE}/patch.schema.json`;
 
 /** "sam_test:shadow_knight" -> "shadow_knight" (file stem from the id). */
@@ -44,20 +46,22 @@ export function patchStem(target, fallback) {
 }
 
 /** Manifest-relative paths for each collection, exactly as the zip lays them out. */
-export function contentPaths(classes, items, monsters, spells = [], patches = [], effects = []) {
+export function contentPaths(classes, items, monsters, spells = [], patches = [], effects = [], races = [], sounds = []) {
   return {
     classPaths: classes.map((c, i) => `classes/${fileStem(c.id, `class_${i + 1}`)}.json`),
     itemPaths: items.map((it, i) => `items/${fileStem(it.id, `item_${i + 1}`)}.json`),
     monsterPaths: (monsters ?? []).map((m, i) => `monsters/${fileStem(m.id, `monster_${i + 1}`)}.json`),
     spellPaths: (spells ?? []).map((s, i) => `spells/${fileStem(s.id, `spell_${i + 1}`)}.json`),
     effectPaths: (effects ?? []).map((e, i) => `effects/${fileStem(e.id, `effect_${i + 1}`)}.json`),
+    racePaths: (races ?? []).map((r, i) => `races/${fileStem(r.id, `race_${i + 1}`)}.json`),
+    soundPaths: (sounds ?? []).map((s, i) => `sounds/${fileStem(s.id, `sound_${i + 1}`)}.json`),
     patchPaths: (patches ?? []).map((p, i) => `patches/${patchStem(p.target, `patch_${i + 1}`)}.json`),
   };
 }
 
 /** The mod.json object (sans $schema — callers stamp it when writing). */
 export function buildManifest(meta, paths) {
-  const { classPaths, itemPaths, monsterPaths, spellPaths, effectPaths, patchPaths } = paths;
+  const { classPaths, itemPaths, monsterPaths, spellPaths, effectPaths, racePaths, soundPaths, patchPaths } = paths;
   const manifest = {
     namespace: meta.namespace,
     name: meta.name,
@@ -76,6 +80,8 @@ export function buildManifest(meta, paths) {
   if (monsterPaths && monsterPaths.length) manifest.monsters = monsterPaths;
   if (spellPaths && spellPaths.length) manifest.spells = spellPaths;
   if (effectPaths && effectPaths.length) manifest.effects = effectPaths;
+  if (racePaths && racePaths.length) manifest.races = racePaths;
+  if (soundPaths && soundPaths.length) manifest.sounds = soundPaths;
   manifest.plugins = [];
   manifest.description = meta.description ?? '';
   return manifest;
@@ -97,10 +103,10 @@ export function scriptPathFor(classDef, i, scripts) {
  */
 export function buildModFiles(mod) {
   const {
-    meta, classes = [], items = [], monsters = [], spells = [], effects = [], patches = [],
+    meta, classes = [], items = [], monsters = [], spells = [], effects = [], races = [], sounds = [], patches = [],
     scripts = {}, assets = {},
   } = mod;
-  const paths = contentPaths(classes, items, monsters, spells, patches, effects);
+  const paths = contentPaths(classes, items, monsters, spells, patches, effects, races, sounds);
   const manifest = buildManifest(meta, paths);
 
   const files = [
@@ -126,6 +132,14 @@ export function buildModFiles(mod) {
       path: paths.effectPaths[i],
       text: JSON.stringify({ $schema: EFFECT_SCHEMA, ...e }, null, 2) + '\n',
     })),
+    ...races.map((r, i) => ({
+      path: paths.racePaths[i],
+      text: JSON.stringify({ $schema: RACE_SCHEMA, ...r }, null, 2) + '\n',
+    })),
+    ...sounds.map((s, i) => ({
+      path: paths.soundPaths[i],
+      text: JSON.stringify({ $schema: SOUND_SCHEMA, ...s }, null, 2) + '\n',
+    })),
     ...patches.map((p, i) => ({
       path: paths.patchPaths[i],
       text: JSON.stringify({ $schema: PATCH_SCHEMA, ...p }, null, 2) + '\n',
@@ -136,6 +150,13 @@ export function buildModFiles(mod) {
   classes.forEach((c, i) => {
     const sp = scriptPathFor(c, i, scripts);
     if (sp) files.push({ path: sp.path, text: sp.code.endsWith('\n') ? sp.code : sp.code + '\n' });
+  });
+  // Race behavior scripts, next to their race JSON (same mechanism as class scripts).
+  races.forEach((r, i) => {
+    const s = scripts?.[r.id];
+    if (s && s.code && s.code.trim()) {
+      files.push({ path: `races/${fileStem(r.id, `race_${i + 1}`)}.${s.lang}`, text: s.code.endsWith('\n') ? s.code : s.code + '\n' });
+    }
   });
 
   for (const [path, dataUrl] of Object.entries(assets)) {

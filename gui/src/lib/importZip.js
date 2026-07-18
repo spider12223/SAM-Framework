@@ -109,6 +109,8 @@ export async function parseModZip(file) {
     monsters: manifest.monsters ?? [],
     spells: manifest.spells ?? [],
     effects: manifest.effects ?? [],
+    races: manifest.races ?? [],
+    sounds: manifest.sounds ?? [],
     patches: manifest.patches ?? [],
   };
 
@@ -149,6 +151,27 @@ export async function parseModZip(file) {
     const def = await readDef(zip, p, 'effect', report);
     if (def) effects.push(def);
   }
+  const races = [];
+  for (const p of declared.races) {
+    const def = await readDef(zip, p, 'race', report);
+    if (!def) continue;
+    races.push(def);
+    // Load the companion behavior script sitting next to the race JSON.
+    for (const lang of SCRIPT_LANGS) {
+      const sp = p.replace(/\.json$/i, `.${lang}`);
+      const entry = zip.file(sp);
+      if (entry) {
+        scripts[def.id] = { lang, code: await entry.async('string') };
+        scriptPaths.add(sp);
+        break;
+      }
+    }
+  }
+  const sounds = [];
+  for (const p of declared.sounds) {
+    const def = await readDef(zip, p, 'sound', report);
+    if (def) sounds.push(def);
+  }
   const patches = [];
   for (const p of declared.patches) {
     const def = await readDef(zip, p, 'patch', report);
@@ -159,7 +182,7 @@ export async function parseModZip(file) {
   const declaredSet = new Set([
     'mod.json',
     ...declared.classes, ...declared.items, ...declared.monsters,
-    ...declared.spells, ...declared.effects, ...declared.patches,
+    ...declared.spells, ...declared.effects, ...declared.races, ...declared.sounds, ...declared.patches,
     ...scriptPaths,
   ]);
   const assets = {};
@@ -179,5 +202,5 @@ export async function parseModZip(file) {
     assets[relPath] = `data:${mime};base64,${base64}`;
   }
 
-  return { meta, classes, items, monsters, spells, effects, patches, scripts, assets, report };
+  return { meta, classes, items, monsters, spells, effects, races, sounds, patches, scripts, assets, report };
 }

@@ -45,6 +45,8 @@ struct SAMModManifest
 	std::vector<std::string> monsters;     // relative paths to monster JSON files
 	std::vector<std::string> spells;       // relative paths to spell JSON files
 	std::vector<std::string> effects;      // relative paths to custom status-effect JSON files
+	std::vector<std::string> races;        // relative paths to custom playable-race JSON files
+	std::vector<std::string> sounds;       // relative paths to custom sound JSON defs
 	std::vector<std::string> plugins;      // relative paths to plugin .dll files
 
 	std::string modPath;      // absolute directory this mod was loaded from

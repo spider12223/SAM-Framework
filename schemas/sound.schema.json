@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://spider12223.github.io/SAM-Framework/schemas/sound.schema.json",
+  "title": "S.A.M Custom Sound",
+  "description": "A mod-supplied sound effect. S.A.M loads the file with FMOD and appends it onto the engine sound table so it can be played by its \"namespace:sound\" id via sam_play_sound (or the /sam_playsound test command). The registry is empty in vanilla, so the sound table is byte-identical when no sound mod is loaded.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "file"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+:[a-z0-9_]+$",
+      "description": "Unique id in \"namespace:sound\" form, e.g. \"mymod:boom\". Pass this to sam_play_sound."
+    },
+    "file": {
+      "type": "string",
+      "pattern": "\\.(ogg|wav)$",
+      "description": "Mod-relative path to the sound file (.ogg or .wav), e.g. \"sounds/boom.ogg\"."
+    },
+    "loop": {
+      "type": "boolean",
+      "default": false,
+      "description": "If true, the sound loops when played (for ambience). Most sound effects leave this false."
+    }
+  }
+}

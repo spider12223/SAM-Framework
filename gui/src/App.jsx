@@ -6,6 +6,8 @@ import ItemEditor from '@/pages/ItemEditor.jsx';
 import MonsterEditor from '@/pages/MonsterEditor.jsx';
 import SpellEditor from '@/pages/SpellEditor.jsx';
 import EffectEditor from '@/pages/EffectEditor.jsx';
+import RaceEditor from '@/pages/RaceEditor.jsx';
+import SoundEditor from '@/pages/SoundEditor.jsx';
 import PatchEditor from '@/pages/PatchEditor.jsx';
 import ModBuilder from '@/pages/ModBuilder.jsx';
 import Validator from '@/pages/Validator.jsx';
@@ -18,6 +20,8 @@ const NAV = [
   { to: '/monster-editor', icon: '👹', label: 'Monster Editor' },
   { to: '/spell-editor', icon: '✨', label: 'Spell Editor' },
   { to: '/effect-editor', icon: '🌀', label: 'Effect Editor' },
+  { to: '/race-editor', icon: '🧬', label: 'Race Editor' },
+  { to: '/sound-editor', icon: '🔊', label: 'Sound Editor' },
   { to: '/patch-editor', icon: '🧩', label: 'Patch Editor' },
   { to: '/mod-builder', icon: '📦', label: 'Mod Builder' },
   { to: '/validator', icon: '📜', label: 'Validator' },
@@ -72,6 +76,8 @@ export default function App() {
                 <Route path="/monster-editor" element={<MonsterEditor />} />
                 <Route path="/spell-editor" element={<SpellEditor />} />
                 <Route path="/effect-editor" element={<EffectEditor />} />
+                <Route path="/race-editor" element={<RaceEditor />} />
+                <Route path="/sound-editor" element={<SoundEditor />} />
                 <Route path="/patch-editor" element={<PatchEditor />} />
                 <Route path="/mod-builder" element={<ModBuilder />} />
                 <Route path="/validator" element={<Validator />} />

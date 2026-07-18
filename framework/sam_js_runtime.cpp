@@ -65,6 +65,8 @@ extern "C" {
 #	include "sam_classes.hpp" // v0.7.0 F5: SAMClasses::patchClass / addClassPassive
 #	include "sam_monster_patches.hpp" // v0.7.0 F5: SAMMonsterPatch::set
 #	include "sam_spells.hpp"  // custom-spell registry (sam_grant_spell)
+#	include "sam_sounds.hpp"  // custom sounds (resolve "ns:sound" ids in sam_play_sound)
+#	include "sam_races.hpp"   // custom races (sam_get_race id lookup)
 #	include "magic/magic.hpp" // addSpell (grant a spell to a player)
 #	include <cctype>
 #endif
@@ -586,7 +588,14 @@ namespace
 	{
 		SAMLogger::noteApiCall();
 		int32_t soundId = -1, vol = 128;
-		if ( argc >= 1 ) { JS_ToInt32(ctx, &soundId, argv[0]); }
+		if ( argc >= 1 && JS_IsString(argv[0]) )
+		{
+			const char* nm = JS_ToCString(ctx, argv[0]);
+			soundId = nm ? SAMSounds::soundIndexForId(nm) : -1;
+			if ( nm ) { JS_FreeCString(ctx, nm); }
+			if ( soundId < 0 ) { SAM_ERROR("JS", "sam_play_sound: unknown sound name."); return JS_NewBool(ctx, 0); }
+		}
+		else if ( argc >= 1 ) { JS_ToInt32(ctx, &soundId, argv[0]); }
 		if ( argc >= 2 && !JS_IsUndefined(argv[1]) ) { JS_ToInt32(ctx, &vol, argv[1]); }
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_play_sound refused: host only."); return JS_NewBool(ctx, 0); }
 		if ( soundId < 0 || (Uint32)soundId >= numsounds )
@@ -763,6 +772,24 @@ namespace
 			return JS_NewString(ctx, def ? def->name.c_str() : "");
 		}
 		return JS_NewString(ctx, playerClassLangEntry(cls, player));
+	}
+
+	// The race identifier for a player: a custom race's "namespace:race" id, or the
+	// vanilla race's name. Lets a race behavior script gate its logic by race.
+	JSValue js_sam_get_race(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return JS_NULL; }
+		const int race = stats[player]->playerRace;
+		if ( race >= SAM_RACE_ID_BASE )
+		{
+			const SAMRaceDef* def = SAMRaces::get(race);
+			return JS_NewString(ctx, def ? def->id.c_str() : "");
+		}
+		const int mon = (int)getMonsterFromPlayerRace(race);
+		if ( mon >= 0 && mon < NUMMONSTERS ) { return JS_NewString(ctx, monstertypename[mon]); }
+		return JS_NewString(ctx, "");
 	}
 
 	JSValue js_sam_get_kills(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
@@ -1043,6 +1070,134 @@ namespace
 		for ( char& c : want ) { c = (char)std::tolower((unsigned char)c); }
 		for ( int i = 0; i < NUMMONSTERS; ++i ) { if ( want == monstertypename[i] ) { return i; } }
 		return -1;
+	}
+
+	// ---- v2 world-ops: position / teleport / spawn / inventory (JS twins) -------
+	// Positions are MAP TILE coordinates (integers). Mirrors the Lua bindings.
+
+	// sam_get_player_uid(player) -> entity uid | null.
+	JSValue js_sam_get_player_uid(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity ) { return JS_NULL; }
+		return JS_NewInt64(ctx, (int64_t)players[player]->entity->getUID());
+	}
+
+	// sam_get_position(uid) -> [tileX, tileY] | null.
+	JSValue js_sam_get_position(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0; if ( argc >= 1 ) { JS_ToInt64(ctx, &uid, argv[0]); }
+		Entity* e = uidToEntity((Sint32)uid);
+		if ( !e ) { return JS_NULL; }
+		JSValue arr = JS_NewArray(ctx);
+		JS_SetPropertyUint32(ctx, arr, 0, JS_NewInt32(ctx, (int)e->x >> 4));
+		JS_SetPropertyUint32(ctx, arr, 1, JS_NewInt32(ctx, (int)e->y >> 4));
+		return arr;
+	}
+
+	// sam_set_position(uid, tileX, tileY) -> boolean. Players via the safe teleport()
+	// path; other entities via x/y + UPDATENEEDED. Host only.
+	JSValue js_sam_set_position(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0; int32_t tx = 0, ty = 0;
+		if ( argc >= 1 ) { JS_ToInt64(ctx, &uid, argv[0]); }
+		if ( argc >= 2 ) { JS_ToInt32(ctx, &tx, argv[1]); }
+		if ( argc >= 3 ) { JS_ToInt32(ctx, &ty, argv[2]); }
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_set_position refused: host only."); return JS_NewBool(ctx, 0); }
+		Entity* e = uidToEntity((Sint32)uid);
+		if ( !e ) { SAM_WARN("JS", "sam_set_position: no entity uid " + std::to_string(uid) + "."); return JS_NewBool(ctx, 0); }
+		if ( tx < 0 || tx >= (int)map.width || ty < 0 || ty >= (int)map.height )
+		{ SAM_ERROR("JS", "sam_set_position: tile out of bounds."); return JS_NewBool(ctx, 0); }
+		if ( e->behavior == &actPlayer )
+		{
+			const bool ok = e->teleport(tx, ty);
+			return JS_NewBool(ctx, ok ? 1 : 0);
+		}
+		e->x = (double)(tx * 16 + 8);
+		e->y = (double)(ty * 16 + 8);
+		e->flags[UPDATENEEDED] = true;
+		e->flags[NOUPDATE] = false;
+		TileEntityList.updateEntity(*e);
+		return JS_NewBool(ctx, 1);
+	}
+
+	// sam_spawn_monster(tileX, tileY, "name" [, shopType]) -> uid | null. Host only.
+	JSValue js_sam_spawn_monster(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t tx = 0, ty = 0; std::string monName;
+		if ( argc >= 1 ) { JS_ToInt32(ctx, &tx, argv[0]); }
+		if ( argc >= 2 ) { JS_ToInt32(ctx, &ty, argv[1]); }
+		if ( argc >= 3 ) { const char* s = JS_ToCString(ctx, argv[2]); if ( s ) { monName = s; JS_FreeCString(ctx, s); } }
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_spawn_monster refused: host only."); return JS_NULL; }
+		const int creature = samMonsterNameToId(monName.c_str());
+		if ( creature <= 0 ) { SAM_ERROR("JS", "sam_spawn_monster: unknown monster '" + monName + "'."); return JS_NULL; }
+		if ( tx < 0 || tx >= (int)map.width || ty < 0 || ty >= (int)map.height )
+		{ SAM_ERROR("JS", "sam_spawn_monster: tile out of bounds."); return JS_NULL; }
+		Entity* e = summonMonster(static_cast<Monster>(creature), tx * 16 + 8, ty * 16 + 8);
+		if ( !e ) { SAM_ERROR("JS", "sam_spawn_monster: spawn failed (blocked tile?)."); return JS_NULL; }
+		if ( argc >= 4 && creature == SHOPKEEPER )
+		{
+			int32_t shopType = 0; JS_ToInt32(ctx, &shopType, argv[3]);
+			if ( shopType < 0 ) { shopType = 0; }
+			if ( shopType > 14 ) { shopType = 14; }
+			if ( Stat* s = e->getStats() ) { s->MISC_FLAGS[STAT_FLAG_NPC] = 1 + shopType; }
+		}
+		SAM_INFO("JS", "Spawned monster " + monName + " at (" + std::to_string(tx) + "," + std::to_string(ty) + ")");
+		return JS_NewInt64(ctx, (int64_t)e->getUID());
+	}
+
+	// sam_get_inventory(player) -> array of { uid, type, name, count, beatitude, status,
+	// identified, equipped }. Empty array for an invalid player. Reader.
+	JSValue js_sam_get_inventory(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		JSValue arr = JS_NewArray(ctx);
+		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return arr; }
+		uint32_t idx = 0;
+		for ( node_t* node = stats[player]->inventory.first; node != nullptr; node = node->next )
+		{
+			Item* it = (Item*)node->element;
+			if ( !it ) { continue; }
+			JSValue o = JS_NewObject(ctx);
+			JS_SetPropertyStr(ctx, o, "uid", JS_NewInt64(ctx, (int64_t)it->uid));
+			JS_SetPropertyStr(ctx, o, "type", JS_NewInt32(ctx, (int32_t)it->type));
+			if ( (int)it->type >= 0 && (int)it->type < NUMITEMS ) { JS_SetPropertyStr(ctx, o, "name", JS_NewString(ctx, itemNameStrings[(int)it->type + 2])); }
+			else { JS_SetPropertyStr(ctx, o, "name", JS_NewString(ctx, "custom")); }
+			JS_SetPropertyStr(ctx, o, "count", JS_NewInt32(ctx, (int32_t)it->count));
+			JS_SetPropertyStr(ctx, o, "beatitude", JS_NewInt32(ctx, (int32_t)it->beatitude));
+			JS_SetPropertyStr(ctx, o, "status", JS_NewInt32(ctx, (int32_t)it->status));
+			JS_SetPropertyStr(ctx, o, "identified", JS_NewBool(ctx, it->identified ? 1 : 0));
+			JS_SetPropertyStr(ctx, o, "equipped", JS_NewBool(ctx, (itemSlot(stats[player], it) != nullptr) ? 1 : 0));
+			JS_SetPropertyUint32(ctx, arr, idx++, o);
+		}
+		return arr;
+	}
+
+	// sam_remove_item(itemUid) -> boolean. Refuses an equipped item. Host only.
+	JSValue js_sam_remove_item(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0; if ( argc >= 1 ) { JS_ToInt64(ctx, &uid, argv[0]); }
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_remove_item refused: host only."); return JS_NewBool(ctx, 0); }
+		Item* it = uidToItem((Uint32)uid);
+		if ( !it ) { SAM_WARN("JS", "sam_remove_item: no item uid " + std::to_string(uid) + "."); return JS_NewBool(ctx, 0); }
+		int owner = -1;
+		for ( int p = 0; p < MAXPLAYERS; ++p )
+		{
+			if ( !stats[p] ) { continue; }
+			if ( itemSlot(stats[p], it) != nullptr )
+			{ SAM_WARN("JS", "sam_remove_item: item uid " + std::to_string(uid) + " is equipped; unequip first."); return JS_NewBool(ctx, 0); }
+			for ( node_t* n = stats[p]->inventory.first; n; n = n->next ) { if ( (Item*)n->element == it ) { owner = p; break; } }
+		}
+		Item* ref = it;
+		while ( ref ) { consumeItem(ref, owner >= 0 ? owner : 0); }
+		SAM_INFO("JS", "Removed item uid " + std::to_string(uid) + ".");
+		return JS_NewBool(ctx, 1);
 	}
 #endif
 
@@ -1798,8 +1953,16 @@ namespace
 		JS_SetPropertyStr(ctx, g, "sam_get_inventory_count", JS_NewCFunction(ctx, js_sam_get_inventory_count, "sam_get_inventory_count", 2));
 		JS_SetPropertyStr(ctx, g, "sam_has_effect", JS_NewCFunction(ctx, js_sam_has_effect, "sam_has_effect", 2));
 		JS_SetPropertyStr(ctx, g, "sam_get_class", JS_NewCFunction(ctx, js_sam_get_class, "sam_get_class", 1));
+		JS_SetPropertyStr(ctx, g, "sam_get_race", JS_NewCFunction(ctx, js_sam_get_race, "sam_get_race", 1));
 		JS_SetPropertyStr(ctx, g, "sam_get_kills", JS_NewCFunction(ctx, js_sam_get_kills, "sam_get_kills", 1));
 		JS_SetPropertyStr(ctx, g, "sam_get_time_played", JS_NewCFunction(ctx, js_sam_get_time_played, "sam_get_time_played", 0));
+		// v2 world-ops: position / teleport / spawn / inventory.
+		JS_SetPropertyStr(ctx, g, "sam_get_player_uid", JS_NewCFunction(ctx, js_sam_get_player_uid, "sam_get_player_uid", 1));
+		JS_SetPropertyStr(ctx, g, "sam_get_position", JS_NewCFunction(ctx, js_sam_get_position, "sam_get_position", 1));
+		JS_SetPropertyStr(ctx, g, "sam_set_position", JS_NewCFunction(ctx, js_sam_set_position, "sam_set_position", 3));
+		JS_SetPropertyStr(ctx, g, "sam_spawn_monster", JS_NewCFunction(ctx, js_sam_spawn_monster, "sam_spawn_monster", 4));
+		JS_SetPropertyStr(ctx, g, "sam_get_inventory", JS_NewCFunction(ctx, js_sam_get_inventory, "sam_get_inventory", 1));
+		JS_SetPropertyStr(ctx, g, "sam_remove_item", JS_NewCFunction(ctx, js_sam_remove_item, "sam_remove_item", 1));
 #endif
 		JS_FreeValue(ctx, g);
 	}

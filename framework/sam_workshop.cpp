@@ -264,6 +264,8 @@ static bool parseManifest(const std::string& jsonText, const std::string& modPat
 	out.monsters = getStringArray("monsters", true);
 	out.spells = getStringArray("spells", true);
 	out.effects = getStringArray("effects", true);
+	out.races = getStringArray("races", true);
+	out.sounds = getStringArray("sounds", true);
 	out.plugins = getStringArray("plugins", true);
 	out.modPath = modPath;
 	out.displayName = displayName;
