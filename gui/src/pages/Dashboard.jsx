@@ -52,17 +52,18 @@ export default function Dashboard() {
           playable mod on its own.
         </p>
         <div className="mt-3 flex flex-wrap gap-3">
-          <a className="sam-btn" href={WORKSHOP_URL} target="_blank" rel="noreferrer">🎮 Steam Workshop</a>
           <a className="sam-btn" href={INSTALLER_URL} target="_blank" rel="noreferrer">⬇ Download Installer</a>
+          <a className="sam-btn" href={WORKSHOP_URL} target="_blank" rel="noreferrer">🎮 Steam Workshop</a>
         </div>
         <div className="mt-3 sam-well px-4 py-3">
           <div className="sam-label">Building a mod? Tell your players where to get S.A.M:</div>
           <div className="mt-1 text-sm" style={{ color: 'var(--color-parchment)' }}>
-            Subscribe on{' '}
+            Point them to the{' '}
+            <a href={INSTALLER_URL} target="_blank" rel="noreferrer" style={{ color: 'var(--color-gold)' }}>installer from GitHub Releases</a>{' '}
+            (it finds Barony and sets S.A.M up), then have them enable your mod in Barony's{' '}
+            <span className="sam-label">Mods</span> menu. It's on the{' '}
             <a href={WORKSHOP_URL} target="_blank" rel="noreferrer" style={{ color: 'var(--color-gold)' }}>Steam Workshop</a>{' '}
-            <span style={{ color: '#6b5a35' }}>or</span> run the{' '}
-            <a href={INSTALLER_URL} target="_blank" rel="noreferrer" style={{ color: 'var(--color-gold)' }}>installer from GitHub Releases</a>,
-            then enable your mod in Barony's <span className="sam-label">Mods</span> menu.
+            too, but Steam can't replace the game's program by itself, so they still run the installer.
           </div>
         </div>
       </Panel>
