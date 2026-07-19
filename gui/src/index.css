@@ -7,17 +7,21 @@
 @theme {
   --color-abyss: #120c05;        /* page edge vignette */
   --color-stone: #1a1208;        /* main background     */
-  --color-wood: #2a1f0e;         /* panel background    */
-  --color-wood-deep: #211808;    /* inset wells         */
-  --color-wood-raised: #33260f;  /* hover / raised      */
-  --color-gold: #d4a84b;         /* primary text/accent */
-  --color-gold-bright: #f0cd7a;  /* highlights          */
+  --color-wood: #2b2010;         /* panel background    */
+  --color-wood-deep: #201708;    /* inset wells         */
+  --color-wood-raised: #38290f;  /* hover / raised      */
+  --color-gold: #d8ac4e;         /* primary text/accent */
+  --color-gold-bright: #f3d488;  /* highlights          */
   --color-gold-fill: #c9922a;    /* slider fills        */
-  --color-gold-dim: #8a6d2e;     /* muted gold          */
-  --color-parchment: #e8d5a3;    /* light text          */
+  --color-gold-dim: #9a7c3a;     /* muted gold (labels) */
+  --color-parchment: #ecd9a8;    /* light text          */
   --color-ember: #7a1f1a;        /* red accent (save)   */
   --color-moss: #2e4a1f;         /* green accent (test) */
   --color-blood: #a03327;        /* remove/error        */
+  /* derived lines/edges — used everywhere instead of ad-hoc hexes */
+  --color-line: #4f3a18;         /* standard border     */
+  --color-line-bright: #6a4e22;  /* hovered/raised edge */
+  --color-line-dark: #0c0803;    /* deep inner edge     */
   --font-medieval: "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
 }
 
@@ -55,31 +59,46 @@ body::before {
 /* ------------------------------------------------------------------ text */
 .sam-title {
   font-variant: small-caps;
-  letter-spacing: 0.12em;
-  color: var(--color-gold);
-  text-shadow: 0 2px 3px rgba(0, 0, 0, 0.9), 0 0 18px rgba(212, 168, 75, 0.15);
+  letter-spacing: 0.1em;
+  color: var(--color-gold); /* fallback where background-clip:text is unsupported */
+  background: linear-gradient(180deg, var(--color-gold-bright) 0%, var(--color-gold) 55%, #b78a34 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent; /* clips to text only where supported; else keeps gold */
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.9)) drop-shadow(0 0 22px rgba(212, 168, 75, 0.18));
 }
 
 .sam-subtitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7rem;
   font-variant: small-caps;
   letter-spacing: 0.35em;
   color: var(--color-gold-dim);
 }
+.sam-subtitle::before,
+.sam-subtitle::after {
+  content: "";
+  width: 34px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--color-gold-dim));
+}
+.sam-subtitle::after { background: linear-gradient(90deg, var(--color-gold-dim), transparent); }
 
 /* ------------------------------------------------------------- ornate panel */
 .sam-panel {
   position: relative;
   background:
-    linear-gradient(180deg, rgba(255, 235, 180, 0.03) 0%, transparent 18%),
+    linear-gradient(180deg, rgba(255, 235, 180, 0.045) 0%, transparent 22%),
     var(--color-wood);
-  border: 1px solid #4a3617;
-  outline: 1px solid #0c0803;
+  border: 1px solid var(--color-line);
+  outline: 1px solid var(--color-line-dark);
   outline-offset: -4px;
   box-shadow:
-    inset 0 0 0 2px rgba(0, 0, 0, 0.55),
-    inset 0 0 30px rgba(0, 0, 0, 0.5),
-    0 4px 14px rgba(0, 0, 0, 0.7);
-  border-radius: 4px;
+    inset 0 0 0 1px rgba(0, 0, 0, 0.45),
+    inset 0 14px 26px rgba(0, 0, 0, 0.28),
+    0 6px 20px rgba(0, 0, 0, 0.6);
+  border-radius: 5px;
 }
 
 /* gold corner nubs */
@@ -102,15 +121,18 @@ body::before {
   align-items: center;
   justify-content: center;
   gap: 0.6rem;
-  padding: 0.55rem 1rem 0.5rem;
-  border-bottom: 1px solid #4a3617;
-  background: linear-gradient(180deg, #241a0b, #1e1509);
+  padding: 0.6rem 1rem 0.55rem;
+  border-bottom: 1px solid var(--color-line);
+  background:
+    linear-gradient(180deg, rgba(243, 212, 136, 0.06), transparent 60%),
+    linear-gradient(180deg, #2b2010, #1f1609);
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.5);
   font-variant: small-caps;
-  letter-spacing: 0.18em;
-  font-size: 1.02rem;
-  color: var(--color-gold);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
-  border-radius: 4px 4px 0 0;
+  letter-spacing: 0.16em;
+  font-size: 1.04rem;
+  color: var(--color-gold-bright);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9), 0 0 14px rgba(212, 168, 75, 0.12);
+  border-radius: 5px 5px 0 0;
 }
 
 .sam-ornament {
@@ -134,10 +156,10 @@ body::before {
 
 /* -------------------------------------------------------------- inset well */
 .sam-well {
-  background: var(--color-wood-deep);
+  background: linear-gradient(180deg, #241a0b 0%, var(--color-wood-deep) 40%);
   border: 1px solid #0e0a04;
-  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.7), 0 1px 0 rgba(212, 168, 75, 0.08);
-  border-radius: 3px;
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(212, 168, 75, 0.05), 0 1px 0 rgba(212, 168, 75, 0.06);
+  border-radius: 4px;
 }
 
 /* ------------------------------------------------------------------ inputs */
@@ -155,7 +177,22 @@ body::before {
 }
 .sam-input:focus {
   border-color: var(--color-gold-dim);
-  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.8), 0 0 8px rgba(212, 168, 75, 0.25);
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.8), 0 0 9px rgba(212, 168, 75, 0.3);
+}
+
+/* Unified keyboard-focus ring: visible only for keyboard users, gold to match theme.
+   Applies across every interactive control so tabbing is legible everywhere. */
+.sam-btn:focus-visible,
+.sam-step:focus-visible,
+.sam-slot:focus-visible,
+.sam-nav-item:focus-visible,
+.sam-check:focus-visible,
+.sam-input:focus-visible,
+.sam-bstop:focus-visible,
+.sam-linkish:focus-visible {
+  outline: 2px solid var(--color-gold-bright);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
 /*
@@ -250,28 +287,33 @@ select.sam-input { appearance: none; cursor: var(--sam-cursor); }
   justify-content: center;
   gap: 0.5rem;
   padding: 0.5rem 1.4rem;
-  background: linear-gradient(180deg, #33260f, #241a0b);
-  border: 1px solid var(--color-gold-dim);
-  outline: 1px solid #0c0803;
+  background: linear-gradient(180deg, #3c2c11, #281c0b);
+  border: 1px solid var(--color-line-bright);
+  outline: 1px solid var(--color-line-dark);
   outline-offset: -3px;
-  border-radius: 3px;
-  color: var(--color-gold);
+  border-radius: 4px;
+  color: var(--color-gold-bright);
   font-family: inherit;
   font-variant: small-caps;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.13em;
   font-size: 1rem;
   cursor: var(--sam-cursor);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
-  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(240, 205, 122, 0.12);
-  transition: filter 120ms ease, transform 60ms ease;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(243, 212, 136, 0.14);
+  transition: filter 130ms ease, transform 90ms ease, box-shadow 130ms ease, border-color 130ms ease;
   user-select: none;
 }
-.sam-btn:hover { filter: brightness(1.18); }
-.sam-btn:active { transform: translateY(1px); }
-.sam-btn:disabled { opacity: 0.45; cursor: not-allowed; filter: none; }
+.sam-btn:hover {
+  filter: brightness(1.14);
+  transform: translateY(-1px);
+  border-color: var(--color-gold-dim);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(243, 212, 136, 0.2), 0 0 12px rgba(212, 168, 75, 0.12);
+}
+.sam-btn:active { transform: translateY(0); filter: brightness(1.05); box-shadow: 0 2px 5px rgba(0, 0, 0, 0.6); }
+.sam-btn:disabled { opacity: 0.4; cursor: not-allowed; filter: none; transform: none; box-shadow: none; }
 
-.sam-btn-red { background: linear-gradient(180deg, #5c1813, #3a0f0c); border-color: #a03327; }
-.sam-btn-green { background: linear-gradient(180deg, #2e4a1f, #1d3013); border-color: #5a7a3a; }
+.sam-btn-red { background: linear-gradient(180deg, #67201a, #3f110d); border-color: #b23c30; color: #f2c3ba; }
+.sam-btn-green { background: linear-gradient(180deg, #35521f, #203413); border-color: #6a8c44; color: #d3e8b6; }
 
 /* small square +/- stepper buttons */
 .sam-step {
@@ -290,7 +332,8 @@ select.sam-input { appearance: none; cursor: var(--sam-cursor); }
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.6);
   user-select: none;
 }
-.sam-step:hover { filter: brightness(1.25); border-color: var(--color-gold-dim); }
+.sam-step { transition: filter 120ms ease, border-color 120ms ease, box-shadow 120ms ease; }
+.sam-step:hover { filter: brightness(1.22); border-color: var(--color-gold-dim); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6), 0 0 8px rgba(212, 168, 75, 0.14); }
 .sam-step:active { transform: translateY(1px); }
 
 .sam-remove {
@@ -301,27 +344,44 @@ select.sam-input { appearance: none; cursor: var(--sam-cursor); }
 
 /* --------------------------------------------------------------- nav (left) */
 .sam-nav-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 0.7rem;
-  padding: 0.65rem 1.1rem;
-  color: var(--color-gold-dim);
+  padding: 0.62rem 1rem 0.62rem 1.05rem;
+  color: #b39456;
   font-variant: small-caps;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   font-size: 1.02rem;
   border: 1px solid transparent;
-  border-radius: 3px;
+  border-radius: 4px;
   cursor: var(--sam-cursor);
   text-decoration: none;
-  transition: color 120ms ease, background 120ms ease;
+  transition: color 130ms ease, background 130ms ease, border-color 130ms ease, padding-left 130ms ease;
 }
-.sam-nav-item:hover { color: var(--color-gold); background: rgba(212, 168, 75, 0.05); }
+.sam-nav-item::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 50%;
+  height: 0; width: 3px;
+  transform: translateY(-50%);
+  border-radius: 0 2px 2px 0;
+  background: linear-gradient(180deg, var(--color-gold-bright), var(--color-gold-fill));
+  transition: height 150ms ease;
+}
+.sam-nav-item:hover {
+  color: var(--color-gold-bright);
+  background: rgba(212, 168, 75, 0.07);
+  padding-left: 1.15rem;
+}
+.sam-nav-item:hover::before { height: 40%; }
 .sam-nav-item.active {
   color: var(--color-gold-bright);
-  background: linear-gradient(90deg, #5c1813, #3a0f0c);
+  background: linear-gradient(90deg, rgba(112, 30, 24, 0.85), rgba(58, 15, 12, 0.7));
   border-color: #7a2a1e;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(240, 205, 122, 0.1);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(243, 212, 136, 0.12);
 }
+.sam-nav-item.active::before { height: 62%; }
 
 /* --------------------------------------------------------------- scrollbars */
 * {

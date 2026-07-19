@@ -100,8 +100,12 @@ struct SAMClassDef
 	std::map<std::string, int> skills;          // "PRO_X" -> 0..100
 	std::vector<SAMStartingItem> startingItems;
 	std::vector<std::string> startingSpells;    // "SPELL_X"
-	std::vector<std::string> strongRolls;       // stat names ("STR"...)
-	std::vector<std::string> weakRolls;         // stat names
+	std::vector<std::string> strongRolls;       // stat names ("STR"...) — sugar for weight 6
+	std::vector<std::string> weakRolls;         // stat names           — sugar for weight 1
+	// Explicit per-attribute level-up growth WEIGHT ("STR"->n). The engine picks 3 stats to
+	// raise each level by weighted random; vanilla weights are graduated (1..6, 2=neutral),
+	// so this exposes the full range instead of just strong/weak. Overrides strong/weak.
+	std::map<std::string, int> statGrowthWeights;
 	int gold = 0;
 
 	// Optional custom class-select portrait (carousel icon).

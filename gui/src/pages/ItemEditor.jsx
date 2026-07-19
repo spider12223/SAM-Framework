@@ -199,13 +199,26 @@ export default function ItemEditor() {
 
         <Panel title="Appearance">
           <div className="mb-3 text-xs" style={{ color: '#9dc76a' }}>
-            ✓ Both the <span className="sam-mono">3D Model</span> and the <span className="sam-mono">Inventory Icon</span> load in-game (v0.9.3+).
-            Borrow a vanilla item's 3D model, and point the icon at your own PNG.
+            ✓ Ship your OWN <span className="sam-mono">.vox</span> model, borrow a vanilla one, or set a custom
+            2D icon — all load in-game (custom models: v1.3.3+).
           </div>
           <div className="space-y-3">
             <Field
-              label="3D Model — reuse a vanilla item"
-              hint='Your item wears this vanilla item&apos;s model (world + first-person), e.g. SILVER_SHIELD. Leave blank to auto-pick by equip slot (a shield looks like a shield, boots like boots…).'
+              label="Custom 3D Model — your own .vox"
+              hint="A mod-relative path to a .vox you bundle, e.g. models/mymod/blade.vox. Loaded at runtime as the item's world + inventory model (wins over the vanilla model below). Must be Barony SLAB .vox format — MagicaVoxel exports are rejected, so export/convert to slab."
+            >
+              <TextInput value={model} onChange={setModel} placeholder="models/mymod/blade.vox" />
+            </Field>
+            <Field
+              label="First-Person Model (optional)"
+              hint="A separate .vox for the held / first-person view. Leave blank to reuse the model above."
+            >
+              <TextInput value={modelFp} onChange={setModelFp} placeholder="models/mymod/blade_fp.vox" />
+            </Field>
+            <div className="sam-divider" />
+            <Field
+              label="…or reuse a vanilla item's model"
+              hint='No custom .vox? Borrow an existing item model instead (world + first-person), e.g. SILVER_SHIELD. Leave blank to auto-pick by equip slot (a shield looks like a shield, boots like boots…). Ignored if a custom model is set above.'
             >
               <SearchSelect
                 options={ITEM_TYPES}
@@ -218,20 +231,9 @@ export default function ItemEditor() {
                 <button type="button" className="mt-1 text-xs underline" style={{ color: '#a03327' }} onClick={() => setModelFromItem('')}>clear</button>
               )}
             </Field>
-            <Field label="Inventory Icon" hint="Loaded at runtime — path to a PNG in your mod folder (e.g. items/shadowblade.png)">
+            <Field label="Inventory Icon (2D)" hint="Path to a PNG in your mod folder (e.g. items/shadowblade.png). Separate from the 3D model — this is the flat hotbar/inventory icon.">
               <TextInput value={icon} onChange={setIcon} placeholder="items/shadowblade.png" />
             </Field>
-            <details>
-              <summary className="text-xs cursor-pointer" style={{ color: '#6b5a35' }}>Custom .vox model paths (not supported yet)</summary>
-              <div className="space-y-3 mt-2">
-                <Field label="World Model" hint="PLANNED — a new .vox can't be loaded yet; use the 3D Model picker above">
-                  <TextInput value={model} onChange={setModel} placeholder="models/shadowblade.vox" />
-                </Field>
-                <Field label="First-Person Model" hint="PLANNED — not yet loaded">
-                  <TextInput value={modelFp} onChange={setModelFp} placeholder="models/shadowblade_fp.vox" />
-                </Field>
-              </div>
-            </details>
           </div>
         </Panel>
 

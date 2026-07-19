@@ -157,11 +157,18 @@ export default function ClassEditor() {
   );
   const [spells, setSpells] = useState(draft?.spells ?? editDef?.starting_spells ?? []);
   const [spellError, setSpellError] = useState('');
+  // Per-attribute level-up growth WEIGHT (number). 2 = neutral; higher = raised more often;
+  // 0 = never. Loads explicit weights, else derives from the old strong(6)/weak(1) shorthand.
   const [growth, setGrowth] = useState(() => {
     if (draft?.growth) return draft.growth;
     const g = {};
-    for (const a of editDef?.stat_growth?.strong_rolls ?? []) g[a] = 'strong';
-    for (const a of editDef?.stat_growth?.weak_rolls ?? []) g[a] = 'weak';
+    const w = editDef?.stat_growth?.weights;
+    if (w && typeof w === 'object') {
+      for (const a of ROLL_STATS) if (typeof w[a] === 'number') g[a] = w[a];
+    } else {
+      for (const a of editDef?.stat_growth?.strong_rolls ?? []) g[a] = 6;
+      for (const a of editDef?.stat_growth?.weak_rolls ?? []) g[a] = 1;
+    }
     return g;
   });
   // Per-level HP/MP growth + regen. 3 is the engine's "default" row — which is exactly
@@ -187,6 +194,10 @@ export default function ClassEditor() {
     draft?.looks ?? Object.entries(editDef?.appearance?.races ?? {}).map(([race, v]) => ({ race, head: v?.head ?? '' }))
   );
   const [surviveShift, setSurviveShift] = useState(draft?.surviveShift ?? editDef?.appearance?.survive_shapeshift ?? false);
+  // Whole-body custom model (v1.3.3): a mod-relative .vox that replaces the ENTIRE body on
+  // ANY race, over equipped armour (e.g. a vehicle/creature class). Distinct from the
+  // per-race head look above.
+  const [bodyModel, setBodyModel] = useState(draft?.bodyModel ?? editDef?.appearance?.body_model ?? '');
   // Preview-only: which body the rig draws. Not part of the class JSON — sex is the
   // player's own choice at character creation, and a class can't (and shouldn't) force it.
   const [previewSex, setPreviewSex] = useState('male');
@@ -213,14 +224,14 @@ export default function ClassEditor() {
   // durable home until "Save Class", so they must be in here.
   useEffect(() => {
     const d = { name, description, attrs, offsets, skills, items, spells, growth, hpMpGrowth,
-      mpRegenBase, mpRegenMult, mpRegenScaling, looks, surviveShift, gold, portrait, scriptLang, scriptCode, scriptBlocks };
+      mpRegenBase, mpRegenMult, mpRegenScaling, looks, surviveShift, bodyModel, gold, portrait, scriptLang, scriptCode, scriptBlocks };
     try { localStorage.setItem(DRAFT_KEY, JSON.stringify(d)); }
     catch { // a very large portrait can blow the quota — keep the rest, drop the image bytes
       try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ ...d, portrait: { path: portrait.path, dataUrl: '' } })); } catch { /* give up quietly */ }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [name, description, attrs, offsets, skills, items, spells, growth, hpMpGrowth,
-    mpRegenBase, mpRegenMult, mpRegenScaling, looks, surviveShift, gold, portrait, scriptLang, scriptCode, scriptBlocks]);
+    mpRegenBase, mpRegenMult, mpRegenScaling, looks, surviveShift, bodyModel, gold, portrait, scriptLang, scriptCode, scriptBlocks]);
 
   const namespace = meta.namespace || 'mymod';
   const classId = `${namespace}:${slugify(name)}`;
@@ -257,12 +268,9 @@ export default function ClassEditor() {
     setSpells((prev) => (prev.includes(s) ? prev : [...prev, s]));
   };
 
-  const cycleGrowth = (attr) => {
-    setGrowth((prev) => {
-      const cur = prev[attr];
-      const next = cur === undefined ? 'strong' : cur === 'strong' ? 'weak' : undefined;
-      return { ...prev, [attr]: next };
-    });
+  // Set one attribute's growth weight (blank → 2 neutral; clamp 0..99).
+  const setGrowthWeight = (attr, v) => {
+    setGrowth((prev) => ({ ...prev, [attr]: v === '' ? 2 : Math.max(0, Math.min(99, Number(v) || 0)) }));
   };
 
   const buildDef = () => {
@@ -290,12 +298,15 @@ export default function ClassEditor() {
       def.starting_items = items.map(entryToJson);
     }
     if (spells.length) def.starting_spells = spells;
-    const strong = ROLL_STATS.filter((a) => growth[a] === 'strong');
-    const weak = ROLL_STATS.filter((a) => growth[a] === 'weak');
-    if (strong.length || weak.length) {
-      def.stat_growth = {};
-      if (strong.length) def.stat_growth.strong_rolls = strong;
-      if (weak.length) def.stat_growth.weak_rolls = weak;
+    // Per-attribute growth weights. 2 = neutral (the engine default) so those are omitted —
+    // an untouched class emits no stat_growth at all. Only non-neutral weights are written.
+    const weights = {};
+    for (const a of ROLL_STATS) {
+      const w = growth[a];
+      if (w != null && Number(w) !== 2) weights[a] = Math.max(0, Math.min(99, Number(w)));
+    }
+    if (Object.keys(weights).length) {
+      def.stat_growth = { weights };
     }
     // Only emit hp_mp_growth once it differs from the engine default row, so an
     // untouched class keeps producing byte-identical JSON to before.
@@ -323,8 +334,11 @@ export default function ClassEditor() {
       if (!l.race || !String(l.head).trim()) continue;
       races[l.race] = { head: String(l.head).trim() };
     }
-    if (Object.keys(races).length) {
-      def.appearance = { races };
+    const body = bodyModel.trim();
+    if (Object.keys(races).length || body) {
+      def.appearance = {};
+      if (Object.keys(races).length) def.appearance.races = races;
+      if (body) def.appearance.body_model = body;
       if (surviveShift) def.appearance.survive_shapeshift = true;
     }
     if (gold > 0) def.gold = gold;
@@ -355,7 +369,7 @@ export default function ClassEditor() {
   const def = useMemo(buildDef,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [name, description, attrs, offsets, skills, items, spells, growth, gold, portrait, namespace,
-      hpMpGrowth, mpRegenBase, mpRegenMult, mpRegenScaling, looks, surviveShift]);
+      hpMpGrowth, mpRegenBase, mpRegenMult, mpRegenScaling, looks, surviveShift, bodyModel]);
   const preview = useMemo(() => JSON.stringify(def, null, 2), [def]);
   const hints = useMemo(() => checkBalance('class', def), [def]);
 
@@ -459,29 +473,29 @@ export default function ClassEditor() {
               roll high or low as you level. (solidius: put it in the space the sliders freed.) */}
           <Panel title="Stat Growth">
             <div className="text-xs mb-2" style={{ color: '#6b5a35' }}>
-              Which attributes tend to roll high or low on each level-up. Click to cycle:
-              neutral → <span className="sam-ok">strong roll</span> →{' '}
-              <span className="sam-error">weak roll</span>.
+              Each level-up raises <b>3</b> attributes, picked by <b>weight</b> — higher grows more
+              often. <span className="sam-ok">2 = neutral</span>,{' '}
+              <span className="sam-error">0 = never</span>. Vanilla classes run 1–6, so this is the
+              full curve, not just weak/strong.
             </div>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-x-3 gap-y-2">
               {ROLL_STATS.map((a) => {
-                const state = growth[a];
+                const w = growth[a];
+                const val = (w == null ? 2 : w);
+                const tone = val >= 4 ? '#9dc76a' : val <= 1 ? '#e07a6a' : undefined;
                 return (
-                  <button
-                    key={a}
-                    type="button"
-                    className="sam-btn"
-                    style={{
-                      padding: '0.4rem 0.5rem',
-                      borderColor: state === 'strong' ? '#5a7a3a' : state === 'weak' ? '#a03327' : undefined,
-                      color: state === 'strong' ? '#9dc76a' : state === 'weak' ? '#e07a6a' : undefined,
-                    }}
-                    onClick={() => cycleGrowth(a)}
-                  >
-                    {ATTR_ICONS[a]} {a}{state === 'strong' ? ' ▲' : state === 'weak' ? ' ▼' : ''}
-                  </button>
+                  <div key={a} className="flex items-center gap-2">
+                    <span className="sam-label shrink-0" style={{ width: '3.6rem', fontSize: '0.9rem', color: tone }}>
+                      {ATTR_ICONS[a]} {a}
+                    </span>
+                    <NumberInput value={val} min={0} max={99} onChange={(v) => setGrowthWeight(a, v)} />
+                  </div>
                 );
               })}
+            </div>
+            <div className="text-xs mt-2" style={{ color: '#8a7749' }}>
+              Presets: weak = 1 · neutral = 2 · strong = 6. (Old <span className="sam-mono">strong_rolls</span>/
+              <span className="sam-mono">weak_rolls</span> mods still load — strong→6, weak→1.)
             </div>
           </Panel>
         </div>
@@ -560,22 +574,30 @@ export default function ClassEditor() {
         </Panel>
 
         <Panel title="Character Look">
-          <div className="text-xs mb-2" style={{ color: '#e0b46a' }}>
-            ⏳ <b>Needs a newer S.A.M than the current release.</b> You can design and export
-            this now, but the published build ignores the <span className="sam-mono">appearance</span> block —
-            players just keep their normal head until the next release lands.
+          <div className="text-xs mb-3" style={{ color: '#9dc76a' }}>
+            ✓ Works in-game (v1.3.x) — and shows on the character-select preview.
           </div>
+
+          {/* Whole-body custom model — the v1.3.3 unlock: one .vox becomes the entire body. */}
+          <Field
+            label="Whole-body model — your own .vox"
+            hint="A mod-relative .vox that becomes the ENTIRE body on ANY race, even with armour equipped — a vehicle, construct, creature, anything. Barony SLAB .vox format only (MagicaVoxel is rejected). If set, it replaces the whole body (overriding the per-race head below)."
+          >
+            <TextInput value={bodyModel} onChange={setBodyModel} placeholder="models/mymod/mech.vox" />
+          </Field>
+
+          <div className="sam-divider" />
+
+          <div className="sam-label mb-1">Per-race head</div>
           <div className="text-xs mb-2" style={{ color: '#6b5a35' }}>
             Force a head on everyone who plays this class. Pick a race, pick a head — or
-            type a <span className="sam-mono">namespace:model</span> to use your own
-            <span className="sam-mono"> .vox</span>.
+            type a <span className="sam-mono">namespace:model</span> for your own
+            <span className="sam-mono"> .vox</span> head.
             <span className="sam-ok"> default</span> covers any race you don't list.
           </div>
-          <div className="text-xs mb-3 sam-error">
-            ⚠ Head only. The body can't be forced: the game only assigns torso/arms/legs
-            when that armour slot is <b>empty</b>, so a body look would vanish the moment
-            the player equips anything. A race you don't list keeps its normal look — that's
-            deliberate, so a class never breaks a race you didn't design for.
+          <div className="text-xs mb-3" style={{ color: '#8a7749' }}>
+            ⚠ Head only. Equipped armour re-assigns torso/arms/legs, so a per-race <b>body</b> look
+            can't stick here — use the <b>whole-body model</b> above to force a full body.
           </div>
           <div className="space-y-2">
             {looks.map((l, i) => (

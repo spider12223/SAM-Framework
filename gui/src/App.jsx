@@ -37,7 +37,7 @@ function Banner() {
       <h1 className="sam-title text-4xl m-0" style={{ fontWeight: 600 }}>
         S.A.M Framework
       </h1>
-      <div className="sam-subtitle text-sm mt-1">— Support All Mods —</div>
+      <div className="sam-subtitle text-sm mt-1.5">Support All Mods</div>
     </header>
   );
 }

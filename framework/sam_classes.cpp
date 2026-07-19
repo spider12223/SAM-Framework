@@ -352,6 +352,22 @@ void SAMClasses::loadFromManifest(const SAMModManifest& manifest)
 					if ( e.is_string() ) { def.weakRolls.push_back(e.get<std::string>()); }
 				}
 			}
+			// Explicit per-attribute growth weights: { "STR": 6, "DEX": 1, ... }. Higher =
+			// more likely to be one of the 3 stats raised on level-up. Clamped to 0..99
+			// (0 = never). Overrides strong/weak for any attribute it names.
+			if ( g.contains("weights") && g["weights"].is_object() )
+			{
+				for ( auto it = g["weights"].begin(); it != g["weights"].end(); ++it )
+				{
+					if ( it.value().is_number_integer() )
+					{
+						int w = it.value().get<int>();
+						if ( w < 0 ) { w = 0; }
+						if ( w > 99 ) { w = 99; }
+						def.statGrowthWeights[it.key()] = w;
+					}
+				}
+			}
 		}
 
 		def.gold = getInt(j, "gold", 0);

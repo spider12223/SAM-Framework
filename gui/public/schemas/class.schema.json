@@ -789,7 +789,7 @@
     "stat_growth": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Which attributes roll higher (strong) or lower (weak) on level-up.",
+      "description": "How each attribute grows on level-up. Barony picks 3 attributes to raise per level by weighted random. Use 'weights' for the full graduated control (any weight per attribute, like vanilla), or the strong_rolls/weak_rolls shorthand (strong = weight 6, weak = weight 1, unlisted = 2 neutral).",
       "properties": {
         "strong_rolls": {
           "type": "array",
@@ -819,6 +819,19 @@
               "CHR"
             ],
             "description": "An attribute name (STR/DEX/CON/INT/PER/CHR), mapping to STAT_STR..STAT_CHR in stat.hpp."
+          }
+        },
+        "weights": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Explicit per-attribute growth WEIGHT — the graduated control vanilla actually uses. Higher = more likely to be one of the 3 attributes raised each level-up. Vanilla weights run 1..6 (2 = neutral, 0 = never). Overrides strong_rolls/weak_rolls for any attribute named, so you can build any growth curve.",
+          "properties": {
+            "STR": { "type": "integer", "minimum": 0, "maximum": 99 },
+            "DEX": { "type": "integer", "minimum": 0, "maximum": 99 },
+            "CON": { "type": "integer", "minimum": 0, "maximum": 99 },
+            "INT": { "type": "integer", "minimum": 0, "maximum": 99 },
+            "PER": { "type": "integer", "minimum": 0, "maximum": 99 },
+            "CHR": { "type": "integer", "minimum": 0, "maximum": 99 }
           }
         }
       }
