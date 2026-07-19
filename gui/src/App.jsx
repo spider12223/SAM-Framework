@@ -1,5 +1,6 @@
 import { HashRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
 import { ModProvider } from '@/state/ModContext.jsx';
+import StartHere from '@/pages/StartHere.jsx';
 import Dashboard from '@/pages/Dashboard.jsx';
 import ClassEditor from '@/pages/ClassEditor.jsx';
 import ItemEditor from '@/pages/ItemEditor.jsx';
@@ -14,6 +15,7 @@ import Validator from '@/pages/Validator.jsx';
 import ApiReference from '@/pages/ApiReference.jsx';
 
 const NAV = [
+  { to: '/start', icon: '🧭', label: 'Start Here' },
   { to: '/dashboard', icon: '🏰', label: 'Dashboard' },
   { to: '/class-editor', icon: '🛡', label: 'Class Editor' },
   { to: '/item-editor', icon: '⚔', label: 'Item Editor' },
@@ -69,7 +71,8 @@ export default function App() {
             <Sidebar />
             <main className="flex-1 min-w-0 px-3 pb-6 overflow-y-auto">
               <Routes>
-                <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                <Route path="/" element={<Navigate to="/start" replace />} />
+                <Route path="/start" element={<StartHere />} />
                 <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/class-editor" element={<ClassEditor />} />
                 <Route path="/item-editor" element={<ItemEditor />} />
