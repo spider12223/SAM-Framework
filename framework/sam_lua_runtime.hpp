@@ -189,6 +189,28 @@ namespace SAMLua
 	long long getKills(int player);
 	void resetKills();
 
+	// v1.4.0 — floating "companion" entity (a JoJo-style Stand / familiar). A decorative
+	// follower that renders a registered custom .vox model, trails its owner player a short
+	// distance behind with a gentle hover, and thrusts forward on demand (the punch motion).
+	// Backs sam_spawn_companion / sam_companion_punch and lives here (rather than once per
+	// runtime) so the Lua and JS paths share ONE behavior pointer and cannot drift.
+	//
+	// Host-authoritative: only the host runs entity behaviors, and it moves the companion
+	// every frame so its position replicates to clients like any mover. All calls no-op
+	// (return 0/false) off-host, on an invalid player, for an unregistered model, or in the
+	// standalone sandbox that has no engine linked. A companion adds a brand-new behavior
+	// function and touches no vanilla code path — pure no-op unless a mod spawns one.
+	//   spawnCompanion(player 0..3, "ns:model", scale>0) -> new entity uid, or 0 on failure.
+	//   companionPunch(uid) -> false unless uid is a live companion; else starts a thrust.
+	unsigned long long spawnCompanion(int player, const std::string& modelId, double scale);
+	bool companionPunch(unsigned long long uid);
+
+	// v1.4.0 — sam_get_facing(player) reader. Returns the player's facing yaw in radians,
+	// wrapped to [0, 2*PI): 0 = +x (east), increasing toward +y (so the forward unit vector
+	// is (cos yaw, sin yaw)). Returns a negative sentinel for an invalid/absent player.
+	// Host-authoritative for remote players; a client always sees its own facing correctly.
+	double getFacing(int player);
+
 	// Tear down the VM and release all script references.
 	void shutdown();
 

@@ -48,6 +48,10 @@ struct SAMModManifest
 	std::vector<std::string> races;        // relative paths to custom playable-race JSON files
 	std::vector<std::string> sounds;       // relative paths to custom sound JSON defs
 	std::vector<std::string> plugins;      // relative paths to plugin .dll files
+	// Standalone .vox models NOT tied to an item or class — for sam_spawn_companion and
+	// other decorative entities. Each is { id, file }: id = "ns:name" scripts refer to,
+	// file = the mod-relative .vox path (Barony slab format). v1.4.0.
+	std::vector<std::pair<std::string, std::string>> models;
 
 	std::string modPath;      // absolute directory this mod was loaded from
 	std::string displayName;  // Workshop/local display name (from mountedFilepaths)

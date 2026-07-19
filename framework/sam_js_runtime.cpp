@@ -1196,6 +1196,44 @@ namespace
 		return JS_TRUE;
 	}
 
+	// sam_spawn_companion(player, model_id [, scale]) -> uid | null. Twin of the Lua binding:
+	// spawns a floating companion that renders a registered custom .vox model and trails the
+	// player, ready to thrust forward on sam_companion_punch. Remove with sam_remove_entity.
+	JSValue js_sam_spawn_companion(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1;
+		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		const char* modelC = ( argc >= 2 ) ? JS_ToCString(ctx, argv[1]) : nullptr;
+		double scale = 1.0;
+		if ( argc >= 3 ) { JS_ToFloat64(ctx, &scale, argv[2]); }
+		const unsigned long long uid = SAMLua::spawnCompanion(player, modelC ? modelC : "", scale);
+		if ( modelC ) { JS_FreeCString(ctx, modelC); }
+		if ( uid == 0 ) { return JS_NULL; }
+		return JS_NewInt64(ctx, (int64_t)uid);
+	}
+
+	// sam_companion_punch(uid) -> bool. Trigger the forward punch thrust on a companion.
+	JSValue js_sam_companion_punch(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_FALSE; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+		return SAMLua::companionPunch((unsigned long long)uid) ? JS_TRUE : JS_FALSE;
+	}
+
+	// sam_get_facing(player) -> yaw radians [0,2PI) | null. 0 = +x (east), increasing toward
+	// +y; forward unit vector is (cos yaw, sin yaw). Host-authoritative for remote players.
+	JSValue js_sam_get_facing(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1;
+		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		const double yaw = SAMLua::getFacing(player);
+		if ( yaw < 0.0 ) { return JS_NULL; }
+		return JS_NewFloat64(ctx, yaw);
+	}
+
 	// sam_get_inventory(player) -> array of { uid, type, name, count, beatitude, status,
 	// identified, equipped }. Empty array for an invalid player. Reader.
 	JSValue js_sam_get_inventory(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
@@ -2011,6 +2049,10 @@ namespace
 		JS_SetPropertyStr(ctx, g, "sam_remove_entity", JS_NewCFunction(ctx, js_sam_remove_entity, "sam_remove_entity", 1));
 		JS_SetPropertyStr(ctx, g, "sam_get_inventory", JS_NewCFunction(ctx, js_sam_get_inventory, "sam_get_inventory", 1));
 		JS_SetPropertyStr(ctx, g, "sam_remove_item", JS_NewCFunction(ctx, js_sam_remove_item, "sam_remove_item", 1));
+		// v1.4.0 — floating companion ("Stand") + facing reader.
+		JS_SetPropertyStr(ctx, g, "sam_spawn_companion", JS_NewCFunction(ctx, js_sam_spawn_companion, "sam_spawn_companion", 3));
+		JS_SetPropertyStr(ctx, g, "sam_companion_punch", JS_NewCFunction(ctx, js_sam_companion_punch, "sam_companion_punch", 1));
+		JS_SetPropertyStr(ctx, g, "sam_get_facing", JS_NewCFunction(ctx, js_sam_get_facing, "sam_get_facing", 1));
 #endif
 		JS_FreeValue(ctx, g);
 	}

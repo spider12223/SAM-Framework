@@ -73,6 +73,7 @@ extern "C" {
 #	include "sam_classes.hpp" // v0.7.0 F5: SAMClasses::patchClass / addClassPassive
 #	include "sam_monster_patches.hpp" // v0.7.0 F5: SAMMonsterPatch::set
 #	include "sam_spells.hpp"  // custom-spell registry (sam_grant_spell)
+#	include "sam_models.hpp"  // v1.4.0: SAMModels::modelIndexForId (companion custom .vox)
 #	include "magic/magic.hpp" // addSpell (grant a spell to a player)
 #	include <cctype>
 #endif
@@ -1866,6 +1867,109 @@ namespace
 #endif
 	}
 
+	// ==========================================================================
+	//  v1.4.0 — floating "companion" entity (a JoJo-style Stand / familiar).
+	//  Renders a registered custom .vox model, trails its owner player a short
+	//  distance behind with a gentle hover, and thrusts forward on demand (the
+	//  punch motion). Adds a brand-new behavior function and touches no vanilla
+	//  code path — a pure no-op unless a mod calls sam_spawn_companion.
+	// ==========================================================================
+#ifdef SAM_LUA_HAVE_BARONY
+	constexpr double SAM_COMPANION_PI          = 3.14159265358979323846;
+	constexpr int    SAM_COMPANION_PUNCH_TICKS = 8;      // one forward-thrust window
+	constexpr double SAM_COMPANION_BACK        = 18.0;   // idle distance behind the owner (px)
+	constexpr double SAM_COMPANION_REACH       = 30.0;   // forward lunge distance on a punch (px)
+	constexpr double SAM_COMPANION_RISE        = 6.0;    // float height above owner (z is neg-up)
+
+	// Per-frame follow behavior (host-authoritative). Skill layout — none aliased to any
+	// vanilla use (the portal marker is skill[19]==1; a companion is skill[19]==2):
+	//   skill[2]  = owner player index (players[skill[2]] convention)
+	//   skill[18] = punch ticks remaining (0 = idle behind; >0 = thrusting forward)
+	//   skill[19] = 2 (S.A.M companion marker)   fskill[0] = hover-bob phase
+	void samCompanionBehavior(Entity* my)
+	{
+		my->flags[PASSABLE] = true;   // never collide with anything
+		my->flags[BRIGHT]   = true;   // full-bright so the Stand reads in a dark dungeon
+		const int owner = my->skill[2];
+		if ( owner < 0 || owner >= MAXPLAYERS || !players[owner] || !players[owner]->entity )
+		{
+			// Owner gone (died / descended a level) -> despawn. Self-remove is safe: the
+			// entity act loop advances a saved next-node first, exactly as spell missiles do.
+			if ( my->mynode ) { list_RemoveNode(my->mynode); }
+			return;
+		}
+		Entity* p = players[owner]->entity;
+
+		double tx, ty, ease;
+		if ( my->skill[18] > 0 )
+		{
+			// Thrust forward (in front of the player) then back — a crisp jab. reach traces
+			// 0 -> REACH -> 0 across the punch window so the Stand lunges out and returns.
+			const double phase = (double)(SAM_COMPANION_PUNCH_TICKS - my->skill[18])
+			                     / (double)SAM_COMPANION_PUNCH_TICKS;
+			const double reach = SAM_COMPANION_REACH * std::sin(phase * SAM_COMPANION_PI);
+			tx = p->x + reach * std::cos(p->yaw);
+			ty = p->y + reach * std::sin(p->yaw);
+			ease = 0.6;                 // snap out fast for a punchy jab
+			my->skill[18]--;
+		}
+		else
+		{
+			// Idle: float a set distance behind the player (yaw + PI = directly behind).
+			tx = p->x + SAM_COMPANION_BACK * std::cos(p->yaw + SAM_COMPANION_PI);
+			ty = p->y + SAM_COMPANION_BACK * std::sin(p->yaw + SAM_COMPANION_PI);
+			ease = 0.25;                // smooth trail
+		}
+		my->x += (tx - my->x) * ease;
+		my->y += (ty - my->y) * ease;
+		my->yaw = p->yaw;               // face where the owner faces
+
+		my->fskill[0] += 0.05;          // gentle vertical bob
+		my->z = p->z - SAM_COMPANION_RISE + 1.5 * std::sin(my->fskill[0]);
+		// Deliberately DON'T set UPDATENEEDED: the companion is host-authoritative and not
+		// network-synced (clients never create it — behavior pointers aren't sent), so an
+		// ENTU broadcast would only waste bandwidth / risk a behavior-less ghost on clients.
+		// Host/SP local rendering doesn't use that flag anyway (the portal omits it too).
+	}
+#endif // SAM_LUA_HAVE_BARONY
+
+	// sam_spawn_companion(player, model_id [, scale]) -> uid | nil. Spawns a floating
+	// companion that renders a registered custom .vox model and trails the player, ready to
+	// thrust forward on sam_companion_punch. Remove it with sam_remove_entity. Host only.
+	int lua_sam_spawn_companion(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const char* modelC = luaL_checkstring(Ls, 2);
+		const double scale = (double)luaL_optnumber(Ls, 3, 1.0);
+		const unsigned long long uid = SAMLua::spawnCompanion(player, modelC ? modelC : "", scale);
+		if ( uid == 0 ) { lua_pushnil(Ls); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)uid);
+		return 1;
+	}
+
+	// sam_companion_punch(uid) -> bool. Trigger the forward punch thrust on a companion.
+	// Calling it repeatedly (e.g. on a fast timer) reads as a continuous ORA-ORA flurry.
+	int lua_sam_companion_punch(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		lua_pushboolean(Ls, SAMLua::companionPunch((unsigned long long)uid) ? 1 : 0);
+		return 1;
+	}
+
+	// sam_get_facing(player) -> yaw radians [0,2PI) | nil. 0 = +x (east), increasing toward
+	// +y; forward unit vector is (cos yaw, sin yaw). Host-authoritative for remote players.
+	int lua_sam_get_facing(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const double yaw = SAMLua::getFacing(player);
+		if ( yaw < 0.0 ) { lua_pushnil(Ls); return 1; }
+		lua_pushnumber(Ls, (lua_Number)yaw);
+		return 1;
+	}
+
 	// sam_spawn_portal(tileX, tileY) -> uid | nil. Creates a purely-DECORATIVE, walkable
 	// portal (the swirling vortex, sprite 254) at a tile: it animates and glows purple but
 	// is never interactive and never sends anyone to the next floor (see the skill[15]
@@ -2522,6 +2626,13 @@ namespace
 		lua_setglobal(L, "sam_get_inventory");
 		lua_pushcfunction(L, lua_sam_remove_item);
 		lua_setglobal(L, "sam_remove_item");
+		// v1.4.0 — floating companion ("Stand") + facing reader.
+		lua_pushcfunction(L, lua_sam_spawn_companion);
+		lua_setglobal(L, "sam_spawn_companion");
+		lua_pushcfunction(L, lua_sam_companion_punch);
+		lua_setglobal(L, "sam_companion_punch");
+		lua_pushcfunction(L, lua_sam_get_facing);
+		lua_setglobal(L, "sam_get_facing");
 #endif
 	}
 
@@ -3181,6 +3292,72 @@ namespace SAMLua
 		// Deliberately local-only: a new game tears every client's session down anyway, and
 		// sending here would touch net_packet from the menu, off the game thread's cadence.
 		for ( int i = 0; i < MAXPLAYERS; ++i ) { g_samMoveSpeed[i] = 1.0; }
+#endif
+	}
+
+	// ---- v1.4.0 floating companion ("Stand") — shared by both runtimes ----------
+	// The behavior function samCompanionBehavior + its constants live in the anonymous
+	// namespace above (they need Barony types); these public entry points just drive them.
+
+	unsigned long long spawnCompanion(int player, const std::string& modelId, double scale)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("SAM", "spawnCompanion refused: host only."); return 0; }
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity )
+		{ SAM_ERROR("SAM", "spawnCompanion: invalid player index " + std::to_string(player) + "."); return 0; }
+		const int modelIdx = SAMModels::modelIndexForId(modelId);
+		if ( modelIdx < 0 )
+		{ SAM_ERROR("SAM", "spawnCompanion: no registered model '" + modelId + "' (is it in the mod's models[]?)."); return 0; }
+		Entity* owner = players[player]->entity;
+		Entity* e = newEntity(modelIdx, 1, map.entities, nullptr);
+		if ( !e ) { SAM_ERROR("SAM", "spawnCompanion: entity creation failed."); return 0; }
+		e->sprite = modelIdx;                          // custom .vox model index (3D voxel path)
+		e->x = owner->x;
+		e->y = owner->y;
+		e->z = owner->z - SAM_COMPANION_RISE;
+		e->sizex = 2;
+		e->sizey = 2;
+		double s = scale;
+		if ( !(s > 0.0) ) { s = 1.0; }                  // catches <=0 AND NaN (both make !(s>0) true)
+		if ( s > 8.0 )    { s = 8.0; }                  // sane visual ceiling
+		e->scalex = s; e->scaley = s; e->scalez = s;
+		e->yaw = owner->yaw;
+		e->flags[PASSABLE] = true;                      // walkable / never collide
+		e->flags[BRIGHT]   = true;
+		e->flags[SPRITE]   = false;                     // keep the 3D voxel path, not a flat billboard
+		e->behavior = &samCompanionBehavior;
+		e->skill[2]  = player;                          // owner index (players[skill[2]] convention)
+		e->skill[18] = 0;                               // not punching
+		e->skill[19] = 2;                               // S.A.M companion marker (portal uses 1)
+		e->fskill[0] = 0.0;                             // hover-bob phase
+		SAM_INFO("SAM", "spawnCompanion: model '" + modelId + "' for player " + std::to_string(player)
+		                + " uid " + std::to_string(e->getUID()));
+		return (unsigned long long)e->getUID();
+#else
+		(void)player; (void)modelId; (void)scale; return 0;
+#endif
+	}
+
+	bool companionPunch(unsigned long long uid)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { return false; }
+		Entity* e = uidToEntity((Sint32)uid);
+		if ( !e || e->behavior != &samCompanionBehavior ) { return false; } // only a live companion
+		e->skill[18] = SAM_COMPANION_PUNCH_TICKS;       // (re)start a forward thrust
+		return true;
+#else
+		(void)uid; return false;
+#endif
+	}
+
+	double getFacing(int player)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity ) { return -1.0; }
+		return (double)players[player]->entity->yaw; // radians [0,2PI); engine keeps it wrapped
+#else
+		(void)player; return -1.0;
 #endif
 	}
 

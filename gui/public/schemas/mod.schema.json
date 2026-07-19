@@ -150,6 +150,27 @@
         "description": "Path to a compiled S.A.M plugin DLL."
       }
     },
+    "models": {
+      "type": "array",
+      "description": "Standalone custom .vox models NOT tied to any item or class — for sam_spawn_companion (floating 'Stand'/familiar followers) and other decorative entities. Each entry registers one model under a friendly id that scripts pass to sam_spawn_companion. Barony SLAB .vox format only (MagicaVoxel exports are rejected). v1.4.0+.",
+      "items": {
+        "type": "object",
+        "required": ["id", "file"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9_]+:[a-z0-9_./-]+$",
+            "description": "How a script names this model, e.g. \"mymod:star_platinum\". Pass this to sam_spawn_companion."
+          },
+          "file": {
+            "type": "string",
+            "pattern": "\\.vox$",
+            "description": "Mod-relative path to the .vox file (Barony slab format), e.g. \"models/star_platinum/star_platinum.vox\"."
+          }
+        }
+      }
+    },
     "description": {
       "type": "string",
       "description": "Short description of what the mod adds, shown to players."

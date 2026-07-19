@@ -807,6 +807,17 @@ void SAMItems::registerModModels()
 		}
 		if ( seen.insert(p).second ) { reqs.push_back({ p, p }); }
 	}
+	// v1.4.0 — standalone models a mod declares in mod.json "models" (for sam_spawn_companion
+	// and other decorative entities, tied to no item/class). Registered under their FRIENDLY
+	// id (not the path), so scripts spawn by "ns:name". Same escape-guard; dedup by id.
+	for ( const SAMModManifest& m : SAMWorkshop::manifests() )
+	{
+		for ( const auto& md : m.models )   // md = { id, file }
+		{
+			if ( SAMErrors::relPathEscapes(md.second) ) { continue; } // belt-and-braces (parse already guards)
+			if ( seen.insert("id:" + md.first).second ) { reqs.push_back({ md.first, md.second }); }
+		}
+	}
 	if ( reqs.empty() ) { return; }
 
 	SAMModels::appendModels(reqs);

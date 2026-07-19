@@ -267,6 +267,29 @@ static bool parseManifest(const std::string& jsonText, const std::string& modPat
 	out.races = getStringArray("races", true);
 	out.sounds = getStringArray("sounds", true);
 	out.plugins = getStringArray("plugins", true);
+	// v1.4.0 — standalone .vox models for sam_spawn_companion / decorative entities. An
+	// array of { "id": "ns:name", "file": "models/.../x.vox" }. The id is how a script
+	// names the model (sam_spawn_companion); file is the mod-relative .vox path.
+	{
+		auto it = j.find("models");
+		if ( it != j.end() && it->is_array() )
+		{
+			for ( const auto& el : *it )
+			{
+				if ( !el.is_object() ) { continue; }
+				std::string id, file;
+				if ( auto idIt = el.find("id"); idIt != el.end() && idIt->is_string() ) { id = idIt->get<std::string>(); }
+				if ( auto fIt = el.find("file"); fIt != el.end() && fIt->is_string() ) { file = fIt->get<std::string>(); }
+				if ( id.empty() || file.empty() ) { continue; }
+				if ( SAMErrors::relPathEscapes(file) )
+				{
+					SAM_WARN(MOD, std::string("Manifest 'models' file '") + file + "' escapes the mod folder — ignored.");
+					continue;
+				}
+				out.models.push_back({ id, file });
+			}
+		}
+	}
 	out.modPath = modPath;
 	out.displayName = displayName;
 
