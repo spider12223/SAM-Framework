@@ -1150,6 +1150,52 @@ namespace
 		return JS_NewInt64(ctx, (int64_t)e->getUID());
 	}
 
+	// sam_spawn_portal(tileX, tileY) -> uid | null. A purely-DECORATIVE, walkable portal
+	// (swirling vortex, sprite 254): animates + glows but is never interactive and never
+	// descends anyone (see the skill[15] guard in actPortal). Returns its uid so a script
+	// can move it (sam_set_position) or clear it (sam_remove_entity). Host only. Twin of
+	// the Lua binding — keep the two in lock-step.
+	JSValue js_sam_spawn_portal(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t tx = 0, ty = 0;
+		if ( argc >= 1 ) { JS_ToInt32(ctx, &tx, argv[0]); }
+		if ( argc >= 2 ) { JS_ToInt32(ctx, &ty, argv[1]); }
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_spawn_portal refused: host only."); return JS_NULL; }
+		if ( tx < 0 || tx >= (int)map.width || ty < 0 || ty >= (int)map.height )
+		{ SAM_ERROR("JS", "sam_spawn_portal: tile out of bounds."); return JS_NULL; }
+		Entity* e = newEntity(254, 1, map.entities, nullptr);
+		if ( !e ) { SAM_ERROR("JS", "sam_spawn_portal: entity creation failed."); return JS_NULL; }
+		e->x = tx * 16 + 8;
+		e->y = ty * 16 + 8;
+		e->z = 0;
+		e->sprite = 254;
+		e->sizex = 4;
+		e->sizey = 4;
+		e->yaw = 1.5707963267948966;   // PI/2
+		e->flags[PASSABLE] = true;
+		e->behavior = &actPortal;
+		e->skill[19] = 1;              // S.A.M decorative marker (guard in actPortal); skill[19]/[20] are outside the portal alias range
+		SAM_INFO("JS", "sam_spawn_portal: decorative portal at (" + std::to_string(tx) + "," + std::to_string(ty) + ")");
+		return JS_NewInt64(ctx, (int64_t)e->getUID());
+	}
+
+	// sam_remove_entity(uid) -> bool. Remove a non-player world entity by uid (portal
+	// marker, spawned monster, ground item...). Refuses players. Frees any light. Host only.
+	JSValue js_sam_remove_entity(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_FALSE; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_remove_entity refused: host only."); return JS_FALSE; }
+		Entity* e = uidToEntity((Sint32)uid);
+		if ( !e ) { return JS_FALSE; }
+		if ( e->behavior == &actPlayer ) { SAM_WARN("JS", "sam_remove_entity refused: cannot remove a player."); return JS_FALSE; }
+		e->removeLightField();
+		if ( e->mynode ) { list_RemoveNode(e->mynode); }
+		return JS_TRUE;
+	}
+
 	// sam_get_inventory(player) -> array of { uid, type, name, count, beatitude, status,
 	// identified, equipped }. Empty array for an invalid player. Reader.
 	JSValue js_sam_get_inventory(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
@@ -1961,6 +2007,8 @@ namespace
 		JS_SetPropertyStr(ctx, g, "sam_get_position", JS_NewCFunction(ctx, js_sam_get_position, "sam_get_position", 1));
 		JS_SetPropertyStr(ctx, g, "sam_set_position", JS_NewCFunction(ctx, js_sam_set_position, "sam_set_position", 3));
 		JS_SetPropertyStr(ctx, g, "sam_spawn_monster", JS_NewCFunction(ctx, js_sam_spawn_monster, "sam_spawn_monster", 4));
+		JS_SetPropertyStr(ctx, g, "sam_spawn_portal", JS_NewCFunction(ctx, js_sam_spawn_portal, "sam_spawn_portal", 2));
+		JS_SetPropertyStr(ctx, g, "sam_remove_entity", JS_NewCFunction(ctx, js_sam_remove_entity, "sam_remove_entity", 1));
 		JS_SetPropertyStr(ctx, g, "sam_get_inventory", JS_NewCFunction(ctx, js_sam_get_inventory, "sam_get_inventory", 1));
 		JS_SetPropertyStr(ctx, g, "sam_remove_item", JS_NewCFunction(ctx, js_sam_remove_item, "sam_remove_item", 1));
 #endif

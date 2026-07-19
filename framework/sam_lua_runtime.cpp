@@ -1866,6 +1866,61 @@ namespace
 #endif
 	}
 
+	// sam_spawn_portal(tileX, tileY) -> uid | nil. Creates a purely-DECORATIVE, walkable
+	// portal (the swirling vortex, sprite 254) at a tile: it animates and glows purple but
+	// is never interactive and never sends anyone to the next floor (see the skill[15]
+	// guard in actPortal). Returns the new entity's uid so a script can move it
+	// (sam_set_position) or clear it (sam_remove_entity). Host only.
+	int lua_sam_spawn_portal(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int tx = (int)luaL_checkinteger(Ls, 1);
+		const int ty = (int)luaL_checkinteger(Ls, 2);
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_spawn_portal refused: host only."); lua_pushnil(Ls); return 1; }
+		if ( tx < 0 || tx >= (int)map.width || ty < 0 || ty >= (int)map.height )
+		{ SAM_ERROR("LUA", "sam_spawn_portal: tile (" + std::to_string(tx) + "," + std::to_string(ty) + ") out of bounds."); lua_pushnil(Ls); return 1; }
+		Entity* e = newEntity(254, 1, map.entities, nullptr);
+		if ( !e ) { SAM_ERROR("LUA", "sam_spawn_portal: entity creation failed."); lua_pushnil(Ls); return 1; }
+		e->x = tx * 16 + 8;                 // tile centre, pixel coords
+		e->y = ty * 16 + 8;
+		e->z = 0;
+		e->sprite = 254;                    // portal swirl
+		e->sizex = 4;
+		e->sizey = 4;
+		e->yaw = 1.5707963267948966;        // PI/2, matching a real portal's facing
+		e->flags[PASSABLE] = true;          // walkable, so a player can stand on it
+		e->behavior = &actPortal;
+		e->skill[19] = 1;                   // S.A.M decorative marker (guard in actPortal); skill[19]/[20] are outside the portal alias range
+		SAM_INFO("LUA", "sam_spawn_portal: decorative portal at (" + std::to_string(tx) + "," + std::to_string(ty) + ") uid " + std::to_string(e->getUID()));
+		lua_pushinteger(Ls, (lua_Integer)e->getUID());
+		return 1;
+#else
+		(void)tx; (void)ty; lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_remove_entity(uid) -> bool. Remove a non-player world entity by uid — a
+	// sam_spawn_portal marker, a spawned monster, a ground item, etc. Refuses players
+	// (use the normal death/teleport paths for those). Frees any light it owned. Host only.
+	int lua_sam_remove_entity(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_remove_entity refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		Entity* e = uidToEntity((Sint32)uid);
+		if ( !e ) { lua_pushboolean(Ls, 0); return 1; }
+		if ( e->behavior == &actPlayer ) { SAM_WARN("LUA", "sam_remove_entity refused: cannot remove a player."); lua_pushboolean(Ls, 0); return 1; }
+		e->removeLightField();              // drop any light it owns (e.g. a decorative portal)
+		if ( e->mynode ) { list_RemoveNode(e->mynode); }
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)uid; lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
 	int lua_sam_spawn_monsters(lua_State* Ls)
 	{
 		SAMLogger::noteApiCall();
@@ -2459,6 +2514,10 @@ namespace
 		lua_setglobal(L, "sam_set_position");
 		lua_pushcfunction(L, lua_sam_spawn_monster);
 		lua_setglobal(L, "sam_spawn_monster");
+		lua_pushcfunction(L, lua_sam_spawn_portal);
+		lua_setglobal(L, "sam_spawn_portal");
+		lua_pushcfunction(L, lua_sam_remove_entity);
+		lua_setglobal(L, "sam_remove_entity");
 		lua_pushcfunction(L, lua_sam_get_inventory);
 		lua_setglobal(L, "sam_get_inventory");
 		lua_pushcfunction(L, lua_sam_remove_item);
