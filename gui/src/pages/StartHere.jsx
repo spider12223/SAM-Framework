@@ -77,12 +77,18 @@ export default function StartHere() {
               are fully there.
             </p>
             <p>
-              The easy way is the installer below. Run it and it finds your Barony and sets everything
-              up for you. If you would rather use Steam Workshop, you can subscribe there instead.
+              Download the installer below and run it. It finds your Barony and puts everything in the
+              right place. That is the whole install.
+            </p>
+            <p>
+              One thing to know: subscribing on the Steam Workshop does not set it up by itself. Steam
+              can share mod content, but it cannot replace the game's own program, so you still have to
+              run the installer to finish (or copy the patched <span className="sam-mono">barony.exe</span>{' '}
+              into your Barony folder by hand). The installer is the simplest way to do it.
             </p>
             <div className="mt-1 flex flex-wrap gap-3">
               <a className="sam-btn" href={INSTALLER_URL} target="_blank" rel="noreferrer">⬇ Download Installer</a>
-              <a className="sam-btn" href={WORKSHOP_URL} target="_blank" rel="noreferrer">🎮 Steam Workshop</a>
+              <a className="sam-btn" href={WORKSHOP_URL} target="_blank" rel="noreferrer">🎮 S.A.M on Steam Workshop</a>
             </div>
           </Step>
 
