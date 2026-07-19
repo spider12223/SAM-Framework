@@ -260,6 +260,9 @@ void SAMClasses::loadFromManifest(const SAMModManifest& manifest)
 					def.appearanceHeads[it.key()] = head;
 				}
 			}
+			// Optional whole-body model (e.g. a jet): one custom .vox forced as the entire
+			// body, race-independent. Resolved to an engine index in resolveAppearance().
+			def.bodyModel = getStr(a, "body_model");
 		}
 
 		// Optional mana-regen tuning, applied on top of the engine's computed rate.
@@ -811,7 +814,56 @@ void SAMClasses::resolveAppearance()
 			if ( SAMModels::modelIndexForId(hv.second) >= 0 ) { s_customHeadSprites.insert(idx); }
 			SAM_DEBUG(MOD, "  [" + def.id + "] head for " + hv.first + " -> model " + std::to_string(idx));
 		}
+
+		// Whole-body model (jet etc.): resolve its path to an index, and register it as a
+		// "custom head sprite" — actPlayer draws it as my->sprite, the slot the engine
+		// otherwise treats as the head, so isPlayerHeadSprite must accept it.
+		def.bodyModelIdx = -1;
+		if ( !def.bodyModel.empty() )
+		{
+			int bidx = SAMModels::modelIndexForId(def.bodyModel);
+			if ( bidx < 0 )
+			{
+				char* end = nullptr;
+				const long n = std::strtol(def.bodyModel.c_str(), &end, 10);
+				if ( end && *end == '\0' && n >= 0 ) { bidx = (int)n; }
+			}
+			if ( bidx >= 0 )
+			{
+				def.bodyModelIdx = bidx;
+				s_customHeadSprites.insert(bidx);
+				SAM_DEBUG(MOD, "  [" + def.id + "] body model -> " + std::to_string(bidx));
+			}
+			else
+			{
+				SAM_WARN(MOD, "Class [" + def.id + "] body_model '" + def.bodyModel
+					+ "' is not a registered model — ignoring (class keeps its normal body).");
+			}
+		}
 	}
+}
+
+int SAMClasses::bodyModelFor(int classnum)
+{
+	const SAMClassDef* def = getClass(classnum);
+	return def ? def->bodyModelIdx : -1;
+}
+
+std::vector<std::string> SAMClasses::appearanceModelPaths()
+{
+	std::vector<std::string> out;
+	auto looksLikeFile = [](const std::string& s) {
+		return !s.empty() && (s.find('/') != std::string::npos || s.find(".vox") != std::string::npos);
+	};
+	for ( const auto& kv : s_registry )
+	{
+		if ( looksLikeFile(kv.second.bodyModel) ) { out.push_back(kv.second.bodyModel); }
+		for ( const auto& hv : kv.second.appearanceHeads )
+		{
+			if ( looksLikeFile(hv.second) ) { out.push_back(hv.second); }
+		}
+	}
+	return out;
 }
 
 int SAMClasses::headSpriteFor(int classnum, int playerRace)

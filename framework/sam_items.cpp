@@ -21,6 +21,7 @@
 #include "sam_logger.hpp"
 #include "sam_errors.hpp"
 #include "sam_models.hpp" // custom .vox registration (appendModels / modelIndexForId)
+#include "sam_classes.hpp" // class appearance model paths (whole-body + heads) to append
 #include "nlohmann/json.hpp"
 
 #include "main.hpp"    // list_t/string_t, stringCopy, stringDeconstructor, list_* helpers
@@ -793,6 +794,18 @@ void SAMItems::registerModModels()
 	{
 		want(kv.second, kv.second.model, "model");
 		want(kv.second, kv.second.modelFp, "model_fp");
+	}
+	// Class appearance models (whole-body overrides like a jet, and custom heads) share the
+	// one model table, so register them in the SAME batch. resolveAppearance() (which runs
+	// right after this) then indexes them. Same escape-guard + dedup as item models.
+	for ( const std::string& p : SAMClasses::appearanceModelPaths() )
+	{
+		if ( SAMErrors::relPathEscapes(p) )
+		{
+			SAM_WARN(MOD, "Class appearance model path '" + p + "' escapes the mod folder — ignoring it.");
+			continue;
+		}
+		if ( seen.insert(p).second ) { reqs.push_back({ p, p }); }
 	}
 	if ( reqs.empty() ) { return; }
 

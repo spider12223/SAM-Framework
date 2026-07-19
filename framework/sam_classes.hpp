@@ -88,6 +88,15 @@ struct SAMClassDef
 	std::map<std::string, int> appearanceHeadIdx;
 	bool surviveShapeshift = false;
 
+	// Optional WHOLE-BODY model: a single custom .vox drawn INSTEAD of the humanoid limbs,
+	// forced on every player of this class regardless of race OR equipped armour (e.g. a
+	// jet). Unlike appearanceHeads (per-race, head only), this replaces the entire body:
+	// actPlayer draws it as my->sprite and hides every limb. From appearance.body_model.
+	//   bodyModel    : the "models/<ns>/foo.vox" path (or a vanilla model index) as written.
+	//   bodyModelIdx : resolved engine model index (resolveAppearance), or -1 if unset.
+	std::string bodyModel;
+	int bodyModelIdx = -1;
+
 	std::map<std::string, int> skills;          // "PRO_X" -> 0..100
 	std::vector<SAMStartingItem> startingItems;
 	std::vector<std::string> startingSpells;    // "SPELL_X"
@@ -181,6 +190,17 @@ public:
 	// class never imposes a look on a race its author didn't write for — that's what
 	// keeps custom classes playable on every race.
 	static int headSpriteFor(int classnum, int playerRace);
+
+	// The whole-body model index this class forces (drawn as my->sprite with every limb
+	// hidden), or -1 if the class has no body override. Race-independent — a jet is a jet
+	// on any race. Read every frame by actPlayer / the first-person HUD.
+	static int bodyModelFor(int classnum);
+
+	// Every appearance model PATH across all classes (whole-body + custom heads), so they
+	// get appended to models[] alongside item models. Only file-looking paths (with '/' or
+	// ".vox") are returned; a vanilla numeric/name head is skipped. Called by
+	// SAMItems::registerModModels before appendModels; resolveAppearance() indexes them after.
+	static std::vector<std::string> appearanceModelPaths();
 
 	// Is `sprite` a head this framework registered? Barony's Entity::isPlayerHeadSprite
 	// is a hardcoded switch over vanilla indices, and a custom head answers false there

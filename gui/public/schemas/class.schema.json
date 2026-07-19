@@ -755,7 +755,7 @@
             "type": "integer",
             "minimum": 0,
             "default": 0,
-            "description": "Appearance/variant number selecting among model & name variations. Use 0 unless a specific variant is needed."
+            "description": "Appearance/variant number selecting among model & name variations. For a READABLE_BOOK this is the book index (0-33 in vanilla), choosing which book it is. Use 0 unless a specific variant is needed."
           },
           "identified": {
             "type": "boolean",
@@ -906,11 +906,15 @@
     "appearance": {
       "type": "object",
       "additionalProperties": false,
-      "description": "A look forced on every player of this class. Currently the HEAD only. Resolution per player is races[theirRace] -> races.default -> their normal head, so a class never imposes a look on a race you did not write for — which is what keeps custom classes playable on every race.",
+      "description": "A look forced on every player of this class. Either a per-race HEAD (races) or a single WHOLE-BODY model (body_model, e.g. a jet). Head resolution per player is races[theirRace] -> races.default -> their normal head, so a class never imposes a head on a race you did not write for; body_model is race-independent and replaces the whole body.",
       "properties": {
         "survive_shapeshift": {
           "type": "boolean",
           "description": "Keep the class look while polymorphed or shapeshifted. Default false — a look that survives polymorph reads as a bug, not a feature."
+        },
+        "body_model": {
+          "type": "string",
+          "description": "Optional WHOLE-BODY model: a custom \"models/<ns>/foo.vox\" (or a raw vanilla model index) drawn INSTEAD of the humanoid body on every player of this class, regardless of race OR equipped armour — e.g. a jet. When set, the model is drawn as the player's body and every limb (plus the first-person arm and weapon) is hidden. Race-independent; takes precedence over a forced head. The .vox must be Barony slab format (MagicaVoxel exports are rejected)."
         },
         "races": {
           "type": "object",

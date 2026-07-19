@@ -87,11 +87,11 @@
     },
     "model": {
       "type": "string",
-      "description": "PLANNED and IGNORED. Loading a NEW .vox model from the mod folder is not supported yet (SAM can't grow Barony's models[] at runtime). To choose the 3D model, use 'model_from_item' to reuse an existing vanilla item's model. Setting 'model' has no effect."
+      "description": "Ship your OWN 3D model: a mod-relative path to a .vox, e.g. \"models/mymod/sword.vox\". SAM loads it at runtime and uses it as this item's world (and inventory) model, overriding 'model_from_item'. The path is also the model's id, so namespace your folder (models/<yourmod>/...) to avoid clashing with vanilla or another mod. IMPORTANT: the .vox must be Barony's slab format — MagicaVoxel exports are rejected (export/convert to slab .vox). An unknown/failed path is skipped with a warning and the item falls back to 'model_from_item' or a placeholder."
     },
     "model_fp": {
       "type": "string",
-      "description": "PLANNED and IGNORED (see 'model'). The first-person model is taken from 'model_from_item' too."
+      "description": "Optional separate .vox for the FIRST-PERSON / held view (same rules as 'model'). If omitted, the held view reuses 'model'."
     },
     "model_from_item": {
       "type": "string",
