@@ -29,6 +29,8 @@
 #include "main.hpp"          // list_t/node_t, list_AddNodeLast/FreeAll/RemoveNode
 #include "magic/magic.hpp"   // spell_t, spellConstructor, copySpellElement, allGameSpells, spellElement_* globals
 #include "mod_tools.hpp"     // ItemTooltips.spellItems / spellNameStringToSpellID
+#include "sam_effects.hpp"       // v1.5.0: resolve on_hit_effect custom "ns:effect" -> slot
+#include "sam_lua_runtime.hpp"   // v1.5.0: SAMLua::effectIdFromName (vanilla EFF_ names)
 
 #include <fstream>
 #include <sstream>
@@ -276,6 +278,7 @@ void SAMSpells::buildEngineSpell(const SAMSpellDef& def)
 	node->deconstructor = &spellElementDeconstructor;
 	spellElement_t* root = (spellElement_t*)node->element;
 	root->node = node;
+	if ( def.range > 0 ) { root->duration = def.range; } // v1.5.0: travel time in ticks = range (dead field until now)
 
 	// Payload child (drives on-hit behavior + bolt sprite; damage overridden from the def).
 	// A missile root MUST have a child element: actMagicMissile dereferences
@@ -305,6 +308,20 @@ void SAMSpells::buildEngineSpell(const SAMSpellDef& def)
 			+ " — leaving it inert (won't cast a working bolt) rather than crash on hit.");
 	}
 	(void)selfCast;
+
+	// v1.5.0: resolve on_hit_effect to an engine effect slot so actMagicMissile can apply it on
+	// impact (this revives the dead on_hit_* trio). A custom "ns:effect" resolves via SAMEffects;
+	// a vanilla name (POISONED / EFF_POISONED) via SAMLua. Resolved here because buildAllEngineSpells
+	// runs after every mod has loaded, so a spell can reference an effect from any mod.
+	def.onHitEffectSlot = -1;
+	if ( !def.onHitEffect.empty() )
+	{
+		int slot = SAMEffects::idForName(def.onHitEffect);
+		if ( slot < 0 ) { slot = SAMLua::effectIdFromName(def.onHitEffect.c_str()); }
+		if ( slot < 0 && def.onHitEffect.rfind("EFF_", 0) == 0 ) { slot = SAMLua::effectIdFromName(def.onHitEffect.c_str() + 4); }
+		def.onHitEffectSlot = slot;
+		if ( slot < 0 ) { SAM_WARN(MOD, "spell '" + def.id + "' on_hit_effect '" + def.onHitEffect + "' is unknown — ignored."); }
+	}
 
 	// 2) Tooltip/UI metadata so the spell lists with its name + a sane tooltip. spellItem_t
 	//    is a private nested type, so we edit the map's default-inserted value in place.

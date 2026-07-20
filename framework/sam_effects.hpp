@@ -16,6 +16,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 struct SAMModManifest; // from sam_workshop.hpp
 class Stat;            // Barony stat.hpp
@@ -38,6 +39,9 @@ struct SAMEffectDef
 	int hpPerSecond = 0;              // native per-second HP delta (slice 2)
 	int mpPerSecond = 0;              // native per-second MP delta (slice 2)
 	double moveSpeedMult = 1.0;       // 1.0 == no change
+	int acMod = 0;                    // flat AC (armor/defense) modifier while active (v1.5.0)
+	double damageMult = 1.0;          // outgoing melee weapon-damage multiplier while active (v1.5.0)
+	std::vector<int> grants;          // vanilla effect slots re-asserted each second while active (v1.5.0)
 	int defaultDurationTicks = 0;     // 0 == caller supplies the duration
 	bool hudHidden = false;
 	std::string modNamespace;
@@ -70,6 +74,11 @@ namespace SAMEffects
 	int    sumAttrMod(const Stat* s, int attrIndex);
 	// Product of move_speed_mult over active custom slots. 1.0 when none active.
 	double speedMult(const Stat* s);
+	// v1.5.0 — flat AC (armor) modifier summed over active custom slots. 0 when none. Hooked into AC().
+	int    sumACMod(const Stat* s);
+	// v1.5.0 — product of damage_mult over active custom slots. 1.0 when none. Hooked into the melee
+	// attack-damage calc, so an effect can scale the wearer's outgoing melee damage.
+	double attackMult(const Stat* s);
 
 	// (Re)insert a HUD display entry for every registered custom effect into the engine's
 	// status-effect definition map. Call right after the engine's loadStatusEffectsJSON()

@@ -1149,6 +1149,74 @@ namespace
 		return 1;
 	}
 
+	// sam_clear_effects(player) -> count. Strip EVERY active status effect (buffs and debuffs
+	// alike, vanilla and custom) from a player in one call. Host-authoritative. Returns how
+	// many were cleared. (v1.5.0)
+	int lua_sam_clear_effects(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_clear_effects refused: host only."); lua_pushinteger(Ls, 0); return 1; }
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity || !stats[player] )
+		{ SAM_ERROR("LUA", "sam_clear_effects: invalid player index " + std::to_string(player) + "."); lua_pushinteger(Ls, 0); return 1; }
+		int cleared = 0;
+		for ( int eff = 0; eff < NUMEFFECTS; ++eff )
+		{
+			if ( stats[player]->getEffectActive(eff) != 0 )
+			{
+				players[player]->entity->setEffect(eff, false, 0, true);
+				++cleared;
+			}
+		}
+		SAM_INFO("SAM", "sam_clear_effects: cleared " + std::to_string(cleared) + " effect(s) from player " + std::to_string(player));
+		lua_pushinteger(Ls, (lua_Integer)cleared);
+		return 1;
+	}
+
+	// sam_set_effect_duration(player, "EFFECT", ticks) -> bool. Retime an ALREADY-ACTIVE effect
+	// in place (no re-fire of on_effect_applied). No-op if the effect isn't currently active, so
+	// it never spawns a fresh one. Host-authoritative. 50 ticks = 1 second. (v1.5.0)
+	int lua_sam_set_effect_duration(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const char* nameC = luaL_checkstring(Ls, 2);
+		const int ticks = (int)luaL_checkinteger(Ls, 3);
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_set_effect_duration refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity || !stats[player] )
+		{ SAM_ERROR("LUA", "sam_set_effect_duration: invalid player index " + std::to_string(player) + "."); lua_pushboolean(Ls, 0); return 1; }
+		const int eff = samEffectNameToId(nameC);
+		if ( eff < 0 ) { SAM_ERROR("LUA", std::string("sam_set_effect_duration: unknown effect '") + (nameC ? nameC : "") + "'."); lua_pushboolean(Ls, 0); return 1; }
+		if ( stats[player]->getEffectActive(eff) == 0 ) { lua_pushboolean(Ls, 0); return 1; } // not active: don't create it
+		// value=true keeps it active; overrideEffectStrength=false preserves strength; overrideDuration=true writes ticks.
+		players[player]->entity->setEffect(eff, true, ticks, true, true, false, true);
+		lua_pushboolean(Ls, 1);
+		return 1;
+	}
+
+	// sam_set_effect_strength(player, "EFFECT", strength) -> bool. Change the magnitude/tier of an
+	// ALREADY-ACTIVE effect while keeping its remaining duration. No-op if inactive. Host-only.
+	// strength clamped 1..255. (v1.5.0)
+	int lua_sam_set_effect_strength(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const char* nameC = luaL_checkstring(Ls, 2);
+		const int strength = (int)luaL_checkinteger(Ls, 3);
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_set_effect_strength refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity || !stats[player] )
+		{ SAM_ERROR("LUA", "sam_set_effect_strength: invalid player index " + std::to_string(player) + "."); lua_pushboolean(Ls, 0); return 1; }
+		const int eff = samEffectNameToId(nameC);
+		if ( eff < 0 ) { SAM_ERROR("LUA", std::string("sam_set_effect_strength: unknown effect '") + (nameC ? nameC : "") + "'."); lua_pushboolean(Ls, 0); return 1; }
+		if ( stats[player]->getEffectActive(eff) == 0 ) { lua_pushboolean(Ls, 0); return 1; }
+		const Uint8 st = (Uint8)(strength < 1 ? 1 : (strength > 255 ? 255 : strength));
+		const int keepDur = stats[player]->EFFECTS_TIMERS[eff];
+		// value=strength (Uint8) with overrideEffectStrength=true; keep the current duration.
+		players[player]->entity->setEffect(eff, st, keepDur, true, true, true, true);
+		lua_pushboolean(Ls, 1);
+		return 1;
+	}
+
 	// sam_get_item_category(item) -> category name ("WEAPON"/"ARMOR"/"GEM"/...), or nil.
 	// `item` is a numeric item id (e.g. an event's item_type) OR a name (vanilla or "ns:item").
 	// Lets a script react by category, e.g. reward identifying any GEM.
@@ -1850,6 +1918,100 @@ namespace
 #endif
 	}
 
+	// ---- v1.5.0: monster status-effect read/remove parity (players already had these) ------
+
+	// sam_remove_monster_effect(uid, "EFFECT") -> bool. Clear a status effect from a monster by
+	// uid. Host-authoritative. The monster counterpart of sam_remove_effect.
+	int lua_sam_remove_monster_effect(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const char* nameC = luaL_checkstring(Ls, 2);
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_remove_monster_effect refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { SAM_WARN("LUA", "sam_remove_monster_effect: no monster uid " + std::to_string(uid)); lua_pushboolean(Ls, 0); return 1; }
+		const int eff = samEffectNameToId(nameC);
+		if ( eff < 0 ) { SAM_WARN("LUA", std::string("sam_remove_monster_effect: unknown effect '") + (nameC ? nameC : "") + "'"); lua_pushboolean(Ls, 0); return 1; }
+		e->setEffect(eff, false, 0, true);
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)uid; (void)nameC; lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_get_monster_effect_duration(uid, "EFFECT") -> remaining ticks (0 inactive, -1 permanent).
+	int lua_sam_get_monster_effect_duration(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const char* nameC = luaL_checkstring(Ls, 2);
+#ifdef SAM_LUA_HAVE_BARONY
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { lua_pushinteger(Ls, 0); return 1; }
+		const int eff = samEffectNameToId(nameC);
+		if ( eff < 0 || e->getStats()->getEffectActive(eff) == 0 ) { lua_pushinteger(Ls, 0); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)e->getStats()->EFFECTS_TIMERS[eff]);
+		return 1;
+#else
+		(void)uid; (void)nameC; lua_pushinteger(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_get_monster_effect_strength(uid, "EFFECT") -> strength/tier (0 if inactive).
+	int lua_sam_get_monster_effect_strength(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const char* nameC = luaL_checkstring(Ls, 2);
+#ifdef SAM_LUA_HAVE_BARONY
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { lua_pushinteger(Ls, 0); return 1; }
+		const int eff = samEffectNameToId(nameC);
+		if ( eff < 0 ) { lua_pushinteger(Ls, 0); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)e->getStats()->getEffectActive(eff));
+		return 1;
+#else
+		(void)uid; (void)nameC; lua_pushinteger(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_get_monster_effects(uid) -> array of { name, ticks, strength } for every active effect
+	// on the monster (custom slots reported as "CUSTOM:<id>"). The monster twin of sam_get_effects.
+	int lua_sam_get_monster_effects(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		lua_newtable(Ls);
+#ifdef SAM_LUA_HAVE_BARONY
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { return 1; }
+		Stat* s = e->getStats();
+		int n = 0;
+		auto pushEntry = [&](const std::string& name, int id, Uint8 strength) {
+			lua_newtable(Ls);
+			lua_pushstring(Ls, name.c_str());                        lua_setfield(Ls, -2, "name");
+			lua_pushinteger(Ls, (lua_Integer)s->EFFECTS_TIMERS[id]); lua_setfield(Ls, -2, "ticks");
+			lua_pushinteger(Ls, (lua_Integer)strength);             lua_setfield(Ls, -2, "strength");
+			lua_rawseti(Ls, -2, ++n);
+		};
+		for ( const auto& en : samEffectNames )
+		{
+			const Uint8 st = s->getEffectActive(en.id);
+			if ( st != 0 ) { pushEntry(en.name, en.id, st); }
+		}
+		for ( int id = 135; id < NUMEFFECTS; ++id )
+		{
+			const Uint8 st = s->getEffectActive(id);
+			if ( st != 0 ) { pushEntry("CUSTOM:" + std::to_string(id), id, st); }
+		}
+		return 1;
+#else
+		(void)uid; return 1;
+#endif
+	}
+
 	int lua_sam_kill_monster(lua_State* Ls)
 	{
 		SAMLogger::noteApiCall();
@@ -2441,6 +2603,178 @@ namespace
 #endif
 	}
 
+#ifdef SAM_LUA_HAVE_BARONY
+	// v1.5.0: resolve a spell reference (vanilla internalName or custom "ns:spell") to an engine id, or -1.
+	static int samResolveSpellId(const std::string& spell)
+	{
+		if ( spell.find(':') != std::string::npos )
+		{
+			const SAMSpellDef* d = SAMSpells::getSpellByName(spell);
+			return d ? d->numericId : -1;
+		}
+		std::string lower = spell;
+		for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
+		for ( const auto& kv : ItemTooltips.spellItems ) { if ( kv.second.internalName == lower ) { return kv.first; } }
+		return -1;
+	}
+	// Fire spell `id` from caster `e`, aimed by transiently pointing its yaw at (tx,ty) in pixels
+	// (the missile reads yaw once at spawn). aim==false casts straight along the caster's own yaw.
+	static Entity* samCastAimed(Entity* e, int id, bool aim, double tx, double ty)
+	{
+		spell_t* sp = getSpellFromID(id);
+		if ( !e || !sp ) { return nullptr; }
+		if ( !aim ) { return castSpell(e->getUID(), sp, false, true); }
+		const real_t savedYaw = e->yaw;
+		e->yaw = atan2(ty - e->y, tx - e->x);
+		Entity* missile = castSpell(e->getUID(), sp, false, true);
+		e->yaw = savedYaw;
+		return missile;
+	}
+#endif
+
+	// sam_cast_spell_at(player, target_uid, spell) -> missile uid | nil. Cast at an entity
+	// (aims the bolt toward it) instead of straight ahead. Host-only, free cast.
+	int lua_sam_cast_spell_at(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const long long targetUid = (long long)luaL_checkinteger(Ls, 2);
+		const char* spellC = luaL_checkstring(Ls, 3);
+		const std::string spell = spellC ? spellC : "";
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_cast_spell_at refused: host only."); lua_pushnil(Ls); return 1; }
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity )
+		{ SAM_ERROR("LUA", "sam_cast_spell_at: invalid player index " + std::to_string(player) + "."); lua_pushnil(Ls); return 1; }
+		Entity* target = uidToEntity((Sint32)targetUid);
+		if ( !target ) { SAM_WARN("LUA", "sam_cast_spell_at: no entity uid " + std::to_string(targetUid)); lua_pushnil(Ls); return 1; }
+		const int id = samResolveSpellId(spell);
+		if ( id < 0 ) { SAM_ERROR("LUA", "sam_cast_spell_at: unknown spell '" + spell + "'."); lua_pushnil(Ls); return 1; }
+		Entity* missile = samCastAimed(players[player]->entity, id, true, target->x, target->y);
+		if ( !missile ) { lua_pushnil(Ls); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)missile->getUID());
+		return 1;
+#else
+		(void)player; (void)targetUid; (void)spell; lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_cast_spell_pos(player, tileX, tileY, spell) -> missile uid | nil. Cast toward a map tile.
+	int lua_sam_cast_spell_pos(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const int tx = (int)luaL_checkinteger(Ls, 2);
+		const int ty = (int)luaL_checkinteger(Ls, 3);
+		const char* spellC = luaL_checkstring(Ls, 4);
+		const std::string spell = spellC ? spellC : "";
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_cast_spell_pos refused: host only."); lua_pushnil(Ls); return 1; }
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity )
+		{ SAM_ERROR("LUA", "sam_cast_spell_pos: invalid player index " + std::to_string(player) + "."); lua_pushnil(Ls); return 1; }
+		const int id = samResolveSpellId(spell);
+		if ( id < 0 ) { SAM_ERROR("LUA", "sam_cast_spell_pos: unknown spell '" + spell + "'."); lua_pushnil(Ls); return 1; }
+		Entity* missile = samCastAimed(players[player]->entity, id, true, (double)(tx * 16 + 8), (double)(ty * 16 + 8));
+		if ( !missile ) { lua_pushnil(Ls); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)missile->getUID());
+		return 1;
+#else
+		(void)player; (void)tx; (void)ty; (void)spell; lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_monster_cast_spell(uid, spell) -> missile uid | nil. Make a monster cast a spell along
+	// its own facing. Host-only, free cast.
+	int lua_sam_monster_cast_spell(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const char* spellC = luaL_checkstring(Ls, 2);
+		const std::string spell = spellC ? spellC : "";
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_monster_cast_spell refused: host only."); lua_pushnil(Ls); return 1; }
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { SAM_WARN("LUA", "sam_monster_cast_spell: no monster uid " + std::to_string(uid)); lua_pushnil(Ls); return 1; }
+		const int id = samResolveSpellId(spell);
+		if ( id < 0 ) { SAM_ERROR("LUA", "sam_monster_cast_spell: unknown spell '" + spell + "'."); lua_pushnil(Ls); return 1; }
+		Entity* missile = samCastAimed(e, id, false, 0, 0);
+		if ( !missile ) { lua_pushnil(Ls); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)missile->getUID());
+		return 1;
+#else
+		(void)uid; (void)spell; lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_get_spells(player) -> array of spell internal-name strings the player knows.
+	int lua_sam_get_spells(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		lua_newtable(Ls);
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] ) { return 1; }
+		int n = 0;
+		for ( node_t* node = players[player]->magic.spellList.first; node; node = node->next )
+		{
+			spell_t* sp = (spell_t*)node->element;
+			if ( sp ) { lua_pushstring(Ls, sp->spell_internal_name); lua_rawseti(Ls, -2, ++n); }
+		}
+		return 1;
+#else
+		(void)player; return 1;
+#endif
+	}
+
+	// sam_player_knows_spell(player, spell) -> bool. Vanilla SPELL_ name or custom "ns:spell".
+	int lua_sam_player_knows_spell(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const char* spellC = luaL_checkstring(Ls, 2);
+		const std::string spell = spellC ? spellC : "";
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] ) { lua_pushboolean(Ls, 0); return 1; }
+		const int id = samResolveSpellId(spell);
+		if ( id < 0 ) { lua_pushboolean(Ls, 0); return 1; }
+		bool known = false;
+		for ( node_t* node = players[player]->magic.spellList.first; node; node = node->next )
+		{
+			spell_t* sp = (spell_t*)node->element;
+			if ( sp && sp->ID == id ) { known = true; break; }
+		}
+		lua_pushboolean(Ls, known ? 1 : 0);
+		return 1;
+#else
+		(void)player; (void)spell; lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_remove_spell(player, spell) -> bool. Un-learn a spell (local player's list). Host-only.
+	int lua_sam_remove_spell(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const char* spellC = luaL_checkstring(Ls, 2);
+		const std::string spell = spellC ? spellC : "";
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_remove_spell refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] ) { lua_pushboolean(Ls, 0); return 1; }
+		const int id = samResolveSpellId(spell);
+		if ( id < 0 ) { SAM_ERROR("LUA", "sam_remove_spell: unknown spell '" + spell + "'."); lua_pushboolean(Ls, 0); return 1; }
+		for ( node_t* node = players[player]->magic.spellList.first; node; )
+		{
+			node_t* next = node->next;
+			spell_t* sp = (spell_t*)node->element;
+			if ( sp && sp->ID == id ) { list_RemoveNode(node); lua_pushboolean(Ls, 1); return 1; }
+			node = next;
+		}
+		lua_pushboolean(Ls, 0);
+		return 1;
+#else
+		(void)player; (void)spell; lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
 	int lua_panic(lua_State* Ls)
 	{
 		const char* msg = lua_tostring(Ls, -1);
@@ -2539,6 +2873,11 @@ namespace
 		lua_pushcfunction(L, lua_sam_get_effect_duration); lua_setglobal(L, "sam_get_effect_duration");
 		lua_pushcfunction(L, lua_sam_get_effect_strength); lua_setglobal(L, "sam_get_effect_strength");
 		lua_pushcfunction(L, lua_sam_get_effects);         lua_setglobal(L, "sam_get_effects");
+		// v1.5.0 monster status-effect read/remove parity
+		lua_pushcfunction(L, lua_sam_remove_monster_effect);       lua_setglobal(L, "sam_remove_monster_effect");
+		lua_pushcfunction(L, lua_sam_get_monster_effect_duration); lua_setglobal(L, "sam_get_monster_effect_duration");
+		lua_pushcfunction(L, lua_sam_get_monster_effect_strength); lua_setglobal(L, "sam_get_monster_effect_strength");
+		lua_pushcfunction(L, lua_sam_get_monster_effects);         lua_setglobal(L, "sam_get_monster_effects");
 		// v0.7.0 Feature 5: modify existing content (revert on unload)
 		lua_pushcfunction(L, lua_sam_patch_class);         lua_setglobal(L, "sam_patch_class");
 		lua_pushcfunction(L, lua_sam_unpatch_class);       lua_setglobal(L, "sam_unpatch_class");
@@ -2549,6 +2888,13 @@ namespace
 		// Custom spells (Session 1: grant vanilla for real; custom recognized + deferred)
 		lua_pushcfunction(L, lua_sam_grant_spell);         lua_setglobal(L, "sam_grant_spell");
 		lua_pushcfunction(L, lua_sam_cast_spell);          lua_setglobal(L, "sam_cast_spell");
+		// v1.5.0 spell freedom: aimed cast, monster cast, query + remove
+		lua_pushcfunction(L, lua_sam_cast_spell_at);       lua_setglobal(L, "sam_cast_spell_at");
+		lua_pushcfunction(L, lua_sam_cast_spell_pos);      lua_setglobal(L, "sam_cast_spell_pos");
+		lua_pushcfunction(L, lua_sam_monster_cast_spell);  lua_setglobal(L, "sam_monster_cast_spell");
+		lua_pushcfunction(L, lua_sam_get_spells);          lua_setglobal(L, "sam_get_spells");
+		lua_pushcfunction(L, lua_sam_player_knows_spell);  lua_setglobal(L, "sam_player_knows_spell");
+		lua_pushcfunction(L, lua_sam_remove_spell);        lua_setglobal(L, "sam_remove_spell");
 
 #ifdef SAM_LUA_HAVE_BARONY
 		// Host bindings that actually affect the game (engine build only).
@@ -2560,6 +2906,10 @@ namespace
 		lua_setglobal(L, "sam_apply_effect");
 		lua_pushcfunction(L, lua_sam_remove_effect);
 		lua_setglobal(L, "sam_remove_effect");
+		// v1.5.0 player effect control
+		lua_pushcfunction(L, lua_sam_clear_effects);       lua_setglobal(L, "sam_clear_effects");
+		lua_pushcfunction(L, lua_sam_set_effect_duration); lua_setglobal(L, "sam_set_effect_duration");
+		lua_pushcfunction(L, lua_sam_set_effect_strength); lua_setglobal(L, "sam_set_effect_strength");
 		lua_pushcfunction(L, lua_sam_get_stat);
 		lua_setglobal(L, "sam_get_stat");
 		lua_pushcfunction(L, lua_sam_set_stat);

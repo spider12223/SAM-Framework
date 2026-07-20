@@ -50,9 +50,10 @@ struct SAMSpellDef
 	int range = 0;
 	int speed = 0;
 
-	std::string onHitEffect;        // optional EFF_ name
+	std::string onHitEffect;        // optional EFF_ name or custom "ns:effect"
 	int onHitDuration = 0;          // ticks
 	int onHitChance = 0;            // percent 0-100
+	mutable int onHitEffectSlot = -1; // v1.5.0: resolved engine effect slot for onHitEffect (-1 = none/unknown)
 
 	std::string icon;               // mod-relative PNG path
 	bool startingSpell = false;

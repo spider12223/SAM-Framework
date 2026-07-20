@@ -60,6 +60,22 @@
       "default": 0,
       "description": "MP change each second while active. Negative drains, positive restores. 0 = none."
     },
+    "ac_mod": {
+      "type": "integer",
+      "default": 0,
+      "description": "Flat armor (AC / defense) change while active. Positive hardens, negative exposes. 0 = none. (v1.5.0)"
+    },
+    "damage_mult": {
+      "type": "number",
+      "minimum": 0,
+      "default": 1.0,
+      "description": "Multiplier on the wearer's outgoing MELEE weapon damage while active. 1.0 = no change, 1.5 = +50% (berserk), 0.5 = half (weakness). (v1.5.0)"
+    },
+    "grants": {
+      "type": "array",
+      "description": "Vanilla status flags this effect also applies while active. They are re-asserted while it lasts and decay shortly after it ends. Allowlisted safe flags only. (v1.5.0)",
+      "items": { "type": "string", "enum": ["LEVITATING", "INVISIBLE", "TELEPATH"] }
+    },
     "hud_hidden": {
       "type": "boolean",
       "default": false,

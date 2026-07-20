@@ -12,6 +12,7 @@ import { Panel, Field, TextInput, NumberInput, GoldButton, ErrorList, SavedNote 
 
 const ATTRS = ['STR', 'DEX', 'CON', 'INT', 'PER', 'CHR'];
 const ATTR_ICONS = { STR: '💪', DEX: '🪶', CON: '❤️', INT: '📖', PER: '👁️', CHR: '🎭' };
+const GRANT_FLAGS = ['LEVITATING', 'INVISIBLE', 'TELEPATH'];
 
 function slugify(name) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'unnamed';
@@ -31,6 +32,9 @@ export default function EffectEditor() {
   const [hpSec, setHpSec] = useState(editDef?.hp_per_second ?? 0);
   const [mpSec, setMpSec] = useState(editDef?.mp_per_second ?? 0);
   const [hudHidden, setHudHidden] = useState(editDef?.hud_hidden ?? false);
+  const [acMod, setAcMod] = useState(editDef?.ac_mod ?? 0);
+  const [damageMult, setDamageMult] = useState(editDef?.damage_mult ?? 1);
+  const [grants, setGrants] = useState(editDef?.grants ?? []);
   const [errors, setErrors] = useState([]);
   const [savedAs, setSavedAs] = useState('');
 
@@ -55,6 +59,9 @@ export default function EffectEditor() {
     if (num(speedMult) != null && Number(speedMult) !== 1) def.move_speed_mult = Number(speedMult);
     if (num(hpSec) != null && Number(hpSec) !== 0) def.hp_per_second = Number(hpSec);
     if (num(mpSec) != null && Number(mpSec) !== 0) def.mp_per_second = Number(mpSec);
+    if (num(acMod) != null && Number(acMod) !== 0) def.ac_mod = Number(acMod);
+    if (num(damageMult) != null && Number(damageMult) !== 1) def.damage_mult = Number(damageMult);
+    if (Array.isArray(grants) && grants.length) def.grants = grants;
     if (hudHidden) def.hud_hidden = true;
     return def;
   };
@@ -71,7 +78,7 @@ export default function EffectEditor() {
 
   const def = useMemo(buildDef,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [name, tooltip, icon, duration, mods, speedMult, hpSec, mpSec, hudHidden, namespace]);
+    [name, tooltip, icon, duration, mods, speedMult, hpSec, mpSec, hudHidden, acMod, damageMult, grants, namespace]);
   const preview = useMemo(() => JSON.stringify(def, null, 2), [def]);
 
   const setMod = (a, v) => setMods((prev) => ({ ...prev, [a]: v }));
@@ -113,9 +120,29 @@ export default function EffectEditor() {
               <NumberInput value={mpSec} onChange={setMpSec} />
             </Field>
           </div>
+          <div className="grid grid-cols-2 gap-3 mt-3">
+            <Field label="Armor (AC) modifier" hint="Flat defense while active. Positive hardens, negative exposes.">
+              <NumberInput value={acMod} onChange={setAcMod} />
+            </Field>
+            <Field label="Melee damage multiplier" hint="Scales the wearer's outgoing melee damage. 1.0 = normal, 1.5 = +50%, 0.5 = half.">
+              <NumberInput value={damageMult} min={0} step={0.1} onChange={setDamageMult} />
+            </Field>
+          </div>
           <div className="sam-divider" />
           <Field label="Default duration (ticks)" hint="50 ticks = 1 second. The ticks passed to sam_apply_effect override this.">
             <NumberInput value={duration} min={0} onChange={setDuration} />
+          </Field>
+          <div className="sam-divider" />
+          <Field label="Also grants (while active)" hint="The effect also applies these vanilla flags while it lasts, then they fade shortly after it ends.">
+            <div className="flex flex-wrap gap-3 pt-1">
+              {GRANT_FLAGS.map((g) => (
+                <label key={g} className="flex items-center gap-1.5 cursor-pointer text-sm" style={{ color: 'var(--color-parchment)' }}>
+                  <input type="checkbox" className="sam-check" checked={grants.includes(g)}
+                    onChange={(e) => setGrants((prev) => e.target.checked ? [...prev, g] : prev.filter((x) => x !== g))} />
+                  {g}
+                </label>
+              ))}
+            </div>
           </Field>
         </Panel>
       </div>

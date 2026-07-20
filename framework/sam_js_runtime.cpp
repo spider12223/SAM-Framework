@@ -43,6 +43,7 @@ extern "C" {
 #include <cstdio>
 #include <cstring>
 #include <cstdint>
+#include <cmath>       // v1.5.0: std::atan2 for aimed spell casts
 #include <filesystem>
 
 // Barony bindings for sam_grant_item are enabled only inside the engine build
@@ -377,6 +378,58 @@ namespace
 		if ( eff < 0 ) { SAM_ERROR("JS", "sam_remove_effect: unknown effect '" + name + "'."); return JS_NewBool(ctx, 0); }
 		players[player]->entity->setEffect(eff, false, 0, true);
 		SAM_INFO("JS", "Removed effect " + name + " from player " + std::to_string(player));
+		return JS_NewBool(ctx, 1);
+	}
+
+	// v1.5.0 — twins of the Lua player effect-control bindings.
+	JSValue js_sam_clear_effects(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_clear_effects refused: host only."); return JS_NewInt32(ctx, 0); }
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity || !stats[player] )
+		{ SAM_ERROR("JS", "sam_clear_effects: invalid player index " + std::to_string(player) + "."); return JS_NewInt32(ctx, 0); }
+		int cleared = 0;
+		for ( int eff = 0; eff < NUMEFFECTS; ++eff )
+		{
+			if ( stats[player]->getEffectActive(eff) != 0 ) { players[player]->entity->setEffect(eff, false, 0, true); ++cleared; }
+		}
+		return JS_NewInt32(ctx, cleared);
+	}
+
+	JSValue js_sam_set_effect_duration(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1, ticks = 0; std::string name;
+		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( argc >= 2 ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
+		if ( argc >= 3 ) { JS_ToInt32(ctx, &ticks, argv[2]); }
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_set_effect_duration refused: host only."); return JS_NewBool(ctx, 0); }
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity || !stats[player] )
+		{ SAM_ERROR("JS", "sam_set_effect_duration: invalid player index " + std::to_string(player) + "."); return JS_NewBool(ctx, 0); }
+		const int eff = samEffectNameToId(name.c_str());
+		if ( eff < 0 ) { SAM_ERROR("JS", "sam_set_effect_duration: unknown effect '" + name + "'."); return JS_NewBool(ctx, 0); }
+		if ( stats[player]->getEffectActive(eff) == 0 ) { return JS_NewBool(ctx, 0); }
+		players[player]->entity->setEffect(eff, true, ticks, true, true, false, true);
+		return JS_NewBool(ctx, 1);
+	}
+
+	JSValue js_sam_set_effect_strength(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1, strength = 0; std::string name;
+		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( argc >= 2 ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
+		if ( argc >= 3 ) { JS_ToInt32(ctx, &strength, argv[2]); }
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_set_effect_strength refused: host only."); return JS_NewBool(ctx, 0); }
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity || !stats[player] )
+		{ SAM_ERROR("JS", "sam_set_effect_strength: invalid player index " + std::to_string(player) + "."); return JS_NewBool(ctx, 0); }
+		const int eff = samEffectNameToId(name.c_str());
+		if ( eff < 0 ) { SAM_ERROR("JS", "sam_set_effect_strength: unknown effect '" + name + "'."); return JS_NewBool(ctx, 0); }
+		if ( stats[player]->getEffectActive(eff) == 0 ) { return JS_NewBool(ctx, 0); }
+		const Uint8 st = (Uint8)(strength < 1 ? 1 : (strength > 255 ? 255 : strength));
+		const int keepDur = stats[player]->EFFECTS_TIMERS[eff];
+		players[player]->entity->setEffect(eff, st, keepDur, true, true, true, true);
 		return JS_NewBool(ctx, 1);
 	}
 
@@ -1426,6 +1479,89 @@ namespace
 #endif
 	}
 
+	// v1.5.0 — monster status-effect read/remove parity (twins of the Lua bindings).
+	JSValue js_sam_remove_monster_effect(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_FALSE; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+		const char* nameC = JS_ToCString(ctx, argv[1]);
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_remove_monster_effect refused: host only."); if ( nameC ) { JS_FreeCString(ctx, nameC); } return JS_FALSE; }
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { if ( nameC ) { JS_FreeCString(ctx, nameC); } return JS_FALSE; }
+		const int eff = samEffectNameToId(nameC);
+		if ( eff < 0 ) { if ( nameC ) { JS_FreeCString(ctx, nameC); } return JS_FALSE; }
+		e->setEffect(eff, false, 0, true);
+		if ( nameC ) { JS_FreeCString(ctx, nameC); }
+		return JS_TRUE;
+#else
+		(void)uid; if ( nameC ) { JS_FreeCString(ctx, nameC); } return JS_FALSE;
+#endif
+	}
+
+	JSValue js_sam_get_monster_effect_duration(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_NewInt32(ctx, 0); }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+		const char* nameC = JS_ToCString(ctx, argv[1]);
+#ifdef SAM_JS_HAVE_BARONY
+		Entity* e = samResolveMonster(uid);
+		int out = 0;
+		if ( e ) { const int eff = samEffectNameToId(nameC); if ( eff >= 0 && e->getStats()->getEffectActive(eff) != 0 ) { out = (int)e->getStats()->EFFECTS_TIMERS[eff]; } }
+		if ( nameC ) { JS_FreeCString(ctx, nameC); }
+		return JS_NewInt32(ctx, out);
+#else
+		(void)uid; if ( nameC ) { JS_FreeCString(ctx, nameC); } return JS_NewInt32(ctx, 0);
+#endif
+	}
+
+	JSValue js_sam_get_monster_effect_strength(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_NewInt32(ctx, 0); }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+		const char* nameC = JS_ToCString(ctx, argv[1]);
+#ifdef SAM_JS_HAVE_BARONY
+		Entity* e = samResolveMonster(uid);
+		int out = 0;
+		if ( e ) { const int eff = samEffectNameToId(nameC); if ( eff >= 0 ) { out = (int)e->getStats()->getEffectActive(eff); } }
+		if ( nameC ) { JS_FreeCString(ctx, nameC); }
+		return JS_NewInt32(ctx, out);
+#else
+		(void)uid; if ( nameC ) { JS_FreeCString(ctx, nameC); } return JS_NewInt32(ctx, 0);
+#endif
+	}
+
+	JSValue js_sam_get_monster_effects(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0; if ( argc >= 1 ) { JS_ToInt64(ctx, &uid, argv[0]); }
+		JSValue arr = JS_NewArray(ctx);
+#ifdef SAM_JS_HAVE_BARONY
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { return arr; }
+		Stat* s = e->getStats();
+		uint32_t n = 0;
+		for ( int id = 0; id < NUMEFFECTS; ++id )
+		{
+			const Uint8 strength = s->getEffectActive(id);
+			if ( strength == 0 ) { continue; }
+			std::string name = SAMLua::effectNameFromId(id);
+			if ( name.empty() ) { name = "CUSTOM:" + std::to_string(id); }
+			JSValue o = JS_NewObject(ctx);
+			JS_SetPropertyStr(ctx, o, "name", JS_NewString(ctx, name.c_str()));
+			JS_SetPropertyStr(ctx, o, "ticks", JS_NewInt32(ctx, (int32_t)s->EFFECTS_TIMERS[id]));
+			JS_SetPropertyStr(ctx, o, "strength", JS_NewInt32(ctx, (int32_t)strength));
+			JS_SetPropertyUint32(ctx, arr, n++, o);
+		}
+		return arr;
+#else
+		(void)uid; return arr;
+#endif
+	}
+
 	JSValue js_sam_kill_monster(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
@@ -1623,7 +1759,7 @@ namespace
 			const Uint8 strength = stats[player]->getEffectActive(id);
 			if ( strength == 0 ) { continue; }
 			std::string name = SAMLua::effectNameFromId(id);
-			if ( name.empty() ) { name = "EFFECT:" + std::to_string(id); }
+			if ( name.empty() ) { name = "CUSTOM:" + std::to_string(id); }
 			JSValue o = JS_NewObject(ctx);
 			JS_SetPropertyStr(ctx, o, "name", JS_NewString(ctx, name.c_str()));
 			JS_SetPropertyStr(ctx, o, "ticks", JS_NewInt32(ctx, (int32_t)stats[player]->EFFECTS_TIMERS[id]));
@@ -1956,6 +2092,166 @@ namespace
 #endif
 	}
 
+#ifdef SAM_JS_HAVE_BARONY
+	// v1.5.0 spell helpers (JS twins of the Lua ones).
+	static int samJsResolveSpellId(const std::string& spell)
+	{
+		if ( spell.find(':') != std::string::npos )
+		{
+			const SAMSpellDef* d = SAMSpells::getSpellByName(spell);
+			return d ? d->numericId : -1;
+		}
+		std::string lower = spell;
+		for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
+		for ( const auto& kv : ItemTooltips.spellItems ) { if ( kv.second.internalName == lower ) { return kv.first; } }
+		return -1;
+	}
+	static Entity* samJsCastAimed(Entity* e, int id, bool aim, double tx, double ty)
+	{
+		spell_t* sp = getSpellFromID(id);
+		if ( !e || !sp ) { return nullptr; }
+		if ( !aim ) { return castSpell(e->getUID(), sp, false, true); }
+		const real_t savedYaw = e->yaw;
+		e->yaw = std::atan2(ty - e->y, tx - e->x);
+		Entity* missile = castSpell(e->getUID(), sp, false, true);
+		e->yaw = savedYaw;
+		return missile;
+	}
+#endif
+
+	JSValue js_sam_cast_spell_at(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 3 ) { return JS_NULL; }
+		int32_t player = 0; JS_ToInt32(ctx, &player, argv[0]);
+		int64_t targetUid = 0; JS_ToInt64(ctx, &targetUid, argv[1]);
+		const char* spellC = JS_ToCString(ctx, argv[2]);
+		const std::string spell = spellC ? spellC : "";
+		if ( spellC ) { JS_FreeCString(ctx, spellC); }
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_cast_spell_at refused: host only."); return JS_NULL; }
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity ) { return JS_NULL; }
+		Entity* target = uidToEntity((Sint32)targetUid);
+		if ( !target ) { return JS_NULL; }
+		const int id = samJsResolveSpellId(spell);
+		if ( id < 0 ) { SAM_ERROR("JS", "sam_cast_spell_at: unknown spell '" + spell + "'."); return JS_NULL; }
+		Entity* missile = samJsCastAimed(players[player]->entity, id, true, target->x, target->y);
+		return missile ? JS_NewInt64(ctx, (int64_t)missile->getUID()) : JS_NULL;
+#else
+		(void)player; (void)targetUid; (void)spell; return JS_NULL;
+#endif
+	}
+
+	JSValue js_sam_cast_spell_pos(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 4 ) { return JS_NULL; }
+		int32_t player = 0, tx = 0, ty = 0;
+		JS_ToInt32(ctx, &player, argv[0]); JS_ToInt32(ctx, &tx, argv[1]); JS_ToInt32(ctx, &ty, argv[2]);
+		const char* spellC = JS_ToCString(ctx, argv[3]);
+		const std::string spell = spellC ? spellC : "";
+		if ( spellC ) { JS_FreeCString(ctx, spellC); }
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_cast_spell_pos refused: host only."); return JS_NULL; }
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity ) { return JS_NULL; }
+		const int id = samJsResolveSpellId(spell);
+		if ( id < 0 ) { SAM_ERROR("JS", "sam_cast_spell_pos: unknown spell '" + spell + "'."); return JS_NULL; }
+		Entity* missile = samJsCastAimed(players[player]->entity, id, true, (double)(tx * 16 + 8), (double)(ty * 16 + 8));
+		return missile ? JS_NewInt64(ctx, (int64_t)missile->getUID()) : JS_NULL;
+#else
+		(void)player; (void)tx; (void)ty; (void)spell; return JS_NULL;
+#endif
+	}
+
+	JSValue js_sam_monster_cast_spell(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_NULL; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+		const char* spellC = JS_ToCString(ctx, argv[1]);
+		const std::string spell = spellC ? spellC : "";
+		if ( spellC ) { JS_FreeCString(ctx, spellC); }
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_monster_cast_spell refused: host only."); return JS_NULL; }
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { return JS_NULL; }
+		const int id = samJsResolveSpellId(spell);
+		if ( id < 0 ) { SAM_ERROR("JS", "sam_monster_cast_spell: unknown spell '" + spell + "'."); return JS_NULL; }
+		Entity* missile = samJsCastAimed(e, id, false, 0, 0);
+		return missile ? JS_NewInt64(ctx, (int64_t)missile->getUID()) : JS_NULL;
+#else
+		(void)uid; (void)spell; return JS_NULL;
+#endif
+	}
+
+	JSValue js_sam_get_spells(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		JSValue arr = JS_NewArray(ctx);
+#ifdef SAM_JS_HAVE_BARONY
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] ) { return arr; }
+		uint32_t n = 0;
+		for ( node_t* node = players[player]->magic.spellList.first; node; node = node->next )
+		{
+			spell_t* sp = (spell_t*)node->element;
+			if ( sp ) { JS_SetPropertyUint32(ctx, arr, n++, JS_NewString(ctx, sp->spell_internal_name)); }
+		}
+		return arr;
+#else
+		(void)player; return arr;
+#endif
+	}
+
+	JSValue js_sam_player_knows_spell(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_FALSE; }
+		int32_t player = -1; JS_ToInt32(ctx, &player, argv[0]);
+		const char* spellC = JS_ToCString(ctx, argv[1]);
+		const std::string spell = spellC ? spellC : "";
+		if ( spellC ) { JS_FreeCString(ctx, spellC); }
+#ifdef SAM_JS_HAVE_BARONY
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] ) { return JS_FALSE; }
+		const int id = samJsResolveSpellId(spell);
+		if ( id < 0 ) { return JS_FALSE; }
+		for ( node_t* node = players[player]->magic.spellList.first; node; node = node->next )
+		{
+			spell_t* sp = (spell_t*)node->element;
+			if ( sp && sp->ID == id ) { return JS_TRUE; }
+		}
+		return JS_FALSE;
+#else
+		(void)player; (void)spell; return JS_FALSE;
+#endif
+	}
+
+	JSValue js_sam_remove_spell(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_FALSE; }
+		int32_t player = -1; JS_ToInt32(ctx, &player, argv[0]);
+		const char* spellC = JS_ToCString(ctx, argv[1]);
+		const std::string spell = spellC ? spellC : "";
+		if ( spellC ) { JS_FreeCString(ctx, spellC); }
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_remove_spell refused: host only."); return JS_FALSE; }
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] ) { return JS_FALSE; }
+		const int id = samJsResolveSpellId(spell);
+		if ( id < 0 ) { return JS_FALSE; }
+		for ( node_t* node = players[player]->magic.spellList.first; node; )
+		{
+			node_t* next = node->next;
+			spell_t* sp = (spell_t*)node->element;
+			if ( sp && sp->ID == id ) { list_RemoveNode(node); return JS_TRUE; }
+			node = next;
+		}
+		return JS_FALSE;
+#else
+		(void)player; (void)spell; return JS_FALSE;
+#endif
+	}
+
 	// ---- sandbox construction -------------------------------------------------
 	JSContext* newSandboxContext(JSRuntime* rt)
 	{
@@ -2013,10 +2309,25 @@ namespace
 		// Custom spells (Session 1)
 		JS_SetPropertyStr(ctx, g, "sam_grant_spell", JS_NewCFunction(ctx, js_sam_grant_spell, "sam_grant_spell", 2));
 		JS_SetPropertyStr(ctx, g, "sam_cast_spell", JS_NewCFunction(ctx, js_sam_cast_spell, "sam_cast_spell", 2));
+		// v1.5.0 spell freedom (twins of the Lua bindings)
+		JS_SetPropertyStr(ctx, g, "sam_cast_spell_at", JS_NewCFunction(ctx, js_sam_cast_spell_at, "sam_cast_spell_at", 3));
+		JS_SetPropertyStr(ctx, g, "sam_cast_spell_pos", JS_NewCFunction(ctx, js_sam_cast_spell_pos, "sam_cast_spell_pos", 4));
+		JS_SetPropertyStr(ctx, g, "sam_monster_cast_spell", JS_NewCFunction(ctx, js_sam_monster_cast_spell, "sam_monster_cast_spell", 2));
+		JS_SetPropertyStr(ctx, g, "sam_get_spells", JS_NewCFunction(ctx, js_sam_get_spells, "sam_get_spells", 1));
+		JS_SetPropertyStr(ctx, g, "sam_player_knows_spell", JS_NewCFunction(ctx, js_sam_player_knows_spell, "sam_player_knows_spell", 2));
+		JS_SetPropertyStr(ctx, g, "sam_remove_spell", JS_NewCFunction(ctx, js_sam_remove_spell, "sam_remove_spell", 2));
 #ifdef SAM_JS_HAVE_BARONY
 		JS_SetPropertyStr(ctx, g, "sam_grant_gold", JS_NewCFunction(ctx, js_sam_grant_gold, "sam_grant_gold", 2));
 		JS_SetPropertyStr(ctx, g, "sam_apply_effect", JS_NewCFunction(ctx, js_sam_apply_effect, "sam_apply_effect", 3));
 		JS_SetPropertyStr(ctx, g, "sam_remove_effect", JS_NewCFunction(ctx, js_sam_remove_effect, "sam_remove_effect", 2));
+		// v1.5.0 player effect control + monster effect read/remove parity
+		JS_SetPropertyStr(ctx, g, "sam_clear_effects", JS_NewCFunction(ctx, js_sam_clear_effects, "sam_clear_effects", 1));
+		JS_SetPropertyStr(ctx, g, "sam_set_effect_duration", JS_NewCFunction(ctx, js_sam_set_effect_duration, "sam_set_effect_duration", 3));
+		JS_SetPropertyStr(ctx, g, "sam_set_effect_strength", JS_NewCFunction(ctx, js_sam_set_effect_strength, "sam_set_effect_strength", 3));
+		JS_SetPropertyStr(ctx, g, "sam_remove_monster_effect", JS_NewCFunction(ctx, js_sam_remove_monster_effect, "sam_remove_monster_effect", 2));
+		JS_SetPropertyStr(ctx, g, "sam_get_monster_effect_duration", JS_NewCFunction(ctx, js_sam_get_monster_effect_duration, "sam_get_monster_effect_duration", 2));
+		JS_SetPropertyStr(ctx, g, "sam_get_monster_effect_strength", JS_NewCFunction(ctx, js_sam_get_monster_effect_strength, "sam_get_monster_effect_strength", 2));
+		JS_SetPropertyStr(ctx, g, "sam_get_monster_effects", JS_NewCFunction(ctx, js_sam_get_monster_effects, "sam_get_monster_effects", 1));
 		JS_SetPropertyStr(ctx, g, "sam_get_stat", JS_NewCFunction(ctx, js_sam_get_stat, "sam_get_stat", 2));
 		JS_SetPropertyStr(ctx, g, "sam_set_stat", JS_NewCFunction(ctx, js_sam_set_stat, "sam_set_stat", 3));
 		JS_SetPropertyStr(ctx, g, "sam_set_move_speed", JS_NewCFunction(ctx, js_sam_set_move_speed, "sam_set_move_speed", 2));

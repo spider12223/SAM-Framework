@@ -18,9 +18,23 @@
 #include <fstream>
 #include <sstream>
 #include <map>
+#include <cctype>
 
 using nlohmann::json;
 static const char* MOD = "EFFECTS";
+
+// v1.5.0 — allowlist for an effect's "grants": only these safe vanilla flags may be re-asserted
+// by a custom effect (they have no immunity/removal side-logic that would fight us). Returns the
+// EFF_ slot, or -1 for anything not on the list.
+static int samGrantFlagToSlot(const std::string& nameIn)
+{
+	std::string n;
+	for ( char c : nameIn ) { n += (char)std::toupper((unsigned char)c); }
+	if ( n == "LEVITATING" || n == "LEVITATION" ) { return EFF_LEVITATING; }
+	if ( n == "INVISIBLE" )                        { return EFF_INVISIBLE; }
+	if ( n == "TELEPATH" )                         { return EFF_TELEPATH; }
+	return -1;
+}
 
 namespace
 {
@@ -118,6 +132,23 @@ void SAMEffects::loadFromManifest(const SAMModManifest& manifest)
 		def.hpPerSecond = getInt("hp_per_second", 0);
 		def.mpPerSecond = getInt("mp_per_second", 0);
 		def.moveSpeedMult = getNum("move_speed_mult", 1.0);
+		def.acMod = getInt("ac_mod", 0);              // v1.5.0 flat armor modifier
+		def.damageMult = getNum("damage_mult", 1.0);  // v1.5.0 outgoing melee damage multiplier
+		// v1.5.0 grants: ["LEVITATING","INVISIBLE","TELEPATH"] -> re-asserted vanilla flags (allowlisted)
+		{
+			auto gr = j.find("grants");
+			if ( gr != j.end() && gr->is_array() )
+			{
+				for ( const auto& el : *gr )
+				{
+					if ( !el.is_string() ) { continue; }
+					const int slot = samGrantFlagToSlot(el.get<std::string>());
+					if ( slot >= 0 ) { def.grants.push_back(slot); }
+					else { SAM_WARN(MOD, "effect '" + def.id + "' grants unsupported flag '" + el.get<std::string>()
+						+ "' (allowed: LEVITATING, INVISIBLE, TELEPATH) — ignored."); }
+				}
+			}
+		}
 		def.defaultDurationTicks = getInt("duration_ticks", 0);
 		def.hudHidden = getBool("hud_hidden", false);
 		def.modNamespace = manifest.ns;
@@ -202,6 +233,28 @@ double SAMEffects::speedMult(const Stat* s)
 		{
 			mult *= kv.second.moveSpeedMult;
 		}
+	}
+	return mult;
+}
+
+int SAMEffects::sumACMod(const Stat* s)
+{
+	if ( !s || s_bySlot.empty() ) { return 0; }
+	int total = 0;
+	for ( const auto& kv : s_bySlot )
+	{
+		if ( kv.second.acMod != 0 && s->getEffectActive(kv.first) ) { total += kv.second.acMod; }
+	}
+	return total;
+}
+
+double SAMEffects::attackMult(const Stat* s)
+{
+	if ( !s || s_bySlot.empty() ) { return 1.0; }
+	double mult = 1.0;
+	for ( const auto& kv : s_bySlot )
+	{
+		if ( kv.second.damageMult != 1.0 && s->getEffectActive(kv.first) ) { mult *= kv.second.damageMult; }
 	}
 	return mult;
 }
