@@ -140,6 +140,75 @@ export default function StartHere() {
         </div>
       </Panel>
 
+      {/* ----------------------------------------- spells and status effects */}
+      <Panel title="Custom Spells and Status Effects">
+        <p className="m-0 text-sm leading-relaxed" style={{ color: 'var(--color-parchment)' }}>
+          A spell or a status effect can be a mod all on its own. You do not need a class to make one,
+          and it will export and load just fine by itself. But building it is only half the job. The
+          game also needs a way to hand the spell to a player, or to put the effect on someone. If you
+          skip that part, you make the thing and it looks like nothing happens. Here is how each one
+          works.
+        </p>
+
+        <div className="mt-4 sam-well p-4">
+          <div className="sam-label mb-2">✨ Spells</div>
+          <div className="space-y-2 text-sm leading-relaxed" style={{ color: 'var(--color-parchment)' }}>
+            <p>
+              A custom spell really casts. It fires, deals your damage, and does whatever its element
+              does (fire burns, poison poisons, and so on).
+            </p>
+            <p>To actually get it into the game, something has to grant it to the player:</p>
+            <ul className="list-disc pl-5 space-y-1">
+              <li>
+                Add it to a class. In the Class Editor, under Starting Spells, your own spells show up as
+                buttons you can click. This is the easy way.
+              </li>
+              <li>
+                Or grant it from a script with{' '}
+                <span className="sam-mono">sam_grant_spell(player, "yourmod:spell")</span>.
+              </li>
+            </ul>
+            <p>
+              If you make only a spell and nothing grants it, no one ever learns it, so it looks broken.
+              That is the most common reason a custom spell seems to do nothing.
+            </p>
+            <p style={{ color: '#8a7038' }}>
+              Not wired up yet: the on-hit effect, range, and speed fields are saved but not used. You
+              get the element's built-in behavior plus your damage number.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-3 sam-well p-4">
+          <div className="sam-label mb-2">🌀 Status effects</div>
+          <div className="space-y-2 text-sm leading-relaxed" style={{ color: 'var(--color-parchment)' }}>
+            <p>
+              A custom status effect fully works once it is on someone. It counts down on its own,
+              changes their stats, HP, MP, or move speed the way you set it, and shows on the HUD.
+            </p>
+            <p>
+              To put the effect on a player or a monster, you apply it. Right now the way to do that is
+              one short line in a script (the Advanced tab of a class or item script):
+            </p>
+            <pre
+              className="sam-mono text-xs p-3 overflow-x-auto"
+              style={{ background: 'rgba(0,0,0,0.28)', color: 'var(--color-parchment)', borderRadius: 4, margin: 0 }}
+            >{`sam_apply_effect(player, "yourmod:effect", 150)  -- 150 ticks, and 50 ticks is 1 second`}</pre>
+            <p style={{ color: '#8a7038' }}>
+              Heads up: the effect blocks in the visual builder only list the built-in effects for now,
+              so your own effect will not show up there yet. Use the script line above to apply it. A
+              picker for your custom effects is on the way.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-wrap gap-3">
+          <GoldButton onClick={() => navigate('/spell-editor')}>✨ Open Spell Editor</GoldButton>
+          <GoldButton onClick={() => navigate('/effect-editor')}>🌀 Open Effect Editor</GoldButton>
+          <GoldButton onClick={() => navigate('/api-reference')}>📖 API Reference</GoldButton>
+        </div>
+      </Panel>
+
       {/* ------------------------------------------------- optional next steps */}
       <Panel title="Want to Do More? (optional)">
         <div className="space-y-3">
