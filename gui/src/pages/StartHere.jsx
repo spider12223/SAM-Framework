@@ -140,6 +140,50 @@ export default function StartHere() {
         </div>
       </Panel>
 
+      {/* --------------------------------------------- detailed install steps */}
+      <Panel title="Installing S.A.M, Step by Step">
+        <p className="m-0 text-sm leading-relaxed" style={{ color: 'var(--color-parchment)' }}>
+          Here is the whole install, click by click. You do it once, and every mod built with S.A.M
+          works afterward.
+        </p>
+        <ol className="mt-3 space-y-2.5 text-sm leading-relaxed list-decimal pl-5" style={{ color: 'var(--color-parchment)' }}>
+          <li><strong style={{ color: 'var(--color-gold)' }}>Own Barony on Steam.</strong> S.A.M patches Barony's own program, so you need the base game.</li>
+          <li><strong style={{ color: 'var(--color-gold)' }}>Launch Barony once</strong> from Steam, then close it. This makes sure all the game files are unpacked.</li>
+          <li><strong style={{ color: 'var(--color-gold)' }}>Download the installer</strong> (button below).</li>
+          <li><strong style={{ color: 'var(--color-gold)' }}>Run the installer</strong> you just downloaded. It opens a small window and finds your Barony for you.</li>
+          <li><strong style={{ color: 'var(--color-gold)' }}>Click Install.</strong> It backs up your original <span className="sam-mono">barony.exe</span> (as <span className="sam-mono">barony_vanilla.exe</span>), drops the S.A.M version in, and adds <span className="sam-mono">typescript.js</span> next to it. That is the whole install.</li>
+          <li><strong style={{ color: 'var(--color-gold)' }}>Launch Barony</strong> from Steam.</li>
+          <li>
+            <strong style={{ color: 'var(--color-gold)' }}>Check it worked.</strong> Look at the bottom of the main menu. If you see a gold{' '}
+            <span style={{ color: 'var(--color-gold-bright)' }}>S.A.M Framework</span> line (with the version number) near Barony's own version, it is installed and running.
+            <div className="mt-1" style={{ color: '#8a7038' }}>No badge there means the installer did not patch the right folder. Re-run it, or use the by-hand steps below.</div>
+          </li>
+          <li><strong style={{ color: 'var(--color-gold)' }}>Add a mod.</strong> Unzip the mod's folder into Barony's <span className="sam-mono">mods</span> folder (in Steam: right click Barony, Manage, Browse local files, open <span className="sam-mono">mods</span>).</li>
+          <li><strong style={{ color: 'var(--color-gold)' }}>Turn it on.</strong> Open the <span className="sam-label">Mods</span> menu in Barony, enable the mod, and start a game. That is it.</li>
+        </ol>
+        <div className="mt-4">
+          <a className="sam-btn" href={INSTALLER_URL} target="_blank" rel="noreferrer">⬇ Download Installer</a>
+        </div>
+
+        <div className="mt-4 sam-well p-4">
+          <div className="sam-label mb-1">Prefer to do it by hand</div>
+          <p className="m-0 text-sm leading-relaxed" style={{ color: 'var(--color-parchment)' }}>
+            In Steam, right click Barony, choose Manage, then Browse local files. Copy your{' '}
+            <span className="sam-mono">barony.exe</span> and rename the copy to{' '}
+            <span className="sam-mono">barony_vanilla.exe</span> (your backup). Then copy the S.A.M{' '}
+            <span className="sam-mono">barony.exe</span> and <span className="sam-mono">typescript.js</span> into that same folder, overwriting the original. Same result as the installer.
+          </p>
+        </div>
+
+        <div className="mt-3 sam-well p-4">
+          <div className="sam-label mb-1">If something goes wrong</div>
+          <ul className="m-0 text-sm leading-relaxed list-disc pl-5 space-y-1" style={{ color: 'var(--color-parchment)' }}>
+            <li>An error about a missing <span className="sam-mono">SDL2</span> file (or the game not starting) almost always means the S.A.M <span className="sam-mono">barony.exe</span> is in the wrong place. It has to sit inside your Barony folder, next to the game's files, not in your Downloads. Use the installer, or copy it into the Barony folder by hand.</li>
+            <li>No S.A.M line on the main menu means the patched exe is not the one running. Re-run the installer (it finds the right folder), or copy it in by hand.</li>
+          </ul>
+        </div>
+      </Panel>
+
       {/* ----------------------------------------- spells and status effects */}
       <Panel title="Custom Spells and Status Effects">
         <p className="m-0 text-sm leading-relaxed" style={{ color: 'var(--color-parchment)' }}>

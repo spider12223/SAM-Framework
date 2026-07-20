@@ -29,7 +29,7 @@
 #include <chrono>
 
 // S.A.M framework version — stamped into the session banner in the log file.
-#define SAM_FRAMEWORK_VERSION "1.5.0"
+#define SAM_FRAMEWORK_VERSION "1.5.1"
 
 // Barony release this build is patched against — shown in the session banner.
 #define SAM_BARONY_TARGET "5.0.2"
