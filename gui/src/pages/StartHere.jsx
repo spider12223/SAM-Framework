@@ -154,8 +154,8 @@ export default function StartHere() {
           <li><strong style={{ color: 'var(--color-gold)' }}>Click Install.</strong> It backs up your original <span className="sam-mono">barony.exe</span> (as <span className="sam-mono">barony_vanilla.exe</span>), drops the S.A.M version in, and adds <span className="sam-mono">typescript.js</span> next to it. That is the whole install.</li>
           <li><strong style={{ color: 'var(--color-gold)' }}>Launch Barony</strong> from Steam.</li>
           <li>
-            <strong style={{ color: 'var(--color-gold)' }}>Check it worked.</strong> Look at the bottom of the main menu. If you see a gold{' '}
-            <span style={{ color: 'var(--color-gold-bright)' }}>S.A.M Framework</span> line (with the version number) near Barony's own version, it is installed and running.
+            <strong style={{ color: 'var(--color-gold)' }}>Check it worked.</strong> Look at the bottom of the main menu. If you see the{' '}
+            <span style={{ color: 'var(--color-gold-bright)' }}>S.A.M Framework</span> line with its shield icon, near Barony's own version, it is installed and running.
             <div className="mt-1" style={{ color: '#8a7038' }}>No badge there means the installer did not patch the right folder. Re-run it, or use the by-hand steps below.</div>
           </li>
           <li><strong style={{ color: 'var(--color-gold)' }}>Add a mod.</strong> Unzip the mod's folder into Barony's <span className="sam-mono">mods</span> folder (in Steam: right click Barony, Manage, Browse local files, open <span className="sam-mono">mods</span>).</li>
