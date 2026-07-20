@@ -22,7 +22,7 @@ import {
   ItemIcon, ErrorList, SavedNote, BalanceHints, SearchSelect,
 } from '@/components/ui.jsx';
 import LoadoutBoard from '@/components/LoadoutBoard.jsx';
-import { entryFromJson, entryToJson } from '@/data/equipment.js';
+import { entryFromJson, entryToJson, newEntry } from '@/data/equipment.js';
 
 const MAX_PORTRAIT_BYTES = 256 * 1024; // portraits are 54x54 — anything big is a mistake
 
@@ -114,12 +114,48 @@ function itemCategory(t) {
   return 'TOOL';
 }
 
+// A custom item declares a `category` (WEAPON/ARMOR/POTION/…); pick a matching emoji so it
+// reads in the loadout picker even though it has no vanilla item-icon PNG.
+const CUSTOM_CATEGORY_EMOJI = {
+  WEAPON: '🗡️', ARMOR: '🛡️', POTION: '🧪', SCROLL: '📜', SPELLBOOK: '📖', TOME_SPELL: '📖',
+  MAGICSTAFF: '🪄', RING: '💍', AMULET: '📿', GEM: '💎', FOOD: '🍞', TOOL: '🧰', THROWN: '🌀',
+  BOOK: '📖', SPELL_CAT: '✨',
+};
+const customEmoji = (it) => (it && CUSTOM_CATEGORY_EMOJI[it.category]) || '📦';
+
+// A custom item's `slot` (EQUIPPABLE_IN_SLOT_*) → the loadout paperdoll slot id, so a
+// one-click add can EQUIP a weapon/armour custom item, not just stash it in the backpack.
+const CUSTOM_SLOT_TO_PAPERDOLL = {
+  EQUIPPABLE_IN_SLOT_WEAPON: 'weapon', EQUIPPABLE_IN_SLOT_SHIELD: 'shield',
+  EQUIPPABLE_IN_SLOT_MASK: 'mask', EQUIPPABLE_IN_SLOT_HELM: 'helmet',
+  EQUIPPABLE_IN_SLOT_GLOVES: 'gloves', EQUIPPABLE_IN_SLOT_BOOTS: 'boots',
+  EQUIPPABLE_IN_SLOT_BREASTPLATE: 'breastplate', EQUIPPABLE_IN_SLOT_CLOAK: 'cloak',
+  EQUIPPABLE_IN_SLOT_AMULET: 'amulet', EQUIPPABLE_IN_SLOT_RING: 'ring',
+};
+
 function slugify(name) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'unnamed';
 }
 
 export default function ClassEditor() {
-  const { meta, classes, spells: modSpells, scripts, editing, dispatch } = useMod();
+  const { meta, classes, items: modItems, spells: modSpells, scripts, editing, dispatch } = useMod();
+
+  // Custom items from THIS mod become pickable starting gear alongside the vanilla list.
+  // The engine already grants a "namespace:item" in starting_items (sam_classes.cpp) — the
+  // Class Editor just never offered them, which is the gap Absidian hit.
+  const customItemMap = useMemo(
+    () => Object.fromEntries((modItems || []).map((it) => [it.id, it])),
+    [modItems],
+  );
+  const allItemTypes = useMemo(
+    () => [...ITEM_TYPES, ...(modItems || []).map((it) => it.id)],
+    [modItems],
+  );
+  // Icon + category resolvers that fall back to the custom item's own declared category.
+  const iconForType = (type) =>
+    customItemMap[type] ? <ItemIcon src={null} emoji={customEmoji(customItemMap[type])} /> : itemIcon(type);
+  const categoryForType = (type) =>
+    customItemMap[type] ? (customItemMap[type].category || 'TOOL') : itemCategory(type);
 
   // "Edit" handoff from the Mod Builder: seed the form from a saved class.
   const editDef = editing?.kind === 'class' ? classes.find((c) => c.id === editing.id) : null;
@@ -266,6 +302,14 @@ export default function ClassEditor() {
     }
     setSpellError('');
     setSpells((prev) => (prev.includes(s) ? prev : [...prev, s]));
+  };
+
+  // Quick-add a custom item to the starting loadout. If the item declares an equip slot we
+  // place it EQUIPPED in that paperdoll slot (a weapon starts wielded); otherwise it goes to
+  // the backpack. Either way it also shows up in the slot pickers on the board above.
+  const addCustomItem = (it) => {
+    const slotId = CUSTOM_SLOT_TO_PAPERDOLL[it.slot];
+    setItems((prev) => [...prev, newEntry(it.id, !!slotId, slotId)]);
   };
 
   // Set one attribute's growth weight (blank → 2 neutral; clamp 0..99).
@@ -520,14 +564,40 @@ export default function ClassEditor() {
       <LoadoutBoard
         items={items}
         onChange={setItems}
-        allTypes={ITEM_TYPES}
-        iconFor={itemIcon}
-        categoryFor={itemCategory}
+        allTypes={allItemTypes}
+        iconFor={iconForType}
+        categoryFor={categoryForType}
         categories={CATEGORIES}
         portraitUrl={portrait.dataUrl}
         gold={gold}
         onGold={setGold}
       />
+
+      {/* Custom items from this mod — the one-click way to put YOUR gear on a class. They also
+          appear in every slot/backpack picker on the board above. */}
+      {modItems.length > 0 && (
+        <div className="sam-well px-4 py-3">
+          <div className="sam-label mb-1" style={{ color: '#8a6d2e' }}>Your custom items — click to add to the starting kit</div>
+          <div className="flex flex-wrap gap-1">
+            {modItems.map((it) => (
+              <button
+                key={it.id}
+                type="button"
+                className="sam-btn"
+                style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
+                onClick={() => addCustomItem(it)}
+                title={CUSTOM_SLOT_TO_PAPERDOLL[it.slot] ? `equip ${it.id}` : `add ${it.id} to backpack`}
+              >
+                {customEmoji(it)} {it.name_identified || it.name || it.id}
+              </button>
+            ))}
+          </div>
+          <div className="text-xs mt-1" style={{ color: '#6b5a35' }}>
+            Equippable items (weapon, armour…) start <b>worn</b>; everything else goes in the
+            backpack. The engine already grants these at spawn.
+          </div>
+        </div>
+      )}
 
       {/* --------------------------------------- spells + growth + gold */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
