@@ -211,6 +211,40 @@ namespace SAMLua
 	// Host-authoritative for remote players; a client always sees its own facing correctly.
 	double getFacing(int player);
 
+	// v1.6.0 — "impact frame" juice: sam_screen_flash / sam_camera_shake / sam_hitstop.
+	// These let a script punctuate a moment (classically player.on_block — a shield block)
+	// with the anime "impact frame" look: a full-screen colour flash that fades, a camera
+	// shake, and a brief freeze-frame. The state lives here (not per runtime) so the Lua and
+	// JS paths drive ONE set of per-player values and cannot drift, and the engine's draw /
+	// camera / logic loops read it every frame.
+	//
+	// Inert until a script triggers it — this is the whole no-op guarantee. No active flash
+	// draws nothing; no shake leaves cameravars untouched; no hitstop and the entity-freeze
+	// condition is byte-identical to vanilla. All three are also cleared on a new game.
+	//
+	// Owner-machine model, exactly like move-speed: the flash is drawn by the machine the
+	// player lives on (in singleplayer/splitscreen every player is local, so it just works;
+	// the host forwards a remote client's shake over the existing 'SHAK' packet). Hitstop is
+	// singleplayer-only — freezing host logic in a netgame would desync clients.
+	//   triggerScreenFlash: r/g/b 0..255, intensity 0..1 (peak opacity), durationMs the fade.
+	//                       style 0 = plain colour fill (sam_screen_flash); style 1 = manga
+	//                       "impact burst" (sam_impact_frame): the colour pop PLUS radial
+	//                       speed lines converging on screen centre PLUS a bright core flare.
+	//                       `lines` is the speed-line count for style 1 (ignored for style 0).
+	//   screenFlashState:   engine draw reads once per frame per local player; true + current
+	//                       rgba (0..255) + style + line count + progress (0..1 through the
+	//                       fade, for animating the burst) while active, false when idle.
+	//   triggerCameraShake: magnitude ~1..20 (mapped to Barony's shakex/shakey impulses).
+	//   triggerHitstop:     freeze non-player entity logic for durationMs (capped; SINGLE only).
+	//   hitstopActive:      the engine logic loop ORs this into its freeze condition.
+	//   resetImpact:        drop all impact state (call on a new game).
+	void triggerScreenFlash(int player, int r, int g, int b, double intensity, int durationMs, int style, int lines);
+	bool screenFlashState(int player, int& r, int& g, int& b, int& alpha, int& style, int& lines, double& progress);
+	void triggerCameraShake(int player, double magnitude);
+	void triggerHitstop(int durationMs);
+	bool hitstopActive();
+	void resetImpact();
+
 	// Tear down the VM and release all script references.
 	void shutdown();
 

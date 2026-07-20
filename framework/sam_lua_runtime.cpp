@@ -922,6 +922,16 @@ namespace
 	double g_samMoveSpeed[MAXPLAYERS] = { 1.0, 1.0, 1.0, 1.0 };
 	static_assert(MAXPLAYERS == 4, "g_samMoveSpeed's initializer must cover every player slot");
 
+#ifdef SAM_LUA_HAVE_BARONY
+	// ---- v1.6.0 impact-frame state (SDL-typed → engine build only) -------------
+	// Per-player screen flash: an owner-machine HUD overlay that fades from maxAlpha to 0
+	// over durMs (real-time, so it looks the same at any framerate). maxAlpha==0 means idle.
+	struct SamFlashState { Uint32 startMs = 0; Uint32 durMs = 0; Uint8 r = 255, g = 255, b = 255; Uint8 maxAlpha = 0; Uint8 style = 0; Uint16 lines = 0; };
+	static SamFlashState g_samFlash[MAXPLAYERS];
+	// One global hitstop deadline (SDL_GetTicks() ms). 0 = inactive. Singleplayer only.
+	static Uint32 g_samHitstopUntilMs = 0;
+#endif
+
 	const double SAM_MOVE_SPEED_MIN = 0.1;
 	// v1.2.9 — raised 3.0 -> 5.0. The engine hard-clamps final player velocity magnitude at
 	// 5.0 (actplayer.cpp), which for a boosted player we lift to a tunnel-safe 7.0; a ~4-5x
@@ -2132,6 +2142,99 @@ namespace
 		return 1;
 	}
 
+	// sam_screen_flash(player, r, g, b [, intensity=1.0] [, duration_ms=180]) -> bool.
+	// Flash player's whole screen in an RGB colour that fades to nothing over duration_ms —
+	// the anime "impact frame". intensity 0..1 is the peak opacity. Drawn on the machine the
+	// player lives on. Returns true if accepted (valid player, engine build).
+	int lua_sam_screen_flash(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player   = (int)luaL_checkinteger(Ls, 1);
+		const int r        = (int)luaL_checkinteger(Ls, 2);
+		const int g        = (int)luaL_checkinteger(Ls, 3);
+		const int b        = (int)luaL_checkinteger(Ls, 4);
+		const double inten = (double)luaL_optnumber(Ls, 5, 1.0);
+		const int ms       = (int)luaL_optinteger(Ls, 6, 180);
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] )
+		{ lua_pushboolean(Ls, 0); return 1; }
+		SAMLua::triggerScreenFlash(player, r, g, b, inten, ms, 0, 0); // style 0 = plain fill
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)player; (void)r; (void)g; (void)b; (void)inten; (void)ms;
+		lua_pushboolean(Ls, 0);
+		return 1;
+#endif
+	}
+
+	// sam_impact_frame(player, r, g, b [, intensity=1.0] [, duration_ms=220] [, lines=110]) -> bool.
+	// The EXAGGERATED, anime version of the flash: a colour pop PLUS manga speed lines that
+	// converge on the screen centre PLUS a bright core flare. Pair it with sam_camera_shake +
+	// sam_hitstop for a full "impact frame". `lines` is the speed-line count (0 = a plain flash).
+	int lua_sam_impact_frame(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player   = (int)luaL_checkinteger(Ls, 1);
+		const int r        = (int)luaL_checkinteger(Ls, 2);
+		const int g        = (int)luaL_checkinteger(Ls, 3);
+		const int b        = (int)luaL_checkinteger(Ls, 4);
+		const double inten = (double)luaL_optnumber(Ls, 5, 1.0);
+		const int ms       = (int)luaL_optinteger(Ls, 6, 220);
+		const int lines    = (int)luaL_optinteger(Ls, 7, 110);
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] )
+		{ lua_pushboolean(Ls, 0); return 1; }
+		SAMLua::triggerScreenFlash(player, r, g, b, inten, ms, 1, lines); // style 1 = manga burst
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)player; (void)r; (void)g; (void)b; (void)inten; (void)ms; (void)lines;
+		lua_pushboolean(Ls, 0);
+		return 1;
+#endif
+	}
+
+	// sam_camera_shake(player, magnitude) -> bool. Shake player's camera; magnitude ~1..20
+	// (1 = a nudge, ~10 = a solid hit, 20+ = violent). Feeds Barony's own shake channels, so
+	// it decays naturally. For a remote client the host forwards it over the 'SHAK' packet.
+	int lua_sam_camera_shake(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player  = (int)luaL_checkinteger(Ls, 1);
+		const double mag  = (double)luaL_checknumber(Ls, 2);
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] )
+		{ lua_pushboolean(Ls, 0); return 1; }
+		SAMLua::triggerCameraShake(player, mag);
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)player; (void)mag;
+		lua_pushboolean(Ls, 0);
+		return 1;
+#endif
+	}
+
+	// sam_hitstop(duration_ms) -> bool. Briefly freeze enemy/projectile logic (a freeze-frame)
+	// for duration_ms (capped ~400). Player, HUD weapon and hand-magic keep animating, so it
+	// reads as a punchy impact beat. SINGLEPLAYER ONLY (returns false in multiplayer).
+	int lua_sam_hitstop(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int ms = (int)luaL_checkinteger(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer != SINGLE ) { lua_pushboolean(Ls, 0); return 1; }
+		SAMLua::triggerHitstop(ms);
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)ms;
+		lua_pushboolean(Ls, 0);
+		return 1;
+#endif
+	}
+
 	// sam_spawn_portal(tileX, tileY) -> uid | nil. Creates a purely-DECORATIVE, walkable
 	// portal (the swirling vortex, sprite 254) at a tile: it animates and glows purple but
 	// is never interactive and never sends anyone to the next floor (see the skill[15]
@@ -2983,6 +3086,15 @@ namespace
 		lua_setglobal(L, "sam_companion_punch");
 		lua_pushcfunction(L, lua_sam_get_facing);
 		lua_setglobal(L, "sam_get_facing");
+		// v1.6.0 — impact frame: screen flash / manga burst / camera shake / hitstop.
+		lua_pushcfunction(L, lua_sam_screen_flash);
+		lua_setglobal(L, "sam_screen_flash");
+		lua_pushcfunction(L, lua_sam_impact_frame);
+		lua_setglobal(L, "sam_impact_frame");
+		lua_pushcfunction(L, lua_sam_camera_shake);
+		lua_setglobal(L, "sam_camera_shake");
+		lua_pushcfunction(L, lua_sam_hitstop);
+		lua_setglobal(L, "sam_hitstop");
 #endif
 	}
 
@@ -3708,6 +3820,125 @@ namespace SAMLua
 		return (double)players[player]->entity->yaw; // radians [0,2PI); engine keeps it wrapped
 #else
 		(void)player; return -1.0;
+#endif
+	}
+
+	// ---- v1.6.0 impact frame: screen flash / camera shake / hitstop ------------
+	// See the header for the design contract. All three are inert until a script triggers
+	// them, and are cleared by resetImpact() on a new game.
+
+	void triggerScreenFlash(int player, int r, int g, int b, double intensity, int durationMs, int style, int lines)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( player < 0 || player >= MAXPLAYERS ) { return; }
+		if ( durationMs <= 0 ) { g_samFlash[player].maxAlpha = 0; return; } // 0/neg = clear
+		double inten = intensity;
+		if ( !(inten > 0.0) ) { g_samFlash[player].maxAlpha = 0; return; }  // <=0 or NaN = clear
+		if ( inten > 1.0 ) { inten = 1.0; }
+		auto clamp255 = [](int v) -> Uint8 { return (Uint8)(v < 0 ? 0 : (v > 255 ? 255 : v)); };
+		int dur = durationMs;
+		if ( dur > 5000 ) { dur = 5000; } // a flash is a flash, not a fade-to-white
+		int ln = lines;
+		if ( ln < 0 ) { ln = 0; }
+		if ( ln > 400 ) { ln = 400; }     // sane ceiling on speed-line count
+		SamFlashState& f = g_samFlash[player];
+		f.startMs  = SDL_GetTicks();
+		f.durMs    = (Uint32)dur;
+		f.r = clamp255(r); f.g = clamp255(g); f.b = clamp255(b);
+		f.maxAlpha = (Uint8)((int)(inten * 255.0 + 0.5));
+		f.style    = (Uint8)(style == 1 ? 1 : 0);
+		f.lines    = (Uint16)ln;
+#else
+		(void)player; (void)r; (void)g; (void)b; (void)intensity; (void)durationMs; (void)style; (void)lines;
+#endif
+	}
+
+	bool screenFlashState(int player, int& r, int& g, int& b, int& alpha, int& style, int& lines, double& progress)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( player < 0 || player >= MAXPLAYERS ) { return false; }
+		SamFlashState& f = g_samFlash[player];
+		if ( f.maxAlpha == 0 || f.durMs == 0 ) { return false; }
+		const Uint32 elapsed = SDL_GetTicks() - f.startMs; // unsigned; safe across wrap
+		if ( elapsed >= f.durMs ) { f.maxAlpha = 0; return false; } // expired → mark idle
+		const double t = (double)elapsed / (double)f.durMs;         // 0 → 1 through the fade
+		int ai = (int)((double)f.maxAlpha * (1.0 - t) + 0.5);       // linear alpha fade
+		if ( ai <= 0 ) { return false; }
+		if ( ai > 255 ) { ai = 255; }
+		r = f.r; g = f.g; b = f.b; alpha = ai;
+		style = (int)f.style; lines = (int)f.lines; progress = t;
+		return true;
+#else
+		(void)player; (void)r; (void)g; (void)b; (void)alpha; (void)style; (void)lines; (void)progress; return false;
+#endif
+	}
+
+	void triggerCameraShake(int player, double magnitude)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] ) { return; }
+		double m = magnitude;
+		if ( !(m > 0.0) ) { return; }       // <=0 or NaN → nothing
+		if ( m > 40.0 ) { m = 40.0; }       // gameLogic clamps the accumulator anyway
+		if ( players[player]->isLocalPlayer() )
+		{
+			// Same channels vanilla's damage/explosion shakes write to (entity.cpp ~2426).
+			// x is real_t (~.03-.3 typical), y is int (~3-30 typical); gameLogic decays both.
+			cameravars[player].shakex += m * 0.02;
+			cameravars[player].shakey += (int)(m * 2.0);
+		}
+		else if ( player > 0 && multiplayer == SERVER )
+		{
+			// Owned by a remote client — forward the shake over vanilla's 'SHAK' packet.
+			// The receiver (net.cpp) does shakex += byte/100.f and shakey += byte, so send
+			// byte = m*2.0 to match the LOCAL mapping above (shakex += m*0.02, shakey += m*2).
+			int mag = (int)(m * 2.0);
+			if ( mag > 255 ) { mag = 255; }
+			strcpy((char*)net_packet->data, "SHAK");
+			net_packet->data[4] = (Uint8)mag;
+			net_packet->data[5] = (Uint8)mag;
+			net_packet->address.host = net_clients[player - 1].host;
+			net_packet->address.port = net_clients[player - 1].port;
+			net_packet->len = 6;
+			sendPacketSafe(net_sock, -1, net_packet, player - 1);
+		}
+#else
+		(void)player; (void)magnitude;
+#endif
+	}
+
+	void triggerHitstop(int durationMs)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		// Singleplayer only: the freeze gates the host's entity logic, which in a netgame
+		// would stall enemy motion for the host while clients keep simulating → desync.
+		if ( multiplayer != SINGLE ) { return; }
+		if ( durationMs <= 0 ) { return; }
+		int ms = durationMs;
+		if ( ms > 400 ) { ms = 400; } // a beat, not a stall
+		const Uint32 until = SDL_GetTicks() + (Uint32)ms;
+		if ( until > g_samHitstopUntilMs ) { g_samHitstopUntilMs = until; } // extend, never shorten
+#else
+		(void)durationMs;
+#endif
+	}
+
+	bool hitstopActive()
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( g_samHitstopUntilMs == 0 ) { return false; }
+		if ( SDL_GetTicks() >= g_samHitstopUntilMs ) { g_samHitstopUntilMs = 0; return false; }
+		return true;
+#else
+		return false;
+#endif
+	}
+
+	void resetImpact()
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		for ( int i = 0; i < MAXPLAYERS; ++i ) { g_samFlash[i] = SamFlashState{}; }
+		g_samHitstopUntilMs = 0;
 #endif
 	}
 

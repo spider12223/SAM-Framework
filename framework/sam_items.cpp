@@ -273,10 +273,18 @@ static void deepCopyImages(list_t& dest, const list_t& src)
 	}
 }
 
-// The sanitized "tooltip_sam_<id>" key for a custom item (same derivation everywhere).
-static std::string samTooltipKeyFor(const std::string& itemStrId)
+// The tooltip key for a custom item. It MUST BEGIN WITH the vanilla category key it was
+// cloned from (tooltip_sword, tooltip_armor_breastpiece, tooltip_offhand, ...) because the
+// tooltip renderer (mod_tools.cpp ItemTooltips_t::formatItemIcon) fills in the numeric rows
+// (%+d ATK, AC, ...) only when the item's tooltip key SUBSTRING-matches one of those category
+// names. A bare "tooltip_sam_<id>" matched none of them, so every value row rendered as the
+// literal "%+d" format string (reported: "%+d Sword Damage" on custom weapons/shields).
+// Appending "__sam_<sanitized id>" keeps the key unique per custom item while preserving the
+// category prefix the renderer keys off.
+static std::string samTooltipKeyFor(const std::string& srcKey, const std::string& itemStrId)
 {
-	std::string ttKey = "tooltip_sam_";
+	std::string ttKey = srcKey.empty() ? std::string("tooltip_default") : srcKey;
+	ttKey += "__sam_";
 	for ( char c : itemStrId )
 	{
 		const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
@@ -321,7 +329,7 @@ static void injectCustomTooltip(int id, const SAMItemDef& def)
 		while ( std::getline(bs, bl) ) { ttCopy.descriptionText.push_back(bl); }
 		if ( ttCopy.descriptionText.empty() ) { ttCopy.descriptionText.push_back(def.description); }
 	}
-	const std::string ttKey = samTooltipKeyFor(def.id);
+	const std::string ttKey = samTooltipKeyFor(srcKey, def.id);
 	ItemTooltips.tooltips[ttKey] = std::move(ttCopy);
 	items[id].tooltip = ttKey;
 }

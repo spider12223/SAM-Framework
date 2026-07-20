@@ -1287,6 +1287,87 @@ namespace
 		return JS_NewFloat64(ctx, yaw);
 	}
 
+	// sam_screen_flash(player, r, g, b [, intensity=1.0] [, duration_ms=180]) -> bool.
+	// JS twin of the Lua binding — the anime "impact frame" full-screen colour flash.
+	JSValue js_sam_screen_flash(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1, r = 0, g = 0, b = 0, ms = 180;
+		double inten = 1.0;
+		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( argc >= 2 ) { JS_ToInt32(ctx, &r, argv[1]); }
+		if ( argc >= 3 ) { JS_ToInt32(ctx, &g, argv[2]); }
+		if ( argc >= 4 ) { JS_ToInt32(ctx, &b, argv[3]); }
+		if ( argc >= 5 ) { JS_ToFloat64(ctx, &inten, argv[4]); }
+		if ( argc >= 6 ) { JS_ToInt32(ctx, &ms, argv[5]); }
+#ifdef SAM_JS_HAVE_BARONY
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] ) { return JS_FALSE; }
+		SAMLua::triggerScreenFlash(player, r, g, b, inten, ms, 0, 0); // style 0 = plain fill
+		return JS_TRUE;
+#else
+		(void)player; (void)r; (void)g; (void)b; (void)inten; (void)ms;
+		return JS_FALSE;
+#endif
+	}
+
+	// sam_impact_frame(player, r, g, b [, intensity=1.0] [, duration_ms=220] [, lines=110]) -> bool.
+	// JS twin — the exaggerated anime burst (colour pop + manga speed lines + core flare).
+	JSValue js_sam_impact_frame(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1, r = 0, g = 0, b = 0, ms = 220, lines = 110;
+		double inten = 1.0;
+		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( argc >= 2 ) { JS_ToInt32(ctx, &r, argv[1]); }
+		if ( argc >= 3 ) { JS_ToInt32(ctx, &g, argv[2]); }
+		if ( argc >= 4 ) { JS_ToInt32(ctx, &b, argv[3]); }
+		if ( argc >= 5 ) { JS_ToFloat64(ctx, &inten, argv[4]); }
+		if ( argc >= 6 ) { JS_ToInt32(ctx, &ms, argv[5]); }
+		if ( argc >= 7 ) { JS_ToInt32(ctx, &lines, argv[6]); }
+#ifdef SAM_JS_HAVE_BARONY
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] ) { return JS_FALSE; }
+		SAMLua::triggerScreenFlash(player, r, g, b, inten, ms, 1, lines); // style 1 = manga burst
+		return JS_TRUE;
+#else
+		(void)player; (void)r; (void)g; (void)b; (void)inten; (void)ms; (void)lines;
+		return JS_FALSE;
+#endif
+	}
+
+	// sam_camera_shake(player, magnitude) -> bool. JS twin — shakes the player's camera.
+	JSValue js_sam_camera_shake(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1;
+		double mag = 0.0;
+		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( argc >= 2 ) { JS_ToFloat64(ctx, &mag, argv[1]); }
+#ifdef SAM_JS_HAVE_BARONY
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] ) { return JS_FALSE; }
+		SAMLua::triggerCameraShake(player, mag);
+		return JS_TRUE;
+#else
+		(void)player; (void)mag;
+		return JS_FALSE;
+#endif
+	}
+
+	// sam_hitstop(duration_ms) -> bool. JS twin — brief freeze-frame. Singleplayer only.
+	JSValue js_sam_hitstop(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t ms = 0;
+		if ( argc >= 1 ) { JS_ToInt32(ctx, &ms, argv[0]); }
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer != SINGLE ) { return JS_FALSE; }
+		SAMLua::triggerHitstop(ms);
+		return JS_TRUE;
+#else
+		(void)ms;
+		return JS_FALSE;
+#endif
+	}
+
 	// sam_get_inventory(player) -> array of { uid, type, name, count, beatitude, status,
 	// identified, equipped }. Empty array for an invalid player. Reader.
 	JSValue js_sam_get_inventory(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
@@ -2364,6 +2445,11 @@ namespace
 		JS_SetPropertyStr(ctx, g, "sam_spawn_companion", JS_NewCFunction(ctx, js_sam_spawn_companion, "sam_spawn_companion", 3));
 		JS_SetPropertyStr(ctx, g, "sam_companion_punch", JS_NewCFunction(ctx, js_sam_companion_punch, "sam_companion_punch", 1));
 		JS_SetPropertyStr(ctx, g, "sam_get_facing", JS_NewCFunction(ctx, js_sam_get_facing, "sam_get_facing", 1));
+		// v1.6.0 — impact frame: screen flash / manga burst / camera shake / hitstop.
+		JS_SetPropertyStr(ctx, g, "sam_screen_flash", JS_NewCFunction(ctx, js_sam_screen_flash, "sam_screen_flash", 6));
+		JS_SetPropertyStr(ctx, g, "sam_impact_frame", JS_NewCFunction(ctx, js_sam_impact_frame, "sam_impact_frame", 7));
+		JS_SetPropertyStr(ctx, g, "sam_camera_shake", JS_NewCFunction(ctx, js_sam_camera_shake, "sam_camera_shake", 2));
+		JS_SetPropertyStr(ctx, g, "sam_hitstop", JS_NewCFunction(ctx, js_sam_hitstop, "sam_hitstop", 1));
 #endif
 		JS_FreeValue(ctx, g);
 	}
