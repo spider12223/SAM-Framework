@@ -15,6 +15,7 @@
 #include "sam_effects.hpp"
 #include "sam_races.hpp"
 #include "sam_sounds.hpp"
+#include "sam_recipes.hpp"
 #include "sam_monster_patches.hpp" // v0.7.0 F5 monster stat overrides — both builds
 #ifndef EDITOR
 #include "sam_sync.hpp"    // multiplayer sync — game build only (not in EDITOR_SOURCES)
@@ -54,6 +55,7 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 	SAMEffects::clear(); // drop custom status effects -> vanilla
 	SAMRaces::clear(); // drop custom playable races -> vanilla
 	SAMSounds::clear(); // drop staged custom sounds (engine table reset on next append)
+	SAMRecipes::clear(); // drop tinkering recipes -> vanilla craftable grid
 	SAMMonsterPatch::clear(); // v0.7.0 F5: drop any prior monster stat overrides
 #ifndef EDITOR
 	SAMSpells::clear(); // custom-spell registry — rebuild fresh each load
@@ -126,6 +128,7 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 		SAMEffects::loadFromManifest(m); // custom status effects into slots 135..159
 		SAMRaces::loadFromManifest(m); // custom playable races into ids 200..255
 		SAMSounds::loadFromManifest(m); // stage custom sounds (appended after vanilla reload)
+		SAMRecipes::loadFromManifest(m); // tinkering recipes (item ids resolved lazily at kit-open)
 
 #ifndef EDITOR
 		// Custom spells (Session 1: metadata registry only — no in-engine spell yet).
@@ -267,6 +270,7 @@ void SAMLoader::unload()
 	SAMEffects::clear();       // drop custom status effects
 	SAMRaces::clear();         // drop custom playable races
 	SAMSounds::clear();        // drop staged custom sounds
+	SAMRecipes::clear();       // drop tinkering recipes
 	SAMMonsterPatch::clear();  // reverts sam_patch_monster overrides (F5)
 #ifndef EDITOR
 	SAMSpells::clear();   // drop the custom-spell registry

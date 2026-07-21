@@ -14,8 +14,9 @@ import patchSchema from '@schemas/patch.schema.json';
 import effectSchema from '@schemas/effect.schema.json';
 import raceSchema from '@schemas/race.schema.json';
 import soundSchema from '@schemas/sound.schema.json';
+import recipeSchema from '@schemas/recipe.schema.json';
 
-export { modSchema, classSchema, itemSchema, monsterSchema, spellSchema, patchSchema, effectSchema, raceSchema, soundSchema };
+export { modSchema, classSchema, itemSchema, monsterSchema, spellSchema, patchSchema, effectSchema, raceSchema, soundSchema, recipeSchema };
 
 /** All vanilla Barony ItemType names (from class.schema.json's itemType enum). */
 export const ITEM_TYPES = classSchema.definitions.itemType.enum;

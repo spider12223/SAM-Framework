@@ -29,6 +29,7 @@ const MONSTER_SCHEMA = `${SCHEMA_BASE}/monster.schema.json`;
 const SPELL_SCHEMA = `${SCHEMA_BASE}/spell.schema.json`;
 const EFFECT_SCHEMA = `${SCHEMA_BASE}/effect.schema.json`;
 const RACE_SCHEMA = `${SCHEMA_BASE}/race.schema.json`;
+const RECIPE_SCHEMA = `${SCHEMA_BASE}/recipe.schema.json`;
 const SOUND_SCHEMA = `${SCHEMA_BASE}/sound.schema.json`;
 const PATCH_SCHEMA = `${SCHEMA_BASE}/patch.schema.json`;
 
@@ -46,7 +47,7 @@ export function patchStem(target, fallback) {
 }
 
 /** Manifest-relative paths for each collection, exactly as the zip lays them out. */
-export function contentPaths(classes, items, monsters, spells = [], patches = [], effects = [], races = [], sounds = []) {
+export function contentPaths(classes, items, monsters, spells = [], patches = [], effects = [], races = [], sounds = [], recipes = []) {
   return {
     classPaths: classes.map((c, i) => `classes/${fileStem(c.id, `class_${i + 1}`)}.json`),
     itemPaths: items.map((it, i) => `items/${fileStem(it.id, `item_${i + 1}`)}.json`),
@@ -55,13 +56,14 @@ export function contentPaths(classes, items, monsters, spells = [], patches = []
     effectPaths: (effects ?? []).map((e, i) => `effects/${fileStem(e.id, `effect_${i + 1}`)}.json`),
     racePaths: (races ?? []).map((r, i) => `races/${fileStem(r.id, `race_${i + 1}`)}.json`),
     soundPaths: (sounds ?? []).map((s, i) => `sounds/${fileStem(s.id, `sound_${i + 1}`)}.json`),
+    recipePaths: (recipes ?? []).map((r, i) => `recipes/${fileStem(r.id || r.item || r.remove, `recipe_${i + 1}`)}.json`),
     patchPaths: (patches ?? []).map((p, i) => `patches/${patchStem(p.target, `patch_${i + 1}`)}.json`),
   };
 }
 
 /** The mod.json object (sans $schema — callers stamp it when writing). */
 export function buildManifest(meta, paths) {
-  const { classPaths, itemPaths, monsterPaths, spellPaths, effectPaths, racePaths, soundPaths, patchPaths } = paths;
+  const { classPaths, itemPaths, monsterPaths, spellPaths, effectPaths, racePaths, soundPaths, recipePaths, patchPaths } = paths;
   const manifest = {
     namespace: meta.namespace,
     name: meta.name,
@@ -82,6 +84,7 @@ export function buildManifest(meta, paths) {
   if (effectPaths && effectPaths.length) manifest.effects = effectPaths;
   if (racePaths && racePaths.length) manifest.races = racePaths;
   if (soundPaths && soundPaths.length) manifest.sounds = soundPaths;
+  if (recipePaths && recipePaths.length) manifest.recipes = recipePaths;
   manifest.plugins = [];
   manifest.description = meta.description ?? '';
   return manifest;
@@ -103,10 +106,10 @@ export function scriptPathFor(classDef, i, scripts) {
  */
 export function buildModFiles(mod) {
   const {
-    meta, classes = [], items = [], monsters = [], spells = [], effects = [], races = [], sounds = [], patches = [],
+    meta, classes = [], items = [], monsters = [], spells = [], effects = [], races = [], sounds = [], recipes = [], patches = [],
     scripts = {}, assets = {},
   } = mod;
-  const paths = contentPaths(classes, items, monsters, spells, patches, effects, races, sounds);
+  const paths = contentPaths(classes, items, monsters, spells, patches, effects, races, sounds, recipes);
   const manifest = buildManifest(meta, paths);
 
   const files = [
@@ -139,6 +142,10 @@ export function buildModFiles(mod) {
     ...sounds.map((s, i) => ({
       path: paths.soundPaths[i],
       text: JSON.stringify({ $schema: SOUND_SCHEMA, ...s }, null, 2) + '\n',
+    })),
+    ...recipes.map((r, i) => ({
+      path: paths.recipePaths[i],
+      text: JSON.stringify({ $schema: RECIPE_SCHEMA, ...r }, null, 2) + '\n',
     })),
     ...patches.map((p, i) => ({
       path: paths.patchPaths[i],

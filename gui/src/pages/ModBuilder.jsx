@@ -36,7 +36,7 @@ function cloneWithNewId(def, existingIds) {
 }
 
 export default function ModBuilder() {
-  const { meta, classes, items, monsters, spells, effects, races, sounds, patches, scripts, assets, baseline, dispatch } = useMod();
+  const { meta, classes, items, monsters, spells, effects, races, sounds, recipes, patches, scripts, assets, baseline, dispatch } = useMod();
   const navigate = useNavigate();
   const [errors, setErrors] = useState([]);
   const [savedAs, setSavedAs] = useState('');
@@ -49,15 +49,15 @@ export default function ModBuilder() {
   const zipRef = useRef(null);
 
   const setMeta = (patch) => dispatch({ type: 'setMeta', patch });
-  const mod = { meta, classes, items, monsters, spells, effects, races, sounds, patches, scripts, assets };
+  const mod = { meta, classes, items, monsters, spells, effects, races, sounds, recipes, patches, scripts, assets };
 
   const namespaceBad = meta.namespace !== '' && !NAMESPACE_PATTERN.test(meta.namespace);
   const versionBad = meta.version !== '' && !VERSION_PATTERN.test(meta.version);
   const fwBad = meta.framework_min_version !== '' && !VERSION_PATTERN.test(meta.framework_min_version);
 
   const paths = useMemo(
-    () => contentPaths(classes, items, monsters, spells, patches, effects, races, sounds),
-    [classes, items, monsters, spells, patches, effects, races, sounds]
+    () => contentPaths(classes, items, monsters, spells, patches, effects, races, sounds, recipes),
+    [classes, items, monsters, spells, patches, effects, races, sounds, recipes]
   );
 
   const collectErrors = () => {
@@ -73,6 +73,7 @@ export default function ModBuilder() {
     effects.forEach((e, i) => push(paths.effectPaths[i], validate('effect', e)));
     races.forEach((r, i) => push(paths.racePaths[i], validate('race', r)));
     sounds.forEach((s, i) => push(paths.soundPaths[i], validate('sound', s)));
+    recipes.forEach((r, i) => push(paths.recipePaths[i], validate('recipe', r)));
     patches.forEach((p, i) => push(paths.patchPaths[i], validate('patch', p)));
     return all;
   };
@@ -95,7 +96,7 @@ export default function ModBuilder() {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    const hasContent = classes.length || items.length || monsters.length || spells.length || effects.length || races.length || sounds.length || patches.length || meta.name.trim() || meta.namespace.trim();
+    const hasContent = classes.length || items.length || monsters.length || spells.length || effects.length || races.length || sounds.length || recipes.length || patches.length || meta.name.trim() || meta.namespace.trim();
     if (hasContent && !window.confirm('Importing replaces the current mod in this session. Continue?')) return;
     setErrors([]); setNotice(''); setImportReport([]); setSavedAs('');
     try {

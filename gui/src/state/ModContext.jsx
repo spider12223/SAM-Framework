@@ -38,6 +38,7 @@ const initialState = {
   effects: [],   // effect.schema.json-shaped objects (custom status effects)
   races: [],     // race.schema.json-shaped objects (custom playable races)
   sounds: [],    // sound.schema.json-shaped objects (custom sounds; .ogg lives in assets)
+  recipes: [],   // recipe.schema.json-shaped objects (tinkering kit craftables)
   patches: [],   // patch.schema.json-shaped objects
   scripts: {},   // classId -> { lang, code }
   assets: {},    // 'portraits/x.png' -> 'data:image/png;base64,...'
@@ -85,6 +86,10 @@ function reducer(state, action) {
       delete scripts[action.id]; // a race's behavior script goes with it
       return { ...state, races: state.races.filter((r) => r.id !== action.id), scripts };
     }
+    case 'saveRecipe':
+      return { ...state, recipes: upsert(state.recipes, action.def) };
+    case 'deleteRecipe':
+      return { ...state, recipes: state.recipes.filter((r) => r.id !== action.id) };
     case 'saveSound':
       return { ...state, sounds: upsert(state.sounds, action.def) };
     case 'removeSound':
@@ -136,6 +141,7 @@ function reducer(state, action) {
         effects: action.effects ?? [],
         races: action.races ?? [],
         sounds: action.sounds ?? [],
+        recipes: action.recipes ?? [],
         patches: action.patches ?? [],
         scripts: action.scripts ?? {},
         assets: action.assets ?? {},
@@ -153,6 +159,7 @@ function reducer(state, action) {
           effects: state.effects,
           races: state.races,
           sounds: state.sounds,
+          recipes: state.recipes,
           patches: state.patches,
         }),
       };
@@ -191,6 +198,7 @@ function persist(state) {
     effects: state.effects,
     races: state.races,
     sounds: state.sounds,
+    recipes: state.recipes,
     patches: state.patches,
     scripts: state.scripts,
     assets: state.assets,

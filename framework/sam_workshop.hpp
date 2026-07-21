@@ -47,6 +47,7 @@ struct SAMModManifest
 	std::vector<std::string> effects;      // relative paths to custom status-effect JSON files
 	std::vector<std::string> races;        // relative paths to custom playable-race JSON files
 	std::vector<std::string> sounds;       // relative paths to custom sound JSON defs
+	std::vector<std::string> recipes;      // relative paths to tinkering recipe JSON defs
 	std::vector<std::string> plugins;      // relative paths to plugin .dll files
 	// Standalone .vox models NOT tied to an item or class — for sam_spawn_companion and
 	// other decorative entities. Each is { id, file }: id = "ns:name" scripts refer to,

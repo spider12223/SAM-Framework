@@ -266,6 +266,7 @@ static bool parseManifest(const std::string& jsonText, const std::string& modPat
 	out.effects = getStringArray("effects", true);
 	out.races = getStringArray("races", true);
 	out.sounds = getStringArray("sounds", true);
+	out.recipes = getStringArray("recipes", true);
 	out.plugins = getStringArray("plugins", true);
 	// v1.4.0 — standalone .vox models for sam_spawn_companion / decorative entities. An
 	// array of { "id": "ns:name", "file": "models/.../x.vox" }. The id is how a script

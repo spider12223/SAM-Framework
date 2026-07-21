@@ -583,15 +583,18 @@ void SAMItems::loadFromManifest(const SAMModManifest& manifest)
 				if ( it.value().is_number() )
 				{
 					def.attributes[it.key()] = it.value().get<int>();
-					// The engine reads exactly two of these: ATK (items.cpp attackGetAttack)
-					// and AC (armorGetAC). Anything else is stored here and never looked at,
+					// Keys the engine actually reads: ATK (items.cpp attackGetAttack), AC
+					// (armorGetAC), and the two tinkering salvage yields (interface.cpp
+					// tinkeringGetItemValue, which returns how much metal/magic scrap this
+					// item breaks down into). Anything else is stored and never looked at,
 					// so an invented key like "EFF_UNBREAKABLE" silently does nothing — and
 					// the JSON schema can't catch every case for older mods. Say so.
-					if ( it.key() != "ATK" && it.key() != "AC" )
+					if ( it.key() != "ATK" && it.key() != "AC"
+						&& it.key() != "TINKER_SALVAGE_METAL" && it.key() != "TINKER_SALVAGE_MAGIC" )
 					{
 						SAM_WARN(MOD, "Item '" + def.id + "': attribute '" + it.key() + "' is not read by the engine "
-							"and will have no effect. Only ATK and AC are used. (Item effects come from a script, "
-							"not from an attribute key.)");
+							"and will have no effect. Only ATK, AC, TINKER_SALVAGE_METAL and TINKER_SALVAGE_MAGIC "
+							"are used. (Item effects come from a script, not from an attribute key.)");
 					}
 				}
 			}

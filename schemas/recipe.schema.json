@@ -1,0 +1,68 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://spider12223.github.io/SAM-Framework/schemas/recipe.schema.json",
+  "title": "S.A.M Tinkering Recipe",
+  "description": "One entry in the tinkering kit's crafting grid. A recipe either ADDS a craftable item (your own custom item, or a vanilla one at a new price), or REMOVES a vanilla craft entry to free up a grid cell. The grid is a fixed 5x4 = 20 cells and vanilla already fills 16, so only 4 recipes fit until you remove some. Removing hides the CRAFT entry only: that item can still be salvaged and repaired.",
+  "type": "object",
+  "oneOf": [
+    { "required": ["item"] },
+    { "required": ["remove"] }
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Optional. URL of this JSON Schema, so editors give autocomplete and validation."
+    },
+    "id": {
+      "type": "string",
+      "description": "Optional. A 'namespace:name' id for this recipe itself. Only used in log messages; the recipe is keyed by its item.",
+      "pattern": "^[a-z][a-z0-9_]*:[a-z][a-z0-9_]*$"
+    },
+    "item": {
+      "type": "string",
+      "description": "The item this recipe produces. Either a vanilla ItemType name (e.g. 'TOOL_FIRE_BOMB') or one of your own custom items as 'namespace:item'. Giving a vanilla item here re-prices and re-gates the existing recipe instead of adding a second one.",
+      "minLength": 1
+    },
+    "remove": {
+      "type": "string",
+      "description": "Instead of adding, hide the vanilla craft entry for this item so its grid cell becomes free (e.g. 'CLOAK_BACKPACK'). The item can still be salvaged and repaired; only the crafting entry disappears.",
+      "minLength": 1
+    },
+    "metal_cost": {
+      "type": "integer",
+      "description": "Metal scrap (TOOL_METAL_SCRAP) consumed per craft. metal_cost + magic_cost must be at least 1: a recipe that costs nothing can never be crafted, because the engine's affordability check bails when both are zero.",
+      "minimum": 0,
+      "default": 0
+    },
+    "magic_cost": {
+      "type": "integer",
+      "description": "Magic scrap (TOOL_MAGIC_SCRAP) consumed per craft. metal_cost + magic_cost must be at least 1.",
+      "minimum": 0,
+      "default": 0
+    },
+    "skill_level": {
+      "type": "integer",
+      "description": "Tinkering skill TIER required to craft this, 0 to 5. Each tier is 20 points of (Tinkering skill + PER), so the tiers are 0/20/40/60/80/100. Tiers are used rather than a raw number because the crafting screen displays the requirement as tier x 20.",
+      "minimum": 0,
+      "maximum": 5,
+      "default": 0
+    },
+    "status": {
+      "type": "string",
+      "description": "Condition the crafted item comes out at. Defaults to EXCELLENT, which is what almost every vanilla recipe uses. Note the game's spelling of SERVICABLE.",
+      "enum": ["BROKEN", "DECREPIT", "WORN", "SERVICABLE", "EXCELLENT"],
+      "default": "EXCELLENT"
+    },
+    "slot": {
+      "type": "object",
+      "description": "Optional. Pin this recipe to an exact cell in the 5x4 crafting grid. Omit it and the recipe drops into the next free cell, which is usually what you want. If the pinned cell is already taken, the next free cell is used instead.",
+      "properties": {
+        "x": { "type": "integer", "minimum": 0, "maximum": 4, "description": "Column, 0 to 4." },
+        "y": { "type": "integer", "minimum": 0, "maximum": 3, "description": "Row, 0 to 3." }
+      },
+      "required": ["x", "y"],
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

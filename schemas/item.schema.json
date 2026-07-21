@@ -103,7 +103,7 @@
     },
     "attributes": {
       "type": "object",
-      "description": "Numeric bonuses the engine applies to this item. ONLY these keys are read: ATK (added by attackGetAttack for weapons) and AC (added by armorGetAC for armor/shields). Any other key would load and then be silently ignored, so they are rejected here instead. Item behaviour (effects, procs, abilities) comes from a companion script next to this JSON, not from a key.",
+      "description": "Numeric bonuses the engine applies to this item. ONLY these keys are read: ATK (added by attackGetAttack for weapons), AC (added by armorGetAC for armor/shields), and the two tinkering salvage yields. Any other key would load and then be silently ignored, so they are rejected here instead. Item behaviour (effects, procs, abilities) comes from a companion script next to this JSON, not from a key.",
       "additionalProperties": false,
       "properties": {
         "ATK": {
@@ -113,6 +113,16 @@
         "AC": {
           "type": "integer",
           "description": "Armor Class bonus. Read for armor and shields; ignored on other categories."
+        },
+        "TINKER_SALVAGE_METAL": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Metal scrap this item yields when salvaged at a tinkering kit. Omit it and the item cannot be broken down. Keep the yield BELOW the item's crafting cost, or a player can mint scrap forever by crafting and salvaging the same item."
+        },
+        "TINKER_SALVAGE_MAGIC": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Magic scrap this item yields when salvaged at a tinkering kit. Omit it and the item cannot be broken down. Keep the yield BELOW the item's crafting cost."
         }
       }
     },
@@ -151,7 +161,7 @@
       "icon": "icons/shadowblade.png",
       "attributes": {
         "ATK": 4,
-        "shadow_damage": 5
+        "AC": 2
       },
       "on_hit_effect": "EFF_BLIND",
       "on_hit_chance": 0.25,

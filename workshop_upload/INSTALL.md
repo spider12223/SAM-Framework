@@ -61,7 +61,7 @@ Either way, you end up with the S.A.M **`barony.exe`**.
    JavaScript scripts work without it.
 4. That's it — nothing else changes.
 
-> Prefer one click? The **installer** (`SAM_Framework_Installer_v0.4.0.exe`) does
+> Prefer one click? The **installer** (`SAM_Framework_Installer.exe`) does
 > all of this automatically — it backs up your original `barony.exe`, installs the
 > S.A.M one, and deploys `typescript.js`.
 

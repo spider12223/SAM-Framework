@@ -34,8 +34,9 @@ import urllib.request
 # --------------------------------------------------------------------------- #
 #  Constants
 # --------------------------------------------------------------------------- #
-APP_VERSION = "1.6.0"
-APP_TITLE = f"S.A.M Framework Installer v{APP_VERSION}"
+# No version number on purpose. This installer always pulls the NEWEST barony.exe from
+# the GitHub "latest" release, so it never goes out of date and never needs rebuilding.
+APP_TITLE = "S.A.M Framework Installer"
 PAYLOAD_NAME = "sam_barony.exe"   # bundled S.A.M barony.exe (see --add-data)
 TS_PAYLOAD_NAME = "typescript.js" # bundled TypeScript compiler for .ts mod scripts
 
@@ -136,7 +137,7 @@ def find_barony():
 def _download(url, dst, label, on_progress=None, lo=0.0, hi=1.0):
     """Stream `url` to `dst`, reporting progress into the [lo, hi] slice.
     Raises a player-readable RuntimeError on any network failure."""
-    req = urllib.request.Request(url, headers={"User-Agent": "SAM-Framework-Installer/" + APP_VERSION})
+    req = urllib.request.Request(url, headers={"User-Agent": "SAM-Framework-Installer"})
     try:
         with urllib.request.urlopen(req, timeout=30) as resp, open(dst, "wb") as out:
             total = 0
@@ -374,7 +375,7 @@ class Installer(tk.Tk):
                  font=(FONT_FAMILY, 24, "bold")).pack()
         tk.Label(head, text="—  Support All Mods  —", bg=STONE, fg=GOLD_DIM,
                  font=(FONT_FAMILY, 10)).pack(pady=(2, 0))
-        tk.Label(head, text=f"Installer  v{APP_VERSION}", bg=STONE, fg=PARCH,
+        tk.Label(head, text="Installer", bg=STONE, fg=PARCH,
                  font=(FONT_FAMILY, 9)).pack()
         tk.Frame(self, bg=BORDER, height=1).pack(fill="x", padx=18, pady=(12, 0))
 
@@ -535,7 +536,7 @@ class Installer(tk.Tk):
         self._clear()
         tk.Label(self.content, text="✔", bg=STONE, fg=GREEN,
                  font=(FONT_FAMILY, 40)).pack(pady=(8, 0))
-        tk.Label(self.content, text=f"S.A.M Framework v{APP_VERSION} installed successfully!",
+        tk.Label(self.content, text="S.A.M Framework installed successfully!",
                  bg=STONE, fg=GOLD_HI, font=(FONT_FAMILY, 15, "bold"),
                  wraplength=540).pack(pady=(2, 10))
 
