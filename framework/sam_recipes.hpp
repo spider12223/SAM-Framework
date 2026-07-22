@@ -62,6 +62,40 @@ namespace SAMRecipes
 	// its own recipes into 6 tiers of 20; a mod may use any number in between).
 	bool skillFor(int itemType, int& required);
 
+	// ---- custom crafting materials ----------------------------------------------
+	// A recipe may cost the modder's OWN items instead of metal/magic scrap. The
+	// crafting panel has room for exactly two material columns, so a recipe may name
+	// up to two. Returns false when this item uses the ordinary scrap costs, in which
+	// case the caller keeps its existing metal/magic behaviour untouched.
+	//   typeA/typeB: resolved ItemTypes (typeB is -1 when only one material is used)
+	//   cntA/cntB:   how many of each a craft consumes
+	bool materialsFor(int itemType, int& typeA, int& cntA, int& typeB, int& cntB);
+
+	// ---- custom crafting kits ---------------------------------------------------
+	// A recipe may name a "kit": an item that opens its OWN crafting grid instead of
+	// adding to the vanilla tinkering kit. When a custom kit is open the vanilla
+	// recipes are hidden entirely, so that kit gets all 20 cells to itself and never
+	// collides with vanilla crafting.
+	//
+	// True if this item type is used as a kit by at least one registered recipe. The
+	// engine asks this to decide whether "use item" should open the crafting screen.
+	bool isCustomKit(int itemType);
+	// Register a kit that exists whether or not any recipe names it. The framework's own
+	// built-in bench uses this: it must open (and wear its skin) from the moment a mod puts
+	// it in a class loadout, even before that mod adds a single recipe to it.
+	void registerBuiltinKit(int itemType);
+	// Tell the registry which kit the player has open, so cost / skill / material
+	// lookups answer for THAT bench. The same item may be craftable at several kits
+	// for different prices, so these are keyed by (kit, item), not item alone.
+	// -1 = the ordinary tinkering kit.
+	void setActiveKit(int kitItemType);
+	// The kit currently open, or -1 for the ordinary tinkering kit. The panel skin reads
+	// this every frame to decide whose art to draw.
+	int activeKit();
+	// The resolved kit ItemType recipe `index` is bound to, or -1 when it belongs to
+	// the ordinary tinkering kit.
+	int kitForIndex(int index);
+
 	// ---- craftable-list build side ----------------------------------------------
 	// Number of ADD recipes registered (suppressions are not counted here).
 	int count();

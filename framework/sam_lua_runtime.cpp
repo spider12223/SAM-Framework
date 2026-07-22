@@ -799,12 +799,29 @@ namespace
 		const char* nameC = luaL_checkstring(Ls, 3);
 		const std::string itemName = nameC ? nameC : "";
 		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_spawn_item refused: host only."); lua_pushboolean(Ls, 0); return 1; }
-		std::string lower = itemName;
-		for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
-		auto it = ItemTooltips.itemNameStringToItemID.find(lower);
-		if ( it == ItemTooltips.itemNameStringToItemID.end() )
-		{ SAM_ERROR("LUA", "sam_spawn_item: unknown item type '" + itemName + "'."); lua_pushboolean(Ls, 0); return 1; }
-		Entity* e = spawnGroundItem(static_cast<ItemType>(it->second), EXCELLENT, 0, 1, x, y);
+		// Resolve a custom "namespace:item" id first, else a vanilla name (case-insensitive),
+		// matching sam_grant_item. Without the first tier a mod could not drop its OWN items,
+		// which is the main thing scripts spawn.
+		int resolvedType = -1;
+		if ( itemName.find(':') != std::string::npos )
+		{
+			resolvedType = SAMItems::itemIdForIdString(itemName);
+		}
+		if ( resolvedType < 0 )
+		{
+			std::string lower = itemName;
+			for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
+			auto it = ItemTooltips.itemNameStringToItemID.find(lower);
+			if ( it != ItemTooltips.itemNameStringToItemID.end() ) { resolvedType = it->second; }
+		}
+		if ( resolvedType < 0 )
+		{
+			SAM_ERROR("LUA", "sam_spawn_item: unknown item '" + itemName
+				+ "' (expected a vanilla name like \"IRON_DAGGER\" or a custom \"namespace:item\").");
+			lua_pushboolean(Ls, 0);
+			return 1;
+		}
+		Entity* e = spawnGroundItem(static_cast<ItemType>(resolvedType), EXCELLENT, 0, 1, x, y);
 		if ( !e ) { SAM_ERROR("LUA", "sam_spawn_item: invalid tile (" + std::to_string(x) + "," + std::to_string(y) + ")."); lua_pushboolean(Ls, 0); return 1; }
 		SAM_INFO("LUA", "Spawned item " + itemName + " at (" + std::to_string(x) + "," + std::to_string(y) + ")");
 		lua_pushboolean(Ls, 1);

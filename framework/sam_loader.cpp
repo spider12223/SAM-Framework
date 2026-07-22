@@ -16,6 +16,7 @@
 #include "sam_races.hpp"
 #include "sam_sounds.hpp"
 #include "sam_recipes.hpp"
+#include "sam_workbench.hpp"   // the framework's built-in Hunter's Workbench
 #include "sam_monster_patches.hpp" // v0.7.0 F5 monster stat overrides — both builds
 #ifndef EDITOR
 #include "sam_sync.hpp"    // multiplayer sync — game build only (not in EDITOR_SOURCES)
@@ -56,6 +57,7 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 	SAMRaces::clear(); // drop custom playable races -> vanilla
 	SAMSounds::clear(); // drop staged custom sounds (engine table reset on next append)
 	SAMRecipes::clear(); // drop tinkering recipes -> vanilla craftable grid
+	SAMWorkbench::clear(); // and the built-in bench, so it re-installs this cycle
 	SAMMonsterPatch::clear(); // v0.7.0 F5: drop any prior monster stat overrides
 #ifndef EDITOR
 	SAMSpells::clear(); // custom-spell registry — rebuild fresh each load
@@ -96,6 +98,13 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 	// generation (long after this hook), so the mount alone suffices.
 	SAMMonsters::applyAll(mods);
 #endif
+
+	// S.A.M: re-install the framework's own built-in content BEFORE the per-mod loop, so a
+	// mod may name the Hunter's Workbench as a recipe's kit or drop it into a class loadout
+	// and have it already exist. Unconditional: the clear() above wiped the registration
+	// that initGameDatafiles made at startup, and the bench must come back whether or not
+	// this load cycle has any mods in it.
+	SAMWorkbench::install();
 
 	int totalClasses = 0;
 	int totalItems = 0;
@@ -271,6 +280,7 @@ void SAMLoader::unload()
 	SAMRaces::clear();         // drop custom playable races
 	SAMSounds::clear();        // drop staged custom sounds
 	SAMRecipes::clear();       // drop tinkering recipes
+	SAMWorkbench::clear();     // drop the built-in bench registration
 	SAMMonsterPatch::clear();  // reverts sam_patch_monster overrides (F5)
 #ifndef EDITOR
 	SAMSpells::clear();   // drop the custom-spell registry

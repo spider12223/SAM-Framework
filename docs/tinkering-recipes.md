@@ -1,152 +1,147 @@
-# Tinkering recipes
+# Crafting recipes
 
-Add your own items to the tinkering kit's crafting grid, re-price a vanilla recipe, or hide
-one to make room.
+Make your own items craftable at a bench.
 
-The tinkering kit is Barony's crafting item. A player salvages junk into **metal scrap** and
-**magic scrap**, then spends that scrap to build gadgets. Until now a mod could add an item
-but had no way to let the player *build* it. Recipes fix that.
+The framework ships its own bench, the **Hunter's Workbench**. Every player who has the
+framework already has it: nothing to download, nothing to depend on, no art to ship. You can
+also turn one of your own items into a bench of its own.
+
+**The vanilla tinkering kit is off limits.** A mod cannot add to it, re-price it, or hide
+anything on it. Vanilla crafting is always exactly what the game ships, whatever is installed.
 
 ---
 
-## Declaring recipes
+## A recipe
 
-Add a `recipes` array to `mod.json`, listing one JSON file per recipe:
+`recipes/bone_axe.json`
 
-```jsonc
+```json
 {
-  "namespace": "steelworks",
-  "items":   ["items/steel_bomb.json"],
-  "recipes": [
-    "recipes/steel_bomb.json",
-    "recipes/cheap_trap.json",
-    "recipes/hide_backpack.json"
-  ]
+  "item": "mymod:bone_axe",
+  "kit": "sam:hunters_workbench",
+  "materials": [ { "item": "mymod:monster_bone", "count": 3 } ],
+  "skill_level": 0
 }
 ```
 
-### Add a recipe
+Then list it in `mod.json`:
 
-```jsonc
-{
-  "item": "steelworks:steel_bomb",  // your own item, or a vanilla name
-  "metal_cost": 12,
-  "magic_cost": 6,
-  "skill_level": 2,                 // tier 0-5, see below
-  "status": "EXCELLENT",            // optional, this is the default
-  "slot": { "x": 1, "y": 3 }        // optional; omit to take the next free cell
-}
+```json
+"recipes": [ "recipes/bone_axe.json" ]
 ```
 
-### Re-price a vanilla recipe
-
-Name a vanilla item and it re-prices and re-gates the **existing** entry. It does not add a
-second one, and it does not use up a grid cell.
-
-```jsonc
-{ "item": "TOOL_FIRE_BOMB", "metal_cost": 1, "magic_cost": 1, "skill_level": 0 }
-```
-
-### Hide a vanilla recipe
-
-```jsonc
-{ "remove": "CLOAK_BACKPACK" }
-```
+That is the whole thing. `item` is what it makes, `kit` is the bench it appears on.
 
 ---
 
-## The grid holds 20, and vanilla uses 16
+## kit is required
 
-The crafting drawer is a fixed **5 x 4 = 20 cells**. Vanilla fills 16 of them, so **only 4
-recipes fit** until you hide some. Hiding a vanilla recipe frees its cell, which is why
-`remove` matters as much as `item`.
+A recipe with no `kit` **appears nowhere**, and the log says so. That is deliberate: the
+alternatives would be changing vanilla's grid, or picking a bench on your behalf.
 
-If a recipe has nowhere to go it is **invisible and unclickable in game**. S.A.M writes a
-loud warning to `sam_log.txt` when that happens, and the **Recipe Editor** in the Mod Builder
-shows a live grid preview with a free-cell count, so check there before shipping.
-
----
-
-## Skill is a tier, not a raw number
-
-`skill_level` is **0 to 5**. Each tier is 20 points of the player's Tinkering skill plus PER:
-
-| tier | needs |
+| `kit` | Meaning |
 |---|---|
-| 0 | 0 |
-| 1 | 20 |
-| 2 | 40 |
-| 3 | 60 |
-| 4 | 80 |
-| 5 | 100 |
+| `sam:hunters_workbench` | The framework's bench. Every player has it. |
+| `mymod:my_bench` | One of your own items becomes a bench. Using it opens a grid holding only the recipes bound to it. |
 
-Tiers rather than raw numbers because the crafting screen displays the requirement as
-`tier x 20`. A number in between would show the wrong figure to the player.
-
-Note the skill is called **Tinkering** in game but `PRO_LOCKPICKING` internally, so a class
-that should craft well wants points in Lockpicking.
+Only your **own** items can have recipes. Naming a vanilla item is ignored, since that would
+mean changing the vanilla kit.
 
 ---
 
-## Salvage yield
+## Paying for a craft
 
-What an item breaks down into is a property of the **item**, not the recipe:
+Either scrap or your own items, not both.
 
-```jsonc
-{
-  "id": "steelworks:steel_bomb",
-  "attributes": { "TINKER_SALVAGE_METAL": 4, "TINKER_SALVAGE_MAGIC": 2 }
+**Scrap** is the vanilla currency, salvaged from junk:
+
+```json
+{ "item": "mymod:bone_axe", "kit": "sam:hunters_workbench", "metal_cost": 6, "magic_cost": 2 }
+```
+
+The total must be at least 1. A recipe costing nothing renders in the grid and then
+permanently fails to craft, because the engine's affordability check bails when both are zero.
+
+**Your own items** — up to two kinds, any quantity:
+
+```json
+"materials": [
+  { "item": "mymod:monster_bone", "count": 3 },
+  { "item": "mymod:sinew", "count": 1 }
+]
+```
+
+Give each material an `icon` in its item JSON. The crafting panel draws that icon beside the
+number; without one it falls back to the scrap icon, which reads as the wrong material.
+
+---
+
+## Skill requirement
+
+`skill_level` is a **tier from 0 to 5**, not a raw number. Each tier is 20 points of
+(Tinkering skill + PER), so the tiers are 0/20/40/60/80/100. The crafting screen recovers the
+number by multiplying the tier by 20, so anything in between would display wrong.
+
+---
+
+## The grid
+
+A bench has a fixed **5 x 4 = 20 cells**, and a custom bench gets all 20 to itself. Recipes
+fill the next free cell left-to-right, top-to-bottom. Pin one if you want:
+
+```json
+"slot": { "x": 2, "y": 1 }
+```
+
+A recipe with nowhere to go is **invisible and unclickable in game**. The Recipe Editor's grid
+preview shows the free-cell count per bench, so you find that out before shipping rather than
+after.
+
+---
+
+## Giving the player the bench
+
+They need it in hand to open it. Put `sam:hunters_workbench` in a class's starting gear (it is
+in the Class Editor's picker), or hand it out from a script.
+
+---
+
+## Making your own bench
+
+Any custom item can be one: name it as a recipe's `kit`. It then opens its own grid holding
+only its own recipes. Add a `kit_ui` block to that item to give it your own panel art:
+
+```json
+"kit_ui": {
+  "base": "ui/my_base.png",
+  "drawer": "ui/my_drawer.png",
+  "cost_backing": "ui/my_cost.png"
 }
 ```
 
-Omit these and the item cannot be salvaged. **Keep the yield below the craft cost**, or a
-player can craft and salvage the same item forever to mint infinite scrap.
+Every role is optional; anything left out keeps the vanilla panel art. Art must match the
+vanilla pixel sizes:
 
----
-
-## Gotchas
-
-**A recipe must cost at least 1 scrap.** The engine's affordability check bails when both
-costs are zero, so a free recipe would show in the grid and then permanently fail to craft.
-S.A.M rejects it at load with an error instead.
-
-**Item names are not what you might guess.** Barony gives some items a different name in its
-lookup table than the one used elsewhere, and a third name on screen. The one you write in
-JSON is the lookup name:
-
-| you write | shows in game as |
+| Role | Size |
 |---|---|
-| `TOOL_FIRE_BOMB` | flame trap |
-| `TOOL_DETONATED_CHARGE` | detonator charge |
-| `SPELLBOOK_CHARM` | spellbook of charm monster |
-| `QUIVER_HEAVY` | knockback quiver |
-
-Pick items from the Mod Builder's dropdowns and you always get the right name. If you hand
-write JSON and the item never appears, check `sam_log.txt` for
-`Recipe for 'X' could not be resolved`.
-
-**Hiding a recipe hides crafting only.** The item can still be salvaged and repaired, and
-still spawns in the world normally.
-
-**Scrap types are fixed.** Recipes cost metal and magic scrap. Custom currencies are not
-supported.
-
-**Multiplayer.** Recipes never travel over the network, so a modded client shows extra
-recipes and the host neither knows nor cares. But a crafted **custom item** does travel when
-dropped or equipped, so everyone in the lobby needs the same mods for custom-item recipes.
+| `base` | 334 x 312 |
+| `drawer` | 210 x 256 |
+| `name_plate` | 220 x 42 |
+| `cost_backing` | 144 x 34 |
+| `scrap_backing` | 176 x 36 |
+| `item_surround` | 27 x 27 |
+| `prompt_left` / `prompt_right` | 56 x 26 |
+| `filter_left` / `filter_center` / `filter_right` (+ `_high`) | 74 / 94 / 82 x 36 |
+| `arrow_left` / `arrow_right` | 30 x 44 |
+| `close` / `close_high` / `close_press` | 26 x 26 |
 
 ---
 
-## Iterating quickly
+## Changed in v1.8.0
 
-`/sam_reload` re-reads every loaded mod's JSON and scripts from disk without restarting the
-game. Edit a recipe, run it, reopen the kit. Singleplayer only. A brand-new `.vox` model, or
-a change to a mod's item list while you are holding one of its items, still wants a restart.
+Two forms from v1.7.0 were removed, because the Hunter's Workbench removes the need for them:
 
-Useful test commands:
+- Naming a **vanilla item** to re-price its recipe. Ignored now.
+- `"remove": "..."` to hide a vanilla recipe and free a cell. Ignored now.
 
-```
-/sam_give tool_tinkering_kit
-/sam_give tool_metal_scrap 100
-/sam_give tool_magic_scrap 100
-```
+Both are reported in the log rather than failing silently, and `kit` became required.

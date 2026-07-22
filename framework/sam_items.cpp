@@ -24,6 +24,10 @@
 #include "sam_classes.hpp" // class appearance model paths (whole-body + heads) to append
 #include "nlohmann/json.hpp"
 
+#include <map>
+#include <string>
+#include <utility>
+
 #include "main.hpp"    // list_t/string_t, stringCopy, stringDeconstructor, list_* helpers
 #include "items.hpp"   // items[], ItemGeneric, ItemType, Category, ItemEquippableSlot, NUM_ITEM_SLOTS
 #ifndef EDITOR
@@ -42,6 +46,14 @@ static const char* MOD = "ITEMS";
 
 static std::map<int, SAMItemDef> s_registry;
 static int s_nextItemId = SAM_ITEM_ID_BASE;
+
+// Resolved kit_ui paths, cached because the crafting panel asks for every role on EVERY
+// frame: without this each open panel cost ~17 real file opens per frame per player, just
+// to re-derive a string that cannot change until the next mod load. Dropped by clear().
+static std::map<std::pair<int, std::string>, std::string> s_kitUiPathCache;
+// Same story for icons: getIconPath is called per inventory/grid slot per frame, and each
+// call was doing a real file open just to re-derive an unchanging string.
+static std::map<int, std::string> s_iconPathCache;
 
 // v0.7.0 Feature 5: sam_patch_item snapshots. items[id] is a live, persistent table
 // (unlike class/monster stats, which are recomputed each construction), so a patch
@@ -335,17 +347,11 @@ static void injectCustomTooltip(int id, const SAMItemDef& def)
 }
 #endif
 
-// Write one parsed def into its reserved items[] slot. Returns false if full.
-static bool registerItem(SAMItemDef def)
+// Write one parsed def into a specific items[] slot. Used both by the ordinary
+// load-order allocator below and by the framework's own built-ins, which must land
+// on a FIXED id rather than one that moves with the user's mod list.
+static bool registerItemAt(int id, SAMItemDef def)
 {
-	const int id = s_nextItemId;
-	if ( id >= NUM_ITEM_SLOTS )
-	{
-		SAM_ERROR(MOD, "Item registry full (next id " + std::to_string(id) + " >= NUM_ITEM_SLOTS "
-			+ std::to_string(NUM_ITEM_SLOTS) + ") — skipping '" + def.id + "'. Raise NUM_ITEM_SLOTS in items.hpp.");
-		return false;
-	}
-	s_nextItemId = id + 1;
 	def.numericId = id;
 
 	const Category cat = categoryFromName(def.category);
@@ -404,6 +410,19 @@ static bool registerItem(SAMItemDef def)
 		SAM_WARN(MOD, "Item [" + def.id + "] icon path '" + def.icon + "' escapes the mod folder — ignoring it.");
 		def.icon.clear();
 	}
+	// Same guard for the panel skin. These are mod-supplied relative paths joined onto the
+	// mod folder exactly like the icon, so without this a kit_ui entry could reach outside
+	// it while every sibling path could not.
+	for ( auto it = def.kitUi.begin(); it != def.kitUi.end(); )
+	{
+		if ( SAMErrors::relPathEscapes(it->second) )
+		{
+			SAM_WARN(MOD, "Item [" + def.id + "] kit_ui." + it->first + " path '" + it->second
+				+ "' escapes the mod folder — ignoring it.");
+			it = def.kitUi.erase(it);
+		}
+		else { ++it; }
+	}
 	if ( !def.icon.empty() )
 	{
 		const std::string abs = toForwardSlashes(joinPath(def.modPath, def.icon));
@@ -461,6 +480,35 @@ static bool registerItem(SAMItemDef def)
 		+ ", level " + std::to_string(def.level) + ", slot " + def.slot + ", "
 		+ std::to_string(def.attributes.size()) + " attribute(s); placeholder model cloned from a vanilla item");
 	return true;
+}
+
+// Allocate the next mod item id in load order and write the def there. The ceiling is
+// the built-in band, not NUM_ITEM_SLOTS: mods must never be handed a slot the framework
+// has reserved for itself, or a mod item and a built-in would collide on the same id.
+static bool registerItem(SAMItemDef def)
+{
+	const int id = s_nextItemId;
+	if ( id >= SAM_BUILTIN_ITEM_ID_BASE )
+	{
+		SAM_ERROR(MOD, "Item registry full (next id " + std::to_string(id) + " >= "
+			+ std::to_string(SAM_BUILTIN_ITEM_ID_BASE) + ", the start of the framework's reserved band) — skipping '"
+			+ def.id + "'.");
+		return false;
+	}
+	s_nextItemId = id + 1;
+	return registerItemAt(id, std::move(def));
+}
+
+bool SAMItems::registerBuiltinAt(int id, SAMItemDef def)
+{
+	if ( id < SAM_BUILTIN_ITEM_ID_BASE || id >= NUM_ITEM_SLOTS )
+	{
+		SAM_ERROR(MOD, "Built-in item id " + std::to_string(id) + " is outside the reserved band ["
+			+ std::to_string(SAM_BUILTIN_ITEM_ID_BASE) + ", " + std::to_string(NUM_ITEM_SLOTS) + ") — skipping '"
+			+ def.id + "'.");
+		return false;
+	}
+	return registerItemAt(id, std::move(def));
 }
 
 /*-------------------------------------------------------------------------------
@@ -571,6 +619,24 @@ void SAMItems::loadFromManifest(const SAMModManifest& manifest)
 		def.modelFp = getStr("model_fp");
 		def.modelFromItem = getStr("model_from_item");
 		def.icon = getStr("icon");
+		{
+			// "kit_ui": { "<role>": "<mod-relative png>", ... } — the crafting-panel skin used
+			// when THIS item is opened as a custom tinkering kit. Roles are validated at use
+			// time, not here, so an unknown role is simply never asked for rather than a load
+			// error; that keeps an older exe loading a newer mod.
+			auto it = j.find("kit_ui");
+			if ( it != j.end() && it->is_object() )
+			{
+				for ( auto kv = it->begin(); kv != it->end(); ++kv )
+				{
+					if ( kv.value().is_string() )
+					{
+						const std::string rel = kv.value().get<std::string>();
+						if ( !rel.empty() ) { def.kitUi[kv.key()] = rel; }
+					}
+				}
+			}
+		}
 		def.onHitEffect = getStr("on_hit_effect");
 		def.onHitChance = getNum("on_hit_chance", 0.0);
 		def.stackable = getBool("stackable", false);
@@ -606,6 +672,8 @@ void SAMItems::loadFromManifest(const SAMModManifest& manifest)
 
 void SAMItems::clear()
 {
+	s_kitUiPathCache.clear(); // resolved panel-art paths die with the registry
+	s_iconPathCache.clear();  // and the resolved icon paths
 	// v0.7.0 Feature 5: revert every sam_patch_item override to its captured original
 	// FIRST (restores vanilla items[] fields before any custom-slot teardown below).
 	for ( const auto& kv : s_itemPatches )
@@ -745,9 +813,13 @@ int SAMItems::itemIdForIdString(const std::string& idString)
 
 std::string SAMItems::getIconPath(int itemId)
 {
+	auto cached = s_iconPathCache.find(itemId);
+	if ( cached != s_iconPathCache.end() ) { return cached->second; }
+
 	auto it = s_registry.find(itemId);
 	if ( it == s_registry.end() || it->second.icon.empty() )
 	{
+		s_iconPathCache[itemId] = std::string();
 		return std::string();
 	}
 	// Same absolute path we resolved at registration, but collapse any accidental
@@ -762,8 +834,39 @@ std::string SAMItems::getIconPath(int itemId)
 	}
 	if ( !fileExists(out) )
 	{
-		return std::string(); // fall back to the placeholder rather than a broken path
+		out.clear(); // fall back to the placeholder rather than a broken path
 	}
+	s_iconPathCache[itemId] = out;
+	return out;
+}
+
+std::string SAMItems::getKitUiPath(int itemId, const std::string& role)
+{
+	const std::pair<int, std::string> cacheKey(itemId, role);
+	auto cached = s_kitUiPathCache.find(cacheKey);
+	if ( cached != s_kitUiPathCache.end() ) { return cached->second; }
+
+	auto it = s_registry.find(itemId);
+	if ( it == s_registry.end() ) { return std::string(); }
+	auto r = it->second.kitUi.find(role);
+	if ( r == it->second.kitUi.end() || r->second.empty() )
+	{
+		s_kitUiPathCache[cacheKey] = std::string();
+		return std::string();
+	}
+	// Same resolution as getIconPath: join onto the mod folder, normalise slashes, and
+	// refuse a path that is not actually on disk so the caller keeps the vanilla art
+	// instead of asking Image::get for a file that will never resolve.
+	const std::string raw = toForwardSlashes(joinPath(it->second.modPath, r->second));
+	std::string out;
+	out.reserve(raw.size());
+	for ( char c : raw )
+	{
+		if ( c == '/' && !out.empty() && out.back() == '/' ) { continue; }
+		out.push_back(c);
+	}
+	if ( !fileExists(out) ) { out.clear(); }
+	s_kitUiPathCache[cacheKey] = out;
 	return out;
 }
 

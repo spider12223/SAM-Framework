@@ -33,6 +33,11 @@ struct SAMModManifest;  // from sam_workshop.hpp (full type only needed in the .
 // Custom item ids occupy [5000, NUM_ITEM_SLOTS). Chosen well above NUMITEMS.
 static const int SAM_ITEM_ID_BASE = 5000;
 
+// Framework-owned items live ABOVE every mod id, at fixed numbers that never move.
+// See the NUM_ITEM_SLOTS comment in items.hpp for why load-order ids would corrupt saves.
+static const int SAM_BUILTIN_ITEM_ID_BASE = 6000;
+static const int SAM_ITEM_HUNTERS_WORKBENCH = 6000;
+
 // One parsed item JSON (mirrors item.schema.json).
 struct SAMItemDef
 {
@@ -58,6 +63,12 @@ struct SAMItemDef
 	std::string modelFp;            // optional separate first-person model
 	std::string modelFromItem;      // vanilla ItemType name (e.g. "SILVER_SHIELD") to clone the 3D model from
 	std::string icon;               // mod-relative PNG path — loaded into the inventory icon
+
+	// Per-kit crafting-panel skin. Only meaningful on an item used as a custom tinkering
+	// kit. Maps a panel ROLE ("base", "drawer", "cost_backing", ...) to a mod-relative PNG.
+	// Every role is optional; a role the mod does not supply keeps the vanilla art, so a
+	// partial skin is legal and a kit with no entry at all looks exactly like vanilla.
+	std::map<std::string, std::string> kitUi;
 
 	std::map<std::string, int> attributes;
 	std::string onHitEffect;
@@ -113,6 +124,14 @@ public:
 	// renderer calls this for type >= SAM_ITEM_ID_BASE so a custom slot serves its
 	// own icon directly, independent of the vanilla images[]/appearance indexing.
 	static std::string getIconPath(int itemId);
+
+	// Absolute path to this kit's art for one panel role, or "" when the item declares no
+	// skin, omits that role, or the file is missing. The caller falls back to vanilla art.
+	static std::string getKitUiPath(int itemId, const std::string& role);
+
+	// Write a def at a FIXED id, outside the load-order allocator. Only the framework's
+	// own built-ins use this; a mod can never reach the reserved band.
+	static bool registerBuiltinAt(int id, SAMItemDef def);
 
 	// Load every custom .vox a registered item asked for via its "model"/"model_fp"
 	// field, and point the item at it. Must be called from Mods::loadMods AFTER the

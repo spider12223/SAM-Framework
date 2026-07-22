@@ -586,12 +586,28 @@ namespace
 		if ( argc >= 2 ) { JS_ToInt32(ctx, &y, argv[1]); }
 		if ( argc >= 3 ) { const char* s = JS_ToCString(ctx, argv[2]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_spawn_item refused: host only."); return JS_NewBool(ctx, 0); }
-		std::string lower = name;
-		for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
-		auto it = ItemTooltips.itemNameStringToItemID.find(lower);
-		if ( it == ItemTooltips.itemNameStringToItemID.end() )
-		{ SAM_ERROR("JS", "sam_spawn_item: unknown item type '" + name + "'."); return JS_NewBool(ctx, 0); }
-		Entity* e = spawnGroundItem(static_cast<ItemType>(it->second), EXCELLENT, 0, 1, x, y);
+		// Resolve a custom "namespace:item" id first, else a vanilla name (case-insensitive),
+		// matching sam_grant_item. Without the first tier a mod could not drop its OWN items,
+		// which is the main thing scripts spawn.
+		int resolvedType = -1;
+		if ( name.find(':') != std::string::npos )
+		{
+			resolvedType = SAMItems::itemIdForIdString(name);
+		}
+		if ( resolvedType < 0 )
+		{
+			std::string lower = name;
+			for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
+			auto it = ItemTooltips.itemNameStringToItemID.find(lower);
+			if ( it != ItemTooltips.itemNameStringToItemID.end() ) { resolvedType = it->second; }
+		}
+		if ( resolvedType < 0 )
+		{
+			SAM_ERROR("JS", "sam_spawn_item: unknown item '" + name
+				+ "' (expected a vanilla name like \"IRON_DAGGER\" or a custom \"namespace:item\").");
+			return JS_NewBool(ctx, 0);
+		}
+		Entity* e = spawnGroundItem(static_cast<ItemType>(resolvedType), EXCELLENT, 0, 1, x, y);
 		if ( !e ) { SAM_ERROR("JS", "sam_spawn_item: invalid tile (" + std::to_string(x) + "," + std::to_string(y) + ")."); return JS_NewBool(ctx, 0); }
 		SAM_INFO("JS", "Spawned item " + name + " at (" + std::to_string(x) + "," + std::to_string(y) + ")");
 		return JS_NewBool(ctx, 1);

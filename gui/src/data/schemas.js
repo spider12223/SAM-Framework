@@ -21,6 +21,21 @@ export { modSchema, classSchema, itemSchema, monsterSchema, spellSchema, patchSc
 /** All vanilla Barony ItemType names (from class.schema.json's itemType enum). */
 export const ITEM_TYPES = classSchema.definitions.itemType.enum;
 
+// Items the FRAMEWORK itself provides, available to every mod with no dependency and
+// nothing to ship. They are addressed by "namespace:item" exactly like a custom item,
+// so anywhere that accepts one of those accepts these too.
+export const FRAMEWORK_ITEMS = [
+  {
+    id: 'sam:hunters_workbench',
+    name_identified: "hunter's workbench",
+    category: 'TOOL',
+    description:
+      'A second crafting bench, separate from the vanilla tinkering kit. Give it to a class '
+      + 'and bind recipes to it with "kit": "sam:hunters_workbench".',
+  },
+];
+export const FRAMEWORK_ITEM_IDS = FRAMEWORK_ITEMS.map((it) => it.id);
+
 /** The PRO_X skill names (keys of the class schema's skills object). */
 export const SKILLS = Object.keys(classSchema.properties.skills.properties);
 

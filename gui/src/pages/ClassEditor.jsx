@@ -6,7 +6,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  CORE_ATTRIBUTES, OFFSET_STATS, SKILLS, ITEM_TYPES, ROLL_STATS, CATEGORIES,
+  CORE_ATTRIBUTES, OFFSET_STATS, SKILLS, ITEM_TYPES, ROLL_STATS, CATEGORIES, FRAMEWORK_ITEMS,
   CLASS_SPELL_REF_PATTERN, skillLabel, skillBaseAttr,
 } from '@/data/schemas.js';
 import { ITEM_ICONS } from '@/data/itemIcons.js';
@@ -143,12 +143,14 @@ export default function ClassEditor() {
   // Custom items from THIS mod become pickable starting gear alongside the vanilla list.
   // The engine already grants a "namespace:item" in starting_items (sam_classes.cpp) — the
   // Class Editor just never offered them, which is the gap Absidian hit.
+  // Framework built-ins are offered alongside the mod's own items: they need no
+  // dependency and ship inside the framework, so a class can always include them.
   const customItemMap = useMemo(
-    () => Object.fromEntries((modItems || []).map((it) => [it.id, it])),
+    () => Object.fromEntries([...FRAMEWORK_ITEMS, ...(modItems || [])].map((it) => [it.id, it])),
     [modItems],
   );
   const allItemTypes = useMemo(
-    () => [...ITEM_TYPES, ...(modItems || []).map((it) => it.id)],
+    () => [...ITEM_TYPES, ...FRAMEWORK_ITEMS.map((it) => it.id), ...(modItems || []).map((it) => it.id)],
     [modItems],
   );
   // Icon + category resolvers that fall back to the custom item's own declared category.

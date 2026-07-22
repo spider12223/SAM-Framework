@@ -38,7 +38,7 @@
     "framework_min_version": {
       "type": "string",
       "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
-      "description": "Minimum S.A.M framework version this mod needs, in MAJOR.MINOR.PATCH form. If S.A.M is older, the mod is loaded anyway with a warning (it may use features that aren't present yet) — S.A.M never hard-blocks on a version mismatch."
+      "description": "Minimum S.A.M framework version this mod needs, in MAJOR.MINOR.PATCH form. If S.A.M is older, the mod is loaded anyway with a warning (it may use features that aren't present yet) \u2014 S.A.M never hard-blocks on a version mismatch."
     },
     "framework_max_version": {
       "type": "string",
@@ -143,7 +143,7 @@
     },
     "recipes": {
       "type": "array",
-      "description": "Relative paths (from the mod folder) to tinkering recipe JSON files provided by this mod. Each recipe either adds a craftable entry to the tinkering kit (your own custom item, or a vanilla one at a new scrap price and skill requirement) or removes a vanilla entry to free a grid cell. The crafting grid is a fixed 5x4 = 20 cells and vanilla fills 16, so only 4 recipes fit until some are removed. Each file conforms to recipe.schema.json.",
+      "description": "Relative paths (from the mod folder) to crafting recipe JSON files provided by this mod. Each recipe makes one of YOUR items craftable at a bench you name with 'kit' - either the framework's built-in Hunter's Workbench ('sam:hunters_workbench'), which every player already has, or one of your own items used as a bench. The vanilla tinkering kit cannot be changed by a mod. Each bench has its own 5x4 = 20 cell grid.",
       "items": {
         "type": "string",
         "pattern": "\\.json$",
@@ -152,7 +152,7 @@
     },
     "plugins": {
       "type": "array",
-      "description": "PLANNED — the S.A.M plugin system is not yet implemented; declared .dll files are counted but NOT loaded. Leave this empty for now. (Relative paths to compiled plugin .dll files.)",
+      "description": "PLANNED \u2014 the S.A.M plugin system is not yet implemented; declared .dll files are counted but NOT loaded. Leave this empty for now. (Relative paths to compiled plugin .dll files.)",
       "items": {
         "type": "string",
         "pattern": "\\.dll$",
@@ -161,10 +161,13 @@
     },
     "models": {
       "type": "array",
-      "description": "Standalone custom .vox models NOT tied to any item or class — for sam_spawn_companion (floating 'Stand'/familiar followers) and other decorative entities. Each entry registers one model under a friendly id that scripts pass to sam_spawn_companion. Barony SLAB .vox format only (MagicaVoxel exports are rejected). v1.4.0+.",
+      "description": "Standalone custom .vox models NOT tied to any item or class \u2014 for sam_spawn_companion (floating 'Stand'/familiar followers) and other decorative entities. Each entry registers one model under a friendly id that scripts pass to sam_spawn_companion. Barony SLAB .vox format only (MagicaVoxel exports are rejected). v1.4.0+.",
       "items": {
         "type": "object",
-        "required": ["id", "file"],
+        "required": [
+          "id",
+          "file"
+        ],
         "additionalProperties": false,
         "properties": {
           "id": {

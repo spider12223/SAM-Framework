@@ -1,13 +1,10 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://spider12223.github.io/SAM-Framework/schemas/recipe.schema.json",
-  "title": "S.A.M Tinkering Recipe",
-  "description": "One entry in the tinkering kit's crafting grid. A recipe either ADDS a craftable item (your own custom item, or a vanilla one at a new price), or REMOVES a vanilla craft entry to free up a grid cell. The grid is a fixed 5x4 = 20 cells and vanilla already fills 16, so only 4 recipes fit until you remove some. Removing hides the CRAFT entry only: that item can still be salvaged and repaired.",
+  "title": "S.A.M Crafting Recipe",
+  "description": "Makes one of your custom items craftable at a bench. Every recipe must name the bench it belongs on with 'kit': either the framework's built-in Hunter's Workbench, or one of your own items turned into a bench. The vanilla tinkering kit cannot be changed by a mod - its recipes, prices and cells are always exactly what the game ships. A bench has a 5x4 = 20 cell grid, and a custom bench gets all 20 to itself.",
   "type": "object",
-  "oneOf": [
-    { "required": ["item"] },
-    { "required": ["remove"] }
-  ],
+  "required": ["item", "kit"],
   "properties": {
     "$schema": {
       "type": "string",
@@ -15,28 +12,53 @@
     },
     "id": {
       "type": "string",
-      "description": "Optional. A 'namespace:name' id for this recipe itself. Only used in log messages; the recipe is keyed by its item.",
+      "description": "Optional. A 'namespace:name' id for this recipe itself. Only used in log messages; the recipe is keyed by its item and its kit.",
       "pattern": "^[a-z][a-z0-9_]*:[a-z][a-z0-9_]*$"
     },
     "item": {
       "type": "string",
-      "description": "The item this recipe produces. Either a vanilla ItemType name (e.g. 'TOOL_FIRE_BOMB') or one of your own custom items as 'namespace:item'. Giving a vanilla item here re-prices and re-gates the existing recipe instead of adding a second one.",
-      "minLength": 1
+      "description": "The item this recipe produces, as one of your own custom items: 'namespace:item'. A vanilla item cannot be given a recipe, because that would change the vanilla tinkering kit.",
+      "pattern": "^[a-z][a-z0-9_]*:[a-z][a-z0-9_]*$"
     },
-    "remove": {
+    "kit": {
       "type": "string",
-      "description": "Instead of adding, hide the vanilla craft entry for this item so its grid cell becomes free (e.g. 'CLOAK_BACKPACK'). The item can still be salvaged and repaired; only the crafting entry disappears.",
-      "minLength": 1
+      "description": "Required. The bench this recipe appears on. Use 'sam:hunters_workbench' for the framework's built-in bench, which every player already has and no mod needs to ship. Or name one of your own custom items to make it a bench of its own: using it from the inventory opens a grid showing only the recipes bound to it. A recipe with no kit appears nowhere.",
+      "minLength": 1,
+      "default": "sam:hunters_workbench"
+    },
+    "materials": {
+      "type": "array",
+      "description": "Optional. Pay for this craft with your OWN items instead of metal and magic scrap. The crafting panel has room for two material columns, so you may name up to two. Omit this to use the scrap costs below.",
+      "minItems": 1,
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["item"],
+        "properties": {
+          "item": {
+            "type": "string",
+            "description": "The material consumed, as 'namespace:item'. Give that item an 'icon' so the crafting panel can show it; without one the panel falls back to the scrap icon.",
+            "minLength": 1
+          },
+          "count": {
+            "type": "integer",
+            "description": "How many of this material a single craft consumes.",
+            "minimum": 1,
+            "default": 1
+          }
+        },
+        "additionalProperties": false
+      }
     },
     "metal_cost": {
       "type": "integer",
-      "description": "Metal scrap (TOOL_METAL_SCRAP) consumed per craft. metal_cost + magic_cost must be at least 1: a recipe that costs nothing can never be crafted, because the engine's affordability check bails when both are zero.",
+      "description": "Metal scrap (TOOL_METAL_SCRAP) consumed per craft. Ignored when 'materials' is used. Without materials, metal_cost + magic_cost must be at least 1: a recipe that costs nothing can never be crafted, because the engine's affordability check bails when both are zero.",
       "minimum": 0,
       "default": 0
     },
     "magic_cost": {
       "type": "integer",
-      "description": "Magic scrap (TOOL_MAGIC_SCRAP) consumed per craft. metal_cost + magic_cost must be at least 1.",
+      "description": "Magic scrap (TOOL_MAGIC_SCRAP) consumed per craft. Ignored when 'materials' is used.",
       "minimum": 0,
       "default": 0
     },
@@ -49,13 +71,13 @@
     },
     "status": {
       "type": "string",
-      "description": "Condition the crafted item comes out at. Defaults to EXCELLENT, which is what almost every vanilla recipe uses. Note the game's spelling of SERVICABLE.",
+      "description": "Condition the crafted item comes out at. Defaults to EXCELLENT. Note the game's spelling of SERVICABLE.",
       "enum": ["BROKEN", "DECREPIT", "WORN", "SERVICABLE", "EXCELLENT"],
       "default": "EXCELLENT"
     },
     "slot": {
       "type": "object",
-      "description": "Optional. Pin this recipe to an exact cell in the 5x4 crafting grid. Omit it and the recipe drops into the next free cell, which is usually what you want. If the pinned cell is already taken, the next free cell is used instead.",
+      "description": "Optional. Pin this recipe to an exact cell in the bench's 5x4 grid. Omit it and the recipe drops into the next free cell, which is usually what you want. If the pinned cell is already taken, the next free cell is used instead.",
       "properties": {
         "x": { "type": "integer", "minimum": 0, "maximum": 4, "description": "Column, 0 to 4." },
         "y": { "type": "integer", "minimum": 0, "maximum": 3, "description": "Row, 0 to 3." }
