@@ -6,6 +6,10 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { CATEGORIES, SLOTS, ITEM_TYPES } from '@/data/schemas.js';
+
+/* Melee only. Ranged cannot be custom (firing is gated on a hardcoded list of vanilla
+ * bows), and a throwable is declared with category THROWN instead, which already works. */
+const WEAPON_SKILLS = ['sword', 'axe', 'mace', 'polearm'];
 import { validate } from '@/lib/validate.js';
 import { checkBalance } from '@/lib/balance.js';
 import { useMod } from '@/state/ModContext.jsx';
@@ -32,6 +36,7 @@ export default function ItemEditor() {
   const [description, setDescription] = useState(editDef?.description ?? '');
   const [category, setCategory] = useState(editDef?.category ?? CATEGORIES[0]);
   const [slot, setSlot] = useState(editDef?.slot ?? 'NO_EQUIP');
+  const [weaponSkill, setWeaponSkill] = useState(editDef?.weapon_skill ?? 'sword');
   const [weight, setWeight] = useState(editDef?.weight ?? 0);
   const [goldValue, setGoldValue] = useState(editDef?.gold_value ?? 0);
   const [level, setLevel] = useState(editDef?.level ?? 0);
@@ -80,6 +85,9 @@ export default function ItemEditor() {
       gold_value: numOr(goldValue, 0),
       level: numOr(level, 0),
     };
+    // Only meaningful for a wielded weapon. Without it the engine gives a custom weapon no
+    // skill at all: no skill increase from use, no damage variance, no durability scaling.
+    if (slot === 'EQUIPPABLE_IN_SLOT_WEAPON') def.weapon_skill = weaponSkill;
     if (nameUnid.trim()) def.name_unidentified = nameUnid.trim();
     if (description.trim()) def.description = description.trim();
     if (model.trim()) def.model = model.trim();
@@ -110,7 +118,7 @@ export default function ItemEditor() {
 
   const def = useMemo(buildDef,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [nameId, nameUnid, description, category, slot, weight, goldValue, level, stackable,
+    [nameId, nameUnid, description, category, slot, weaponSkill, weight, goldValue, level, stackable,
       magicLevel, model, modelFp, modelFromItem, icon, attribs, namespace]);
   const preview = useMemo(() => JSON.stringify(def, null, 2), [def]);
   const hints = useMemo(() => checkBalance('item', def), [def]);
@@ -158,6 +166,18 @@ export default function ItemEditor() {
             <Field label="Equip Slot" hint="NO_EQUIP for items that can't be worn or wielded.">
               <Select value={slot} onChange={setSlot} options={SLOTS} />
             </Field>
+            {slot === 'EQUIPPABLE_IN_SLOT_WEAPON' && (
+              <Field
+                label="Weapon skill"
+                hint="Which skill this trains and scales off. Without it the game treats a custom weapon as having no skill at all: using it raises nothing, and the tooltip claims Sword whatever it is. For a throwable, set Category to THROWN instead."
+              >
+                <Select
+                  value={weaponSkill}
+                  onChange={setWeaponSkill}
+                  options={WEAPON_SKILLS.map((k) => ({ value: k, label: k[0].toUpperCase() + k.slice(1) }))}
+                />
+              </Field>
+            )}
           </div>
         </Panel>
 

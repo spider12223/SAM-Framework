@@ -193,6 +193,13 @@ static ItemEquippableSlot slotFromName(const std::string& n)
 	return NO_EQUIP;
 }
 
+static std::string samLower(const std::string& in)
+{
+	std::string out = in;
+	for ( char& c : out ) { c = (char)std::tolower((unsigned char)c); }
+	return out;
+}
+
 // A vanilla item whose model + inventory icon we clone as a placeholder, so a
 // custom item renders safely if ever spawned (real custom models are post-launch).
 static ItemType templateForCategory(Category cat)
@@ -214,6 +221,21 @@ static ItemType templateForCategory(Category cat)
 		case BOOK:       return READABLE_BOOK;
 		default:         return IRON_SWORD;
 	}
+}
+
+// A vanilla item matching a DECLARED weapon skill. This drives both the placeholder model
+// and — more importantly — the cloned TOOLTIP, because Barony's tooltip renderer works out
+// which skill to name by substring-matching the tooltip KEY ("tooltip_axe" -> Axe). Cloning
+// iron_sword for every weapon is what made every custom weapon claim "Sword Damage" and
+// sword-skill scaling regardless of what it actually was.
+// Returns -1 when the mod declared nothing, so the caller keeps its slot/category choice.
+static int templateForWeaponSkill(const std::string& skill)
+{
+	if ( skill == "axe" )     { return IRON_AXE; }
+	if ( skill == "mace" )    { return IRON_MACE; }
+	if ( skill == "polearm" ) { return IRON_SPEAR; }
+	if ( skill == "sword" )   { return IRON_SWORD; }
+	return -1; // unset or unrecognised: keep the slot/category pick
 }
 
 // A vanilla item whose model + inventory icon match an EQUIP SLOT, so a custom
@@ -317,7 +339,15 @@ static void injectCustomTooltip(int id, const SAMItemDef& def)
 {
 	const Category cat = categoryFromName(def.category);
 	const ItemEquippableSlot eslot = slotFromName(def.slot);
-	const ItemType tmpl = (eslot != NO_EQUIP) ? templateForSlot(eslot) : templateForCategory(cat);
+	// A declared weapon skill wins over both, because it decides the tooltip key and so the
+	// skill the tooltip names. Falls back to the slot/category pick when nothing is declared.
+	// Gated on the equip slot: weapon_skill means nothing on a shield or a helm, and letting
+	// it through would clone a sword's model onto one.
+	const int samSkillTmpl = ( eslot == EQUIPPABLE_IN_SLOT_WEAPON )
+		? templateForWeaponSkill(def.weaponSkill) : -1;
+	const ItemType tmpl = ( samSkillTmpl >= 0 )
+		? (ItemType)samSkillTmpl
+		: ( (eslot != NO_EQUIP) ? templateForSlot(eslot) : templateForCategory(cat) );
 
 	std::string srcKey = (tmpl >= 0 && tmpl < NUMITEMS) ? items[tmpl].tooltip : std::string();
 	if ( srcKey.empty() || !ItemTooltips.tooltips.count(srcKey) )
@@ -362,7 +392,15 @@ static bool registerItemAt(int id, SAMItemDef def)
 	// the template by its equip slot (a shield clones a shield, boots clone boots,
 	// ...) so it renders as the right kind of gear; otherwise fall back to a
 	// category-appropriate template.
-	const ItemType tmpl = (eslot != NO_EQUIP) ? templateForSlot(eslot) : templateForCategory(cat);
+	// A declared weapon skill wins over both, because it decides the tooltip key and so the
+	// skill the tooltip names. Falls back to the slot/category pick when nothing is declared.
+	// Gated on the equip slot: weapon_skill means nothing on a shield or a helm, and letting
+	// it through would clone a sword's model onto one.
+	const int samSkillTmpl = ( eslot == EQUIPPABLE_IN_SLOT_WEAPON )
+		? templateForWeaponSkill(def.weaponSkill) : -1;
+	const ItemType tmpl = ( samSkillTmpl >= 0 )
+		? (ItemType)samSkillTmpl
+		: ( (eslot != NO_EQUIP) ? templateForSlot(eslot) : templateForCategory(cat) );
 	slot.index = items[tmpl].index;
 	slot.fpindex = items[tmpl].fpindex;
 	slot.indexShort = items[tmpl].indexShort;
@@ -619,6 +657,16 @@ void SAMItems::loadFromManifest(const SAMModManifest& manifest)
 		def.modelFp = getStr("model_fp");
 		def.modelFromItem = getStr("model_from_item");
 		def.icon = getStr("icon");
+		def.weaponSkill = samLower(getStr("weapon_skill"));
+		if ( !def.weaponSkill.empty()
+			&& def.weaponSkill != "sword" && def.weaponSkill != "axe"
+			&& def.weaponSkill != "mace"  && def.weaponSkill != "polearm" )
+		{
+			SAM_WARN(MOD, "Item [" + def.id + "] weapon_skill '" + def.weaponSkill
+				+ "' is not one of sword/axe/mace/polearm — falling back to sword. (For a throwable, "
+				"set \"category\": \"THROWN\" instead; ranged weapons cannot be custom.)");
+			def.weaponSkill.clear();
+		}
 		{
 			// "kit_ui": { "<role>": "<mod-relative png>", ... } — the crafting-panel skin used
 			// when THIS item is opened as a custom tinkering kit. Roles are validated at use
@@ -838,6 +886,37 @@ std::string SAMItems::getIconPath(int itemId)
 	}
 	s_iconPathCache[itemId] = out;
 	return out;
+}
+
+int SAMItems::weaponSkillFor(int itemId)
+{
+#ifdef EDITOR
+	// PRO_* live in stat.hpp, which only the game target pulls in. The editor never asks a
+	// weapon its skill, so answering "none" is correct there and keeps this file compiling
+	// for both targets (sam_items.cpp is in EDITOR_SOURCES).
+	(void)itemId;
+	return -1;
+#else
+	auto it = s_registry.find(itemId);
+	if ( it == s_registry.end() ) { return -1; }
+	// MELEE ONLY, on purpose. Ranged and thrown are not a matter of which skill trains:
+	// firing needs isRangedWeapon(), a hardcoded switch over vanilla bow types that a custom
+	// id can never satisfy, and the character sheet computes a thrown weapon's ATK with a
+	// different formula than the one combat actually uses. Claiming either here would make
+	// the tooltip lie about a weapon that cannot work. A mod wanting a throwable declares
+	// category THROWN instead, which the engine dispatches by category and already works.
+	const std::string& sk = it->second.weaponSkill;
+	if ( sk == "axe" )     { return PRO_AXE; }
+	if ( sk == "mace" )    { return PRO_MACE; }
+	if ( sk == "polearm" ) { return PRO_POLEARM; }
+	if ( sk == "sword" )   { return PRO_SWORD; }
+	// Nothing declared (or something unrecognised, which loadFromManifest has already warned
+	// about). An equippable weapon still has to answer something or the engine treats it as
+	// unarmed: no skill XP, no damage variance, no durability scaling. Sword is what these
+	// items already behaved as, so it is the least surprising default.
+	if ( it->second.slot == "EQUIPPABLE_IN_SLOT_WEAPON" ) { return PRO_SWORD; }
+	return -1;
+#endif
 }
 
 std::string SAMItems::getKitUiPath(int itemId, const std::string& role)

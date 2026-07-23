@@ -64,6 +64,15 @@ struct SAMItemDef
 	std::string modelFromItem;      // vanilla ItemType name (e.g. "SILVER_SHIELD") to clone the 3D model from
 	std::string icon;               // mod-relative PNG path — loaded into the inventory icon
 
+	// Which weapon skill this item trains and scales off: "sword", "axe", "mace",
+	// "polearm", "ranged", "thrown" or "unarmed". Empty = "sword" for an equippable
+	// weapon, which is what every custom weapon silently behaved as before this existed.
+	// Barony decides a weapon's skill by comparing the item TYPE against a hardcoded list
+	// of vanilla types, so a custom id matches nothing and the engine answers -1: no skill
+	// XP, the UNARMED damage table, no damage variance, no durability scaling. Declaring
+	// it here is what makes a custom axe actually an axe.
+	std::string weaponSkill;
+
 	// Per-kit crafting-panel skin. Only meaningful on an item used as a custom tinkering
 	// kit. Maps a panel ROLE ("base", "drawer", "cost_backing", ...) to a mod-relative PNG.
 	// Every role is optional; a role the mod does not supply keeps the vanilla art, so a
@@ -128,6 +137,10 @@ public:
 	// Absolute path to this kit's art for one panel role, or "" when the item declares no
 	// skin, omits that role, or the file is missing. The caller falls back to vanilla art.
 	static std::string getKitUiPath(int itemId, const std::string& role);
+
+	// The proficiency (PRO_SWORD / PRO_AXE / ...) this custom weapon uses, or -1 when the
+	// id is not a registered custom item. The engine asks this from getWeaponSkill.
+	static int weaponSkillFor(int itemId);
 
 	// Write a def at a FIXED id, outside the load-order allocator. Only the framework's
 	// own built-ins use this; a mod can never reach the reserved band.

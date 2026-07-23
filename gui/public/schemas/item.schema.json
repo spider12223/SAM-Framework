@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://sam-framework.dev/schemas/item.schema.json",
   "title": "S.A.M Item / Weapon",
-  "description": "Defines a custom item or weapon. S.A.M registers it into the items[] table at a reserved runtime slot (>=5000) and wires up its names, category, slot, weight, value, level, attributes and 2D inventory icon. Custom 3D models and on-hit effects are PLANNED and not yet loaded — see each field's note.",
+  "description": "Defines a custom item or weapon. S.A.M registers it into the items[] table at a reserved runtime slot (>=5000) and wires up its names, category, slot, weight, value, level, attributes and 2D inventory icon. Custom 3D models and on-hit effects are PLANNED and not yet loaded \u2014 see each field's note.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -70,6 +70,17 @@
       "default": "NO_EQUIP",
       "description": "Equipment slot the item occupies (Barony ItemEquippableSlot enum). Use NO_EQUIP for non-equippable items."
     },
+    "weapon_skill": {
+      "type": "string",
+      "description": "Which weapon skill this trains and scales off. Barony works a weapon's skill out from a hardcoded list of vanilla item types, so a custom weapon matches none of them and gets no skill at all: no skill increase from using it, no damage variance, no durability scaling, and the tooltip claims Sword. Set this and it behaves as the weapon it is. Melee only: a ranged weapon cannot be custom (firing is gated on a hardcoded list of vanilla bows), and for a throwable set category THROWN instead, which trains Ranged and already works. Only meaningful on an equippable weapon; defaults to sword.",
+      "enum": [
+        "sword",
+        "axe",
+        "mace",
+        "polearm"
+      ],
+      "default": "sword"
+    },
     "weight": {
       "type": "integer",
       "minimum": 0,
@@ -87,7 +98,7 @@
     },
     "model": {
       "type": "string",
-      "description": "Ship your OWN 3D model: a mod-relative path to a .vox, e.g. \"models/mymod/sword.vox\". SAM loads it at runtime and uses it as this item's world (and inventory) model, overriding 'model_from_item'. The path is also the model's id, so namespace your folder (models/<yourmod>/...) to avoid clashing with vanilla or another mod. IMPORTANT: the .vox must be Barony's slab format — MagicaVoxel exports are rejected (export/convert to slab .vox). An unknown/failed path is skipped with a warning and the item falls back to 'model_from_item' or a placeholder."
+      "description": "Ship your OWN 3D model: a mod-relative path to a .vox, e.g. \"models/mymod/sword.vox\". SAM loads it at runtime and uses it as this item's world (and inventory) model, overriding 'model_from_item'. The path is also the model's id, so namespace your folder (models/<yourmod>/...) to avoid clashing with vanilla or another mod. IMPORTANT: the .vox must be Barony's slab format \u2014 MagicaVoxel exports are rejected (export/convert to slab .vox). An unknown/failed path is skipped with a warning and the item falls back to 'model_from_item' or a placeholder."
     },
     "model_fp": {
       "type": "string",
@@ -95,11 +106,11 @@
     },
     "model_from_item": {
       "type": "string",
-      "description": "Reuse an existing vanilla item's 3D model (world + first-person + inventory icon) for this custom item, by vanilla ItemType name — e.g. \"SILVER_SHIELD\", \"STEEL_SWORD\", \"IRON_HELM\". This is the supported way to give a custom item a real model. If omitted, the item clones a placeholder that matches its equip slot (a shield looks like a wooden shield, boots like boots, etc.). If the name is unknown, the placeholder is used and a warning is logged. A per-item 'icon' PNG still overrides the 2D inventory icon."
+      "description": "Reuse an existing vanilla item's 3D model (world + first-person + inventory icon) for this custom item, by vanilla ItemType name \u2014 e.g. \"SILVER_SHIELD\", \"STEEL_SWORD\", \"IRON_HELM\". This is the supported way to give a custom item a real model. If omitted, the item clones a placeholder that matches its equip slot (a shield looks like a wooden shield, boots like boots, etc.). If the name is unknown, the placeholder is used and a warning is logged. A per-item 'icon' PNG still overrides the 2D inventory icon."
     },
     "icon": {
       "type": "string",
-      "description": "Path (relative to the mod folder) to a PNG used as the item's 2D inventory/hotbar icon, e.g. 'items/shadowblade.png'. Loaded at runtime and drawn like the class-select portrait. If the file is missing, a placeholder icon cloned from a similar vanilla item is used. (Only the 2D icon is loaded — the 3D 'model'/'model_fp' are still planned.)"
+      "description": "Path (relative to the mod folder) to a PNG used as the item's 2D inventory/hotbar icon, e.g. 'items/shadowblade.png'. Loaded at runtime and drawn like the class-select portrait. If the file is missing, a placeholder icon cloned from a similar vanilla item is used. (Only the 2D icon is loaded \u2014 the 3D 'model'/'model_fp' are still planned.)"
     },
     "attributes": {
       "type": "object",
@@ -128,22 +139,22 @@
     },
     "on_hit_effect": {
       "type": "string",
-      "description": "PLANNED — requires the S.A.M effect/plugin system, which is not yet implemented. Parsed but has no runtime effect. Status effect to apply on a successful hit (e.g. an EFF_ effect name from stat.hpp)."
+      "description": "PLANNED \u2014 requires the S.A.M effect/plugin system, which is not yet implemented. Parsed but has no runtime effect. Status effect to apply on a successful hit (e.g. an EFF_ effect name from stat.hpp)."
     },
     "on_hit_chance": {
       "type": "number",
       "minimum": 0,
       "maximum": 1,
-      "description": "PLANNED — no runtime effect yet (see 'on_hit_effect'). Probability (0.0-1.0) that on_hit_effect triggers on a hit."
+      "description": "PLANNED \u2014 no runtime effect yet (see 'on_hit_effect'). Probability (0.0-1.0) that on_hit_effect triggers on a hit."
     },
     "stackable": {
       "type": "boolean",
       "default": false,
-      "description": "PLANNED — parsed but not yet applied at runtime. Whether multiple copies stack into one inventory slot."
+      "description": "PLANNED \u2014 parsed but not yet applied at runtime. Whether multiple copies stack into one inventory slot."
     },
     "magic_level": {
       "type": "integer",
-      "description": "PLANNED — parsed but not yet applied at runtime. Magic/enchantment level of the item."
+      "description": "PLANNED \u2014 parsed but not yet applied at runtime. Magic/enchantment level of the item."
     }
   },
   "examples": [
