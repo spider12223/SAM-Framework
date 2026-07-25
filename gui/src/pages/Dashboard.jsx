@@ -24,6 +24,26 @@ const TRAVELS = [
   { to: '/validator', icon: '📜', label: 'Validator', desc: 'Check any class, item, monster or mod against the draft-07 schemas.' },
 ];
 
+/* What landed in this release. Kept short and in plain language: this panel is the first
+ * thing a returning modder sees, and the point is 'here is what you can do now that you
+ * could not before', not a changelog. */
+const WHATS_NEW = [
+  ['Monsters can wear your own model',
+   'Point a monster at your own .vox and it wears it. It still moves and fights like the creature you based it on, but it can look like anything you can build.'],
+  ['Eleven monster traits',
+   'Say your monster is a boss, is undead, is a shopkeeper, never flees, walks on lava, or can be walked through. It gets the real behaviour, boss music and health bar included.'],
+  ['Spell items all work',
+   'Custom spellbooks, tomes, foci and magic staves teach and cast their spell, including spells you invented. They take a spell by name now, not a number.'],
+  ['Custom classes work in multiplayer',
+   'The assist shrine could only send a vanilla class before, so custom classes were singleplayer only.'],
+  ['Class and race polish',
+   'Real stat bars and difficulty in character select, blood drinking classes, innate racial spells, race description cards, and custom classes in the random class button.'],
+  ['Curable effects and blessed gear',
+   'A custom status effect can be cured by a cure ailment potion, and blessing or cursing a custom item now changes its AC.'],
+  ['Two bugs that could hurt you',
+   'Mixing acid with a custom potion used to explode and could kill you. Duplicating one with water consumed the water and gave nothing back. Both fixed.'],
+];
+
 /** sam-well stat box: big gold number over a small-caps label. */
 function StatTile({ value, label }) {
   return (
@@ -65,6 +85,36 @@ export default function Dashboard() {
             <a href={WORKSHOP_URL} target="_blank" rel="noreferrer" style={{ color: 'var(--color-gold)' }}>Steam Workshop</a>{' '}
             too, but Steam can't replace the game's program by itself, so they still run the installer.
           </div>
+        </div>
+      </Panel>
+
+      {/* --------------------------------------------------- what is new */}
+      <Panel title={`New in ${SAM_FRAMEWORK_VERSION}`}>
+        <p className="m-0" style={{ color: 'var(--color-parchment)' }}>
+          Barony decides what a thing <em>is</em> by checking it against hardcoded lists of its own
+          content. Modded content was never on those lists, so it quietly fell through every check.
+          That is why a custom spellbook could teach nothing and a custom boss got no boss music,
+          with no error to tell you why.{' '}
+          <strong style={{ color: 'var(--color-gold)' }}>
+            This release puts modded content on about thirty of those lists.
+          </strong>
+        </p>
+        <ul className="mt-3 mb-0 space-y-2" style={{ listStyle: 'none', padding: 0 }}>
+          {WHATS_NEW.map(([title, blurb]) => (
+            <li key={title} className="sam-well px-4 py-3">
+              <div style={{ color: 'var(--color-gold)' }}>{title}</div>
+              <div className="mt-1 text-sm" style={{ color: 'var(--color-parchment)' }}>{blurb}</div>
+            </li>
+          ))}
+        </ul>
+        <div className="mt-3 text-sm" style={{ color: '#8a7749' }}>
+          Two complete example mods ship with the framework: one uses every capability once, the
+          other is a full custom boss fight. They are the fastest way to learn.{' '}
+          <a href="https://github.com/spider12223/SAM-Framework/tree/main/examples" target="_blank"
+             rel="noreferrer" style={{ color: 'var(--color-gold)' }}>Browse the examples</a>
+          {' '}or read the{' '}
+          <a href="https://github.com/spider12223/SAM-Framework/blob/main/docs/scripting-reference.md"
+             target="_blank" rel="noreferrer" style={{ color: 'var(--color-gold)' }}>scripting reference</a>.
         </div>
       </Panel>
 
