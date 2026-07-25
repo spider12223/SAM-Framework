@@ -44,6 +44,9 @@ struct SAMEffectDef
 	std::vector<int> grants;          // vanilla effect slots re-asserted each second while active (v1.5.0)
 	int defaultDurationTicks = 0;     // 0 == caller supplies the duration
 	bool hudHidden = false;
+	bool curable = false;             // cure-ailment (potion/spell/Foci Purity) strips it. Default OFF:
+	                                  // default-on would silently change already-shipped mods, and it
+	                                  // hands authors an uncurable debuff for free.
 	std::string modNamespace;
 	std::string modPath;
 };
@@ -79,6 +82,15 @@ namespace SAMEffects
 	// v1.5.0 — product of damage_mult over active custom slots. 1.0 when none. Hooked into the melee
 	// attack-damage calc, so an effect can scale the wearer's outgoing melee damage.
 	double attackMult(const Stat* s);
+
+	// v1.9.0 — does this engine slot belong to a registered custom effect that opted into
+	// "curable"? false for every vanilla slot (never in the registry), every unregistered
+	// custom slot, and every custom effect that did not set it. Read by the cure-ailment
+	// predicate so a mod effect can be strippable by a potion / spell / Foci of Purity.
+	bool isCurable(int slot);
+	// Test-only: force isCurable() to answer false for everything, so /sam_curable can print
+	// the with/without pair. Set only by that console command, always restored.
+	void suppressCurableForTest(bool on);
 
 	// (Re)insert a HUD display entry for every registered custom effect into the engine's
 	// status-effect definition map. Call right after the engine's loadStatusEffectsJSON()

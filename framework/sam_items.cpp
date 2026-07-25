@@ -21,12 +21,15 @@
 #include "sam_logger.hpp"
 #include "sam_errors.hpp"
 #include "sam_models.hpp" // custom .vox registration (appendModels / modelIndexForId)
+#include "sam_monsters.hpp" // body-model resolution report
+#include "sam_spells.hpp" // resolve "ns:spell" / vanilla spell-name payloads to ids
 #include "sam_classes.hpp" // class appearance model paths (whole-body + heads) to append
 #include "nlohmann/json.hpp"
 
 #include <map>
 #include <string>
 #include <utility>
+#include <algorithm> // std::find — beatitude_ac trait lookup in def.traits
 
 #include "main.hpp"    // list_t/string_t, stringCopy, stringDeconstructor, list_* helpers
 #include "items.hpp"   // items[], ItemGeneric, ItemType, Category, ItemEquippableSlot, NUM_ITEM_SLOTS
@@ -345,9 +348,21 @@ static void injectCustomTooltip(int id, const SAMItemDef& def)
 	// it through would clone a sword's model onto one.
 	const int samSkillTmpl = ( eslot == EQUIPPABLE_IN_SLOT_WEAPON )
 		? templateForWeaponSkill(def.weaponSkill) : -1;
-	const ItemType tmpl = ( samSkillTmpl >= 0 )
+	ItemType tmpl = ( samSkillTmpl >= 0 )
 		? (ItemType)samSkillTmpl
 		: ( (eslot != NO_EQUIP) ? templateForSlot(eslot) : templateForCategory(cat) );
+
+	// A mask defaults to cloning TOOL_BLINDFOLD, whose tooltip carries NO AC row -- so a custom
+	// mask that declares beatitude_ac would gain AC mechanically (the engine arm) but show none
+	// in its tooltip, and a tester reads that as broken. When the trait is set, clone the tooltip
+	// from a real AC-bearing mask instead. TOOLTIP ONLY: this local override never reaches the
+	// model/icon path (templateForSlot is called separately there), so an existing custom mask's
+	// appearance is untouched.
+	if ( eslot == EQUIPPABLE_IN_SLOT_MASK
+		&& std::find(def.traits.begin(), def.traits.end(), std::string("beatitude_ac")) != def.traits.end() )
+	{
+		tmpl = MASK_STEEL_VISOR;
+	}
 
 	std::string srcKey = (tmpl >= 0 && tmpl < NUMITEMS) ? items[tmpl].tooltip : std::string();
 	if ( srcKey.empty() || !ItemTooltips.tooltips.count(srcKey) )
@@ -510,6 +525,45 @@ static bool registerItemAt(int id, SAMItemDef def)
 		slot.attributes[kv.first] = kv.second;
 	}
 
+#ifndef EDITOR
+	// Fold the declared traits into the engine-side bitmask the predicates read. Unknown
+	// names warn rather than failing the item, so a mod written for a newer framework still
+	// loads on an older exe -- it just does not get that behaviour.
+	{
+		struct SamTraitName { const char* name; Uint64 bit; };
+		static const SamTraitName kTraitNames[] = {
+			{ "ranged",           SAMItemTrait::RANGED },
+			{ "quiver",           SAMItemTrait::QUIVER },
+			{ "foci",             SAMItemTrait::FOCI },
+			{ "instrument",       SAMItemTrait::INSTRUMENT },
+			{ "thrown_ball",      SAMItemTrait::THROWN_BALL },
+			{ "shield_slot",      SAMItemTrait::SHIELD_SLOT },
+			{ "potion_bad",       SAMItemTrait::POTION_BAD },
+			{ "automaton_food",   SAMItemTrait::AUTOMATON_FOOD },
+			{ "tinker_throwable", SAMItemTrait::TINKER_THROWABLE },
+			{ "usable",           SAMItemTrait::USABLE },
+			{ "beatitude_ac",     SAMItemTrait::BEATITUDE_AC },
+		};
+		slot.samTraits = 0;
+		for ( const std::string& t : def.traits )
+		{
+			bool matched = false;
+			for ( const auto& kn : kTraitNames )
+			{
+				if ( t == kn.name ) { slot.samTraits |= kn.bit; matched = true; break; }
+			}
+			if ( !matched )
+			{
+				SAM_WARN(MOD, "Item [" + def.id + "] declares unknown trait '" + t + "' — ignored.");
+			}
+		}
+		if ( slot.samTraits != 0 )
+		{
+			SAM_DEBUG(MOD, "  traits: " + std::to_string(def.traits.size()) + " declared");
+		}
+	}
+#endif
+
 	s_registry[id] = def;
 
 	SAM_INFO(MOD, "Registering item: " + def.nameIdentified + " [" + def.id + "] -> slot "
@@ -658,6 +712,16 @@ void SAMItems::loadFromManifest(const SAMModManifest& manifest)
 		def.modelFromItem = getStr("model_from_item");
 		def.icon = getStr("icon");
 		def.weaponSkill = samLower(getStr("weapon_skill"));
+		{
+			auto tr = j.find("traits");
+			if ( tr != j.end() && tr->is_array() )
+			{
+				for ( const auto& t : *tr )
+				{
+					if ( t.is_string() ) { def.traits.push_back(samLower(t.get<std::string>())); }
+				}
+			}
+		}
 		if ( !def.weaponSkill.empty()
 			&& def.weaponSkill != "sword" && def.weaponSkill != "axe"
 			&& def.weaponSkill != "mace"  && def.weaponSkill != "polearm" )
@@ -694,6 +758,17 @@ void SAMItems::loadFromManifest(const SAMModManifest& manifest)
 		{
 			for ( auto it = j["attributes"].begin(); it != j["attributes"].end(); ++it )
 			{
+				// A spell-payload attribute may be a STRING: a vanilla spell name
+				// ("SPELL_FIREBALL") or a custom "ns:spell". It can't be resolved yet
+				// (custom spells load after items), so stash it for
+				// resolveSpellAttributes(). Numeric values still work as before.
+				static const std::set<std::string> kSpellKeys = {
+					"spellbook_spell", "foci_spell", "tome_spell", "magicstaff_spell" };
+				if ( it.value().is_string() && kSpellKeys.count(it.key()) )
+				{
+					def.spellAttrPending[it.key()] = it.value().get<std::string>();
+					continue;
+				}
 				if ( it.value().is_number() )
 				{
 					def.attributes[it.key()] = it.value().get<int>();
@@ -703,12 +778,19 @@ void SAMItems::loadFromManifest(const SAMModManifest& manifest)
 					// item breaks down into). Anything else is stored and never looked at,
 					// so an invented key like "EFF_UNBREAKABLE" silently does nothing — and
 					// the JSON schema can't catch every case for older mods. Say so.
+					// spellbook_spell / foci_spell join the list: getSpellIDFromSpellbook and
+					// getSpellIDFromFoci are pure table reads and now accept custom ids, so a
+					// modded book really does teach its spell. Warning about them told a modder
+					// their correct JSON would not work.
 					if ( it.key() != "ATK" && it.key() != "AC"
-						&& it.key() != "TINKER_SALVAGE_METAL" && it.key() != "TINKER_SALVAGE_MAGIC" )
+						&& it.key() != "TINKER_SALVAGE_METAL" && it.key() != "TINKER_SALVAGE_MAGIC"
+						&& it.key() != "spellbook_spell" && it.key() != "foci_spell"
+						&& it.key() != "tome_spell" && it.key() != "magicstaff_spell" )
 					{
 						SAM_WARN(MOD, "Item '" + def.id + "': attribute '" + it.key() + "' is not read by the engine "
-							"and will have no effect. Only ATK, AC, TINKER_SALVAGE_METAL and TINKER_SALVAGE_MAGIC "
-							"are used. (Item effects come from a script, not from an attribute key.)");
+							"and will have no effect. Recognised keys: ATK, AC, TINKER_SALVAGE_METAL, "
+							"TINKER_SALVAGE_MAGIC, spellbook_spell, foci_spell, tome_spell, magicstaff_spell. (Item behaviour otherwise comes "
+							"from a script, not from an attribute key.)");
 					}
 				}
 			}
@@ -791,6 +873,61 @@ void SAMItems::reapplyAfterDataReload()
 	{
 		SAM_INFO(MOD, "Re-applied " + std::to_string(s_registry.size())
 			+ " custom item(s) after a vanilla data reload (tooltips restored).");
+	}
+#endif
+}
+
+void SAMItems::resolveSpellAttributes()
+{
+#ifndef EDITOR
+	// Resolve a spell NAME (vanilla or "ns:spell") to a numeric spell id, or -1. Tries the
+	// custom registry first when the string is namespaced, then the vanilla spell-name map
+	// as-is and lowercased, so an author may write "SPELL_FIREBALL", "spell_fireball", or
+	// their own "mymod:frost".
+	auto resolve = [](const std::string& raw) -> int
+	{
+		if ( raw.find(':') != std::string::npos )
+		{
+			const SAMSpellDef* sd = SAMSpells::getSpellByName(raw);
+			return sd ? sd->numericId : -1;
+		}
+		auto& m = ItemTooltips.spellNameStringToSpellID;
+		auto hit = m.find(raw);
+		if ( hit != m.end() ) { return hit->second; }
+		std::string lower = raw;
+		for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
+		hit = m.find(lower);
+		if ( hit != m.end() ) { return hit->second; }
+		return -1;
+	};
+
+	int resolved = 0;
+	for ( auto& kv : s_registry )
+	{
+		const int id = kv.first;
+		SAMItemDef& def = kv.second;
+		if ( def.spellAttrPending.empty() ) { continue; }
+		for ( const auto& p : def.spellAttrPending )
+		{
+			const int spellId = resolve(p.second);
+			if ( spellId < 0 )
+			{
+				SAM_WARN(MOD, "Item '" + def.id + "': " + p.first + " = '" + p.second
+					+ "' names no known spell (vanilla name or 'ns:spell'). It teaches nothing.");
+				continue;
+			}
+			def.attributes[p.first] = spellId;                       // survives a data reload
+			if ( id >= 0 && id < NUM_ITEM_SLOTS )
+			{
+				items[id].attributes[p.first] = spellId;             // live now
+			}
+			++resolved;
+		}
+		def.spellAttrPending.clear();
+	}
+	if ( resolved > 0 )
+	{
+		SAM_INFO(MOD, "Resolved " + std::to_string(resolved) + " spell-payload attribute(s) to spell ids.");
 	}
 #endif
 }
@@ -916,6 +1053,28 @@ int SAMItems::weaponSkillFor(int itemId)
 	// items already behaved as, so it is the least surprising default.
 	if ( it->second.slot == "EQUIPPABLE_IN_SLOT_WEAPON" ) { return PRO_SWORD; }
 	return -1;
+#endif
+}
+
+void SAMItems::lootCandidates(int category, int minLevel, int maxLevel, std::vector<int>& out)
+{
+#ifndef EDITOR
+	if ( s_registry.empty() ) { return; }   // no mod: identical to vanilla, no RNG consumed
+	for ( const auto& kv : s_registry )
+	{
+		const int id = kv.first;
+		if ( id < 0 || id >= NUM_ITEM_SLOTS ) { continue; }
+		const ItemGeneric& slot = items[id];
+		// Read the LIVE slot rather than the parsed def: reapplyAfterDataReload re-stamps
+		// these, and a patch may have changed the level after load. Same fields the vanilla
+		// loop tests, so a custom item is judged by exactly the vanilla rule.
+		if ( (int)slot.category != category ) { continue; }
+		if ( slot.level == -1 ) { continue; }                    // opted out
+		if ( slot.level < minLevel || slot.level > maxLevel ) { continue; }
+		out.push_back(id);
+	}
+#else
+	(void)category; (void)minLevel; (void)maxLevel; (void)out;
 #endif
 }
 
@@ -1050,5 +1209,11 @@ void SAMItems::registerModModels()
 			}
 		}
 	}
+
+	// Monster body models: report what resolved and, crucially, what did NOT. A monster's
+	// body is the one id in the framework a modder hand-writes with no editor, so a typo
+	// used to be completely silent -- the creature simply wore its base model and there was
+	// nothing in the log to search for. Runs once per load, right after the models exist.
+	SAMMonsters::reportBodyResolution();
 #endif
 }

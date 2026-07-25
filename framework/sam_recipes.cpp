@@ -358,9 +358,25 @@ void SAMRecipes::loadFromManifest(const SAMModManifest& manifest)
 
 		s_add.push_back(r);
 		s_resolved = false; // force a re-resolve on the next query
+		// Report the cost that will ACTUALLY be charged. Declared materials replace the
+		// scrap price entirely (see materialsFor), so printing the scrap fields
+		// unconditionally made every material-priced recipe read "0 metal + 0 magic"
+		// and look free when it was not.
+		std::string costText;
+		if ( !r.matId[0].empty() )
+		{
+			costText = std::to_string(r.matCount[0]) + "x " + r.matId[0];
+			if ( !r.matId[1].empty() )
+			{
+				costText += " + " + std::to_string(r.matCount[1]) + "x " + r.matId[1];
+			}
+		}
+		else
+		{
+			costText = std::to_string(r.metal) + " metal + " + std::to_string(r.magic) + " magic scrap";
+		}
 		SAM_INFO(MOD, "[" + manifest.ns + "] recipe: '" + r.itemId + "' for "
-			+ std::to_string(r.metal) + " metal + " + std::to_string(r.magic)
-			+ " magic scrap (tier " + std::to_string(r.skillTier) + ").");
+			+ costText + " (tier " + std::to_string(r.skillTier) + ").");
 	}
 }
 

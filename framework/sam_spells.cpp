@@ -29,6 +29,8 @@
 #include "main.hpp"          // list_t/node_t, list_AddNodeLast/FreeAll/RemoveNode
 #include "magic/magic.hpp"   // spell_t, spellConstructor, copySpellElement, allGameSpells, spellElement_* globals
 #include "mod_tools.hpp"     // ItemTooltips.spellItems / spellNameStringToSpellID
+#include "items.hpp"         // items[], NUM_ITEM_SLOTS, SPELLBOOK, WOODEN_SHIELD (reverse map)
+#include "sam_items.hpp"     // SAM_ITEM_ID_BASE
 #include "sam_effects.hpp"       // v1.5.0: resolve on_hit_effect custom "ns:effect" -> slot
 #include "sam_lua_runtime.hpp"   // v1.5.0: SAMLua::effectIdFromName (vanilla EFF_ names)
 
@@ -198,6 +200,7 @@ void SAMSpells::loadFromManifest(const SAMModManifest& manifest)
 
 		def.description   = getStr("description");
 		def.manaCost      = getInt("mana_cost", 1);
+		def.difficulty    = getInt("difficulty", 0);
 		def.projectileType = getStr("projectile_type"); if ( def.projectileType.empty() ) { def.projectileType = "missile"; }
 		def.payload       = getStr("payload");
 		def.damageMin     = getInt("damage_min", 0);
@@ -263,7 +266,7 @@ void SAMSpells::buildEngineSpell(const SAMSpellDef& def)
 	spell->needsDataFreed = 1;
 	strncpy(spell->spell_internal_name, internalName.c_str(), sizeof(spell->spell_internal_name) - 1);
 	spell->spell_internal_name[sizeof(spell->spell_internal_name) - 1] = '\0';
-	spell->difficulty = 0; // learnable by any caster (grants use ignoreSkill anyway)
+	spell->difficulty = (def.difficulty < 0 ? 0 : def.difficulty); // 0 = learnable by anyone (see below)
 	spell->mana = (def.manaCost < 0 ? 0 : def.manaCost);
 	spell->skillID = PRO_SORCERY;
 
@@ -374,6 +377,32 @@ void SAMSpells::buildEngineSpell(const SAMSpellDef& def)
 void SAMSpells::buildAllEngineSpells()
 {
 	for ( const auto& kv : s_registry ) { buildEngineSpell(kv.second); }
+
+#ifndef EDITOR
+	// Roadmap #21 -- the REVERSE map. getSpellbookFromSpellID answers "which book teaches this
+	// spell?" from ItemTooltips.spellItems[spellID].spellbookId, whose only vanilla writer is a
+	// `for (i < NUMITEMS)` loop -- so it can never name a custom book. Derive it from the
+	// spellbook_spell attribute the modder already declared, so the forward and reverse maps
+	// cannot disagree. Runs here because by now custom items are resolved (loader) AND custom
+	// spells are in spellItems (the loop above), and it re-runs on every data reload with them.
+	//
+	// Guard: claim a spell only if NOTHING already teaches it -- getSpellbookFromSpellID(id) ==
+	// WOODEN_SHIELD is the engine's own "no book" sentinel, and it accounts for the vanilla
+	// switch too, not just spellbookId. So a custom book can never displace a vanilla spell's
+	// canonical book, and two custom books racing for one spell resolve first-registered-wins.
+	for ( int itemId = SAM_ITEM_ID_BASE; itemId < NUM_ITEM_SLOTS; ++itemId )
+	{
+		if ( items[itemId].category != SPELLBOOK ) { continue; }
+		if ( !items[itemId].hasAttribute("spellbook_spell") ) { continue; }
+		const int spellId = items[itemId].attributes["spellbook_spell"];
+		auto it = ItemTooltips.spellItems.find(spellId);
+		if ( it == ItemTooltips.spellItems.end() ) { continue; }
+		if ( getSpellbookFromSpellID(spellId) != WOODEN_SHIELD ) { continue; } // already taught
+		it->second.spellbookId = itemId;
+		SAM_INFO(MOD, "Reverse-mapped spell " + std::to_string(spellId)
+			+ " -> custom spellbook item " + std::to_string(itemId) + ".");
+	}
+#endif
 }
 
 bool SAMSpells::grantCustomSpell(int player, const std::string& namespacedId)

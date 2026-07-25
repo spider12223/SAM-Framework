@@ -5,9 +5,14 @@
   "description": "A mod-defined status effect with real engine mechanics. Registered into a reserved effect slot (135-159); applies flat attribute modifiers, a move-speed multiplier and per-second HP/MP deltas while active, and shows on the HUD. Apply it in-game via sam_apply_effect(player, \"namespace:effect\", ticks).",
   "type": "object",
   "additionalProperties": false,
-  "required": ["id", "name"],
+  "required": [
+    "id",
+    "name"
+  ],
   "properties": {
-    "$schema": { "type": "string" },
+    "$schema": {
+      "type": "string"
+    },
     "id": {
       "type": "string",
       "pattern": "^[a-z0-9_]+:[a-z0-9_]+$",
@@ -36,12 +41,24 @@
       "additionalProperties": false,
       "description": "Flat attribute modifiers applied while the effect is active (may be negative).",
       "properties": {
-        "STR": { "type": "integer" },
-        "DEX": { "type": "integer" },
-        "CON": { "type": "integer" },
-        "INT": { "type": "integer" },
-        "PER": { "type": "integer" },
-        "CHR": { "type": "integer" }
+        "STR": {
+          "type": "integer"
+        },
+        "DEX": {
+          "type": "integer"
+        },
+        "CON": {
+          "type": "integer"
+        },
+        "INT": {
+          "type": "integer"
+        },
+        "PER": {
+          "type": "integer"
+        },
+        "CHR": {
+          "type": "integer"
+        }
       }
     },
     "move_speed_mult": {
@@ -74,12 +91,24 @@
     "grants": {
       "type": "array",
       "description": "Vanilla status flags this effect also applies while active. They are re-asserted while it lasts and decay shortly after it ends. Allowlisted safe flags only. (v1.5.0)",
-      "items": { "type": "string", "enum": ["LEVITATING", "INVISIBLE", "TELEPATH"] }
+      "items": {
+        "type": "string",
+        "enum": [
+          "LEVITATING",
+          "INVISIBLE",
+          "TELEPATH"
+        ]
+      }
     },
     "hud_hidden": {
       "type": "boolean",
       "default": false,
       "description": "If true, the effect works but does not show an icon on the status bar."
+    },
+    "curable": {
+      "type": "boolean",
+      "default": false,
+      "description": "If true, this effect can be removed by a potion or spell of cure ailment and by the Foci of Purity. Default false, so it is not stripped and you can use it for an uncurable debuff."
     }
   }
 }

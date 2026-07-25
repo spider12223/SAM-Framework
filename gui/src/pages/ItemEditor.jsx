@@ -10,6 +10,22 @@ import { CATEGORIES, SLOTS, ITEM_TYPES } from '@/data/schemas.js';
 /* Melee only. Ranged cannot be custom (firing is gated on a hardcoded list of vanilla
  * bows), and a throwable is declared with category THROWN instead, which already works. */
 const WEAPON_SKILLS = ['sword', 'axe', 'mace', 'polearm'];
+
+/* Engine traits an item can opt into. Barony decides what an item IS from hardcoded lists
+ * of vanilla items, and a custom item is never on them -- these put it on. */
+const ITEM_TRAITS = [
+  ['usable',           'Offers a "Use" option in the inventory'],
+  ['tinker_throwable', 'Can be thrown and deployed, like a bomb or trap'],
+  ['ranged',           'Fires like a bow (trains Ranged)'],
+  ['quiver',           'Holds ammo'],
+  ['foci',             'Acts as a spell focus'],
+  ['instrument',       'Playable instrument'],
+  ['thrown_ball',      'A throwable ball'],
+  ['shield_slot',      'Goes in the shield hand'],
+  ['potion_bad',       'Recognised as a harmful potion'],
+  ['automaton_food',   'An automaton can eat it'],
+  ['beatitude_ac',     'Blessing or cursing it changes its AC (needed for custom masks)'],
+];
 import { validate } from '@/lib/validate.js';
 import { checkBalance } from '@/lib/balance.js';
 import { useMod } from '@/state/ModContext.jsx';
@@ -37,6 +53,7 @@ export default function ItemEditor() {
   const [category, setCategory] = useState(editDef?.category ?? CATEGORIES[0]);
   const [slot, setSlot] = useState(editDef?.slot ?? 'NO_EQUIP');
   const [weaponSkill, setWeaponSkill] = useState(editDef?.weapon_skill ?? 'sword');
+  const [traits, setTraits] = useState(editDef?.traits ?? []);
   const [weight, setWeight] = useState(editDef?.weight ?? 0);
   const [goldValue, setGoldValue] = useState(editDef?.gold_value ?? 0);
   const [level, setLevel] = useState(editDef?.level ?? 0);
@@ -88,6 +105,7 @@ export default function ItemEditor() {
     // Only meaningful for a wielded weapon. Without it the engine gives a custom weapon no
     // skill at all: no skill increase from use, no damage variance, no durability scaling.
     if (slot === 'EQUIPPABLE_IN_SLOT_WEAPON') def.weapon_skill = weaponSkill;
+    if (traits.length) def.traits = traits;
     if (nameUnid.trim()) def.name_unidentified = nameUnid.trim();
     if (description.trim()) def.description = description.trim();
     if (model.trim()) def.model = model.trim();
@@ -118,7 +136,7 @@ export default function ItemEditor() {
 
   const def = useMemo(buildDef,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [nameId, nameUnid, description, category, slot, weaponSkill, weight, goldValue, level, stackable,
+    [nameId, nameUnid, description, category, slot, weaponSkill, traits, weight, goldValue, level, stackable,
       magicLevel, model, modelFp, modelFromItem, icon, attribs, namespace]);
   const preview = useMemo(() => JSON.stringify(def, null, 2), [def]);
   const hints = useMemo(() => checkBalance('item', def), [def]);
@@ -166,6 +184,29 @@ export default function ItemEditor() {
             <Field label="Equip Slot" hint="NO_EQUIP for items that can't be worn or wielded.">
               <Select value={slot} onChange={setSlot} options={SLOTS} />
             </Field>
+            <Field
+              label="Engine traits"
+              hint="What the game should treat this item AS. Without these a custom item can never be a bow, hold arrows, or be thrown as a gadget, however you configure it."
+            >
+              <div className="space-y-1">
+                {ITEM_TRAITS.map(([key, blurb]) => (
+                  <label key={key} className="flex items-start gap-2 text-sm" style={{ color: 'var(--color-parchment)' }}>
+                    <input
+                      type="checkbox"
+                      checked={traits.includes(key)}
+                      onChange={(ev) => setTraits(
+                        ev.target.checked ? [...traits, key] : traits.filter((t) => t !== key),
+                      )}
+                      style={{ marginTop: 3 }}
+                    />
+                    <span>
+                      <span className="sam-mono">{key}</span>
+                      <span style={{ color: '#8a7749' }}> — {blurb}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </Field>
             {slot === 'EQUIPPABLE_IN_SLOT_WEAPON' && (
               <Field
                 label="Weapon skill"
@@ -189,7 +230,10 @@ export default function ItemEditor() {
             <Field label="Gold Value">
               <NumberInput value={goldValue} min={0} onChange={setGoldValue} />
             </Field>
-            <Field label="Level" hint="-1 = excluded from random loot">
+            <Field
+              label="Dungeon level"
+              hint="Which depth this can start appearing at in chests, shops, floor loot and monster inventories. Set -1 to keep it out of random generation entirely — right for quest items and class starting gear."
+            >
               <NumberInput value={level} min={-1} onChange={setLevel} />
             </Field>
             <Field label="Magic Level">

@@ -29,6 +29,7 @@
 #include "sam_monsters.hpp"
 #include "sam_workshop.hpp"   // SAMModManifest
 #include "sam_logger.hpp"
+#include "sam_models.hpp" // modelIndexForId — body resolution report
 #include "sam_errors.hpp"
 #include "nlohmann/json.hpp"
 
@@ -50,6 +51,40 @@
 #include <vector>
 #include <cctype>
 #include <system_error>
+
+namespace
+{
+	// variant display name -> trait bitmask. Empty in vanilla.
+	std::map<std::string, unsigned long long> s_monsterTraits;
+	// variant display name -> mod-declared body model id ("ns:model"). Empty in vanilla.
+	std::map<std::string, std::string> s_monsterBodies;
+	bool s_anyBodyDeclared = false;
+
+	unsigned long long samMonsterTraitBit(const std::string& name)
+	{
+		return SAMMonsters::traitBitForName(name.c_str());
+	}
+}
+
+// The single trait-name table. Public so the script binding resolves names through the
+// exact same list the JSON parser uses.
+unsigned long long SAMMonsters::traitBitForName(const char* nameC)
+{
+	const std::string name = nameC ? nameC : "";
+	if ( name == "boss" )            { return 1ULL << 0; }
+	if ( name == "trader" )          { return 1ULL << 1; }
+	if ( name == "untargetable" )    { return 1ULL << 2; }
+	if ( name == "immobile_turret" ) { return 1ULL << 3; }
+	if ( name == "never_retreat" )   { return 1ULL << 4; }
+	if ( name == "water_walking" )   { return 1ULL << 5; }
+	if ( name == "undead" )          { return 1ULL << 6; }
+	if ( name == "ally_recolour" )   { return 1ULL << 7; }
+	if ( name == "tinker_construct" ) { return 1ULL << 8; }
+	if ( name == "no_digestion" )    { return 1ULL << 9; }
+	if ( name == "pass_through" )    { return 1ULL << 10; }
+	return 0;
+}
+
 
 using nlohmann::json;
 namespace fs = std::filesystem;
@@ -339,6 +374,67 @@ static Translated translateMonster(const json& in, const std::string& modNs, con
 	}
 	tr.name = in["name"].get<std::string>();
 
+	// S.A.M: mod-declared engine traits for this monster. Recorded by NAME, because a custom
+	// monster is a variant of a vanilla Monster type and shares that type -- the name is what
+	// identifies it when the engine stamps the variant onto a live Stat.
+	if ( in.contains("traits") && in["traits"].is_array() )
+	{
+		unsigned long long bits = 0;
+		for ( const auto& t : in["traits"] )
+		{
+			if ( !t.is_string() ) { continue; }
+			std::string tn = t.get<std::string>();
+			for ( char& c : tn ) { c = (char)std::tolower((unsigned char)c); }
+			const unsigned long long b = samMonsterTraitBit(tn);
+			if ( b ) { bits |= b; }
+			else
+			{
+				SAM_WARN(MOD, "Monster '" + tr.name + "' declares unknown trait '" + tn + "' — ignored.");
+			}
+		}
+		if ( bits )
+		{
+			// Keyed by DISPLAY NAME, which is not guaranteed unique: two mods, or a mod and a
+			// vanilla named NPC, can collide. Traits change GAMEPLAY (untargetable, pass_through,
+			// boss), so a silent collision could make an unrelated creature unhittable. First
+			// declaration wins and the clash is reported.
+			auto prev = s_monsterTraits.find(tr.name);
+			if ( prev != s_monsterTraits.end() && prev->second != bits )
+			{
+				SAM_WARN(MOD, "Two monsters are both named '" + tr.name + "' with different traits. "
+					"Traits are matched by name, so the first one loaded wins. Rename one of them.");
+			}
+			else { s_monsterTraits[tr.name] = bits; }
+		}
+	}
+
+	// S.A.M: an optional custom BODY model, recorded by name for the same reason as traits.
+	// The value is the mod's "namespace:model" id; it is resolved to an engine model index
+	// lazily (at draw time), because models are appended to the engine table AFTER monster
+	// JSON is parsed, and because an index is load-order dependent while the id is stable.
+	if ( in.contains("body") && in["body"].is_object() )
+	{
+		const auto& b = in["body"];
+		if ( b.contains("model") && b["model"].is_string() )
+		{
+			const std::string mid = b["model"].get<std::string>();
+			if ( !mid.empty() )
+			{
+				auto prevBody = s_monsterBodies.find(tr.name);
+				if ( prevBody != s_monsterBodies.end() && prevBody->second != mid )
+				{
+					SAM_WARN(MOD, "Two monsters are both named '" + tr.name + "' with different body "
+						"models. Bodies are matched by name, so the first one loaded wins. Rename one.");
+				}
+				else
+				{
+					s_monsterBodies[tr.name] = mid;
+					s_anyBodyDeclared = true;
+				}
+			}
+		}
+	}
+
 	// --- base_type (validated against the engine's monstertypename[] whitelist) ---
 	if ( !in.contains("base_type") || !in["base_type"].is_string() )
 	{
@@ -591,6 +687,9 @@ static void mergeSpawn(json& curve, const std::string& variantFile, const std::s
 -------------------------------------------------------------------------------*/
 void SAMMonsters::clear()
 {
+	s_monsterBodies.clear();
+	s_anyBodyDeclared = false;
+	s_monsterTraits.clear();
 	if ( s_mounted )
 	{
 		PHYSFS_unmount(overlayRealDir().c_str());
@@ -601,6 +700,45 @@ void SAMMonsters::clear()
 	s_filesWritten = 0;
 	s_declared = 0;
 	s_curveLevels = 0;
+}
+
+unsigned long long SAMMonsters::traitsForName(const char* variantName)
+{
+	if ( !variantName || !*variantName || s_monsterTraits.empty() ) { return 0; }
+	auto it = s_monsterTraits.find(variantName);
+	return ( it != s_monsterTraits.end() ) ? it->second : 0ULL;
+}
+
+const char* SAMMonsters::bodyModelForName(const char* variantName)
+{
+	if ( !variantName || !*variantName || s_monsterBodies.empty() ) { return nullptr; }
+	auto it = s_monsterBodies.find(variantName);
+	return ( it != s_monsterBodies.end() ) ? it->second.c_str() : nullptr;
+}
+
+bool SAMMonsters::anyBodyDeclared()
+{
+	return s_anyBodyDeclared;
+}
+
+void SAMMonsters::reportBodyResolution()
+{
+	if ( s_monsterBodies.empty() ) { return; }
+	for ( const auto& kv : s_monsterBodies )
+	{
+		const int idx = SAMModels::modelIndexForId(kv.second);
+		if ( idx >= 0 )
+		{
+			SAM_INFO(MOD, "Monster '" + kv.first + "' body model '" + kv.second
+				+ "' -> model index " + std::to_string(idx) + ".");
+		}
+		else
+		{
+			SAM_WARN(MOD, "Monster '" + kv.first + "' declares body model '" + kv.second
+				+ "', which is not a registered model. It will render as its base creature. "
+				  "Declare the .vox in this mod's \"models\" list with that exact id.");
+		}
+	}
 }
 
 void SAMMonsters::applyAll(const std::vector<SAMModManifest>& mods)

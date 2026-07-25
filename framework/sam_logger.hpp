@@ -24,12 +24,13 @@
 #pragma once
 
 #include <string>
+#include <map>
 #include <fstream>
 #include <mutex>
 #include <chrono>
 
 // S.A.M framework version — stamped into the session banner in the log file.
-#define SAM_FRAMEWORK_VERSION "1.8.1"
+#define SAM_FRAMEWORK_VERSION "1.9.0"
 
 // Barony release this build is patched against — shown in the session banner.
 #define SAM_BARONY_TARGET "5.0.2"
@@ -105,7 +106,9 @@ public:
 
 	// A hook was dispatched to `scriptsReached` scripts. The FIRST call opens the
 	// GAMEPLAY section. Called from each runtime's dispatchEvent().
-	static void noteHookFired(int scriptsReached);
+	// `eventName` is tallied so the session summary can report WHICH hooks fired and how
+	// often, instead of one log line per dispatch (which was 80% of a real session).
+	static void noteHookFired(int scriptsReached, const char* eventName = nullptr);
 	// A host API function was invoked (from a script). Called by sam_* bindings.
 	static void noteApiCall();
 	// A script was disabled by an on_event error. Called from dispatchEvent().
@@ -122,6 +125,23 @@ public:
 private:
 	// Which phase we are in — controls the relative-time suffix on gameplay lines.
 	enum class Phase { Init, ModLoad, Gameplay };
+
+	// Consecutive-duplicate collapsing: a per-frame hook would otherwise emit the same
+
+	// line hundreds of times and bury everything else. See SAMLogger::log.
+
+	static std::string repeatModule;
+
+	static std::string repeatMessage;
+
+	static SAMLogLevel repeatLevel;
+
+	static int repeatCount;
+
+	static std::map<std::string, long long> hookTally;
+
+	static void flushRepeatLocked();
+
 
 	static std::ofstream logFile;
 	static std::mutex logMutex;

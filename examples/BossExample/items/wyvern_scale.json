@@ -1,0 +1,11 @@
+{
+  "$schema": "https://spider12223.github.io/SAM-Framework/schemas/item.schema.json",
+  "id": "bossexample:wyvern_scale",
+  "name_identified": "wyvern scale",
+  "name_unidentified": "scorched plate",
+  "description": "Still warm.\nCrafting material.",
+  "category": "TOOL",
+  "model_from_item": "TOOL_METAL_SCRAP",
+  "weight": 1, "gold_value": 120, "level": -1,
+  "stackable": true
+}

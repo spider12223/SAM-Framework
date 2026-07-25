@@ -1,0 +1,14 @@
+{
+  "$schema": "https://spider12223.github.io/SAM-Framework/schemas/item.schema.json",
+  "id": "bonehunter:bone_snare",
+  "name_identified": "bone snare",
+  "name_unidentified": "tangle of bone",
+  "description": "Throw it. Something unpleasant happens where it lands.",
+  "category": "TOOL",
+  "slot": "EQUIPPABLE_IN_SLOT_WEAPON",
+  "model_from_item": "TOOL_BEARTRAP",
+  "weight": 2,
+  "gold_value": 60,
+  "level": -1,
+  "traits": ["tinker_throwable", "usable"]
+}

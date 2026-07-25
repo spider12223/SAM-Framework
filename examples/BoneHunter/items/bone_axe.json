@@ -1,0 +1,15 @@
+{
+  "$schema": "https://spider12223.github.io/SAM-Framework/schemas/item.schema.json",
+  "id": "bonehunter:bone_axe",
+  "name_identified": "bone axe",
+  "name_unidentified": "jagged bone tool",
+  "description": "A heavy axe lashed together from bone.\nCrude, but it bites.",
+  "category": "WEAPON",
+  "slot": "EQUIPPABLE_IN_SLOT_WEAPON",
+  "weapon_skill": "axe",
+  "model_from_item": "IRON_AXE",
+  "weight": 5,
+  "gold_value": 90,
+  "level": 2,
+  "attributes": { "ATK": 4 }
+}

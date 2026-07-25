@@ -85,6 +85,11 @@ export function buildManifest(meta, paths) {
   if (racePaths && racePaths.length) manifest.races = racePaths;
   if (soundPaths && soundPaths.length) manifest.sounds = soundPaths;
   if (recipePaths && recipePaths.length) manifest.recipes = recipePaths;
+  // Preserve a hand-authored "models" list (custom .vox declarations). The builder has no
+  // model editor, so this is round-tripped verbatim from the imported manifest -- without it
+  // an import/export cycle silently deletes every custom model, breaking monster bodies,
+  // custom item models and companions.
+  if (Array.isArray(meta.models) && meta.models.length) manifest.models = meta.models;
   manifest.plugins = [];
   manifest.description = meta.description ?? '';
   return manifest;

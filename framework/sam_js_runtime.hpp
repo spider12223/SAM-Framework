@@ -73,6 +73,9 @@ namespace SAMJs
 	// Returns the number of scripts the event reached.
 	int dispatchEvent(const Event& ev);
 
+	// See SAMLua::lastDispatchCancelled -- same contract, JS side.
+	bool lastDispatchCancelled();
+
 	// v0.7.0: call on_tick(event) for every script that defines it, once per game
 	// tick (host-authoritative, silent — no per-tick logging).
 	void dispatchTick(long long tickCount);

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://spider12223.github.io/SAM-Framework/schemas/spell.schema.json",
+  "id": "bossexample:searing_breath",
+  "name": "Searing Breath",
+  "description": "A gout of flame.",
+  "mana_cost": 0,
+  "difficulty": 0,
+  "projectile_type": "missile",
+  "payload": "fire",
+  "damage_min": 18,
+  "damage_max": 30
+}

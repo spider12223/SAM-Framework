@@ -183,7 +183,7 @@ end
 | Hook | Fires when | Event fields |
 |------|-----------|--------------|
 | `player.on_hunger_change` | hunger crosses a tier edge | `player`, `hunger`, `hunger_level`, `old_hunger_level` |
-| `player.on_xp_gained` | a player gains XP from a kill | `player`, `amount`, `source_type`, `new_total`, `monster_type` |
+| `player.on_xp_gained` | a player gains XP from a kill | `player`, `amount`, `source_type`, `monster_type` (modifiable with `sam_modify_value`) |
 | `player.on_proficiency_increased` | a skill rank goes up | `player`, `proficiency`, `proficiency_name`, `old_rank`, `new_rank` |
 | `player.on_status_effect_tick` | active effect ticks *(throttled to 1/sec)* | `player`, `effect`, `effect_name`, `ticks_remaining` |
 
@@ -297,6 +297,16 @@ S.A.M publishes its schemas so **VS Code validates and autocompletes your JSON**
 …or copy this repo's [`.vscode/settings.json`](.vscode/settings.json) into your mod folder to map every file automatically. The [Mod Builder](https://spider12223.github.io/SAM-Framework/) stamps `$schema` into everything it exports, so exported mods get this for free.
 
 ---
+
+## Scripting reference
+
+Every event your script can receive, which ones you can **cancel** or **change the number
+of**, the item and monster **traits**, and the console commands for testing without playing:
+
+**[docs/scripting-reference.md](docs/scripting-reference.md)**
+
+If you are about to hardcode an item or effect id, read the "Never hardcode an id" section
+first — the enum values are not what you would guess and a wrong one fails silently.
 
 ## Schema reference
 

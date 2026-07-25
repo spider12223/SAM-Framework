@@ -1,0 +1,10 @@
+{
+  "$schema": "https://spider12223.github.io/SAM-Framework/schemas/recipe.schema.json",
+  "id": "bonehunter:bone_snare_recipe",
+  "item": "bonehunter:bone_snare",
+  "kit": "sam:hunters_workbench",
+  "materials": [
+    { "item": "bonehunter:monster_bone", "count": 2 }
+  ],
+  "skill_level": 1
+}

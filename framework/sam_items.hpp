@@ -73,6 +73,12 @@ struct SAMItemDef
 	// it here is what makes a custom axe actually an axe.
 	std::string weaponSkill;
 
+	// Engine traits this item opts into: "ranged", "quiver", "foci", "instrument",
+	// "thrown_ball", "shield_slot", "potion_bad", "automaton_food", "tinker_throwable".
+	// Barony decides each of those by checking the item against a hardcoded list of vanilla
+	// types, which a custom item can never be on. Naming one here puts the item on the list.
+	std::vector<std::string> traits;
+
 	// Per-kit crafting-panel skin. Only meaningful on an item used as a custom tinkering
 	// kit. Maps a panel ROLE ("base", "drawer", "cost_backing", ...) to a mod-relative PNG.
 	// Every role is optional; a role the mod does not supply keeps the vanilla art, so a
@@ -80,6 +86,12 @@ struct SAMItemDef
 	std::map<std::string, std::string> kitUi;
 
 	std::map<std::string, int> attributes;
+	// Spell-payload attributes (spellbook_spell / foci_spell / tome_spell / magicstaff_spell)
+	// whose JSON value was a STRING -- a vanilla spell name ("SPELL_FIREBALL") or a custom
+	// "namespace:spell". They cannot be resolved at parse time because custom spells load
+	// AFTER items, so they are stashed here and turned into numeric ids by
+	// SAMItems::resolveSpellAttributes() once every spell is registered.
+	std::map<std::string, std::string> spellAttrPending;
 	std::string onHitEffect;
 	double onHitChance = 0.0;
 	bool stackable = false;
@@ -123,6 +135,19 @@ public:
 	// Reverse lookup: runtime slot id for a "namespace:item" id string, or -1.
 	static int itemIdForIdString(const std::string& idString);
 
+	// Custom item ids eligible for RANDOM GENERATION in `category` at a dungeon depth
+	// between minLevel and maxLevel, appended to `out`. This is how modded items reach
+	// chests, shops, floor drops and monster inventories.
+	//
+	// The engine cannot simply widen its own loop to cover the custom id band: those slots
+	// are zero-initialised, so an UNREGISTERED one reads back as category WEAPON at level 0
+	// and would pass the filter -- flooding every weapon roll with phantom items even with
+	// no mod loaded. Asking the registry means only real, declared items are ever offered,
+	// and with no mod the answer is always "none", so the vanilla RNG stream is untouched.
+	//
+	// An item opts OUT with "level": -1, which is exactly what that field has always meant.
+	static void lootCandidates(int category, int minLevel, int maxLevel, std::vector<int>& out);
+
 	// v0.7.0 Feature 5: override an existing item slot's base fields (vanilla or custom).
 	// Snapshots the slot's originals on the first patch; reverted by clear() on unload.
 	// Returns false if id is out of range [0, NUM_ITEM_SLOTS).
@@ -158,6 +183,14 @@ public:
 	// wiping our "tooltip_sam_*" entries; call this right after those reads so custom
 	// items keep their ATK / weight / value rows and real hover tooltip. Idempotent.
 	static void reapplyAfterDataReload();
+
+	// Resolve string-valued spell-payload attributes (spellbook_spell / foci_spell /
+	// tome_spell / magicstaff_spell) into numeric spell ids, now that every custom spell
+	// is registered. A value with ':' is a custom "namespace:spell"; anything else is a
+	// vanilla spell name ("SPELL_FIREBALL"). Writes the id into BOTH the registry def and
+	// the live items[] slot, so it survives a later data reload. Call from the loader after
+	// SAMSpells::loadFromManifest has run for every mod. No-op when nothing is pending.
+	static void resolveSpellAttributes();
 
 	// Name of a Category enum value ("WEAPON", "ARMOR", "GEM", ...), or "" if unknown.
 	// Reverse of the internal categoryFromName; lets scripts read an item's category.

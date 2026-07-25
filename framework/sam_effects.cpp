@@ -61,6 +61,7 @@ namespace
 	std::map<int, SAMEffectDef> s_bySlot;       // engine slot 135..159 -> def
 	std::map<std::string, int>  s_byName;        // "ns:effect" -> slot
 	int s_nextSlot = SAM_EFFECT_SLOT_BASE;
+	bool s_curableSuppressed = false;            // /sam_curable A/B control only
 }
 
 void SAMEffects::loadFromManifest(const SAMModManifest& manifest)
@@ -151,6 +152,7 @@ void SAMEffects::loadFromManifest(const SAMModManifest& manifest)
 		}
 		def.defaultDurationTicks = getInt("duration_ticks", 0);
 		def.hudHidden = getBool("hud_hidden", false);
+		def.curable   = getBool("curable", false);
 		def.modNamespace = manifest.ns;
 		def.modPath = manifest.modPath;
 		if ( !getStr("icon").empty() ) { def.icon = joinPath(manifest.modPath, getStr("icon")); }
@@ -183,6 +185,7 @@ void SAMEffects::clear()
 	s_bySlot.clear();
 	s_byName.clear();
 	s_nextSlot = SAM_EFFECT_SLOT_BASE;
+	s_curableSuppressed = false;
 }
 
 int  SAMEffects::count() { return static_cast<int>(s_bySlot.size()); }
@@ -258,6 +261,15 @@ double SAMEffects::attackMult(const Stat* s)
 	}
 	return mult;
 }
+
+bool SAMEffects::isCurable(int slot)
+{
+	if ( s_curableSuppressed ) { return false; }
+	auto it = s_bySlot.find(slot);
+	return (it != s_bySlot.end()) ? it->second.curable : false;
+}
+
+void SAMEffects::suppressCurableForTest(bool on) { s_curableSuppressed = on; }
 
 void SAMEffects::reapplyDisplayEntries()
 {

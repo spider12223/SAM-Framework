@@ -1,0 +1,13 @@
+{
+  "$schema": "https://spider12223.github.io/SAM-Framework/schemas/item.schema.json",
+  "id": "bonehunter:monster_bone",
+  "name_identified": "monster bone",
+  "name_unidentified": "chunk of bone",
+  "description": "Pried from something large.\nUsed as a crafting material.",
+  "category": "TOOL",
+  "model_from_item": "TOOL_METAL_SCRAP",
+  "weight": 1,
+  "gold_value": 15,
+  "level": -1,
+  "stackable": true
+}

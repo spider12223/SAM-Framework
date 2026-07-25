@@ -1,0 +1,23 @@
+{
+  "$schema": "https://spider12223.github.io/SAM-Framework/schemas/mod.schema.json",
+  "namespace": "bonehunter",
+  "name": "Bone Hunter",
+  "author": "S.A.M Framework",
+  "version": "1.0.0",
+  "framework_min_version": "1.9.0",
+  "description": "A worked example. Monsters drop bones, bones craft gear at the Hunter's Workbench, and a thrown snare becomes a real trap. Every capability added in v1.9.0 appears here exactly once - copy this folder, rename the namespace, and change the parts you want.",
+
+  "items": [
+    "items/monster_bone.json",
+    "items/bone_axe.json",
+    "items/bone_snare.json",
+    "items/hunters_charm.json"
+  ],
+  "monsters": [
+    "monsters/bone_tyrant.json"
+  ],
+  "recipes": [
+    "recipes/bone_axe.json",
+    "recipes/bone_snare.json"
+  ]
+}

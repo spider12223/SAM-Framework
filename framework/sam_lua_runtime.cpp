@@ -72,6 +72,7 @@ extern "C" {
 #	include "sam_races.hpp" // custom races (sam_get_race id lookup)
 #	include "sam_classes.hpp" // v0.7.0 F5: SAMClasses::patchClass / addClassPassive
 #	include "sam_monster_patches.hpp" // v0.7.0 F5: SAMMonsterPatch::set
+#	include "sam_monsters.hpp" // SAMMonsters::traitBitForName (sam_monster_has_trait)
 #	include "sam_spells.hpp"  // custom-spell registry (sam_grant_spell)
 #	include "sam_models.hpp"  // v1.4.0: SAMModels::modelIndexForId (companion custom .vox)
 #	include "magic/magic.hpp" // addSpell (grant a spell to a player)
@@ -145,6 +146,16 @@ namespace
 	bool      g_bdActive = false;
 	int       g_bdPlayer = -1;
 	long long g_bdValue  = 0;
+
+	// Monster-damage latch. See the header for why it is separate and unkeyed.
+	bool      g_bdmActive = false;
+	long long g_bdmValue  = 0;
+
+	// Generic value-rewrite latch (see the header). One at a time, by design: the engine
+	// opens it immediately before a dispatch and closes it immediately after.
+	bool        g_hvActive = false;
+	long long   g_hvValue  = 0;
+	std::string g_hvName;
 
 	// v0.7.0 Feature 4 — per-monster scratch data (boss phases etc.). Keyed by monster
 	// UID then key; values are JSON strings (same marshaling as sam_save_data). In-memory,
@@ -228,7 +239,13 @@ namespace
 
 	// A protected call with the watchdog armed. `what` is a label for logging.
 	// The callable + its `nargs` args must already be on the stack.
-	bool protectedCall(int nargs, int nresults, const std::string& what)
+	// Set by the most recent dispatchEvent: did any handler return false? Read immediately
+// after dispatch by an engine site that offers a cancellable decision. Deliberately a
+// plain flag rather than a return value, so adding cancellation to an existing hook does
+// not change dispatchEvent's signature or any of its 78 call sites.
+bool g_lastDispatchCancelled = false;
+
+bool protectedCall(int nargs, int nresults, const std::string& what)
 	{
 		// Nesting-aware: only the OUTERMOST call arms/disarms the watchdog, so the
 		// instruction budget spans a whole reentrant tree (e.g. sam_fire_hook inside an
@@ -533,9 +550,29 @@ namespace
 	};
 
 	// Map a case-insensitive effect name to its EFF_* id, or -1 if unknown.
+	// A short sample of valid effect names, for error messages. Guessing the name is the
+	// single most common scripting mistake, and "unknown effect 'X'" on its own gives a
+	// modder nowhere to go.
+	std::string samEffectNameHint()
+	{
+		std::string out;
+		int n = 0;
+		for ( const auto& e : samEffectNames )
+		{
+			if ( n++ >= 6 ) { break; }
+			if ( !out.empty() ) { out += ", "; }
+			out += e.name;
+		}
+		return out + ", ... (no EFF_ prefix needed)";
+	}
+
 	int samEffectNameToId(const char* nameIn)
 	{
-		const std::string n = samUpper(nameIn);
+		std::string n = samUpper(nameIn);
+		// Accept the engine's own "EFF_" prefix as well as the bare name. The C++ constants
+		// are EFF_FAST, EFF_POISONED and so on, so that is what a modder reading the engine
+		// (or guessing) writes first -- and it used to fail with a bare "unknown effect".
+		if ( n.rfind("EFF_", 0) == 0 ) { n = n.substr(4); }
 #ifdef SAM_LUA_HAVE_BARONY
 		// A registered custom effect id ("namespace:effect", case-sensitive) resolves to its
 		// assigned slot 135..159. Checked first so a mod effect wins over any vanilla name.
@@ -607,7 +644,7 @@ namespace
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity )
 		{ SAM_ERROR("LUA", "sam_apply_effect: invalid player index " + std::to_string(player) + "."); lua_pushboolean(Ls, 0); return 1; }
 		const int eff = samEffectNameToId(nameC);
-		if ( eff < 0 ) { SAM_ERROR("LUA", std::string("sam_apply_effect: unknown effect '") + (nameC ? nameC : "") + "'."); lua_pushboolean(Ls, 0); return 1; }
+		if ( eff < 0 ) { SAM_ERROR("LUA", std::string("sam_apply_effect: unknown effect '") + (nameC ? nameC : "") + "'. Valid: " + samEffectNameHint()); lua_pushboolean(Ls, 0); return 1; }
 		bool ok;
 		if ( strength > 0 )
 		{
@@ -634,7 +671,7 @@ namespace
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity )
 		{ SAM_ERROR("LUA", "sam_remove_effect: invalid player index " + std::to_string(player) + "."); lua_pushboolean(Ls, 0); return 1; }
 		const int eff = samEffectNameToId(nameC);
-		if ( eff < 0 ) { SAM_ERROR("LUA", std::string("sam_remove_effect: unknown effect '") + (nameC ? nameC : "") + "'."); lua_pushboolean(Ls, 0); return 1; }
+		if ( eff < 0 ) { SAM_ERROR("LUA", std::string("sam_remove_effect: unknown effect '") + (nameC ? nameC : "") + "'. Valid: " + samEffectNameHint()); lua_pushboolean(Ls, 0); return 1; }
 		players[player]->entity->setEffect(eff, false, 0, true);
 		SAM_INFO("LUA", std::string("Removed effect ") + (nameC ? nameC : "") + " from player " + std::to_string(player));
 		lua_pushboolean(Ls, 1);
@@ -1112,7 +1149,7 @@ namespace
 		const char* nameC = luaL_checkstring(Ls, 2);
 		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { lua_pushboolean(Ls, 0); return 1; }
 		const int eff = samEffectNameToId(nameC);
-		if ( eff < 0 ) { SAM_WARN("LUA", std::string("sam_has_effect: unknown effect '") + (nameC ? nameC : "") + "'."); lua_pushboolean(Ls, 0); return 1; }
+		if ( eff < 0 ) { SAM_WARN("LUA", std::string("sam_has_effect: unknown effect '") + (nameC ? nameC : "") + "'. Valid: " + samEffectNameHint()); lua_pushboolean(Ls, 0); return 1; }
 		lua_pushboolean(Ls, stats[player]->getEffectActive(eff) != 0 ? 1 : 0);
 		return 1;
 	}
@@ -1213,7 +1250,7 @@ namespace
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity || !stats[player] )
 		{ SAM_ERROR("LUA", "sam_set_effect_duration: invalid player index " + std::to_string(player) + "."); lua_pushboolean(Ls, 0); return 1; }
 		const int eff = samEffectNameToId(nameC);
-		if ( eff < 0 ) { SAM_ERROR("LUA", std::string("sam_set_effect_duration: unknown effect '") + (nameC ? nameC : "") + "'."); lua_pushboolean(Ls, 0); return 1; }
+		if ( eff < 0 ) { SAM_ERROR("LUA", std::string("sam_set_effect_duration: unknown effect '") + (nameC ? nameC : "") + "'. Valid: " + samEffectNameHint()); lua_pushboolean(Ls, 0); return 1; }
 		if ( stats[player]->getEffectActive(eff) == 0 ) { lua_pushboolean(Ls, 0); return 1; } // not active: don't create it
 		// value=true keeps it active; overrideEffectStrength=false preserves strength; overrideDuration=true writes ticks.
 		players[player]->entity->setEffect(eff, true, ticks, true, true, false, true);
@@ -1234,7 +1271,7 @@ namespace
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity || !stats[player] )
 		{ SAM_ERROR("LUA", "sam_set_effect_strength: invalid player index " + std::to_string(player) + "."); lua_pushboolean(Ls, 0); return 1; }
 		const int eff = samEffectNameToId(nameC);
-		if ( eff < 0 ) { SAM_ERROR("LUA", std::string("sam_set_effect_strength: unknown effect '") + (nameC ? nameC : "") + "'."); lua_pushboolean(Ls, 0); return 1; }
+		if ( eff < 0 ) { SAM_ERROR("LUA", std::string("sam_set_effect_strength: unknown effect '") + (nameC ? nameC : "") + "'. Valid: " + samEffectNameHint()); lua_pushboolean(Ls, 0); return 1; }
 		if ( stats[player]->getEffectActive(eff) == 0 ) { lua_pushboolean(Ls, 0); return 1; }
 		const Uint8 st = (Uint8)(strength < 1 ? 1 : (strength > 255 ? 255 : strength));
 		const int keepDur = stats[player]->EFFECTS_TIMERS[eff];
@@ -1647,6 +1684,40 @@ namespace
 		return 0;
 	}
 
+	// sam_modify_monster_damage(newValue) — rewrite the damage a MONSTER is about to take.
+	// Only valid inside an on_before_monster_damage callback. No subject argument: only one
+	// monster is ever mid-dispatch, so the latch needs no key.
+	int lua_sam_modify_monster_damage(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long v = (long long)luaL_checkinteger(Ls, 1);
+		if ( !SAMLua::beforeMonsterDamageActive() )
+		{
+			SAM_WARN("LUA", "sam_modify_monster_damage: only valid inside an on_before_monster_damage callback — ignored.");
+			return 0;
+		}
+		SAMLua::beforeMonsterDamageModify(v);
+		return 0;
+	}
+
+	// sam_modify_value(newValue) — rewrite the number the engine is about to use, inside any
+	// hook that offers one (XP gained, gold gained, and every future modifiable hook). The
+	// error names the hook you ARE inside, so a wrong-place call says something useful.
+	int lua_sam_modify_value(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long v = (long long)luaL_checkinteger(Ls, 1);
+		if ( !SAMLua::hookValueActive() )
+		{
+			SAM_WARN("LUA", "sam_modify_value: no hook is offering a value to rewrite right now — ignored. "
+				"It works inside player.on_xp_gained; for damage use sam_modify_damage (player) "
+				"or sam_modify_monster_damage (monster).");
+			return 0;
+		}
+		SAMLua::hookValueModify(v);
+		return 0;
+	}
+
 	// v0.7.0 Feature 2: sam_deal_damage(entity_uid, amount) — deal `amount` damage to
 	// any entity by UID (host-only, UID-only, existence-validated). Positive = damage.
 	int lua_sam_deal_damage(lua_State* Ls)
@@ -1884,8 +1955,37 @@ namespace
 		Entity* e = samResolveMonster(uid);
 		if ( !e ) { lua_pushboolean(Ls, 0); return 1; }
 		const int eff = samEffectNameToId(nameC);
-		if ( eff < 0 ) { SAM_WARN("LUA", std::string("sam_monster_has_effect: unknown effect '") + (nameC ? nameC : "") + "'."); lua_pushboolean(Ls, 0); return 1; }
+		if ( eff < 0 ) { SAM_WARN("LUA", std::string("sam_monster_has_effect: unknown effect '") + (nameC ? nameC : "") + "'. Valid: " + samEffectNameHint()); lua_pushboolean(Ls, 0); return 1; }
 		lua_pushboolean(Ls, e->getStats()->getEffectActive(eff) != 0 ? 1 : 0);
+		return 1;
+#else
+		(void)uid; (void)nameC; lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_monster_has_trait(uid, "undead") -> bool. Reads back what the mod declared in
+	// JSON. Without this a mod can SAY a monster is undead and the engine will agree, but
+	// the mod's own script can't ask -- so a "bonus vs undead" rule had no way to test for
+	// undead. False for every vanilla monster (mask is 0), so it is a no-op without a mod.
+	int lua_sam_monster_has_trait(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const char* nameC = luaL_checkstring(Ls, 2);
+#ifdef SAM_LUA_HAVE_BARONY
+		const unsigned long long bit = SAMMonsters::traitBitForName(nameC);
+		if ( bit == 0 )
+		{
+			SAM_WARN("LUA", std::string("sam_monster_has_trait: unknown trait '") + (nameC ? nameC : "")
+				+ "'. Valid: boss, trader, untargetable, immobile_turret, never_retreat, "
+				  "water_walking, undead, ally_recolour, tinker_construct, no_digestion, pass_through.");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { lua_pushboolean(Ls, 0); return 1; }
+		Stat* st = e->getStats();
+		if ( !st ) { lua_pushboolean(Ls, 0); return 1; }
+		lua_pushboolean(Ls, samMonsterHasTrait(st, bit) ? 1 : 0);
 		return 1;
 #else
 		(void)uid; (void)nameC; lua_pushboolean(Ls, 0); return 1;
@@ -2973,12 +3073,17 @@ namespace
 		lua_setglobal(L, "sam_fire_hook");
 		lua_pushcfunction(L, lua_sam_modify_damage);
 		lua_setglobal(L, "sam_modify_damage");
+		lua_pushcfunction(L, lua_sam_modify_monster_damage);
+		lua_setglobal(L, "sam_modify_monster_damage");
+		lua_pushcfunction(L, lua_sam_modify_value);
+		lua_setglobal(L, "sam_modify_value");
 		lua_pushcfunction(L, lua_sam_deal_damage);
 		lua_setglobal(L, "sam_deal_damage");
 		lua_pushcfunction(L, lua_sam_is_key_held);
 		lua_setglobal(L, "sam_is_key_held");
 		lua_pushcfunction(L, lua_sam_get_monster_stat);    lua_setglobal(L, "sam_get_monster_stat");
 		lua_pushcfunction(L, lua_sam_monster_has_effect);  lua_setglobal(L, "sam_monster_has_effect");
+		lua_pushcfunction(L, lua_sam_monster_has_trait);   lua_setglobal(L, "sam_monster_has_trait");
 		lua_pushcfunction(L, lua_sam_get_item_category);   lua_setglobal(L, "sam_get_item_category");
 		lua_pushcfunction(L, lua_sam_set_monster_stat);    lua_setglobal(L, "sam_set_monster_stat");
 		lua_pushcfunction(L, lua_sam_apply_monster_effect); lua_setglobal(L, "sam_apply_monster_effect");
@@ -3280,6 +3385,12 @@ namespace SAMLua
 
 	int dispatchEvent(const Event& ev)
 	{
+		// Reset BEFORE the early-out guard below. Doing it after meant a shutdown or a
+		// pre-init dispatch left a stale `true` latched: every later veto-capable site
+		// (itemPickup, castSpell, useItem) then saw a cancel nobody asked for, in a
+		// session with no mods loaded at all.
+		g_lastDispatchCancelled = false;
+
 		if ( !L )
 		{
 			// Expected during the pre-mod main-menu/char-select carousel, which equips
@@ -3295,6 +3406,8 @@ namespace SAMLua
 		}
 
 		int delivered = 0;
+		g_lastDispatchCancelled = false;
+		bool cancelled = false;
 		// Preserve the caller's namespace. dispatchEvent can RE-ENTER: a script's on_event
 		// may call a host API (sam_apply_effect, sam_fire_hook, ...) that fires another hook,
 		// nesting a dispatch inside this one. Restoring (not clearing) g_currentNs keeps the
@@ -3311,10 +3424,23 @@ namespace SAMLua
 			pushEventTable(ev);                                // push event table arg
 
 			g_currentNs = s.ns;
-			const bool ok = protectedCall(1, 0, "on_event('" + ev.name + "') in " + s.path);
+			// ONE result, not zero. This is what lets a mod DECIDE rather than merely watch:
+			// a handler that returns exactly `false` is saying "I handled this, skip what the
+			// game would have done". Anything else -- true, nil, or no return at all, which is
+			// what every existing script does -- means "carry on", so this is backwards
+			// compatible with every script ever written for an older framework.
+			//
+			// Every handler still runs even after one cancels, so two mods watching the same
+			// event both see it and neither can silently starve the other. The cancel is the
+			// OR of all of them.
+			const bool ok = protectedCall(1, 1, "on_event('" + ev.name + "') in " + s.path);
 			g_currentNs = savedNs;
 			if ( ok )
 			{
+				// lua_toboolean would treat nil as false and cancel everything by accident,
+				// so require a real boolean false.
+				if ( lua_isboolean(L, -1) && !lua_toboolean(L, -1) ) { cancelled = true; }
+				lua_pop(L, 1); // discard the result (protectedCall left exactly one)
 				++delivered;
 			}
 			else
@@ -3326,8 +3452,23 @@ namespace SAMLua
 			}
 		}
 
-		SAMLogger::noteHookFired(delivered); // count + open the GAMEPLAY section on the first hook
-		SAM_INFO("LUA", "Dispatched '" + ev.name + "' to " + std::to_string(delivered) + " script(s).");
+		SAMLogger::noteHookFired(delivered, ev.name.c_str()); // count + open the GAMEPLAY section on the first hook
+		// A dispatch that reached NOBODY carries no information -- half a real session's
+		// log was "Dispatched 'X' to 0 script(s)". Keep it at DEBUG so it is still there
+		// with SAM_DEBUG set when you are working out why a hook is not firing.
+		// A hook firing is routine -- one line per dispatch was 80% of a real session's log.
+		// The SESSION SUMMARY reports which hooks fired and how often, which is strictly more
+		// useful. A CANCEL still logs at INFO: that one changed what the game did.
+		if ( cancelled )
+		{
+			SAM_INFO("LUA", "Dispatched '" + ev.name + "' to " + std::to_string(delivered)
+				+ " script(s). (a script cancelled the default behaviour)");
+		}
+		else
+		{
+			SAM_DEBUG("LUA", "Dispatched '" + ev.name + "' to " + std::to_string(delivered) + " script(s).");
+		}
+		g_lastDispatchCancelled = cancelled;
 		return delivered;
 	}
 
@@ -3361,9 +3502,48 @@ namespace SAMLua
 	// on_before_damage dispatch with begin()/end(); scripts call modify() (via
 	// sam_modify_damage) in between. Shared by both runtimes + Entity::modHP.
 	void beforeDamageBegin(int player, long long damage)   { g_bdActive = true; g_bdPlayer = player; g_bdValue = damage; }
-	void beforeDamageModify(int player, long long newValue) { if ( g_bdActive && player == g_bdPlayer ) { g_bdValue = ( newValue < 0 ) ? 0 : newValue; } }
+	// Clamp to [0, INT_MAX] here rather than at each engine read-back. Every consumer
+	// narrows to int, and a script returning something huge would wrap negative -- turning
+	// damage into healing. One clamp at the write covers all three read sites.
+	static long long samClampHookValue(long long v)
+	{
+		if ( v < 0 ) { return 0; }
+		if ( v > 2147483647LL ) { return 2147483647LL; }
+		return v;
+	}
+	void beforeDamageModify(int player, long long newValue) { if ( g_bdActive && player == g_bdPlayer ) { g_bdValue = samClampHookValue(newValue); } }
 	long long beforeDamageEnd()                             { g_bdActive = false; return g_bdValue; }
 	bool beforeDamageActive()                              { return g_bdActive; }
+
+	void beforeMonsterDamageBegin(long long damage)         { g_bdmActive = true; g_bdmValue = damage; }
+	void beforeMonsterDamageModify(long long newValue)      { if ( g_bdmActive ) { g_bdmValue = samClampHookValue(newValue); } }
+	long long beforeMonsterDamageEnd()                      { g_bdmActive = false; return g_bdmValue; }
+	bool beforeMonsterDamageActive()                        { return g_bdmActive; }
+
+	void hookValueBegin(const char* hookName, long long value)
+	{
+		// NESTING IS REFUSED. dispatchEvent can re-enter: a script's handler may call a host
+		// API that fires another hook. Without this, the inner hook would overwrite the
+		// outer one's value and the outer engine site would then apply a number meant for
+		// something else entirely. The engine sites all guard on hookValueActive() before
+		// opening, so this is belt-and-braces -- but the guarantee should live here, not
+		// depend on every future call site remembering it.
+		if ( g_hvActive )
+		{
+			SAM_WARN("LUA", std::string("hookValueBegin('") + ( hookName ? hookName : "?" )
+				+ "') while '" + g_hvName + "' is still open — the inner hook offers no value to rewrite.");
+			return;
+		}
+		g_hvActive = true; g_hvValue = value; g_hvName = hookName ? hookName : "";
+	}
+	void hookValueModify(long long newValue)  { if ( g_hvActive ) { g_hvValue = samClampHookValue(newValue); } }
+	long long hookValueEnd()                  { g_hvActive = false; return g_hvValue; }
+	bool hookValueActive()                    { return g_hvActive; }
+	const char* hookValueName()               { return g_hvName.c_str(); }
+
+	// Did any handler of the last dispatchEvent return false? See the header.
+	bool lastDispatchCancelled()                           { return g_lastDispatchCancelled; }
+	std::string effectNameHint()                           { return samEffectNameHint(); }
 
 	// ---- v0.7.0 Feature 3: input hooks ----------------------------------------
 #ifdef SAM_LUA_HAVE_BARONY

@@ -71,6 +71,15 @@ namespace SAMLua
 	// was successfully delivered to.
 	int dispatchEvent(const Event& ev);
 
+	// Did any handler of the LAST dispatchEvent return false, i.e. ask the game not to do
+	// what it was about to do? Call this immediately after dispatchEvent at a site that
+	// offers the mod a decision. Always false when no script cancels, which is every script
+	// written before this existed -- so an engine arm guarded on it is a no-op for them.
+	bool lastDispatchCancelled();
+
+	// A short list of valid effect names, for error messages in both runtimes.
+	std::string effectNameHint();
+
 	// v0.7.0: call on_tick(event) for every script that defines it, once per game
 	// tick (host-authoritative, silent — no per-tick logging). `tickCount` is the
 	// current per-game tick.
@@ -84,6 +93,29 @@ namespace SAMLua
 	void beforeDamageModify(int player, long long newValue);
 	long long beforeDamageEnd();
 	bool beforeDamageActive();
+
+	// The same idea for MONSTER damage. A separate latch rather than reusing the player one:
+	// that is keyed on a player INDEX (0..3) and a monster would have to be identified by
+	// uid, which is a Uint32 and does not fit that key safely. Only one monster is ever mid
+	// -dispatch at a time, so this latch needs no key at all.
+	void beforeMonsterDamageBegin(long long damage);
+	void beforeMonsterDamageModify(long long newValue);
+	long long beforeMonsterDamageEnd();
+	bool beforeMonsterDamageActive();
+
+	// GENERIC value-rewrite latch. The two damage latches above are one-offs from before
+	// this existed; every hook added from here uses this instead, so a new "let a script
+	// rewrite this number" costs ~6 lines at the engine site and no new binding.
+	//
+	// The engine brackets a dispatch with begin()/end() and a script rewrites the number
+	// with sam_modify_value(). Only ONE may be open at a time: a nested begin() is refused
+	// and warns, so a hook fired from inside another hook's handler cannot overwrite the
+	// outer hook's value. hookValueName() reports which one is open, for error messages.
+	void hookValueBegin(const char* hookName, long long value);
+	void hookValueModify(long long newValue);
+	long long hookValueEnd();
+	bool hookValueActive();
+	const char* hookValueName();
 
 	// v0.7.0 Feature 3 — input hooks. pollInput() is called once per game tick (host +
 	// gameplay) to fire on_key_pressed / on_key_released on key-state transitions;

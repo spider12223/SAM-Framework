@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://sam-framework.dev/schemas/item.schema.json",
   "title": "S.A.M Item / Weapon",
-  "description": "Defines a custom item or weapon. S.A.M registers it into the items[] table at a reserved runtime slot (>=5000) and wires up its names, category, slot, weight, value, level, attributes and 2D inventory icon. Custom 3D models and on-hit effects are PLANNED and not yet loaded \u2014 see each field's note.",
+  "description": "Defines a custom item or weapon. S.A.M registers it into the items[] table at a reserved runtime slot (>=5000) and wires up its names, category, slot, weight, value, level, attributes and 2D inventory icon. Custom 3D models and on-hit effects are PLANNED and not yet loaded — see each field's note.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -81,6 +81,27 @@
       ],
       "default": "sword"
     },
+    "traits": {
+      "type": "array",
+      "description": "Engine behaviours this item opts into. Barony answers questions like 'is this a bow?' or 'can this hold arrows?' from hardcoded lists of vanilla item types, and a custom item can never be on those lists. Naming a trait here puts it on. A trait makes the item RECOGNISED; what it then does is up to your script.",
+      "items": {
+        "type": "string",
+        "enum": [
+          "ranged",
+          "quiver",
+          "foci",
+          "instrument",
+          "thrown_ball",
+          "shield_slot",
+          "potion_bad",
+          "automaton_food",
+          "tinker_throwable",
+          "usable",
+          "beatitude_ac"
+        ]
+      },
+      "uniqueItems": true
+    },
     "weight": {
       "type": "integer",
       "minimum": 0,
@@ -98,7 +119,7 @@
     },
     "model": {
       "type": "string",
-      "description": "Ship your OWN 3D model: a mod-relative path to a .vox, e.g. \"models/mymod/sword.vox\". SAM loads it at runtime and uses it as this item's world (and inventory) model, overriding 'model_from_item'. The path is also the model's id, so namespace your folder (models/<yourmod>/...) to avoid clashing with vanilla or another mod. IMPORTANT: the .vox must be Barony's slab format \u2014 MagicaVoxel exports are rejected (export/convert to slab .vox). An unknown/failed path is skipped with a warning and the item falls back to 'model_from_item' or a placeholder."
+      "description": "Ship your OWN 3D model: a mod-relative path to a .vox, e.g. \"models/mymod/sword.vox\". SAM loads it at runtime and uses it as this item's world (and inventory) model, overriding 'model_from_item'. The path is also the model's id, so namespace your folder (models/<yourmod>/...) to avoid clashing with vanilla or another mod. IMPORTANT: the .vox must be Barony's slab format — MagicaVoxel exports are rejected (export/convert to slab .vox). An unknown/failed path is skipped with a warning and the item falls back to 'model_from_item' or a placeholder."
     },
     "model_fp": {
       "type": "string",
@@ -106,15 +127,15 @@
     },
     "model_from_item": {
       "type": "string",
-      "description": "Reuse an existing vanilla item's 3D model (world + first-person + inventory icon) for this custom item, by vanilla ItemType name \u2014 e.g. \"SILVER_SHIELD\", \"STEEL_SWORD\", \"IRON_HELM\". This is the supported way to give a custom item a real model. If omitted, the item clones a placeholder that matches its equip slot (a shield looks like a wooden shield, boots like boots, etc.). If the name is unknown, the placeholder is used and a warning is logged. A per-item 'icon' PNG still overrides the 2D inventory icon."
+      "description": "Reuse an existing vanilla item's 3D model (world + first-person + inventory icon) for this custom item, by vanilla ItemType name — e.g. \"SILVER_SHIELD\", \"STEEL_SWORD\", \"IRON_HELM\". This is the supported way to give a custom item a real model. If omitted, the item clones a placeholder that matches its equip slot (a shield looks like a wooden shield, boots like boots, etc.). If the name is unknown, the placeholder is used and a warning is logged. A per-item 'icon' PNG still overrides the 2D inventory icon."
     },
     "icon": {
       "type": "string",
-      "description": "Path (relative to the mod folder) to a PNG used as the item's 2D inventory/hotbar icon, e.g. 'items/shadowblade.png'. Loaded at runtime and drawn like the class-select portrait. If the file is missing, a placeholder icon cloned from a similar vanilla item is used. (Only the 2D icon is loaded \u2014 the 3D 'model'/'model_fp' are still planned.)"
+      "description": "Path (relative to the mod folder) to a PNG used as the item's 2D inventory/hotbar icon, e.g. 'items/shadowblade.png'. Loaded at runtime and drawn like the class-select portrait. If the file is missing, a placeholder icon cloned from a similar vanilla item is used. (Only the 2D icon is loaded — the 3D 'model'/'model_fp' are still planned.)"
     },
     "attributes": {
       "type": "object",
-      "description": "Numeric bonuses the engine applies to this item. ONLY these keys are read: ATK (added by attackGetAttack for weapons), AC (added by armorGetAC for armor/shields), and the two tinkering salvage yields. Any other key would load and then be silently ignored, so they are rejected here instead. Item behaviour (effects, procs, abilities) comes from a companion script next to this JSON, not from a key.",
+      "description": "Numeric values the engine reads off this item. Recognised keys: ATK (added by attackGetAttack for weapons), AC (added by armorGetAC for armor and shields), TINKER_SALVAGE_METAL and TINKER_SALVAGE_MAGIC (what this yields when salvaged), spellbook_spell (the spell this SPELLBOOK teaches or casts, as a spell id), and foci_spell (the spell a shield-slot focus channels, as a spell id). Any other key is stored but never read by the engine -- a script can still read it with sam_get_item_attribute, so custom keys are useful for your own logic.",
       "additionalProperties": false,
       "properties": {
         "ATK": {
@@ -134,27 +155,55 @@
           "type": "integer",
           "minimum": 0,
           "description": "Magic scrap this item yields when salvaged at a tinkering kit. Omit it and the item cannot be broken down. Keep the yield BELOW the item's crafting cost."
+        },
+        "spellbook_spell": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "Spell this book teaches. A vanilla spell name (\"SPELL_FIREBALL\"), a numeric spell id, or your own \"namespace:spell\"."
+        },
+        "foci_spell": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "Spell this focus channels. Vanilla name, numeric id, or \"namespace:spell\"."
+        },
+        "tome_spell": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "Spell this tome teaches. Vanilla name, numeric id, or \"namespace:spell\"."
+        },
+        "magicstaff_spell": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "Spell this magic staff casts when swung. Vanilla name, numeric id, or \"namespace:spell\"."
         }
       }
     },
     "on_hit_effect": {
       "type": "string",
-      "description": "PLANNED \u2014 requires the S.A.M effect/plugin system, which is not yet implemented. Parsed but has no runtime effect. Status effect to apply on a successful hit (e.g. an EFF_ effect name from stat.hpp)."
+      "description": "PLANNED — requires the S.A.M effect/plugin system, which is not yet implemented. Parsed but has no runtime effect. Status effect to apply on a successful hit (e.g. an EFF_ effect name from stat.hpp)."
     },
     "on_hit_chance": {
       "type": "number",
       "minimum": 0,
       "maximum": 1,
-      "description": "PLANNED \u2014 no runtime effect yet (see 'on_hit_effect'). Probability (0.0-1.0) that on_hit_effect triggers on a hit."
+      "description": "PLANNED — no runtime effect yet (see 'on_hit_effect'). Probability (0.0-1.0) that on_hit_effect triggers on a hit."
     },
     "stackable": {
       "type": "boolean",
       "default": false,
-      "description": "PLANNED \u2014 parsed but not yet applied at runtime. Whether multiple copies stack into one inventory slot."
+      "description": "PLANNED — parsed but not yet applied at runtime. Whether multiple copies stack into one inventory slot."
     },
     "magic_level": {
       "type": "integer",
-      "description": "PLANNED \u2014 parsed but not yet applied at runtime. Magic/enchantment level of the item."
+      "description": "PLANNED — parsed but not yet applied at runtime. Magic/enchantment level of the item."
     }
   },
   "examples": [

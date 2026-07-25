@@ -32,6 +32,7 @@ export default function EffectEditor() {
   const [hpSec, setHpSec] = useState(editDef?.hp_per_second ?? 0);
   const [mpSec, setMpSec] = useState(editDef?.mp_per_second ?? 0);
   const [hudHidden, setHudHidden] = useState(editDef?.hud_hidden ?? false);
+  const [curable, setCurable] = useState(editDef?.curable ?? false);
   const [acMod, setAcMod] = useState(editDef?.ac_mod ?? 0);
   const [damageMult, setDamageMult] = useState(editDef?.damage_mult ?? 1);
   const [grants, setGrants] = useState(editDef?.grants ?? []);
@@ -63,6 +64,7 @@ export default function EffectEditor() {
     if (num(damageMult) != null && Number(damageMult) !== 1) def.damage_mult = Number(damageMult);
     if (Array.isArray(grants) && grants.length) def.grants = grants;
     if (hudHidden) def.hud_hidden = true;
+    if (curable) def.curable = true;
     return def;
   };
 
@@ -78,7 +80,7 @@ export default function EffectEditor() {
 
   const def = useMemo(buildDef,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [name, tooltip, icon, duration, mods, speedMult, hpSec, mpSec, hudHidden, acMod, damageMult, grants, namespace]);
+    [name, tooltip, icon, duration, mods, speedMult, hpSec, mpSec, hudHidden, curable, acMod, damageMult, grants, namespace]);
   const preview = useMemo(() => JSON.stringify(def, null, 2), [def]);
 
   const setMod = (a, v) => setMods((prev) => ({ ...prev, [a]: v }));
@@ -159,6 +161,10 @@ export default function EffectEditor() {
             <label className="flex items-center gap-2 mt-3 cursor-pointer text-sm" style={{ color: 'var(--color-parchment)' }}>
               <input type="checkbox" className="sam-check" checked={hudHidden} onChange={(e) => setHudHidden(e.target.checked)} />
               Hide from the status bar (still works, just no icon)
+            </label>
+            <label className="flex items-center gap-2 mt-3 cursor-pointer text-sm" style={{ color: 'var(--color-parchment)' }}>
+              <input type="checkbox" className="sam-check" checked={curable} onChange={(e) => setCurable(e.target.checked)} />
+              Curable (a cure ailment potion or spell can remove it)
             </label>
           </div>
         </div>

@@ -65,6 +65,7 @@ extern "C" {
 #	include "sam_items.hpp" // SAMItems::itemIdForIdString (custom item names in queries)
 #	include "sam_classes.hpp" // v0.7.0 F5: SAMClasses::patchClass / addClassPassive
 #	include "sam_monster_patches.hpp" // v0.7.0 F5: SAMMonsterPatch::set
+#	include "sam_monsters.hpp" // SAMMonsters::traitBitForName (sam_monster_has_trait)
 #	include "sam_spells.hpp"  // custom-spell registry (sam_grant_spell)
 #	include "sam_sounds.hpp"  // custom sounds (resolve "ns:sound" ids in sam_play_sound)
 #	include "sam_races.hpp"   // custom races (sam_get_race id lookup)
@@ -349,7 +350,7 @@ namespace
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity )
 		{ SAM_ERROR("JS", "sam_apply_effect: invalid player index " + std::to_string(player) + "."); return JS_NewBool(ctx, 0); }
 		const int eff = samEffectNameToId(name.c_str());
-		if ( eff < 0 ) { SAM_ERROR("JS", "sam_apply_effect: unknown effect '" + name + "'."); return JS_NewBool(ctx, 0); }
+		if ( eff < 0 ) { SAM_ERROR("JS", "sam_apply_effect: unknown effect '" + name + "'. Valid: " + SAMLua::effectNameHint()); return JS_NewBool(ctx, 0); }
 		bool ok;
 		if ( strength > 0 )
 		{
@@ -375,7 +376,7 @@ namespace
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity )
 		{ SAM_ERROR("JS", "sam_remove_effect: invalid player index " + std::to_string(player) + "."); return JS_NewBool(ctx, 0); }
 		const int eff = samEffectNameToId(name.c_str());
-		if ( eff < 0 ) { SAM_ERROR("JS", "sam_remove_effect: unknown effect '" + name + "'."); return JS_NewBool(ctx, 0); }
+		if ( eff < 0 ) { SAM_ERROR("JS", "sam_remove_effect: unknown effect '" + name + "'. Valid: " + SAMLua::effectNameHint()); return JS_NewBool(ctx, 0); }
 		players[player]->entity->setEffect(eff, false, 0, true);
 		SAM_INFO("JS", "Removed effect " + name + " from player " + std::to_string(player));
 		return JS_NewBool(ctx, 1);
@@ -408,7 +409,7 @@ namespace
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity || !stats[player] )
 		{ SAM_ERROR("JS", "sam_set_effect_duration: invalid player index " + std::to_string(player) + "."); return JS_NewBool(ctx, 0); }
 		const int eff = samEffectNameToId(name.c_str());
-		if ( eff < 0 ) { SAM_ERROR("JS", "sam_set_effect_duration: unknown effect '" + name + "'."); return JS_NewBool(ctx, 0); }
+		if ( eff < 0 ) { SAM_ERROR("JS", "sam_set_effect_duration: unknown effect '" + name + "'. Valid: " + SAMLua::effectNameHint()); return JS_NewBool(ctx, 0); }
 		if ( stats[player]->getEffectActive(eff) == 0 ) { return JS_NewBool(ctx, 0); }
 		players[player]->entity->setEffect(eff, true, ticks, true, true, false, true);
 		return JS_NewBool(ctx, 1);
@@ -425,7 +426,7 @@ namespace
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity || !stats[player] )
 		{ SAM_ERROR("JS", "sam_set_effect_strength: invalid player index " + std::to_string(player) + "."); return JS_NewBool(ctx, 0); }
 		const int eff = samEffectNameToId(name.c_str());
-		if ( eff < 0 ) { SAM_ERROR("JS", "sam_set_effect_strength: unknown effect '" + name + "'."); return JS_NewBool(ctx, 0); }
+		if ( eff < 0 ) { SAM_ERROR("JS", "sam_set_effect_strength: unknown effect '" + name + "'. Valid: " + SAMLua::effectNameHint()); return JS_NewBool(ctx, 0); }
 		if ( stats[player]->getEffectActive(eff) == 0 ) { return JS_NewBool(ctx, 0); }
 		const Uint8 st = (Uint8)(strength < 1 ? 1 : (strength > 255 ? 255 : strength));
 		const int keepDur = stats[player]->EFFECTS_TIMERS[eff];
@@ -823,7 +824,7 @@ namespace
 		std::string name; if ( argc >= 2 ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
 		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return JS_NewBool(ctx, 0); }
 		const int eff = samEffectNameToId(name.c_str());
-		if ( eff < 0 ) { SAM_WARN("JS", "sam_has_effect: unknown effect '" + name + "'."); return JS_NewBool(ctx, 0); }
+		if ( eff < 0 ) { SAM_WARN("JS", "sam_has_effect: unknown effect '" + name + "'. Valid: " + SAMLua::effectNameHint()); return JS_NewBool(ctx, 0); }
 		return JS_NewBool(ctx, stats[player]->getEffectActive(eff) != 0 ? 1 : 0);
 	}
 
@@ -1085,6 +1086,38 @@ namespace
 			return JS_UNDEFINED;
 		}
 		SAMLua::beforeDamageModify(player, (long long)v);
+		return JS_UNDEFINED;
+	}
+
+	// sam_modify_monster_damage(new_value) — the monster-side counterpart. See the Lua
+	// runtime; no subject argument because only one monster is ever mid-dispatch.
+	JSValue js_sam_modify_monster_damage(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_UNDEFINED; }
+		int64_t v = 0; JS_ToInt64(ctx, &v, argv[0]);
+		if ( !SAMLua::beforeMonsterDamageActive() )
+		{
+			SAM_WARN("JS", "sam_modify_monster_damage: only valid inside an on_before_monster_damage callback — ignored.");
+			return JS_UNDEFINED;
+		}
+		SAMLua::beforeMonsterDamageModify((long long)v);
+		return JS_UNDEFINED;
+	}
+
+	// sam_modify_value(new_value) — see the Lua runtime. Parity matters: the same script
+	// text must work in both.
+	JSValue js_sam_modify_value(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_UNDEFINED; }
+		int64_t v = 0; JS_ToInt64(ctx, &v, argv[0]);
+		if ( !SAMLua::hookValueActive() )
+		{
+			SAM_WARN("JS", "sam_modify_value: only valid inside a hook that offers a value to rewrite — ignored.");
+			return JS_UNDEFINED;
+		}
+		SAMLua::hookValueModify((long long)v);
 		return JS_UNDEFINED;
 	}
 
@@ -1480,6 +1513,35 @@ namespace
 		if ( nameC ) { JS_FreeCString(ctx, nameC); }
 		if ( eff < 0 ) { return JS_NewBool(ctx, 0); }
 		return JS_NewBool(ctx, e->getStats()->getEffectActive(eff) != 0 ? 1 : 0);
+#else
+		(void)uid; if ( nameC ) { JS_FreeCString(ctx, nameC); } return JS_NewBool(ctx, 0);
+#endif
+	}
+
+	// sam_monster_has_trait(uid, "undead") -> boolean. Reads back what the mod declared in
+	// JSON. False for every vanilla monster (mask is 0), so it is a no-op without a mod.
+	JSValue js_sam_monster_has_trait(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_NewBool(ctx, 0); }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+		const char* nameC = JS_ToCString(ctx, argv[1]);
+#ifdef SAM_JS_HAVE_BARONY
+		const unsigned long long bit = SAMMonsters::traitBitForName(nameC ? nameC : "");
+		if ( bit == 0 )
+		{
+			SAM_WARN("JS", std::string("sam_monster_has_trait: unknown trait '") + (nameC ? nameC : "")
+				+ "'. Valid: boss, trader, untargetable, immobile_turret, never_retreat, "
+				  "water_walking, undead, ally_recolour, tinker_construct, no_digestion, pass_through.");
+			if ( nameC ) { JS_FreeCString(ctx, nameC); }
+			return JS_NewBool(ctx, 0);
+		}
+		if ( nameC ) { JS_FreeCString(ctx, nameC); }
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { return JS_NewBool(ctx, 0); }
+		Stat* st = e->getStats();
+		if ( !st ) { return JS_NewBool(ctx, 0); }
+		return JS_NewBool(ctx, samMonsterHasTrait(st, bit) ? 1 : 0);
 #else
 		(void)uid; if ( nameC ) { JS_FreeCString(ctx, nameC); } return JS_NewBool(ctx, 0);
 #endif
@@ -2377,6 +2439,8 @@ namespace
 		JS_SetPropertyStr(ctx, g, "sam_register_hook", JS_NewCFunction(ctx, js_sam_register_hook, "sam_register_hook", 2));
 		JS_SetPropertyStr(ctx, g, "sam_fire_hook", JS_NewCFunction(ctx, js_sam_fire_hook, "sam_fire_hook", 2));
 		JS_SetPropertyStr(ctx, g, "sam_modify_damage", JS_NewCFunction(ctx, js_sam_modify_damage, "sam_modify_damage", 2));
+		JS_SetPropertyStr(ctx, g, "sam_modify_monster_damage", JS_NewCFunction(ctx, js_sam_modify_monster_damage, "sam_modify_monster_damage", 1));
+		JS_SetPropertyStr(ctx, g, "sam_modify_value", JS_NewCFunction(ctx, js_sam_modify_value, "sam_modify_value", 1));
 		JS_SetPropertyStr(ctx, g, "sam_deal_damage", JS_NewCFunction(ctx, js_sam_deal_damage, "sam_deal_damage", 2));
 		JS_SetPropertyStr(ctx, g, "sam_is_key_held", JS_NewCFunction(ctx, js_sam_is_key_held, "sam_is_key_held", 1));
 		// v0.7.0 Feature 4: monster / NPC scripting (UID-based, host-authoritative)
@@ -2387,6 +2451,7 @@ namespace
 		JS_SetPropertyStr(ctx, g, "sam_get_effects", JS_NewCFunction(ctx, js_sam_get_effects, "sam_get_effects", 1));
 		JS_SetPropertyStr(ctx, g, "sam_get_monster_stat", JS_NewCFunction(ctx, js_sam_get_monster_stat, "sam_get_monster_stat", 2));
 		JS_SetPropertyStr(ctx, g, "sam_monster_has_effect", JS_NewCFunction(ctx, js_sam_monster_has_effect, "sam_monster_has_effect", 2));
+		JS_SetPropertyStr(ctx, g, "sam_monster_has_trait", JS_NewCFunction(ctx, js_sam_monster_has_trait, "sam_monster_has_trait", 2));
 		JS_SetPropertyStr(ctx, g, "sam_get_item_category", JS_NewCFunction(ctx, js_sam_get_item_category, "sam_get_item_category", 1));
 		JS_SetPropertyStr(ctx, g, "sam_set_monster_stat", JS_NewCFunction(ctx, js_sam_set_monster_stat, "sam_set_monster_stat", 3));
 		JS_SetPropertyStr(ctx, g, "sam_apply_monster_effect", JS_NewCFunction(ctx, js_sam_apply_monster_effect, "sam_apply_monster_effect", 3));
@@ -2693,8 +2758,19 @@ namespace SAMJs
 		return loadJSSource(js, path, ns);
 	}
 
+
+// Set by the most recent dispatchEvent: did any handler return false? Mirrors the Lua
+// runtime's flag so an engine site can ask one question and get both runtimes' answer.
+bool g_lastDispatchCancelled = false;
+
 	int dispatchEvent(const Event& ev)
 	{
+		// Reset BEFORE the early-out guard below. Doing it after meant a shutdown or a
+		// pre-init dispatch left a stale `true` latched: every later veto-capable site
+		// (itemPickup, castSpell, useItem) then saw a cancel nobody asked for, in a
+		// session with no mods loaded at all.
+		g_lastDispatchCancelled = false;
+
 		if ( !g_rt )
 		{
 			// Expected during the pre-mod menu/char-select carousel (equips fire before
@@ -2708,6 +2784,8 @@ namespace SAMJs
 			return 0;
 		}
 		int delivered = 0;
+		g_lastDispatchCancelled = false;
+		bool cancelled = false;
 		// Preserve the caller's namespace across a possibly RE-ENTRANT dispatch (a script's
 		// on_event may call a host API that fires another hook). Restore, don't clear, so an
 		// outer script's sam_save_data still resolves its owning mod. See the Lua mirror.
@@ -2751,12 +2829,21 @@ namespace SAMJs
 					if ( pc ) { JS_FreeCString(sc.ctx, pc); }
 				}
 				JS_FreeValue(sc.ctx, pend);
+				// A handler returning exactly `false` asks the game not to do what it was
+				// about to do. Strict check: undefined (no return, what every existing
+				// script does) and null must NOT cancel, so this stays compatible.
+				if ( JS_IsBool(ret) && !JS_ToBool(sc.ctx, ret) ) { cancelled = true; }
 				++delivered;
 			}
 			JS_FreeValue(sc.ctx, ret);
 		}
-		SAMLogger::noteHookFired(delivered); // count + open the GAMEPLAY section on the first hook
-		SAM_INFO("JS", "Dispatched '" + ev.name + "' to " + std::to_string(delivered) + " script(s).");
+		SAMLogger::noteHookFired(delivered, ev.name.c_str()); // count + open the GAMEPLAY section on the first hook
+		g_lastDispatchCancelled = cancelled;
+		// A dispatch that reached NOBODY carries no information -- half a real session's
+		// log was "Dispatched 'X' to 0 script(s)". Keep it at DEBUG so it is still there
+		// with SAM_DEBUG set when you are working out why a hook is not firing.
+		// Routine: counted in the SESSION SUMMARY rather than one line each. See the Lua side.
+		SAM_DEBUG("JS", "Dispatched '" + ev.name + "' to " + std::to_string(delivered) + " script(s).");
 		return delivered;
 	}
 
@@ -2920,5 +3007,8 @@ namespace SAMJs
 		}
 		return false;
 	}
+
+
+	bool lastDispatchCancelled() { return g_lastDispatchCancelled; }
 
 } // namespace SAMJs

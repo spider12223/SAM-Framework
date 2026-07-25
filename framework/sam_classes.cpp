@@ -371,6 +371,28 @@ void SAMClasses::loadFromManifest(const SAMModManifest& manifest)
 		}
 
 		def.gold = getInt(j, "gold", 0);
+		def.bloodDiet = getBool(j, "blood_diet", false);
+		if ( j.contains("ratings") && j["ratings"].is_object() )
+		{
+			const json& r = j["ratings"];
+			static const char* kOrder[6] = { "STR","DEX","CON","INT","PER","CHR" };
+			static const std::set<std::string> kVocab = { "bad","poor","average","decent","good" };
+			if ( r.contains("stats") && r["stats"].is_object() )
+			{
+				def.statRatings.assign(6, "average");   // always exactly 6
+				for ( int i = 0; i < 6; ++i )
+				{
+					const std::string v = getStr(r["stats"], kOrder[i]);
+					if ( kVocab.count(v) ) { def.statRatings[i] = v; }
+				}
+			}
+			if ( r.contains("difficulty") && r["difficulty"].is_object() )
+			{
+				auto clamp15 = [](int v){ return (v < 1) ? 0 : (v > 5 ? 5 : v); };
+				def.difficultyAttack   = clamp15(getInt(r["difficulty"], "attack", 0));
+				def.difficultySurvival = clamp15(getInt(r["difficulty"], "survival", 0));
+			}
+		}
 
 #ifndef EDITOR
 		// Load-time validation of enum-name references, with "did you mean?" hints.
@@ -457,6 +479,18 @@ const SAMClassDef* SAMClasses::getClass(int classId)
 {
 	auto it = s_registry.find(classId);
 	return (it != s_registry.end()) ? &it->second : nullptr;
+}
+
+bool SAMClasses::requiresBloodDiet(int classId)
+{
+	const SAMClassDef* def = getClass(classId);
+	return def && def->bloodDiet;
+}
+
+int SAMClasses::numStartingSpells(int classId)
+{
+	const SAMClassDef* def = getClass(classId);
+	return def ? (int)def->startingSpells.size() : 0;
 }
 
 int SAMClasses::count()

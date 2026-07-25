@@ -60,6 +60,33 @@ public:
 	// Unmount + delete the overlay folder (call from SAMLoader::unload()).
 	static void clear();
 
+	// Mod-declared traits for a monster VARIANT, looked up by the variant's display name.
+	// A custom monster is a variant of a vanilla Monster type, so it shares that type and
+	// has no id of its own -- the name is the only thing that identifies it at the moment
+	// the engine stamps a variant onto a live Stat. Returns 0 for anything unknown, which
+	// is every vanilla monster, so the engine's trait check is a no-op without a mod.
+	static unsigned long long traitsForName(const char* variantName);
+
+	// Mod-declared custom BODY model id ("namespace:model") for a monster VARIANT, by the
+	// variant's display name, or nullptr. Returns the ID STRING, not an engine model index:
+	// models are appended to the engine table AFTER monster JSON is parsed, and an index is
+	// load-order dependent while the id is stable. Resolved lazily by SAMBodies at draw time.
+	static const char* bodyModelForName(const char* variantName);
+
+	// True if ANY loaded mod declared a monster body. The renderer's fast path checks this
+	// so a game with no body-declaring mod never touches a monster's Stat while drawing.
+	static bool anyBodyDeclared();
+
+	// Log which declared body models resolved to a real .vox and which did not. A monster's
+	// body is the one id a modder hand-writes with no editor, so an unresolvable one used to
+	// be completely silent. Called once per load, after models are appended.
+	static void reportBodyResolution();
+
+	// One trait NAME ("undead") -> its bit, or 0 if the name isn't a trait. Shared by the
+	// JSON parser and the script binding so there is a single table: a name accepted in
+	// mod JSON is the same name a script may query, and neither can drift from the other.
+	static unsigned long long traitBitForName(const char* name);
+
 	// Stats from the most recent applyAll(), for the load summary.
 	static int count();          // monster variant files written
 	static int declared();       // monster entries declared across all mods

@@ -34,17 +34,24 @@
 #include <cstdlib>   // std::atexit
 #include <ctime>
 #include <vector>
+#include <string>
+#include <algorithm> // std::sort, std::min
+#include <utility>
+#include <map>
 #include <iterator>
 
 #ifdef _WIN32
 	#include <windows.h>
 	#include <io.h>      // _isatty
+	#include <direct.h>  // _mkdir
 	#include <process.h> // _getpid
 	#ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
 		#define ENABLE_VIRTUAL_TERMINAL_PROCESSING 0x0004
 	#endif
 #else
-	#include <unistd.h>  // isatty, getpid
+	#include <unistd.h>     // isatty, getpid
+	#include <sys/stat.h>   // mkdir
+	#include <dirent.h>     // opendir/readdir
 #endif
 
 /*-------------------------------------------------------------------------------
@@ -72,6 +79,10 @@ static const int SAM_DIV_WIDTH = 56;  // total columns of a section divider
 	Static member storage.
 -------------------------------------------------------------------------------*/
 std::ofstream SAMLogger::logFile;
+std::string SAMLogger::repeatModule;
+std::string SAMLogger::repeatMessage;
+SAMLogLevel SAMLogger::repeatLevel = SAMLogLevel::Info;
+int SAMLogger::repeatCount = 0;
 std::mutex SAMLogger::logMutex;
 bool SAMLogger::debugMode = false;
 bool SAMLogger::initialized = false;
@@ -94,6 +105,7 @@ long long SAMLogger::loadMillis = 0;
 long long SAMLogger::warnCount = 0;
 long long SAMLogger::errorCount = 0;
 long long SAMLogger::hookCount = 0;
+std::map<std::string, long long> SAMLogger::hookTally;
 long long SAMLogger::hookScriptsTotal = 0;
 long long SAMLogger::apiCallCount = 0;
 long long SAMLogger::scriptErrorCount = 0;
@@ -178,6 +190,18 @@ static std::string samDivider(const std::string& name)
 /*-------------------------------------------------------------------------------
 	Low-level emit (caller MUST hold logMutex).
 -------------------------------------------------------------------------------*/
+// Emit the "... and N more" line for a run of identical messages. Caller holds the lock.
+void SAMLogger::flushRepeatLocked()
+{
+	if ( repeatCount <= 0 ) { return; }
+	const int n = repeatCount;
+	repeatCount = 0;
+	const std::string text = "[" + getTimestamp() + "] " + levelToString(repeatLevel)
+		+ " [" + padModule(repeatModule) + "] ... last message repeated "
+		+ std::to_string(n) + " more time" + ( n == 1 ? "" : "s" );
+	emitRaw(text, levelToColor(repeatLevel), text);
+}
+
 void SAMLogger::emitRaw(const std::string& fileLine, const char* color, const std::string& stdoutLine)
 {
 	if ( samStdoutIsTty() && color )
@@ -225,35 +249,135 @@ int SAMLogger::bumpSessionCounter(const std::string& dir)
 	return n;
 }
 
+/*-------------------------------------------------------------------------------
+	Per-session log files. sam_log.txt is always the CURRENT run; previous runs are
+	archived beside it in sam_logs/ so a specific session can be found by date.
+-------------------------------------------------------------------------------*/
+
+// "<dir>/sam_log.txt" -> "<dir>/sam_logs"
+static std::string samLogArchiveDir(const std::string& logPath)
+{
+	const size_t slash = logPath.find_last_of("/\\");
+	const std::string dir = ( slash == std::string::npos ) ? std::string(".") : logPath.substr(0, slash);
+	return dir + "/sam_logs";
+}
+
+static void samEnsureDir(const std::string& dir)
+{
+#ifdef _WIN32
+	_mkdir(dir.c_str());
+#else
+	mkdir(dir.c_str(), 0755);
+#endif
+}
+
+// Recover "0041_2026-07-23_21-18" from a session banner, so an archived file is named for
+// the run it contains rather than the run doing the archiving. Falls back to the number
+// alone if the banner is missing or in an older format.
+static std::string samExtractSessionStamp(const std::string& content, int fallbackNumber)
+{
+	std::string num, date;
+	const size_t sPos = content.find("Session #");
+	if ( sPos != std::string::npos )
+	{
+		size_t i = sPos + 9;
+		while ( i < content.size() && content[i] >= '0' && content[i] <= '9' ) { num += content[i++]; }
+		// The banner reads: Session #N - YYYY-MM-DD HH:MM:SS
+		const size_t dash = content.find(" - ", i);
+		if ( dash != std::string::npos && dash < i + 8 )
+		{
+			const size_t eol = content.find(char(10), i);
+			std::string when = content.substr(dash + 3, ( eol == std::string::npos ? 19 : std::min<size_t>(19, eol - dash - 3) ));
+			for ( char& c : when )
+			{
+				if ( c == ':' ) { c = '-'; }
+				else if ( c == ' ' ) { c = '_'; }
+			}
+			// keep YYYY-MM-DD_HH-MM
+			if ( when.size() > 16 ) { when = when.substr(0, 16); }
+			date = when;
+		}
+	}
+	if ( num.empty() ) { num = std::to_string( fallbackNumber > 0 ? fallbackNumber : 0 ); }
+	while ( num.size() < 4 ) { num = "0" + num; }
+	return date.empty() ? num : ( num + "_" + date );
+}
+
+// Keep the newest `keep` archived sessions, delete the rest. Names sort chronologically
+// because they lead with a zero-padded session number.
+static void samPruneArchive(const std::string& dir, int keep)
+{
+	std::vector<std::string> files;
+#ifdef _WIN32
+	WIN32_FIND_DATAA fd;
+	const std::string pattern = dir + "/session_*.txt";
+	HANDLE h = FindFirstFileA(pattern.c_str(), &fd);
+	if ( h != INVALID_HANDLE_VALUE )
+	{
+		do { files.push_back(fd.cFileName); } while ( FindNextFileA(h, &fd) );
+		FindClose(h);
+	}
+#else
+	if ( DIR* d = opendir(dir.c_str()) )
+	{
+		while ( struct dirent* e = readdir(d) )
+		{
+			const std::string n = e->d_name;
+			if ( n.rfind("session_", 0) == 0 && n.size() > 4 && n.substr(n.size() - 4) == ".txt" )
+			{
+				files.push_back(n);
+			}
+		}
+		closedir(d);
+	}
+#endif
+	if ( (int)files.size() <= keep ) { return; }
+	std::sort(files.begin(), files.end());
+	const int remove = (int)files.size() - keep;
+	for ( int i = 0; i < remove; ++i )
+	{
+		std::remove((dir + "/" + files[i]).c_str());
+	}
+}
+
 void SAMLogger::rotateAndOpen(const std::string& path)
 {
-	// Keep only the most recent (5 - 1) sessions in the file, so this launch makes
-	// five. Sessions are delimited by the box-top glyph (╔) at column 0.
-	const int KEEP = 5;
-	const std::string marker = std::string(GX_TL); // start of each session banner
+	// ONE SESSION PER FILE. sam_log.txt used to accumulate five sessions, which meant
+	// scrolling past three dead runs to reach the one you just played. Now sam_log.txt is
+	// always exactly the current run, and the previous run is moved into sam_logs/ first.
+	//
+	//   sam_log.txt                              <- the run you just did, nothing else
+	//   sam_logs/session_0041_2026-07-23_21-18.txt   <- the one before, and so on
+	//
+	// The archive keeps the newest KEEP_ARCHIVE files and deletes the rest, so the folder
+	// cannot grow without bound.
+	const int KEEP_ARCHIVE = 12;
+
+	// Move the previous session aside, naming it by ITS session number and start time so
+	// the folder sorts chronologically and a run is findable by when it happened.
 	{
-		std::ifstream in(path.c_str(), std::ios::binary);
-		if ( in )
+		std::ifstream prev(path.c_str(), std::ios::binary);
+		if ( prev.good() )
 		{
-			std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-			in.close();
-			std::vector<size_t> starts;
-			size_t pos = 0;
-			while ( (pos = content.find(marker, pos)) != std::string::npos )
+			std::string content((std::istreambuf_iterator<char>(prev)), std::istreambuf_iterator<char>());
+			prev.close();
+			if ( !content.empty() )
 			{
-				starts.push_back(pos);
-				pos += marker.size();
-			}
-			if ( (int)starts.size() >= KEEP )
-			{
-				const size_t keepFrom = starts[starts.size() - (KEEP - 1)];
-				const std::string trimmed = content.substr(keepFrom);
-				std::ofstream out(path.c_str(), std::ios::binary | std::ios::trunc);
-				if ( out ) { out << trimmed; out.close(); }
+				const std::string dir = samLogArchiveDir(path);
+				samEnsureDir(dir);
+				// Recover the previous run's number + date from its own banner, so the
+				// archived name describes that run rather than this one.
+				const std::string stamp = samExtractSessionStamp(content, sessionNumber - 1);
+				const std::string dest = dir + "/session_" + stamp + ".txt";
+				std::ofstream out(dest.c_str(), std::ios::binary | std::ios::trunc);
+				if ( out ) { out << content; out.close(); }
+				samPruneArchive(dir, KEEP_ARCHIVE);
 			}
 		}
 	}
-	logFile.open(path.c_str(), std::ios::out | std::ios::app);
+
+	// Truncate, not append: this file is one session now.
+	logFile.open(path.c_str(), std::ios::out | std::ios::trunc);
 }
 
 void SAMLogger::writeSessionHeader()
@@ -299,6 +423,7 @@ void SAMLogger::init(const std::string& outputDir, bool debugModeEnabled)
 	modLoadStart = sessionStart;
 	phase = Phase::Init;
 	warnCount = errorCount = hookCount = hookScriptsTotal = apiCallCount = scriptErrorCount = 0;
+	hookTally.clear();
 	warnAtLoadEnd = errorAtLoadEnd = 0;
 	loadMillis = 0;
 
@@ -320,6 +445,7 @@ void SAMLogger::init(const std::string& outputDir, bool debugModeEnabled)
 void SAMLogger::shutdown()
 {
 	std::lock_guard<std::mutex> lock(logMutex);
+	flushRepeatLocked();
 	if ( logFile.is_open() )
 	{
 		logFile.flush();
@@ -336,6 +462,26 @@ void SAMLogger::log(SAMLogLevel level, const std::string& module, const std::str
 	if ( level == SAMLogLevel::Debug && !debugMode ) { return; }
 
 	std::lock_guard<std::mutex> lock(logMutex);
+
+	// REPEAT COLLAPSING. A per-frame or per-input hook emits the identical line hundreds of
+	// times in a row -- one real session was 80% "Dispatched 'on_action_pressed' to 1
+	// script(s)" -- which buries everything that actually happened. Identical consecutive
+	// messages are counted instead of repeated, and the total is flushed as a single line
+	// when something different comes along. Warnings and errors are NEVER collapsed: if a
+	// problem is recurring, seeing it recur is the point.
+	if ( level != SAMLogLevel::Warn && level != SAMLogLevel::Error )
+	{
+		if ( module == repeatModule && message == repeatMessage )
+		{
+			++repeatCount;
+			return;
+		}
+	}
+	flushRepeatLocked();
+	repeatModule  = ( level == SAMLogLevel::Warn || level == SAMLogLevel::Error ) ? std::string() : module;
+	repeatMessage = ( level == SAMLogLevel::Warn || level == SAMLogLevel::Error ) ? std::string() : message;
+	repeatLevel   = level;
+	repeatCount   = 0;
 
 	if ( level == SAMLogLevel::Warn )  { ++warnCount; }
 	if ( level == SAMLogLevel::Error ) { ++errorCount; }
@@ -426,6 +572,30 @@ void SAMLogger::logSessionSummary()
 	samEmitPlain(logFile, samDivider("SESSION SUMMARY"));
 	samEmitPlain(logFile, std::string("  Duration:       ") + dur);
 	samEmitPlain(logFile, "  Hooks fired:    " + std::to_string(hookCount) + " (Lua+JS dispatches, " + std::to_string(hookScriptsTotal) + " script deliveries)");
+	// Which hooks, and how often. This replaces the per-dispatch log lines: a hook firing is
+	// routine, and the count is far more useful than the individual events -- "fired 62
+	// times" tells you something, 62 identical lines do not.
+	if ( !hookTally.empty() )
+	{
+		std::vector<std::pair<long long, std::string>> byCount;
+		for ( const auto& kv : hookTally ) { byCount.push_back(std::make_pair(kv.second, kv.first)); }
+		std::sort(byCount.begin(), byCount.end(),
+			[](const std::pair<long long, std::string>& a, const std::pair<long long, std::string>& b)
+			{ return a.first > b.first; });
+		samEmitPlain(logFile, "  Hooks by name:");
+		int shown = 0;
+		for ( const auto& e : byCount )
+		{
+			if ( shown++ >= 12 ) 
+			{
+				samEmitPlain(logFile, "                  ... and " + std::to_string((int)byCount.size() - 12) + " more");
+				break;
+			}
+			std::string name = e.second;
+			while ( name.size() < 28 ) { name += ' '; }
+			samEmitPlain(logFile, "      " + name + std::to_string(e.first));
+		}
+	}
 	samEmitPlain(logFile, "  API calls:      " + std::to_string(apiCallCount));
 	samEmitPlain(logFile, "  Script errors:  " + std::to_string(scriptErrorCount));
 	samEmitPlain(logFile, "  Warnings:       " + std::to_string(warnCount - warnAtLoadEnd) + " (gameplay)");
@@ -436,11 +606,12 @@ void SAMLogger::logSessionSummary()
 /*-------------------------------------------------------------------------------
 	Gameplay counters.
 -------------------------------------------------------------------------------*/
-void SAMLogger::noteHookFired(int scriptsReached)
+void SAMLogger::noteHookFired(int scriptsReached, const char* eventName)
 {
 	std::lock_guard<std::mutex> lock(logMutex);
 	++hookCount;
 	if ( scriptsReached > 0 ) { hookScriptsTotal += scriptsReached; }
+	if ( eventName && *eventName ) { ++hookTally[eventName]; }
 	if ( phase != Phase::Gameplay )
 	{
 		phase = Phase::Gameplay;

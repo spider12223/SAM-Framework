@@ -1,0 +1,13 @@
+{
+  "$schema": "https://spider12223.github.io/SAM-Framework/schemas/monster.schema.json",
+  "id": "bonehunter:bone_tyrant",
+  "name": "Bone Tyrant",
+  "base_type": "skeleton",
+  "stats": {
+    "HP": 350,
+    "MAXHP": 350,
+    "STR": 18,
+    "CON": 12
+  },
+  "traits": ["boss", "undead", "never_retreat"]
+}

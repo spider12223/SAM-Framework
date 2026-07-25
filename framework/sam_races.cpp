@@ -17,6 +17,11 @@
 #include "main.hpp"     // umbrella — provides decls stat.hpp needs
 #include "stat.hpp"     // Stat members (STR..CHR, HP/MP, playerRace)
 #include "monster.hpp"  // Monster enum, monstertypename[], NUMMONSTERS
+#include "player.hpp"   // players[], MAXPLAYERS (applySpells)
+#include "net.hpp"      // multiplayer, CLIENT, intro
+#include "mod_tools.hpp" // ItemTooltips.spellItems (vanilla spell-name resolve)
+#include "magic/magic.hpp" // addSpell
+#include "sam_spells.hpp"  // grant custom "ns:spell" innate race spells
 
 #include <fstream>
 #include <sstream>
@@ -107,6 +112,10 @@ void SAMRaces::loadFromManifest(const SAMModManifest& manifest)
 			auto it = j.find(k);
 			return (it != j.end() && it->is_string()) ? it->get<std::string>() : std::string();
 		};
+		auto getBool = [&](const char* k, bool dv) -> bool {
+			auto it = j.find(k);
+			return (it != j.end() && it->is_boolean()) ? it->get<bool>() : dv;
+		};
 
 		SAMRaceDef def;
 		def.id = getStr("id");
@@ -158,6 +167,14 @@ void SAMRaces::loadFromManifest(const SAMModManifest& manifest)
 			rd("INT", def.intel); rd("PER", def.per); rd("CHR", def.chr);
 			rd("HP", def.hp); rd("MP", def.mp);
 		}
+		def.bloodDiet = getBool("blood_diet", false);
+		if ( j.contains("starting_spells") && j["starting_spells"].is_array() )
+		{
+			for ( const json& e : j["starting_spells"] )
+			{
+				if ( e.is_string() ) { def.startingSpells.push_back(e.get<std::string>()); }
+			}
+		}
 
 		def.numericId = s_nextId++;
 		s_byId[def.numericId] = def;
@@ -185,6 +202,53 @@ const SAMRaceDef* SAMRaces::get(int raceId)
 {
 	auto it = s_byId.find(raceId);
 	return (it != s_byId.end()) ? &it->second : nullptr;
+}
+
+bool SAMRaces::requiresBloodDiet(int raceId)
+{
+	const SAMRaceDef* def = get(raceId);
+	return def && def->bloodDiet;
+}
+
+void SAMRaces::applySpells(int player)
+{
+	if ( player < 0 || player >= MAXPLAYERS || !players[player] || !stats[player] ) { return; }
+	const SAMRaceDef* def = get(stats[player]->playerRace);
+	if ( !def ) { return; }
+	const bool isLocalPlayer = players[player]->isLocalPlayer();
+	if ( !isLocalPlayer && multiplayer == CLIENT && intro == false ) { return; }
+
+	int learned = 0;
+	for ( const std::string& sp : def->startingSpells )
+	{
+		// Vanilla spell name first, resolved through the same map SAMClasses uses.
+		std::string lower = sp;
+		for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
+		int id = -1;
+		for ( const auto& kv : ItemTooltips.spellItems )
+		{
+			if ( kv.second.internalName == lower ) { id = kv.first; break; }
+		}
+		if ( id < 0 )
+		{
+			// A custom "namespace:spell": grant via the engine spell_t SAMSpells built.
+			if ( SAMSpells::getSpellByName(sp) )
+			{
+				if ( SAMSpells::grantCustomSpell(player, sp) ) { ++learned; }
+			}
+			else
+			{
+				SAM_ERROR(MOD, "race [" + def->id + "] references unknown spell '" + sp + "' — skipping.");
+			}
+			continue;
+		}
+		addSpell(id, player, true); // ignoreSkill: innate spells are never gated
+		++learned;
+	}
+	if ( learned > 0 )
+	{
+		SAM_INFO(MOD, "Applied " + std::to_string(learned) + " innate spell(s) for race [" + def->id + "].");
+	}
 }
 
 int SAMRaces::raceIdAtIndex(int index)

@@ -14,6 +14,23 @@ import {
 import { validate } from '@/lib/validate.js';
 import { checkBalance } from '@/lib/balance.js';
 import { useMod } from '@/state/ModContext.jsx';
+
+/* Engine traits a monster can opt into. A custom monster is a variant of a vanilla
+ * creature, so it inherits that creature's type -- traits are how you say it is something
+ * else. */
+const MONSTER_TRAITS = [
+  ['boss',            'Treated as a boss (music, health bar, death presentation)'],
+  ['trader',          'Can be traded with, like a shopkeeper'],
+  ['untargetable',    'Ignored by autoaim and monster AI — decorative scenery'],
+  ['immobile_turret', 'Rooted in place like a sentry bot'],
+  ['never_retreat',   'Fights to the death instead of fleeing'],
+  ['water_walking',   'Can cross water and lava'],
+  ['undead',          'Weak to smite and holy damage'],
+  ['ally_recolour',   'Gets recoloured when it becomes your ally'],
+  ['tinker_construct','A tinkering construct: salvageable and repairable. Worth NO experience to kill'],
+  ['no_digestion',    'Has no gut, so it never vomits and cannot be made nauseous'],
+  ['pass_through',    'You walk through it, but it can still be hit and killed'],
+];
 import {
   Panel, Field, TextInput, NumberInput, Select, Stepper, GoldButton,
   SearchSelect, ErrorList, SavedNote, BalanceHints,
@@ -88,6 +105,7 @@ function EntryRow({ entry, showSlot, onChange, onRemove }) {
         <button type="button" className="sam-step sam-remove shrink-0" onClick={onRemove} aria-label="remove item">✕</button>
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+
         <Field label="Status">
           <Select
             value={entry.status}
@@ -138,6 +156,8 @@ export default function MonsterEditor() {
 
   const [name, setName] = useState(editDef?.name ?? '');
   const [baseType, setBaseType] = useState(editDef?.base_type ?? MONSTER_BASE_TYPES[0]);
+  const [traits, setTraits] = useState(editDef?.traits ?? []);
+  const [bodyModel, setBodyModel] = useState(editDef?.body?.model ?? '');
   const [sex, setSex] = useState(editDef?.sex != null ? String(editDef.sex) : '');
   const [appearance, setAppearance] = useState(editDef?.appearance ?? '');
   const [stats, setStats] = useState(editDef?.stats ?? {});
@@ -194,6 +214,8 @@ export default function MonsterEditor() {
     if (propNums.xp_award_percent !== '') props.xp_award_percent = propNums.xp_award_percent;
     if (propNums.spellbook_cast_cooldown !== '') props.spellbook_cast_cooldown = propNums.spellbook_cast_cooldown;
     if (Object.keys(props).length) def.properties = props;
+    if (traits.length) def.traits = traits;
+    if (bodyModel.trim()) def.body = { model: bodyModel.trim() };
 
     const equipped = {};
     for (const slot of MONSTER_EQUIP_SLOTS) {
@@ -258,7 +280,7 @@ export default function MonsterEditor() {
 
   const def = useMemo(buildDef,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [name, baseType, sex, appearance, stats, randomStats, profs, flags, propNums,
+    [name, baseType, sex, appearance, stats, randomStats, profs, flags, propNums, bodyModel,
       equip, inventory, numFollowers, followerVariants, shop, spawn, namespace]);
   const preview = useMemo(() => JSON.stringify(def, null, 2), [def]);
   const hints = useMemo(() => checkBalance('monster', def), [def]);
@@ -293,6 +315,35 @@ export default function MonsterEditor() {
         <Panel title="Identity">
           <Field label="Base creature" hint="sprite, AI & limbs come from this vanilla type">
             <Select value={baseType} onChange={setBaseType} options={MONSTER_BASE_TYPES} />
+          </Field>
+          <Field
+            label="Engine traits"
+            hint="What the game should treat this monster AS. Yours is a variant of the base creature above, so without these the game only ever knows it as that creature."
+          >
+            <div className="space-y-1">
+              {MONSTER_TRAITS.map(([key, blurb]) => (
+                <label key={key} className="flex items-start gap-2 text-sm" style={{ color: 'var(--color-parchment)' }}>
+                  <input
+                    type="checkbox"
+                    checked={traits.includes(key)}
+                    onChange={(ev) => setTraits(
+                      ev.target.checked ? [...traits, key] : traits.filter((t) => t !== key),
+                    )}
+                    style={{ marginTop: 3 }}
+                  />
+                  <span>
+                    <span className="sam-mono">{key}</span>
+                    <span style={{ color: '#8a7749' }}> — {blurb}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </Field>
+          <Field
+            label="Custom body model"
+            hint="Optional. A model id from this mod's models list, e.g. mymod:rathalos. Changes only how the creature LOOKS: its behaviour, AI and attacks still come from the base creature above."
+          >
+            <TextInput value={bodyModel} onChange={setBodyModel} placeholder="mymod:rathalos" />
           </Field>
           <div className="grid grid-cols-2 gap-3 mt-3">
             <Field label="Sex">

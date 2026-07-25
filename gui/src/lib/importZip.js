@@ -95,6 +95,10 @@ export async function parseModZip(file) {
     author: manifest.author ?? '',
     version: manifest.version ?? '1.0.0',
     framework_min_version: manifest.framework_min_version ?? '0.1.0',
+    // Carried through untouched so an import/export cycle cannot delete custom .vox
+    // declarations (monster bodies, item models, companions). The builder has no editor for
+    // these; it just must not lose them.
+    models: Array.isArray(manifest.models) ? manifest.models : [],
     framework_max_version: manifest.framework_max_version ?? '',
     barony_min_version: manifest.barony_min_version ?? '',
     barony_max_version: manifest.barony_max_version ?? '',

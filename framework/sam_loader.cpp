@@ -22,7 +22,9 @@
 #include "sam_sync.hpp"    // multiplayer sync — game build only (not in EDITOR_SOURCES)
 #include "sam_patcher.hpp" // layered data patches — game build only (needs PhysFS + outputdir)
 #include "sam_monsters.hpp"// custom monster overlay — game build only (needs PhysFS + outputdir)
-#include "sam_spells.hpp"  // custom spell registry — game build only (GAME_SOURCES)
+#include "sam_spells.hpp"
+#include "sam_models.hpp"  // custom .vox registry — dropped on unload (stale-index fix)
+#include "sam_bodies.hpp"  // custom creature body tags — game build only (GAME_SOURCES)
 #include "sam_backup.hpp"  // daily save backup — game build only (needs outputdir + fs)
 #include "sam_lua_runtime.hpp" // Lua behavior scripting — game build only
 #include "sam_js_runtime.hpp"  // JavaScript + TypeScript scripting — game build only
@@ -228,6 +230,12 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 	}
 
 #ifndef EDITOR
+	// Every mod's items AND spells are now registered, so a spellbook/tome/focus/staff that
+	// named its spell by string ("SPELL_FIREBALL" or "ns:spell") can finally be turned into
+	// a numeric id. Must run here, after the loop: custom spells load per-mod inside it, so
+	// this is the first point at which a cross-mod "ns:spell" reference is guaranteed present.
+	SAMItems::resolveSpellAttributes();
+
 	// All scripts loaded — free the ~9MB TypeScript compiler + its runtime so it
 	// is not resident during gameplay (lazily recreated if a later load needs it).
 	SAMJs::releaseTranspiler();
@@ -284,6 +292,12 @@ void SAMLoader::unload()
 	SAMMonsterPatch::clear();  // reverts sam_patch_monster overrides (F5)
 #ifndef EDITOR
 	SAMSpells::clear();   // drop the custom-spell registry
+	// NOTE: do NOT call SAMModels::clear() here. The id->index map IS the append-time
+	// duplicate guard: appendModels skips an id already in it. Dropping the map on unload
+	// makes the next load re-append every .vox the engine still holds, growing the model
+	// table and its VBOs without bound across mods-off/mods-on cycles. The stale-index
+	// concern it was meant to address is handled by ids being re-resolved on each load.
+	SAMBodies::clear();   // drop custom creature body tags (they cache model indices)
 	SAMSync::clear();
 	SAMPatcher::clear();  // unmount + wipe the generated patch overlay
 	SAMMonsters::clear(); // unmount + wipe the generated monster overlay

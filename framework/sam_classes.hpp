@@ -108,6 +108,18 @@ struct SAMClassDef
 	std::map<std::string, int> statGrowthWeights;
 	int gold = 0;
 
+	// Optional "blood_diet": true — this class sustains on blood, not food (like the vanilla
+	// Accursed). Read by playerRequiresBloodToSustain via SAMClasses::requiresBloodDiet().
+	bool bloodDiet = false;
+
+	// Optional character-select RATINGS (cosmetic; character-creation screen only).
+	//   statRatings : size 0 (undeclared) or exactly 6, in STR,DEX,CON,INT,PER,CHR order;
+	//                 each "bad"/"poor"/"average"/"decent"/"good" (the vanilla vocabulary).
+	//   difficultyAttack/difficultySurvival : 1..5 (the two star lines); 0 = undeclared.
+	std::vector<std::string> statRatings;
+	int difficultyAttack = 0;
+	int difficultySurvival = 0;
+
 	// Optional custom class-select portrait (carousel icon).
 	//   portrait      = path exactly as written in the JSON (relative to the mod
 	//                   folder), kept for round-tripping / diagnostics.
@@ -143,6 +155,14 @@ public:
 
 	// Look up a registered class by its runtime id (>= 1000). null if none.
 	static const SAMClassDef* getClass(int classId);
+
+	// True iff this (custom) class opted into a blood diet. False for a vanilla id, an
+	// unregistered id, or a class without the flag. Read by playerRequiresBloodToSustain.
+	static bool requiresBloodDiet(int classId);
+
+	// How many starting_spells this (custom) class declared. 0 for a vanilla/unregistered id.
+	// Used to protect those front-of-list class spells from a cursed spellbook's forget roll.
+	static int numStartingSpells(int classId);
 
 	// Number of custom classes currently registered.
 	static int count();

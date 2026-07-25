@@ -1,0 +1,13 @@
+{
+  "$schema": "https://spider12223.github.io/SAM-Framework/schemas/item.schema.json",
+  "id": "bonehunter:hunters_charm",
+  "name_identified": "hunter's charm",
+  "name_unidentified": "carved trinket",
+  "description": "Kills come faster to the one who carries it.",
+  "category": "AMULET",
+  "slot": "EQUIPPABLE_IN_SLOT_AMULET",
+  "model_from_item": "AMULET_POISONRESISTANCE",
+  "weight": 1,
+  "gold_value": 200,
+  "level": 4
+}

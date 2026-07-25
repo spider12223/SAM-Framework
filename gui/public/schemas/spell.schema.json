@@ -35,6 +35,12 @@
       "default": 1,
       "description": "Mana required to cast the spell."
     },
+    "difficulty": {
+      "type": "integer",
+      "default": 0,
+      "minimum": 0,
+      "description": "Magic skill (Spellcasting proficiency + INT) needed to LEARN this from a book. 0 (default) means any character can learn it, even a low-INT melee class. Raise it to gate the spell behind magic skill like a vanilla spellbook."
+    },
     "projectile_type": {
       "enum": [
         "missile",

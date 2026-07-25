@@ -42,6 +42,11 @@ struct SAMSpellDef
 	std::string description;
 
 	int manaCost = 1;
+	// Magic skill (Spellcasting proficiency + INT) needed to LEARN it from a book. 0 = the
+	// default = anyone can learn it, even a low-INT melee class (the learn path passes
+	// ignoreSkill for a difficulty-0 custom spell, matching "learnable by any caster").
+	// Set it above 0 to gate the spell behind magic skill like a vanilla spellbook.
+	int difficulty = 0;
 	std::string projectileType = "missile"; // "missile" | "missile_trio" | "none"
 	std::string payload;            // e.g. "force", "fire", "drain_soul" (schema enum)
 

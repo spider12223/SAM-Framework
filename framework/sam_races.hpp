@@ -50,6 +50,13 @@ struct SAMRaceDef
 	// Attribute / HP / MP deltas added on top of the class base (vanilla races add
 	// no attributes, so these are the race's whole stat identity). intel == INT.
 	int str = 0, dex = 0, con = 0, intel = 0, per = 0, chr = 0, hp = 0, mp = 0;
+
+	// Optional "blood_diet": true — this race sustains on blood, not food.
+	bool bloodDiet = false;
+
+	// Optional "starting_spells": innate spells this race knows from creation (vanilla
+	// "SPELL_X" names or custom "namespace:spell"). Granted by SAMRaces::applySpells.
+	std::vector<std::string> startingSpells;
 };
 
 class SAMRaces
@@ -70,6 +77,14 @@ public:
 
 	// Look up a registered race by its runtime id (>= 200). null if none.
 	static const SAMRaceDef* get(int raceId);
+
+	// True iff this (custom) race opted into a blood diet. False for a vanilla race, an
+	// unregistered id, or a race without the flag. Read by playerRequiresBloodToSustain.
+	static bool requiresBloodDiet(int raceId);
+
+	// Grant this player's custom-race innate spells (startingSpells). No-op for a vanilla
+	// race or an unregistered id. Called from initClass, mirroring SAMClasses::applySpells.
+	static void applySpells(int player);
 
 	// Enumerate registered races by index (0..count()-1), ascending id order.
 	// Returns the runtime race id, or -1 if out of range. Used by char-select

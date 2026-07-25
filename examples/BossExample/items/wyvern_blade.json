@@ -1,0 +1,13 @@
+{
+  "$schema": "https://spider12223.github.io/SAM-Framework/schemas/item.schema.json",
+  "id": "bossexample:wyvern_blade",
+  "name_identified": "wyvern blade",
+  "name_unidentified": "fanged sword",
+  "description": "Forged from something that used to fly.",
+  "category": "WEAPON",
+  "slot": "EQUIPPABLE_IN_SLOT_WEAPON",
+  "weapon_skill": "sword",
+  "model_from_item": "CRYSTAL_SWORD",
+  "weight": 5, "gold_value": 600, "level": -1,
+  "attributes": { "ATK": 9 }
+}
