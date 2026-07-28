@@ -57,7 +57,7 @@ namespace
 	// variant display name -> trait bitmask. Empty in vanilla.
 	std::map<std::string, unsigned long long> s_monsterTraits;
 	// variant display name -> mod-declared body model id ("ns:model"). Empty in vanilla.
-	std::map<std::string, std::string> s_monsterBodies;
+	std::map<std::string, SAMMonsters::BodyDef> s_monsterBodies;
 	bool s_anyBodyDeclared = false;
 
 	unsigned long long samMonsterTraitBit(const std::string& name)
@@ -415,22 +415,60 @@ static Translated translateMonster(const json& in, const std::string& modNs, con
 	if ( in.contains("body") && in["body"].is_object() )
 	{
 		const auto& b = in["body"];
-		if ( b.contains("model") && b["model"].is_string() )
+		SAMMonsters::BodyDef bd;
+		if ( b.contains("model") && b["model"].is_string() ) { bd.model = b["model"].get<std::string>(); }
+		if ( b.contains("attack") && b["attack"].is_string() ) { bd.attack = b["attack"].get<std::string>(); }
+		if ( b.contains("hitbox") && b["hitbox"].is_number_integer() )
 		{
-			const std::string mid = b["model"].get<std::string>();
-			if ( !mid.empty() )
+			// Hard ceiling of 127, because sizex/sizey go out in the entity packet as a Sint8
+			// (net.cpp writes (Sint8)entity->sizex). A hitbox of 200 would arrive on a
+			// multiplayer client as -56 and silently break collision for everyone but the host,
+			// so clamp here and say so rather than shipping a box that only works solo.
+			const int hb = b["hitbox"].get<int>();
+			bd.hitbox = (hb < 0) ? 0 : ((hb > 127) ? 127 : hb);
+			if ( hb > 127 )
 			{
-				auto prevBody = s_monsterBodies.find(tr.name);
-				if ( prevBody != s_monsterBodies.end() && prevBody->second != mid )
-				{
-					SAM_WARN(MOD, "Two monsters are both named '" + tr.name + "' with different body "
-						"models. Bodies are matched by name, so the first one loaded wins. Rename one.");
-				}
-				else
-				{
-					s_monsterBodies[tr.name] = mid;
-					s_anyBodyDeclared = true;
-				}
+				SAM_WARN(MOD, "Monster '" + tr.name + "' sets body.hitbox to "
+					+ std::to_string(hb) + ", above the maximum of 127. The hitbox is sent to "
+					"multiplayer clients as a signed byte, so a larger value would arrive "
+					"negative and break collision for them. Clamped to 127.");
+			}
+		}
+		if ( b.contains("offset") && b["offset"].is_object() )
+		{
+			const auto& o = b["offset"];
+			if ( o.contains("forward") && o["forward"].is_number() ) { bd.offsetForward = o["forward"].get<double>(); }
+			if ( o.contains("side") && o["side"].is_number() )       { bd.offsetSide = o["side"].get<double>(); }
+			if ( o.contains("up") && o["up"].is_number() )           { bd.offsetUp = o["up"].get<double>(); }
+		}
+		if ( b.contains("yaw_offset") && b["yaw_offset"].is_number() )
+		{
+			bd.yawOffsetDeg = b["yaw_offset"].get<double>();
+		}
+		if ( b.contains("frame_ticks") && b["frame_ticks"].is_number_integer() )
+		{
+			const int ft = b["frame_ticks"].get<int>();
+			bd.frameTicks = (ft < 1) ? 1 : ft;   // 0 would divide by zero at draw time
+		}
+		if ( b.contains("fly") && b["fly"].is_array() )
+		{
+			for ( const auto& fr : b["fly"] )
+			{
+				if ( fr.is_string() && !fr.get<std::string>().empty() ) { bd.fly.push_back(fr.get<std::string>()); }
+			}
+		}
+		if ( !bd.model.empty() )
+		{
+			auto prevBody = s_monsterBodies.find(tr.name);
+			if ( prevBody != s_monsterBodies.end() && prevBody->second.model != bd.model )
+			{
+				SAM_WARN(MOD, "Two monsters are both named '" + tr.name + "' with different body "
+					"models. Bodies are matched by name, so the first one loaded wins. Rename one.");
+			}
+			else
+			{
+				s_monsterBodies[tr.name] = bd;
+				s_anyBodyDeclared = true;
 			}
 		}
 	}
@@ -709,11 +747,11 @@ unsigned long long SAMMonsters::traitsForName(const char* variantName)
 	return ( it != s_monsterTraits.end() ) ? it->second : 0ULL;
 }
 
-const char* SAMMonsters::bodyModelForName(const char* variantName)
+const SAMMonsters::BodyDef* SAMMonsters::bodyForName(const char* variantName)
 {
 	if ( !variantName || !*variantName || s_monsterBodies.empty() ) { return nullptr; }
 	auto it = s_monsterBodies.find(variantName);
-	return ( it != s_monsterBodies.end() ) ? it->second.c_str() : nullptr;
+	return ( it != s_monsterBodies.end() ) ? &it->second : nullptr;
 }
 
 bool SAMMonsters::anyBodyDeclared()
@@ -726,15 +764,15 @@ void SAMMonsters::reportBodyResolution()
 	if ( s_monsterBodies.empty() ) { return; }
 	for ( const auto& kv : s_monsterBodies )
 	{
-		const int idx = SAMModels::modelIndexForId(kv.second);
+		const int idx = SAMModels::modelIndexForId(kv.second.model);
 		if ( idx >= 0 )
 		{
-			SAM_INFO(MOD, "Monster '" + kv.first + "' body model '" + kv.second
+			SAM_INFO(MOD, "Monster '" + kv.first + "' body model '" + kv.second.model
 				+ "' -> model index " + std::to_string(idx) + ".");
 		}
 		else
 		{
-			SAM_WARN(MOD, "Monster '" + kv.first + "' declares body model '" + kv.second
+			SAM_WARN(MOD, "Monster '" + kv.first + "' declares body model '" + kv.second.model
 				+ "', which is not a registered model. It will render as its base creature. "
 				  "Declare the .vox in this mod's \"models\" list with that exact id.");
 		}

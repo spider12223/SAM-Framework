@@ -10,7 +10,7 @@ import { useMod } from '@/state/ModContext.jsx';
 import { Panel, GoldButton } from '@/components/ui.jsx';
 
 /** The framework's own version (mods declare their own framework_min_version). */
-const SAM_FRAMEWORK_VERSION = '1.9.0';
+const SAM_FRAMEWORK_VERSION = '1.10.0';
 
 /** Where players get S.A.M itself (the framework is a dependency, not a mod). */
 const WORKSHOP_URL = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472';
@@ -28,20 +28,18 @@ const TRAVELS = [
  * thing a returning modder sees, and the point is 'here is what you can do now that you
  * could not before', not a changelog. */
 const WHATS_NEW = [
-  ['Monsters can wear your own model',
-   'Point a monster at your own .vox and it wears it. It still moves and fights like the creature you based it on, but it can look like anything you can build.'],
-  ['Eleven monster traits',
-   'Say your monster is a boss, is undead, is a shopkeeper, never flees, walks on lava, or can be walked through. It gets the real behaviour, boss music and health bar included.'],
-  ['Spell items all work',
-   'Custom spellbooks, tomes, foci and magic staves teach and cast their spell, including spells you invented. They take a spell by name now, not a number.'],
-  ['Custom classes work in multiplayer',
-   'The assist shrine could only send a vanilla class before, so custom classes were singleplayer only.'],
-  ['Class and race polish',
-   'Real stat bars and difficulty in character select, blood drinking classes, innate racial spells, race description cards, and custom classes in the random class button.'],
-  ['Curable effects and blessed gear',
-   'A custom status effect can be cured by a cure ailment potion, and blessing or cursing a custom item now changes its AC.'],
-  ['Two bugs that could hurt you',
-   'Mixing acid with a custom potion used to explode and could kill you. Duplicating one with water consumed the water and gave nothing back. Both fixed.'],
+  ['Your creature animates',
+   'Give it a list of models and it cycles them while it moves. Two frames is already enough to read as a walk or a wingbeat. Barony has no skeletons, so this is exactly how the vanilla rat animates.'],
+  ['An attack frame',
+   'Name one more model and the creature switches to it while it is swinging, so you can see the bite coming.'],
+  ['Fix a model that faces the wrong way',
+   'One rotation number in the mod, instead of asking your artist to export every frame again. Try 90, 180 or 270 until it faces you.'],
+  ['Put the head where the bite comes from',
+   'The game spawns attacks from the exact spot a creature stands on, and on a long creature that spot sits mid body, so a dragon looks like it bites with its belly. Slide the model back and its head lands there instead.'],
+  ['Set how big it is to hit',
+   'A big model used to keep the small hitbox of the creature underneath it, so you had to swing at its ankles. Now you can size the box to the model. It blocks movement too, so a wide creature really does fill a corridor.'],
+  ['Custom bodies work on any creature now',
+   'Basing your monster on a bat, duck, mimic, moth or sentry bot used to show nothing at all, and every other creature showed its old arms and legs poking out of your model. Both fixed, so all 41 creatures are usable as a base.'],
 ];
 
 /** sam-well stat box: big gold number over a small-caps label. */
@@ -91,13 +89,13 @@ export default function Dashboard() {
       {/* --------------------------------------------------- what is new */}
       <Panel title={`New in ${SAM_FRAMEWORK_VERSION}`}>
         <p className="m-0" style={{ color: 'var(--color-parchment)' }}>
-          Barony decides what a thing <em>is</em> by checking it against hardcoded lists of its own
-          content. Modded content was never on those lists, so it quietly fell through every check.
-          That is why a custom spellbook could teach nothing and a custom boss got no boss music,
-          with no error to tell you why.{' '}
+          The last release let a monster wear your own model. It just stood there, frozen, facing
+          whichever way you happened to build it, and it kept the hitbox of whatever creature was
+          underneath it.{' '}
           <strong style={{ color: 'var(--color-gold)' }}>
-            This release puts modded content on about thirty of those lists.
-          </strong>
+            This release makes that model move, face you, and be the right size to hit.
+          </strong>{' '}
+          Everything here is set in the monster editor, with no scripting.
         </p>
         <ul className="mt-3 mb-0 space-y-2" style={{ listStyle: 'none', padding: 0 }}>
           {WHATS_NEW.map(([title, blurb]) => (

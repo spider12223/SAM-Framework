@@ -158,6 +158,16 @@ export default function MonsterEditor() {
   const [baseType, setBaseType] = useState(editDef?.base_type ?? MONSTER_BASE_TYPES[0]);
   const [traits, setTraits] = useState(editDef?.traits ?? []);
   const [bodyModel, setBodyModel] = useState(editDef?.body?.model ?? '');
+  const [bodyFly, setBodyFly] = useState((editDef?.body?.fly ?? []).join(', '));
+  const [bodyAttack, setBodyAttack] = useState(editDef?.body?.attack ?? '');
+  const [bodyFrameTicks, setBodyFrameTicks] = useState(editDef?.body?.frame_ticks ?? '');
+  const [bodyYaw, setBodyYaw] = useState(editDef?.body?.yaw_offset ?? '');
+  const [bodyHitbox, setBodyHitbox] = useState(editDef?.body?.hitbox ?? '');
+  const [bodyOffset, setBodyOffset] = useState({
+    forward: editDef?.body?.offset?.forward ?? '',
+    side: editDef?.body?.offset?.side ?? '',
+    up: editDef?.body?.offset?.up ?? '',
+  });
   const [sex, setSex] = useState(editDef?.sex != null ? String(editDef.sex) : '');
   const [appearance, setAppearance] = useState(editDef?.appearance ?? '');
   const [stats, setStats] = useState(editDef?.stats ?? {});
@@ -215,7 +225,21 @@ export default function MonsterEditor() {
     if (propNums.spellbook_cast_cooldown !== '') props.spellbook_cast_cooldown = propNums.spellbook_cast_cooldown;
     if (Object.keys(props).length) def.properties = props;
     if (traits.length) def.traits = traits;
-    if (bodyModel.trim()) def.body = { model: bodyModel.trim() };
+    if (bodyModel.trim()) {
+      const body = { model: bodyModel.trim() };
+      const fly = bodyFly.split(',').map((s) => s.trim()).filter(Boolean);
+      if (fly.length) body.fly = fly;
+      if (bodyAttack.trim()) body.attack = bodyAttack.trim();
+      if (bodyFrameTicks !== '') body.frame_ticks = Number(bodyFrameTicks);
+      if (bodyYaw !== '') body.yaw_offset = Number(bodyYaw);
+      if (bodyHitbox !== '') body.hitbox = Number(bodyHitbox);
+      const off = {};
+      for (const k of ['forward', 'side', 'up']) {
+        if (bodyOffset[k] !== '') off[k] = Number(bodyOffset[k]);
+      }
+      if (Object.keys(off).length) body.offset = off;
+      def.body = body;
+    }
 
     const equipped = {};
     for (const slot of MONSTER_EQUIP_SLOTS) {
@@ -281,6 +305,7 @@ export default function MonsterEditor() {
   const def = useMemo(buildDef,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [name, baseType, sex, appearance, stats, randomStats, profs, flags, propNums, bodyModel,
+      bodyFly, bodyAttack, bodyFrameTicks, bodyYaw, bodyHitbox, bodyOffset,
       equip, inventory, numFollowers, followerVariants, shop, spawn, namespace]);
   const preview = useMemo(() => JSON.stringify(def, null, 2), [def]);
   const hints = useMemo(() => checkBalance('monster', def), [def]);
@@ -345,6 +370,58 @@ export default function MonsterEditor() {
           >
             <TextInput value={bodyModel} onChange={setBodyModel} placeholder="mymod:rathalos" />
           </Field>
+          {bodyModel.trim() ? (
+            <div
+              style={{
+                marginTop: 10, padding: '10px 12px 12px',
+                border: '1px solid var(--color-gold-dim)', borderRadius: 4,
+              }}
+            >
+              <Field
+                label="Movement frames"
+                hint="Optional. Model ids separated by commas, cycled while the creature is moving. Barony has no skeletal animation, so creatures animate by swapping whole models. Two frames is already enough to read as a walk or a wingbeat. Every frame should be the same size and centred the same way, or the creature will jump as it animates."
+              >
+                <TextInput
+                  value={bodyFly}
+                  onChange={setBodyFly}
+                  placeholder="mymod:flap_low, mymod:flap_mid, mymod:flap_high, mymod:flap_mid"
+                />
+              </Field>
+              <div className="grid grid-cols-2 gap-3 mt-3">
+                <Field label="Attack frame" hint="Shown while the creature is attacking. Leave empty to keep the idle model.">
+                  <TextInput value={bodyAttack} onChange={setBodyAttack} placeholder="mymod:attack" />
+                </Field>
+                <Field label="Ticks per frame" hint="How long each movement frame is held. Vanilla's rat uses 10; lower is faster.">
+                  <NumberInput value={bodyFrameTicks} min={1} onChange={setBodyFrameTicks} placeholder="10" />
+                </Field>
+              </div>
+              <div className="grid grid-cols-2 gap-3 mt-3">
+                <Field label="Rotation (degrees)" hint="For a model built facing a different way than Barony expects. Try 90, 180 or 270 if your creature renders sideways or backwards.">
+                  <NumberInput value={bodyYaw} onChange={setBodyYaw} placeholder="0" />
+                </Field>
+                <Field label="Hitbox size" hint="How big the creature is to hit and to walk into. Empty keeps the base creature's size. A bat is 2 and the devil, the largest vanilla monster, is 20. A big model needs a bigger number or players swing at empty air, but this also blocks movement, so a value near the model's full width will wall off a corridor. Maximum 127.">
+                  <NumberInput value={bodyHitbox} min={0} max={127} onChange={setBodyHitbox} placeholder="0" />
+                </Field>
+              </div>
+              <Field
+                label="Model offset (voxels)"
+                hint="Slides the model relative to the creature's real position, along its own facing. That position is where the game spawns attacks from, and on a long creature it sits mid-body, so it looks like it bites with its belly. Push the model back (negative forward) to put its head there instead. Up lifts a flying creature off the floor."
+              >
+                <div className="grid grid-cols-3 gap-3">
+                  {[['forward', 'Forward'], ['side', 'Side'], ['up', 'Up']].map(([key, label]) => (
+                    <label key={key} style={{ display: 'block' }}>
+                      <span style={{ fontSize: 11, color: '#8a7749' }}>{label}</span>
+                      <NumberInput
+                        value={bodyOffset[key]}
+                        onChange={(v) => setBodyOffset({ ...bodyOffset, [key]: v })}
+                        placeholder="0"
+                      />
+                    </label>
+                  ))}
+                </div>
+              </Field>
+            </div>
+          ) : null}
           <div className="grid grid-cols-2 gap-3 mt-3">
             <Field label="Sex">
               <Select

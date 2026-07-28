@@ -486,11 +486,61 @@
     },
     "body": {
       "type": "object",
-      "description": "Optional custom BODY model. The creature keeps its base_type's behaviour, AI and hitbox and only LOOKS different. Declare the .vox under the mod's top-level \"models\" list, then name it here.",
+      "description": "Optional custom BODY model. The creature keeps its base_type's behaviour, AI and hitbox and only LOOKS different. Barony has no skeletal animation, so movement is animated by swapping whole models, the same way vanilla creatures do.",
       "properties": {
         "model": {
           "type": "string",
-          "description": "A model id you declared in this mod's \"models\" list, e.g. \"mymod:rathalos\"."
+          "description": "Idle model. A model id from this mod's \"models\" list, e.g. \"mymod:rathalos\"."
+        },
+        "fly": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Frames cycled while the creature is moving. Two frames already reads as a walk or a wingbeat. Every frame should be the same size and centred the same way, or the creature will jump as it animates."
+        },
+        "attack": {
+          "type": "string",
+          "description": "Model shown while the creature is attacking. Omit to keep the idle model."
+        },
+        "frame_ticks": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 10,
+          "description": "Ticks per frame of the movement cycle. Vanilla's rat uses 10; lower is faster."
+        },
+        "yaw_offset": {
+          "type": "number",
+          "default": 0,
+          "description": "Rotate the model this many degrees, for a .vox modelled facing a different way than Barony expects. Try 90, 180 or 270 if your creature renders sideways or backwards."
+        },
+        "offset": {
+          "type": "object",
+          "description": "Slide the model relative to the creature's real position, along its own facing, in voxels. The creature's position is where the game spawns its attacks from, and on a long creature that point sits mid-body, so it looks like it bites with its belly. Push the model backward (negative forward) to put its head there instead.",
+          "properties": {
+            "forward": {
+              "type": "number",
+              "default": 0,
+              "description": "Positive moves the model forward, negative moves it back."
+            },
+            "side": {
+              "type": "number",
+              "default": 0
+            },
+            "up": {
+              "type": "number",
+              "default": 0,
+              "description": "Raise or lower the model, e.g. to lift a flying creature off the floor."
+            }
+          },
+          "additionalProperties": false
+        },
+        "hitbox": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 127,
+          "default": 0,
+          "description": "How big the creature is to hit and to walk into. 0 keeps the base creature's size. For scale: a bat is 2, and the devil, the largest vanilla monster, is 20. A big model needs a bigger number or you will be swinging at empty air, but this also blocks movement, so a value near the model's full width will wall off a corridor."
         }
       },
       "required": [

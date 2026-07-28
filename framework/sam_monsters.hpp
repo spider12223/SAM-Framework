@@ -67,11 +67,38 @@ public:
 	// is every vanilla monster, so the engine's trait check is a no-op without a mod.
 	static unsigned long long traitsForName(const char* variantName);
 
-	// Mod-declared custom BODY model id ("namespace:model") for a monster VARIANT, by the
-	// variant's display name, or nullptr. Returns the ID STRING, not an engine model index:
+	// A mod-declared custom BODY for a monster variant. Model IDS, not engine indices:
 	// models are appended to the engine table AFTER monster JSON is parsed, and an index is
-	// load-order dependent while the id is stable. Resolved lazily by SAMBodies at draw time.
-	static const char* bodyModelForName(const char* variantName);
+	// load-order dependent while the id is stable. SAMBodies resolves these lazily at draw.
+	//
+	// Barony has no skeletal animation -- vanilla creatures animate by swapping whole models
+	// (the rat is two models alternating every 10 ticks). So do we: `fly` is a frame list
+	// cycled while the creature moves, `attack` is shown while it is swinging.
+	struct BodyDef
+	{
+		std::string model;                 // idle / fallback (required)
+		std::vector<std::string> fly;      // movement cycle; empty = never animate
+		std::string attack;                // shown while attacking; empty = use idle
+		int frameTicks = 10;               // ticks per fly frame (vanilla rat uses 10)
+		// Slide the model relative to the creature's actual position, along its OWN facing.
+		// The entity origin is where the engine spawns attacks and measures range from, and
+		// on a long creature that origin sits mid-body -- so a dragon appears to bite from
+		// its belly. Pushing the model BACKWARD (negative forward) puts its head on the
+		// origin, so attacks read as coming from the head.
+		double offsetForward = 0.0;        // +forward / -backward, in voxels
+		double offsetSide = 0.0;
+		double offsetUp = 0.0;
+		// Half-extent of the creature's hitbox, in the engine's units (vanilla bat is 2, the
+		// devil -- the biggest vanilla boss -- is 20). 0 = leave the base creature's box.
+		// This is what you swing at AND what blocks movement, so a value near the model's
+		// full size makes a big creature impassable in a corridor.
+		int hitbox = 0;
+		double yawOffsetDeg = 0.0;         // rotate the model this many degrees about Z, for a
+		                                   // .vox authored facing a different way than Barony expects
+	};
+
+	// The body declared for a monster VARIANT, by the variant's display name, or nullptr.
+	static const BodyDef* bodyForName(const char* variantName);
 
 	// True if ANY loaded mod declared a monster body. The renderer's fast path checks this
 	// so a game with no body-declaring mod never touches a monster's Stat while drawing.

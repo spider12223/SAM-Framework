@@ -47,6 +47,17 @@ public:
 	// immediately when nothing is registered, which is the vanilla no-op path.
 	static int modelForEntity(const Entity* entity);
 
+	// Extra rotation (DEGREES about the vertical axis) for this entity's custom body, or 0.
+	// A .vox authored facing a different way than Barony expects would otherwise render
+	// sideways, and re-exporting every frame is a worse fix than one number in the JSON.
+	static double yawOffsetForEntity(const Entity* entity);
+
+	// Model offset for this entity's custom body, in the model's OWN facing (voxels).
+	// Returns false and leaves the outputs untouched when there is nothing to offset.
+	// Lets a long creature put its HEAD on the entity origin, which is where the engine
+	// spawns attacks from -- otherwise a dragon appears to bite you with its belly.
+	static bool offsetForEntity(const Entity* entity, double& fwd, double& side, double& up);
+
 	// Drop every registration (mod unload / new game).
 	static void clear();
 
