@@ -1,35 +1,51 @@
 [h1]S.A.M Framework (Support All Mods)[/h1]
 
-Mod Barony with plain files. No C++, no compiler. Write a small .json, drop it in your mods folder, and the game loads it as a real class, item, monster, spell or status effect.
+Mod Barony with plain files. No C++, no compiler, no engine knowledge. Write a small .json, drop it in your mods folder, and the game loads it as a real class, item, monster, spell or status effect. Add a short script next to it if you want it to actually do something.
 
-[b]S.A.M is a dependency, not a playable mod.[/b] It is the thing other mods are built on. Install it once and every S.A.M mod works.
+[b]S.A.M is a dependency, not a playable mod.[/b] On its own it adds nothing to play. It is the thing other mods are built on. Install it once and every S.A.M mod works.
 
-[b]READ THIS: subscribing here does NOT install it.[/b] S.A.M is a modified barony.exe, and Steam cannot replace a game's .exe by itself. You have to run the installer one time. It takes about a minute.
+[b]READ THIS: subscribing here does NOT install it.[/b] S.A.M is a modified barony.exe, and Steam cannot replace a game's .exe by itself. You have to run the installer one time. Steps are right below and it takes about a minute.
 
 [hr][/hr]
 
-[h1]HOW TO INSTALL[/h1]
+[h1]HOW TO INSTALL (step by step)[/h1]
 
-[b]Step 1.[/b] Own Barony on Steam and launch the game once, so its files exist. Then close the game.
+[b]Step 1.[/b] Own Barony on Steam and launch it once so its files exist. Then close the game.
 
 [b]Step 2.[/b] Open the download page:
 [url=https://github.com/spider12223/SAM-Framework/releases/latest]https://github.com/spider12223/SAM-Framework/releases/latest[/url]
 
-[b]Step 3.[/b] Scroll to the [b]Assets[/b] list and click [b]SAM_Framework_Installer.exe[/b]. There is only one installer and it never goes out of date.
+[b]Step 3.[/b] Scroll down to the [b]Assets[/b] list and click [b]SAM_Framework_Installer.exe[/b]. It saves to your Downloads folder.
 
-[b]Step 4.[/b] Open your [b]Downloads[/b] folder and double click it.
+[b]Step 4.[/b] Open [b]Downloads[/b] and double click [b]SAM_Framework_Installer.exe[/b].
 
 [b]Step 5.[/b] If Windows says "Windows protected your PC", click [b]More info[/b], then [b]Run anyway[/b]. The installer is not code signed, which is the only reason Windows warns.
 
-[b]Step 6.[/b] It finds your Barony folder on its own. Check the path is right, then click [b]Install[/b].
+[b]Step 6.[/b] It finds your Barony folder on its own. Check the path looks right, then click [b]Install[/b].
 
-[b]Step 7.[/b] It saves your original game file as [b]barony_vanilla.exe[/b] (your backup), then puts the S.A.M version in place. Close the installer.
+[b]Step 7.[/b] Let it finish. It saves your original game as [b]barony_vanilla.exe[/b] (your backup), then puts the S.A.M version in place. Close the installer.
 
-[b]Step 8.[/b] Launch Barony from Steam like normal.
+[b]Step 8.[/b] Launch Barony from Steam as normal.
 
-[b]Step 9.[/b] Look at the bottom of the main menu. If you see a shield icon and [b]S.A.M Framework[/b], you are done. If not, repeat steps 3 to 7.
+[b]Step 9.[/b] Look at the bottom of the main menu. A shield icon and the words [b]S.A.M Framework[/b] mean you are done. If it is not there, repeat steps 3 to 7.
 
 [b]You only do this once.[/b] To update later, run the installer again. It always grabs the newest version.
+
+[hr][/hr]
+
+[h1]PLEASE READ BEFORE INSTALLING[/h1]
+
+S.A.M replaces the game's program file, and we build it without a few services that need the developer's own private credentials. [b]While S.A.M is installed you lose three things: crossplay with Epic Games Store players, online leaderboard scores, and video playback (the intro and animated signs).[/b] Everything else, including Steam multiplayer, works normally.
+
+These are not bugs we can fix. They need private Epic and PlayFab credentials that only the game's developer has. Switching back takes ten seconds, see below.
+
+[hr][/hr]
+
+[h1]HOW TO GO BACK TO NORMAL BARONY[/h1]
+
+Delete barony.exe, then rename [b]barony_vanilla.exe[/b] back to [b]barony.exe[/b]. Or right click Barony in Steam, pick Properties, then Installed Files, then Verify integrity of game files.
+
+Nothing else is ever changed. S.A.M does not edit any of the game's own files, and it backs up your saves while mods are active.
 
 [hr][/hr]
 
@@ -37,80 +53,71 @@ Mod Barony with plain files. No C++, no compiler. Write a small .json, drop it i
 
 [b]Step 1.[/b] Get a S.A.M mod. It is a folder. If you got a .zip, unzip it first.
 
-[b]Step 2.[/b] Put that folder in:
+[b]Step 2.[/b] Put that folder in your Barony mods folder, usually:
 [b]C:\Program Files (x86)\Steam\steamapps\common\Barony\mods\[/b]
 
-[b]Step 3.[/b] Launch Barony, click [b]Mods[/b], click the [b]Local Mods[/b] tab, then [b]Load Mod[/b] next to your mod.
+[b]Step 3.[/b] Launch Barony, click [b]Mods[/b], open the [b]Local Mods[/b] tab, then click [b]Load Mod[/b] next to yours.
 
-[b]Step 4.[/b] Click [b]Start Modded Game[/b]. Your class or item is now in the game.
+[b]Step 4.[/b] Click [b]Start Modded Game[/b] at the bottom.
 
-[b]Workshop mod?[/b] Subscribe, then let Steam finish downloading before you launch. If [b]Load Mod[/b] does nothing, Steam has not downloaded it yet. Close Steam fully, reopen, wait, then launch.
-
-[b]To go back to normal Barony:[/b] delete barony.exe and rename [b]barony_vanilla.exe[/b] back to [b]barony.exe[/b]. Or verify the game files in Steam. Nothing else is ever changed, and your saves are backed up while mods are active.
+[b]Workshop mod instead?[/b] Subscribe, then let Steam finish downloading before you launch. If [b]Load Mod[/b] does nothing, Steam has not finished. Close Steam fully, reopen, wait, then launch.
 
 [hr][/hr]
 
-[h1]HOW TO MAKE A MOD[/h1]
-
-[b]The easy way, in your browser. Nothing to download:[/b]
-[b][url=https://spider12223.github.io/SAM-Framework/]S.A.M Mod Builder[/url][/b]
-Fill in the boxes, export a ready to use .zip. If it exports, it loads.
-
-[b]By hand,[/b] a mod is a folder with a mod.json saying what it contains, then one file per thing you add. Here is a whole working weapon:
-
-[code]{
-  "id": "mymod:bone_axe",
-  "name_identified": "bone axe",
-  "category": "WEAPON",
-  "slot": "EQUIPPABLE_IN_SLOT_WEAPON",
-  "weapon_skill": "axe",
-  "attributes": { "ATK": 4 }
-}[/code]
-
-That is a real axe in Barony's item table. It trains the Axe skill, shows proper damage in its tooltip, appears in shops and chests, and can be a class's starting weapon.
-
-You can make classes, items, monsters, spells, status effects, playable races, sounds, models and tinkering recipes the same way.
-
-[b]A JSON file says what your thing is. A script says what it does.[/b] Most mods never need a script. If you want one, drop a .lua, .js or .ts file next to your JSON and it loads by itself:
-
-[code]function on_event(e)
-  if e.name == "player.on_kill" then
-    sam_message(e.player, "Another one falls.")
-  end
-end[/code]
-
-56 events to react to, over 90 functions to act with. Scripts are sandboxed: a broken one switches itself off and cannot crash your game.
-
-[b]Two example mods ship with the framework[/b] and are the fastest way to learn. One uses every capability once, the other is a full custom boss.
-
-[hr][/hr]
-
-[h1]WHAT IS NEW IN 1.10.0[/h1]
-
-1.9.0 let a monster wear your own model. It stood perfectly still, faced whichever way you happened to build it, and kept the hitbox of whatever creature was underneath it. [b]1.10.0 makes that model move, face you, and be the right size to hit.[/b]
-
+[h1]WHAT YOU CAN MAKE[/h1]
 [list]
-[*][b]Your creature animates.[/b] Give it a list of models and it cycles them while it moves. Two frames is already enough to read as a walk or a wingbeat. Barony has no skeletons, so this is exactly how the vanilla rat animates.
-[*][b]An attack frame.[/b] Name one more model and it switches to that while swinging, so players see the bite coming.
-[*][b]Fix a model that faces the wrong way.[/b] One rotation number, instead of exporting every frame again.
-[*][b]Put the head where the bite comes from.[/b] The game spawns attacks from the spot a creature stands on, and on a long creature that sits mid body, so a dragon looks like it bites with its belly. Slide the model back and its head lands there instead.
-[*][b]Set how big it is to hit.[/b] A big model used to keep the small hitbox of the creature underneath it, so you swung at its ankles. Now you can size the box to the model, and a wide creature really does fill a corridor.
-[*][b]Custom bodies work on every creature.[/b] Bats, ducks, mimics, moths and sentry bots used to show nothing at all, and everything else showed its old arms and legs poking through your model. Both fixed, so all 41 creatures are usable as a base.
+[*][b]Classes.[/b] Attributes, skills, starting gear (including your own items), starting spells, level up growth, gold, and a character select portrait with real stat bars and difficulty stars.
+[*][b]Items and weapons.[/b] Real entries in Barony's item table, with category, equip slot, weight, value, ATK and AC, your own model and icon.
+[*][b]Monsters.[/b] Variants of any creature with your own stats, gear, name, followers and spawn floors, plus your own model that animates as it moves and attacks.
+[*][b]Spells.[/b] Custom spells that really cast, through the game's own projectile pipeline.
+[*][b]Status effects.[/b] Your own named buffs and afflictions, with duration, strength, AC and damage changes.
+[*][b]Playable races.[/b] Play as a monster body.
+[*][b]Sounds.[/b] Ship your own .ogg files and play them from a script.
+[*][b]Custom .vox models.[/b] Your own voxel models, loaded at startup.
+[*][b]Tinkering recipes.[/b] Add, remove or re-cost what the tinkering kit can build.
+[*][b]Vanilla patches.[/b] Edit the game's data in layers, so two mods stack instead of overwriting each other.
 [/list]
 
-Everything above is set in the Mod Builder, with no scripting. 1.9.0's additions are all still here: custom monster models, eleven monster traits, working spell items, custom classes in multiplayer, and the scripting reference.
+[hr][/hr]
+
+[h1]SCRIPTING (Lua, JavaScript, TypeScript)[/h1]
+
+JSON says what your content [i]is[/i]. A script says what it [i]does[/i]. Drop a .lua, .js or .ts file next to any class or item JSON and it loads automatically. TypeScript is compiled for you.
+
+[b]60 events[/b] to react to. Combat, level up, death, floor change, items (equip, use, pick up, identify, break), shops, chests, traps, monsters, key presses, a per tick handler, world things (doors, levers, fountains, teleporters, projectile hits), and bound actions that follow whatever the player rebound them to.
+
+[b]96 functions[/b] to act with. Grant items and gold at any quality, read and set stats, level a player up for real, apply and read status effects, cast spells, deal or change damage, move speed, teleport, spawn monsters and items, full monster control by id, timers, saved data that survives between runs, screen effects, and live patching that reverts when your mod unloads.
+
+Only two functions ever get called: [b]on_event(event)[/b] and [b]on_tick(event)[/b]. Everything else arrives as [b]event.name[/b] inside on_event.
+
+[b]Safe by design.[/b] Scripts run sandboxed with a memory cap and an instruction limit. A broken script switches itself off and writes why to the log. It cannot crash your game.
 
 [hr][/hr]
 
-[h1]ONE THING TO KNOW BEFORE YOU INSTALL[/h1]
+[h1]MAKE A MOD IN YOUR BROWSER[/h1]
 
-S.A.M replaces the game's program file, and we build it without a few services that need the developer's own private credentials. [b]While S.A.M is installed you lose three things: crossplay with Epic Games Store players, online leaderboard scores, and video playback (the intro and animated signs).[/b] Everything else, including Steam multiplayer, works normally.
+The easiest way, nothing to download:
 
-These are not bugs we can fix. They need private Epic and PlayFab credentials that only the game's developer has.
+[b][url=https://spider12223.github.io/SAM-Framework/]S.A.M Mod Builder[/url][/b]
 
-Your original game is saved as [b]barony_vanilla.exe[/b]. Rename it back to barony.exe any time you want crossplay, and rerun the installer when you want S.A.M again. Saves and mods are untouched either way.
+Build a class, item, monster, spell or effect with dropdowns and sliders, watch the JSON update live, then export a ready to use .zip. It checks your work against the same rules the game uses, so if it exports, it loads. You can import an existing mod to edit it too.
 
-S.A.M is open source. Framework, Mod Builder, schemas, docs and examples:
+[hr][/hr]
+
+[h1]PUBLISHING YOUR OWN MOD[/h1]
+[list]
+[*][b]1.[/b] Build and test it locally with S.A.M installed.
+[*][b]2.[/b] Put a [b]preview.png[/b] in your mod folder. That exact filename becomes the thumbnail, and the upload can fail without one.
+[*][b]3.[/b] Upload the folder as a Workshop item.
+[*][b]4.[/b] Add [b]S.A.M Framework[/b] as a Required Item, and tell players in your description that they must run the S.A.M installer. Subscribing alone does not install the exe.
+[/list]
+
+[hr][/hr]
+
+[h1]SOURCE[/h1]
+
+S.A.M is open source. The framework, the Mod Builder, the schemas and the docs:
+
 [b][url=https://github.com/spider12223/SAM-Framework]github.com/spider12223/SAM-Framework[/url][/b]
 
 [i]Barony (c) Turning Wheel LLC. S.A.M is an unofficial community framework, not affiliated with or endorsed by Turning Wheel LLC.[/i]
