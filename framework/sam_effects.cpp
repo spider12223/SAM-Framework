@@ -274,24 +274,32 @@ void SAMEffects::suppressCurableForTest(bool on) { s_curableSuppressed = on; }
 void SAMEffects::reapplyDisplayEntries()
 {
 #ifndef EDITOR
-	// A neutral vanilla status-fx icon so a custom effect always renders SOMETHING on the HUD
-	// (per-effect custom icons are a later slice — they need the absolute-path Image::get flow).
+	// A neutral vanilla status-fx icon, used when a mod ships no icon of its own so a custom
+	// effect always renders SOMETHING on the HUD.
 	static const char* const kFallbackIcon = "*images/ui/HUD/statusfx/bellbuff.png";
 	for ( const auto& kv : s_bySlot )
 	{
 		const SAMEffectDef& d = kv.second;
+		// A mod's own icon, if it shipped one. def.icon is already an absolute path (joined
+		// onto modPath at parse time) and Image::get handles that: it only rewrites a path
+		// PhysFS owns, and passes anything else through to the raw loader untouched. The
+		// leading '*' selects nearest-neighbour filtering, matching the vanilla pixel art.
+		//
+		// This used to be deferred with a note saying it "needs the absolute-path Image::get
+		// flow" -- that flow was already there, so the note outlived the blocker.
+		const std::string icon = d.icon.empty() ? std::string(kFallbackIcon) : ("*" + d.icon);
 		auto& e = StatusEffectQueue_t::StatusEffectDefinitions_t::allEffects[d.slot];
 		e.effect_id = d.slot;
 		e.internal_name = d.id;
 		e.name = d.name;
 		e.desc = d.tooltip;
-		e.imgPath = kFallbackIcon;
+		e.imgPath = icon;
 		e.neverDisplay = d.hudHidden;
 		// getName(variation>=0)/getDesc index the *Variations vectors; give them one entry each
 		// so the HUD can never index an empty vector out of bounds.
 		e.nameVariations.clear();      e.nameVariations.push_back(d.name);
 		e.descVariations.clear();      e.descVariations.push_back(d.tooltip);
-		e.imgPathVariations.clear();   e.imgPathVariations.push_back(kFallbackIcon);
+		e.imgPathVariations.clear();   e.imgPathVariations.push_back(icon);
 	}
 	if ( !s_bySlot.empty() )
 	{

@@ -10,7 +10,7 @@ import { useMod } from '@/state/ModContext.jsx';
 import { Panel, GoldButton } from '@/components/ui.jsx';
 
 /** The framework's own version (mods declare their own framework_min_version). */
-const SAM_FRAMEWORK_VERSION = '1.10.1';
+const SAM_FRAMEWORK_VERSION = '1.10.2';
 
 /** Where players get S.A.M itself (the framework is a dependency, not a mod). */
 const WORKSHOP_URL = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472';
@@ -28,20 +28,20 @@ const TRAVELS = [
  * thing a returning modder sees, and the point is 'here is what you can do now that you
  * could not before', not a changelog. */
 const WHATS_NEW = [
-  ['Custom item icons actually apply',
-   'The icon path is relative to your mod folder, but model paths are not, so anyone who copied the model style silently got no icon and no error. Both spellings work now, and a path that resolves the wrong way says so in the log.'],
-  ['A class that never shows up now tells you why',
-   'By far the most common cause is a mod.json with no classes listed. That was completely silent. If class files exist on disk but are not declared, the log names them and prints the exact line to paste.'],
-  ['Two star ratings with the right names',
-   'The character-select stars were called attack and survival, which matched neither line on the card. They are survival and complexity now. The old names still work, so nothing you published breaks.'],
-  ['The stars and bars have an editor',
-   'They were readable by the game but had no field in the Mod Builder, so opening a class and exporting it again quietly deleted them. Now they are real controls.'],
-  ['Class icons light up like the base game',
-   'Vanilla ships a dim icon and a bright one and swaps them. Add a second PNG with portrait_selected and yours does the same.'],
-  ['Know what you just killed',
-   'sam_get_monster_type and sam_get_monster_name give you a creature name from a uid, instead of logging a number once and hardcoding it.'],
-  ['Clearer failures',
-   'A MagicaVoxel .vox is now named as the problem instead of blaming your file path, and a typo in stat growth weights is caught instead of silently falling back to neutral.'],
+  ['Ship your own dungeon',
+   'Barony builds a floor by stamping prefab rooms into an open arena, which means a mod can ship a whole procedurally generated branch as data. Three map files is the minimum. Point a portal at it and it generates, no scripting and no editing the level list.'],
+  ['Steer monsters from a script',
+   'Barony has no per creature AI at all, just one shared brain nothing could drive. Four new functions steer it: path to a tile with real pathfinding, face a tile, swing now, or charge.'],
+  ['A charge attack that was already in the game',
+   'The engine has a fully written charge behaviour that nothing ever triggered. sam_monster_charge reaches it. Aim it with face, and it stops itself on impact.'],
+  ['Know if you are the host',
+   'Most functions are host only and quietly refuse on a client. sam_is_host, sam_player_count and sam_local_player let a co-op mod branch instead of filling the log.'],
+  ['Custom status effects can have their own icon',
+   'The icon field was read but never used, held back by a note about a limitation that had already been fixed.'],
+  ['Two ways a mod could corrupt memory, closed',
+   'A map name longer than 127 characters overran a buffer on every other player in the game, and a mod shipping its own tile or sprite list wrote past the end of a heap array. Both are fixed.'],
+  ['Two things that already worked, now written down',
+   'Any texture or font in the game can be replaced just by shipping a file at the same path, and a tile whose filename contains lava or water becomes real lava or water, pathfinding included.'],
 ];
 
 /** sam-well stat box: big gold number over a small-caps label. */
@@ -91,12 +91,12 @@ export default function Dashboard() {
       {/* --------------------------------------------------- what is new */}
       <Panel title={`New in ${SAM_FRAMEWORK_VERSION}`}>
         <p className="m-0" style={{ color: 'var(--color-parchment)' }}>
-          A fix release, mostly from things modders and players reported.{' '}
+          This one is about reach.{' '}
           <strong style={{ color: 'var(--color-gold)' }}>
-            The theme is failures that used to be silent.
+            Mods can now ship whole dungeons and drive monsters themselves.
           </strong>{' '}
-          An icon that did not apply, a class that never appeared, settings quietly deleted on
-          export: each of those now either works or tells you what went wrong.
+          Some of it is new, and some of it turned out to be sitting in the engine already,
+          working and undocumented.
         </p>
         <ul className="mt-3 mb-0 space-y-2" style={{ listStyle: 'none', padding: 0 }}>
           {WHATS_NEW.map(([title, blurb]) => (

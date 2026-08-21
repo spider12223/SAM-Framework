@@ -64,6 +64,7 @@ extern "C" {
 #	include "entity.hpp"    // Entity::setEffect/setHP/setMP/getUID, act* behaviors, map iteration
 #	include "monster.hpp"   // actMonster, Monster enum
 #	include "collision.hpp" // entityDist
+#	include "paths.hpp"     // GeneratePathTypes (monster movement bindings)
 #	include "engine/audio/sound.hpp" // playSoundPlayer, numsounds
 #	include "files.hpp"     // outputdir (savegames base dir for persistent mod data)
 #	include "sam_items.hpp" // SAMItems::itemIdForIdString (custom item names in queries)
@@ -1371,6 +1372,54 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		return 1;
 	}
 
+	// ---- multiplayer awareness ----------------------------------------------------------
+	//
+	// Most S.A.M functions are host-only and warn-and-return-false on a client, but until now a
+	// script had no way to ASK. So a co-op mod either spammed the log with refusals or guessed.
+	// These three are the cheap fix and are safe to call from anywhere.
+
+	// sam_is_host() -> boolean. True in singleplayer and on the server; false on a client.
+	int lua_sam_is_host(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_LUA_HAVE_BARONY
+		lua_pushboolean(Ls, (multiplayer != CLIENT) ? 1 : 0);
+#else
+		lua_pushboolean(Ls, 1);
+#endif
+		return 1;
+	}
+
+	// sam_player_count() -> integer. How many players are actually connected right now.
+	int lua_sam_player_count(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_LUA_HAVE_BARONY
+		int n = 0;
+		for ( int i = 0; i < MAXPLAYERS; ++i )
+		{
+			if ( !client_disconnected[i] ) { ++n; }
+		}
+		lua_pushinteger(Ls, (lua_Integer)n);
+#else
+		lua_pushinteger(Ls, 1);
+#endif
+		return 1;
+	}
+
+	// sam_local_player() -> integer. The player index THIS machine controls. On a client that is
+	// not 0, which is the assumption most single-player-tested mods quietly bake in.
+	int lua_sam_local_player(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_LUA_HAVE_BARONY
+		lua_pushinteger(Ls, (lua_Integer)clientnum);
+#else
+		lua_pushinteger(Ls, 0);
+#endif
+		return 1;
+	}
+
 	int lua_sam_get_time_played(lua_State* Ls)
 	{
 		SAMLogger::noteApiCall();
@@ -1989,6 +2038,111 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		return 1;
 #else
 		(void)uid; lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// ---- monster movement -------------------------------------------------------------
+	//
+	// Barony has no per-species AI: actMonster is ONE generic state machine that every
+	// creature runs, with inline exceptions for particular types. So "write your own AI" does
+	// not mean replacing a brain, it means being able to STEER the shared one. These three
+	// bindings are that steering, and they are deliberately thin wrappers over machinery the
+	// engine already has rather than a parallel movement system.
+	//
+	// All coordinates are TILE coordinates, matching sam_get_position.
+
+	// sam_monster_path_to(uid, tileX, tileY) -> boolean
+	// Ask the engine to path a monster to a tile using its real pathfinder, then put it in the
+	// hunt state so the existing follow logic walks the path. Returns false if no path exists.
+	int lua_sam_monster_path_to(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const int tx = (int)luaL_checkinteger(Ls, 2);
+		const int ty = (int)luaL_checkinteger(Ls, 3);
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_monster_path_to refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { lua_pushboolean(Ls, 0); return 1; }
+		// adjacentTilesToCheck = 1 so a blocked exact tile still finds a neighbour, which is what
+		// the vanilla ally-follow calls do.
+		const bool ok = e->monsterSetPathToLocation(tx, ty, 1,
+			GeneratePathTypes::GENERATE_PATH_PLAYER_ALLY_MOVETO);
+		if ( ok ) { e->monsterState = MONSTER_STATE_HUNT; }
+		lua_pushboolean(Ls, ok ? 1 : 0);
+		return 1;
+#else
+		(void)uid; (void)tx; (void)ty; lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_monster_face(uid, tileX, tileY) -> boolean. Turn a monster to look at a tile.
+	int lua_sam_monster_face(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const int tx = (int)luaL_checkinteger(Ls, 2);
+		const int ty = (int)luaL_checkinteger(Ls, 3);
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_monster_face refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { lua_pushboolean(Ls, 0); return 1; }
+		// Tile centre, so facing a tile does not aim at its corner.
+		const real_t wx = (real_t)(tx * 16 + 8);
+		const real_t wy = (real_t)(ty * 16 + 8);
+		e->yaw = atan2(wy - e->y, wx - e->x);
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)uid; (void)tx; (void)ty; lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_monster_attack(uid) -> boolean. Make a monster swing now, using whatever pose its
+	// current weapon calls for (getAttackPose is what the engine's own melee path uses).
+	int lua_sam_monster_attack(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_monster_attack refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { lua_pushboolean(Ls, 0); return 1; }
+		e->attack(e->getAttackPose(), 0, nullptr);
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)uid; lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_monster_charge(uid, ticks) -> boolean
+	//
+	// Send a monster into a straight-line charge for `ticks`. This drives
+	// MONSTER_STATE_GENERIC_CHARGE, a fully implemented behaviour that was DEAD CODE: the state
+	// is handled in actMonster but nothing in the engine ever set it. It aims at the monster's
+	// current target if it has line of sight, otherwise it charges along its current facing --
+	// so pair it with sam_monster_face to aim a charge wherever you like.
+	//
+	// Self-terminating: it stops on its own when the timer runs out OR the moment it hits
+	// anything, so a script cannot wedge a monster by charging it into a wall.
+	int lua_sam_monster_charge(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		int ticks = (int)luaL_optinteger(Ls, 2, 50);
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_monster_charge refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { lua_pushboolean(Ls, 0); return 1; }
+		if ( ticks < 1 ) { ticks = 1; }
+		if ( ticks > 500 ) { ticks = 500; }   // ~10s ceiling; a charge is a dash, not a mode
+		e->monsterState = MONSTER_STATE_GENERIC_CHARGE;
+		e->monsterSpecialTimer = ticks;
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)uid; (void)ticks; lua_pushboolean(Ls, 0); return 1;
 #endif
 	}
 
@@ -3130,6 +3284,10 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		lua_pushcfunction(L, lua_sam_is_key_held);
 		lua_setglobal(L, "sam_is_key_held");
 		lua_pushcfunction(L, lua_sam_get_monster_stat);    lua_setglobal(L, "sam_get_monster_stat");
+		lua_pushcfunction(L, lua_sam_monster_path_to);     lua_setglobal(L, "sam_monster_path_to");
+		lua_pushcfunction(L, lua_sam_monster_face);        lua_setglobal(L, "sam_monster_face");
+		lua_pushcfunction(L, lua_sam_monster_attack);      lua_setglobal(L, "sam_monster_attack");
+		lua_pushcfunction(L, lua_sam_monster_charge);      lua_setglobal(L, "sam_monster_charge");
 		lua_pushcfunction(L, lua_sam_get_monster_type);    lua_setglobal(L, "sam_get_monster_type");
 		lua_pushcfunction(L, lua_sam_get_monster_name);    lua_setglobal(L, "sam_get_monster_name");
 		lua_pushcfunction(L, lua_sam_monster_has_effect);  lua_setglobal(L, "sam_monster_has_effect");
@@ -3231,6 +3389,9 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		lua_setglobal(L, "sam_get_race");
 		lua_pushcfunction(L, lua_sam_get_kills);
 		lua_setglobal(L, "sam_get_kills");
+		lua_pushcfunction(L, lua_sam_is_host);             lua_setglobal(L, "sam_is_host");
+		lua_pushcfunction(L, lua_sam_player_count);        lua_setglobal(L, "sam_player_count");
+		lua_pushcfunction(L, lua_sam_local_player);        lua_setglobal(L, "sam_local_player");
 		lua_pushcfunction(L, lua_sam_get_time_played);
 		lua_setglobal(L, "sam_get_time_played");
 

@@ -60,6 +60,7 @@ extern "C" {
 #	include "entity.hpp"    // Entity::setEffect/setHP/setMP/getUID, act* behaviors, map iteration
 #	include "monster.hpp"   // actMonster, Monster enum
 #	include "collision.hpp" // entityDist
+#	include "paths.hpp"     // GeneratePathTypes (monster movement bindings)
 #	include "engine/audio/sound.hpp" // playSoundPlayer, numsounds
 #	include "files.hpp"     // outputdir (savegames base dir for persistent mod data)
 #	include "sam_items.hpp" // SAMItems::itemIdForIdString (custom item names in queries)
@@ -1509,6 +1510,123 @@ namespace
 #endif
 	}
 
+	// ---- monster movement (Lua parity: lua_sam_monster_path_to / _face / _attack) --------
+	// Tile coordinates throughout, matching sam_get_position.
+
+	JSValue js_sam_monster_path_to(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 3 ) { return JS_FALSE; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+		int32_t tx = 0, ty = 0; JS_ToInt32(ctx, &tx, argv[1]); JS_ToInt32(ctx, &ty, argv[2]);
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_monster_path_to refused: host only."); return JS_FALSE; }
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { return JS_FALSE; }
+		const bool ok = e->monsterSetPathToLocation(tx, ty, 1,
+			GeneratePathTypes::GENERATE_PATH_PLAYER_ALLY_MOVETO);
+		if ( ok ) { e->monsterState = MONSTER_STATE_HUNT; }
+		return ok ? JS_TRUE : JS_FALSE;
+#else
+		(void)uid; (void)tx; (void)ty; return JS_FALSE;
+#endif
+	}
+
+	JSValue js_sam_monster_face(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 3 ) { return JS_FALSE; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+		int32_t tx = 0, ty = 0; JS_ToInt32(ctx, &tx, argv[1]); JS_ToInt32(ctx, &ty, argv[2]);
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_monster_face refused: host only."); return JS_FALSE; }
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { return JS_FALSE; }
+		const real_t wx = (real_t)(tx * 16 + 8);
+		const real_t wy = (real_t)(ty * 16 + 8);
+		e->yaw = atan2(wy - e->y, wx - e->x);
+		return JS_TRUE;
+#else
+		(void)uid; (void)tx; (void)ty; return JS_FALSE;
+#endif
+	}
+
+	JSValue js_sam_monster_attack(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_FALSE; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_monster_attack refused: host only."); return JS_FALSE; }
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { return JS_FALSE; }
+		e->attack(e->getAttackPose(), 0, nullptr);
+		return JS_TRUE;
+#else
+		(void)uid; return JS_FALSE;
+#endif
+	}
+
+	// ---- multiplayer awareness (Lua parity: sam_is_host / _player_count / _local_player) --
+
+	JSValue js_sam_is_host(JSContext* ctx, JSValueConst /*this_val*/, int /*argc*/, JSValueConst* /*argv*/)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_JS_HAVE_BARONY
+		return (multiplayer != CLIENT) ? JS_TRUE : JS_FALSE;
+#else
+		return JS_TRUE;
+#endif
+	}
+
+	JSValue js_sam_player_count(JSContext* ctx, JSValueConst /*this_val*/, int /*argc*/, JSValueConst* /*argv*/)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_JS_HAVE_BARONY
+		int n = 0;
+		for ( int i = 0; i < MAXPLAYERS; ++i )
+		{
+			if ( !client_disconnected[i] ) { ++n; }
+		}
+		return JS_NewInt32(ctx, n);
+#else
+		return JS_NewInt32(ctx, 1);
+#endif
+	}
+
+	JSValue js_sam_local_player(JSContext* ctx, JSValueConst /*this_val*/, int /*argc*/, JSValueConst* /*argv*/)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_JS_HAVE_BARONY
+		return JS_NewInt32(ctx, clientnum);
+#else
+		return JS_NewInt32(ctx, 0);
+#endif
+	}
+
+	// sam_monster_charge(uid, ticks) -> boolean. Lua parity: lua_sam_monster_charge.
+	// Drives MONSTER_STATE_GENERIC_CHARGE, an implemented-but-never-triggered engine behaviour.
+	JSValue js_sam_monster_charge(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_FALSE; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+		int32_t ticks = 50;
+		if ( argc >= 2 ) { JS_ToInt32(ctx, &ticks, argv[1]); }
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_monster_charge refused: host only."); return JS_FALSE; }
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { return JS_FALSE; }
+		if ( ticks < 1 ) { ticks = 1; }
+		if ( ticks > 500 ) { ticks = 500; }
+		e->monsterState = MONSTER_STATE_GENERIC_CHARGE;
+		e->monsterSpecialTimer = ticks;
+		return JS_TRUE;
+#else
+		(void)uid; (void)ticks; return JS_FALSE;
+#endif
+	}
+
 	JSValue js_sam_get_monster_stat(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
@@ -2491,6 +2609,13 @@ namespace
 		JS_SetPropertyStr(ctx, g, "sam_get_effect_strength", JS_NewCFunction(ctx, js_sam_get_effect_strength, "sam_get_effect_strength", 2));
 		JS_SetPropertyStr(ctx, g, "sam_get_effects", JS_NewCFunction(ctx, js_sam_get_effects, "sam_get_effects", 1));
 		JS_SetPropertyStr(ctx, g, "sam_get_monster_stat", JS_NewCFunction(ctx, js_sam_get_monster_stat, "sam_get_monster_stat", 2));
+		JS_SetPropertyStr(ctx, g, "sam_is_host", JS_NewCFunction(ctx, js_sam_is_host, "sam_is_host", 0));
+		JS_SetPropertyStr(ctx, g, "sam_player_count", JS_NewCFunction(ctx, js_sam_player_count, "sam_player_count", 0));
+		JS_SetPropertyStr(ctx, g, "sam_local_player", JS_NewCFunction(ctx, js_sam_local_player, "sam_local_player", 0));
+		JS_SetPropertyStr(ctx, g, "sam_monster_path_to", JS_NewCFunction(ctx, js_sam_monster_path_to, "sam_monster_path_to", 3));
+		JS_SetPropertyStr(ctx, g, "sam_monster_face", JS_NewCFunction(ctx, js_sam_monster_face, "sam_monster_face", 3));
+		JS_SetPropertyStr(ctx, g, "sam_monster_attack", JS_NewCFunction(ctx, js_sam_monster_attack, "sam_monster_attack", 1));
+		JS_SetPropertyStr(ctx, g, "sam_monster_charge", JS_NewCFunction(ctx, js_sam_monster_charge, "sam_monster_charge", 2));
 		JS_SetPropertyStr(ctx, g, "sam_get_monster_type", JS_NewCFunction(ctx, js_sam_get_monster_type, "sam_get_monster_type", 1));
 		JS_SetPropertyStr(ctx, g, "sam_get_monster_name", JS_NewCFunction(ctx, js_sam_get_monster_name, "sam_get_monster_name", 1));
 		JS_SetPropertyStr(ctx, g, "sam_monster_has_effect", JS_NewCFunction(ctx, js_sam_monster_has_effect, "sam_monster_has_effect", 2));
