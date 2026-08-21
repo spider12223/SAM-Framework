@@ -1944,6 +1944,54 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 #endif
 	}
 
+	// sam_get_monster_type(uid) -> "rat" / "skeleton" / ... or nil.
+	//
+	// A monster's SPECIES, as the lowercase name the engine itself uses in monstertypename[].
+	// Until now the only way to identify a creature from a script was the raw integer in an
+	// event payload, and the docs told modders to log it once and hardcode the number.
+	//
+	// NOTE this is the BASE type: a custom monster is a variant of a vanilla species, so a
+	// mod's "Rathalos" built on a bat answers "bat". Use sam_get_monster_name for the variant's
+	// own name, or sam_monster_has_trait to tell modded creatures apart.
+	int lua_sam_get_monster_type(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { lua_pushnil(Ls); return 1; }
+		const int t = (int)e->getStats()->type;
+		if ( t < 0 || t >= NUMMONSTERS ) { lua_pushnil(Ls); return 1; }
+		lua_pushstring(Ls, monstertypename[t]);
+		return 1;
+#else
+		(void)uid; lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_get_monster_name(uid) -> the creature's DISPLAY name, or nil.
+	//
+	// For a mod's custom monster this is the variant name it was given ("Rathalos"). A plain
+	// vanilla creature carries an empty variant name, so fall back to the species name and
+	// never hand a script an empty string.
+	int lua_sam_get_monster_name(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { lua_pushnil(Ls); return 1; }
+		Stat* st = e->getStats();
+		if ( st->name[0] ) { lua_pushstring(Ls, st->name); return 1; }
+		const int t = (int)st->type;
+		if ( t < 0 || t >= NUMMONSTERS ) { lua_pushnil(Ls); return 1; }
+		lua_pushstring(Ls, monstertypename[t]);
+		return 1;
+#else
+		(void)uid; lua_pushnil(Ls); return 1;
+#endif
+	}
+
 	// sam_monster_has_effect(uid, "EFFECT") -> boolean. The monster counterpart of
 	// sam_has_effect — e.g. "when a monster takes damage AND it has POISONED".
 	int lua_sam_monster_has_effect(lua_State* Ls)
@@ -3082,6 +3130,8 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		lua_pushcfunction(L, lua_sam_is_key_held);
 		lua_setglobal(L, "sam_is_key_held");
 		lua_pushcfunction(L, lua_sam_get_monster_stat);    lua_setglobal(L, "sam_get_monster_stat");
+		lua_pushcfunction(L, lua_sam_get_monster_type);    lua_setglobal(L, "sam_get_monster_type");
+		lua_pushcfunction(L, lua_sam_get_monster_name);    lua_setglobal(L, "sam_get_monster_name");
 		lua_pushcfunction(L, lua_sam_monster_has_effect);  lua_setglobal(L, "sam_monster_has_effect");
 		lua_pushcfunction(L, lua_sam_monster_has_trait);   lua_setglobal(L, "sam_monster_has_trait");
 		lua_pushcfunction(L, lua_sam_get_item_category);   lua_setglobal(L, "sam_get_item_category");

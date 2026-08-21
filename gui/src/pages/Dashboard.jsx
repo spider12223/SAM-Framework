@@ -10,7 +10,7 @@ import { useMod } from '@/state/ModContext.jsx';
 import { Panel, GoldButton } from '@/components/ui.jsx';
 
 /** The framework's own version (mods declare their own framework_min_version). */
-const SAM_FRAMEWORK_VERSION = '1.10.0';
+const SAM_FRAMEWORK_VERSION = '1.10.1';
 
 /** Where players get S.A.M itself (the framework is a dependency, not a mod). */
 const WORKSHOP_URL = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472';
@@ -28,18 +28,20 @@ const TRAVELS = [
  * thing a returning modder sees, and the point is 'here is what you can do now that you
  * could not before', not a changelog. */
 const WHATS_NEW = [
-  ['Your creature animates',
-   'Give it a list of models and it cycles them while it moves. Two frames is already enough to read as a walk or a wingbeat. Barony has no skeletons, so this is exactly how the vanilla rat animates.'],
-  ['An attack frame',
-   'Name one more model and the creature switches to it while it is swinging, so you can see the bite coming.'],
-  ['Fix a model that faces the wrong way',
-   'One rotation number in the mod, instead of asking your artist to export every frame again. Try 90, 180 or 270 until it faces you.'],
-  ['Put the head where the bite comes from',
-   'The game spawns attacks from the exact spot a creature stands on, and on a long creature that spot sits mid body, so a dragon looks like it bites with its belly. Slide the model back and its head lands there instead.'],
-  ['Set how big it is to hit',
-   'A big model used to keep the small hitbox of the creature underneath it, so you had to swing at its ankles. Now you can size the box to the model. It blocks movement too, so a wide creature really does fill a corridor.'],
-  ['Custom bodies work on any creature now',
-   'Basing your monster on a bat, duck, mimic, moth or sentry bot used to show nothing at all, and every other creature showed its old arms and legs poking out of your model. Both fixed, so all 41 creatures are usable as a base.'],
+  ['Custom item icons actually apply',
+   'The icon path is relative to your mod folder, but model paths are not, so anyone who copied the model style silently got no icon and no error. Both spellings work now, and a path that resolves the wrong way says so in the log.'],
+  ['A class that never shows up now tells you why',
+   'By far the most common cause is a mod.json with no classes listed. That was completely silent. If class files exist on disk but are not declared, the log names them and prints the exact line to paste.'],
+  ['Two star ratings with the right names',
+   'The character-select stars were called attack and survival, which matched neither line on the card. They are survival and complexity now. The old names still work, so nothing you published breaks.'],
+  ['The stars and bars have an editor',
+   'They were readable by the game but had no field in the Mod Builder, so opening a class and exporting it again quietly deleted them. Now they are real controls.'],
+  ['Class icons light up like the base game',
+   'Vanilla ships a dim icon and a bright one and swaps them. Add a second PNG with portrait_selected and yours does the same.'],
+  ['Know what you just killed',
+   'sam_get_monster_type and sam_get_monster_name give you a creature name from a uid, instead of logging a number once and hardcoding it.'],
+  ['Clearer failures',
+   'A MagicaVoxel .vox is now named as the problem instead of blaming your file path, and a typo in stat growth weights is caught instead of silently falling back to neutral.'],
 ];
 
 /** sam-well stat box: big gold number over a small-caps label. */
@@ -89,13 +91,12 @@ export default function Dashboard() {
       {/* --------------------------------------------------- what is new */}
       <Panel title={`New in ${SAM_FRAMEWORK_VERSION}`}>
         <p className="m-0" style={{ color: 'var(--color-parchment)' }}>
-          The last release let a monster wear your own model. It just stood there, frozen, facing
-          whichever way you happened to build it, and it kept the hitbox of whatever creature was
-          underneath it.{' '}
+          A fix release, mostly from things modders and players reported.{' '}
           <strong style={{ color: 'var(--color-gold)' }}>
-            This release makes that model move, face you, and be the right size to hit.
+            The theme is failures that used to be silent.
           </strong>{' '}
-          Everything here is set in the monster editor, with no scripting.
+          An icon that did not apply, a class that never appeared, settings quietly deleted on
+          export: each of those now either works or tells you what went wrong.
         </p>
         <ul className="mt-3 mb-0 space-y-2" style={{ listStyle: 'none', padding: 0 }}>
           {WHATS_NEW.map(([title, blurb]) => (

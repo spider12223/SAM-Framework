@@ -564,6 +564,10 @@
       "type": "string",
       "description": "Optional path (relative to the mod folder) to a PNG used as this class's icon on the character-select carousel, e.g. 'portraits/assassin.png'. A 54x54 PNG matches the vanilla class icons exactly; the image is drawn centered at native size and cropped to the 54x54 button, so other sizes still work. If omitted, or the file cannot be found at load time, S.A.M falls back to a placeholder icon."
     },
+    "portrait_selected": {
+      "type": "string",
+      "description": "Optional second icon shown while this class is selected or hovered in the class grid, exactly like the vanilla classes (which ship a dim icon and a bright 'On' icon). Same size and format as `portrait`. Omit it and the single `portrait` is used in every state."
+    },
     "stats": {
       "type": "object",
       "additionalProperties": false,
@@ -1242,17 +1246,26 @@
         },
         "difficulty": {
           "type": "object",
-          "description": "The two star lines, 1-5 each.",
+          "description": "The two star lines on the character-select card: Survival and Complexity. Both must be set or neither line is drawn. Higher Survival is better (5 = tanky, shown blue); higher Complexity is harder to play (5 = shown red). For scale, vanilla uses Warrior 4/1, Wizard 2/2, Joker 1/3.",
           "properties": {
-            "attack": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 5
-            },
             "survival": {
               "type": "integer",
               "minimum": 1,
-              "maximum": 5
+              "maximum": 5,
+              "description": "The Survival line, 1-5. Higher is more survivable."
+            },
+            "complexity": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5,
+              "description": "The Complexity line, 1-5. Higher is harder to play."
+            },
+            "attack": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5,
+              "deprecated": true,
+              "description": "DEPRECATED, and misnamed: it never set an Attack rating, it set the SURVIVAL line. Still read so published mods keep working. Use \"survival\" and \"complexity\" instead. When \"attack\" is present and \"complexity\" is not, the old meaning applies: attack = Survival, survival = Complexity."
             }
           }
         }

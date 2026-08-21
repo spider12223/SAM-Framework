@@ -6,6 +6,7 @@
 #include "sam_logger.hpp"
 
 #include <map>
+#include <string>
 #include <cstdlib>
 #include <cstring>
 
@@ -23,6 +24,40 @@ namespace
 	// "namespace:name" -> engine model index. Only ever grows within a load; cleared
 	// when mods unload.
 	std::map<std::string, int> s_index;
+}
+
+namespace
+{
+	// Why did loadVoxel fail? Barony's .vox is a "slab" format: three int32 dimensions,
+	// then w*h*d palette bytes, then a 768-byte palette. MagicaVoxel's own .vox is a
+	// RIFF-ish format beginning with the ASCII magic "VOX ". They share an extension and
+	// nothing else, and exporting from MagicaVoxel without converting is by far the most
+	// common way a modder's model fails to load -- so name it instead of blaming the path.
+	// Returns a diagnosis to append to the error, or "" when we cannot tell.
+	std::string samDiagnoseVoxFailure(const std::string& physfsPath)
+	{
+#ifdef SAM_MODELS_HAVE_BARONY
+		if ( !PHYSFS_getRealDir(physfsPath.c_str()) )
+		{
+			return " The file is not in the mod folder at that path.";
+		}
+		if ( PHYSFS_File* fh = PHYSFS_openRead(physfsPath.c_str()) )
+		{
+			char magic[4] = { 0, 0, 0, 0 };
+			const PHYSFS_sint64 got = PHYSFS_readBytes(fh, magic, 4);
+			PHYSFS_close(fh);
+			if ( got == 4 && magic[0] == 'V' && magic[1] == 'O' && magic[2] == 'X' && magic[3] == ' ' )
+			{
+				return " It is a MagicaVoxel .vox, which Barony cannot read."
+					" Convert it to Barony slab format (the two formats share an extension"
+					" and nothing else).";
+			}
+		}
+#else
+		(void)physfsPath;
+#endif
+		return "";
+	}
 }
 
 int SAMModels::appendModels(const std::vector<Request>& requests)
@@ -63,8 +98,8 @@ int SAMModels::appendModels(const std::vector<Request>& requests)
 		voxel_t* vox = loadVoxel(path.data());
 		if ( !vox )
 		{
-			SAM_ERROR(MOD, "Could not load model '" + r.physfsPath + "' for [" + r.id
-				+ "] — is the .vox actually in the mod folder? Skipping it; the rest still load.");
+			SAM_ERROR(MOD, "Could not load model '" + r.physfsPath + "' for [" + r.id + "]."
+				+ samDiagnoseVoxFailure(r.physfsPath) + " Skipping it; the rest still load.");
 			continue;
 		}
 		staged.push_back({ r.id, vox });

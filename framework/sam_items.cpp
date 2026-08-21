@@ -110,6 +110,56 @@ static bool fileExists(const std::string& p)
 	return f.good();
 }
 
+// Resolve a mod-supplied image path to something the image loader can open.
+//
+// The DOCUMENTED form is relative to the mod folder ("items/images/foo.png"). But `model`
+// and `model_fp` resolve a completely different way -- they go to loadVoxel as raw PhysFS
+// logical paths and are never joined onto anything -- and PhysFS has the game root mounted
+// too, so "mods/<folder>/foo.vox" happens to work for a hand-installed mod. A modder who
+// copies that prefix style onto `icon` gets <mod>/mods/<folder>/foo.png here: the prefix
+// doubles, nothing is found, and the icon silently stays vanilla with no diagnostic at all.
+//
+// So try the documented form, tolerate the PhysFS form, and warn when the second one is what
+// worked -- because that spelling also breaks the MODELS on a Workshop install, where the
+// content directory is not <Barony>/mods/<folder>.
+static std::string samResolveModImage(const std::string& modPath, const std::string& rel,
+	const char* field, const std::string& ownerId)
+{
+	if ( rel.empty() ) { return std::string(); }
+	auto collapse = [](const std::string& in) {
+		std::string out; out.reserve(in.size());
+		for ( char c : in )
+		{
+			if ( c == '/' && !out.empty() && out.back() == '/' ) { continue; }
+			out.push_back(c);
+		}
+		return out;
+	};
+
+	const std::string want = collapse(toForwardSlashes(joinPath(modPath, rel)));
+	if ( fileExists(want) ) { return want; }
+
+#ifndef EDITOR
+	const std::string logical = collapse(toForwardSlashes(rel));
+	if ( const char* realDir = PHYSFS_getRealDir(logical.c_str()) )
+	{
+		const std::string alt = collapse(toForwardSlashes(joinPath(realDir, logical)));
+		if ( fileExists(alt) )
+		{
+			SAM_WARN("ITEMS", "[" + ownerId + "] " + field + " '" + rel + "' was found from the "
+				"game folder, not your mod folder. These paths are relative to your mod, so drop "
+				"the leading \"mods/<your folder>/\". It works today only because you installed "
+				"the mod by hand -- on a Steam Workshop install this path will not exist.");
+			return alt;
+		}
+	}
+#endif
+	SAM_WARN("ITEMS", "[" + ownerId + "] " + field + " '" + rel + "' was not found (looked for '"
+		+ want + "'). The path is relative to your mod folder: for a file at "
+		"<your mod>/items/images/foo.png write \"items/images/foo.png\". Using the default icon.");
+	return std::string();
+}
+
 // Valid enum-name lists (for validation + "did you mean?" suggestions). Kept in
 // step with categoryFromName/slotFromName below and with item.schema.json.
 static const std::vector<std::string>& validCategoryNames()
@@ -478,7 +528,7 @@ static bool registerItemAt(int id, SAMItemDef def)
 	}
 	if ( !def.icon.empty() )
 	{
-		const std::string abs = toForwardSlashes(joinPath(def.modPath, def.icon));
+		const std::string abs = samResolveModImage(def.modPath, def.icon, "icon", def.id);
 		if ( fileExists(abs) && slot.images.first )
 		{
 			string_t* s = static_cast<string_t*>(slot.images.first->element);
@@ -1009,18 +1059,9 @@ std::string SAMItems::getIconPath(int itemId)
 	}
 	// Same absolute path we resolved at registration, but collapse any accidental
 	// "//" into "/" so Image::get (PhysFS + raw fallback) resolves it cleanly.
-	const std::string raw = toForwardSlashes(joinPath(it->second.modPath, it->second.icon));
-	std::string out;
-	out.reserve(raw.size());
-	for ( char c : raw )
-	{
-		if ( c == '/' && !out.empty() && out.back() == '/' ) { continue; }
-		out.push_back(c);
-	}
-	if ( !fileExists(out) )
-	{
-		out.clear(); // fall back to the placeholder rather than a broken path
-	}
+	// Same resolver as registration so the two can never disagree about where an icon lives.
+	// Any warning was already emitted once at load time; this runs per draw, so it stays quiet.
+	std::string out = samResolveModImage(it->second.modPath, it->second.icon, "icon", it->second.id);
 	s_iconPathCache[itemId] = out;
 	return out;
 }

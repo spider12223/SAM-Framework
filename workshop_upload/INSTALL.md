@@ -1,4 +1,4 @@
-# Installing the S.A.M Framework (v0.4.0)
+# Installing the S.A.M Framework
 
 **S.A.M — "Support All Mods" — is a modding framework for Barony.** It lets mods
 add classes, items, and monsters from plain JSON. It is a **dependency**: on its
@@ -11,6 +11,22 @@ compiler S.A.M uses for `.ts` mod scripts. (Lua and JavaScript mod scripts work
 without it; only TypeScript needs it.)
 
 ---
+
+## One thing to know before you install
+
+S.A.M replaces the game's program file, and we build it without a few services that need
+the developer's own private credentials. **While S.A.M is installed you lose three things:
+crossplay with Epic Games Store players, online leaderboard scores, and video playback
+(the intro and animated signs).** Everything else, including Steam multiplayer, works
+normally.
+
+These are not bugs we can fix. They need private Epic and PlayFab credentials that only
+the game's developer has.
+
+Your original game is kept as `barony_vanilla.exe`. Rename it back to `barony.exe` any time
+you want crossplay, and run the installer again when you want S.A.M back. Your saves and
+your mods are untouched either way.
+
 
 ## 1. Prerequisites
 

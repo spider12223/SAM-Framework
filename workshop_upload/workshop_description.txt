@@ -102,6 +102,14 @@ Everything above is set in the Mod Builder, with no scripting. 1.9.0's additions
 
 [hr][/hr]
 
+[h1]ONE THING TO KNOW BEFORE YOU INSTALL[/h1]
+
+S.A.M replaces the game's program file, and we build it without a few services that need the developer's own private credentials. [b]While S.A.M is installed you lose three things: crossplay with Epic Games Store players, online leaderboard scores, and video playback (the intro and animated signs).[/b] Everything else, including Steam multiplayer, works normally.
+
+These are not bugs we can fix. They need private Epic and PlayFab credentials that only the game's developer has.
+
+Your original game is saved as [b]barony_vanilla.exe[/b]. Rename it back to barony.exe any time you want crossplay, and rerun the installer when you want S.A.M again. Saves and mods are untouched either way.
+
 S.A.M is open source. Framework, Mod Builder, schemas, docs and examples:
 [b][url=https://github.com/spider12223/SAM-Framework]github.com/spider12223/SAM-Framework[/url][/b]
 

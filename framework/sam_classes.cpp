@@ -42,6 +42,8 @@
 #include "sam_spells.hpp"    // SAMSpells::getSpellByName (custom starting spells)
 #include <cctype>
 #include <cstdlib>           // free
+#include <system_error>
+#include <filesystem>
 #endif
 
 using nlohmann::json;
@@ -121,6 +123,46 @@ static void validateClassSemantics(const SAMClassDef& def, const std::string& fi
 
 void SAMClasses::loadFromManifest(const SAMModManifest& manifest)
 {
+	// The number-one reason a modder's class never appears: mod.json has no "classes"
+	// array, or an empty one, or it simply does not list the file. Nothing in the framework
+	// ever looked at what was actually on disk, so a folder of perfectly good class JSON was
+	// invisible and completely silent -- the load summary just said "0 classes" and a new
+	// modder has no reason to read that as an error.
+	//
+	// So when a mod declares no classes, look in its classes/ folder and say what we found.
+	// Omitting the array is legitimate (plenty of mods ship no classes at all), which is why
+	// this only speaks up when there are real files being ignored.
+#ifndef EDITOR
+	if ( manifest.classes.empty() )
+	{
+		std::error_code ec;
+		std::vector<std::string> found;
+		const std::string dir = joinPath(manifest.modPath, "classes");
+		for ( const auto& entry : std::filesystem::directory_iterator(dir, ec) )
+		{
+			if ( ec ) { break; }
+			std::error_code ec2;
+			if ( entry.is_regular_file(ec2) && entry.path().extension() == ".json" )
+			{
+				found.push_back("classes/" + entry.path().filename().string());
+			}
+		}
+		if ( !found.empty() )
+		{
+			std::string list;
+			for ( const std::string& f : found )
+			{
+				if ( !list.empty() ) { list += ", "; }
+				list += "\"" + f + "\"";
+			}
+			SAM_WARN(MOD, "Mod [" + manifest.ns + "] declares no classes in mod.json, but "
+				+ std::to_string(found.size()) + " class file(s) exist on disk and are being IGNORED.");
+			SAM_WARN(MOD, "  fix:      add them to mod.json ->  \"classes\": [" + list + "]");
+			SAM_WARN(MOD, "  -> until then these classes will NOT appear in character select.");
+		}
+	}
+#endif
+
 	for ( const std::string& relPath : manifest.classes )
 	{
 		const std::string path = joinPath(manifest.modPath, relPath);
@@ -213,6 +255,30 @@ void SAMClasses::loadFromManifest(const SAMModManifest& manifest)
 			else
 			{
 				SAM_WARN(MOD, "Class [" + def.id + "] portrait not found (using placeholder): " + abs);
+			}
+		}
+
+		// Optional second icon for the selected/hovered state. Same rules as portrait:
+		// traversal-guarded, existence-checked at load, and non-fatal when absent.
+		def.portraitSelected = getStr(j, "portrait_selected");
+		if ( !def.portraitSelected.empty() && SAMErrors::relPathEscapes(def.portraitSelected) )
+		{
+			SAM_WARN(MOD, "Class [" + def.id + "] portrait_selected path '" + def.portraitSelected
+				+ "' escapes the mod folder — ignoring it.");
+			def.portraitSelected.clear();
+		}
+		if ( !def.portraitSelected.empty() )
+		{
+			const std::string absSel = toForwardSlashes(joinPath(manifest.modPath, def.portraitSelected));
+			if ( fileExists(absSel) )
+			{
+				def.portraitSelectedPath = absSel;
+				SAM_INFO(MOD, "Class [" + def.id + "] portrait_selected -> " + absSel);
+			}
+			else
+			{
+				SAM_WARN(MOD, "Class [" + def.id + "] portrait_selected not found (the normal "
+					"portrait will be used in every state): " + absSel);
 			}
 		}
 
@@ -388,9 +454,43 @@ void SAMClasses::loadFromManifest(const SAMModManifest& manifest)
 			}
 			if ( r.contains("difficulty") && r["difficulty"].is_object() )
 			{
+				// Two star lines on the character-select card. The engine's own label (lang entry
+				// 5428) is a two-line label reading "Survival:" then "Complexity:", but these
+				// shipped as "attack" and "survival" -- names matching NEITHER line, so modders
+				// reliably set the wrong one.
+				//
+				// The correct names are survival/complexity. The old pair still parses so nothing
+				// already published breaks. Note "survival" is unfortunately in BOTH spellings and
+				// means a different line in each, so which scheme is in use has to be decided before
+				// reading it -- the presence of a partner key is what settles it:
+				//   has "complexity"        -> new scheme: survival = line 0, complexity = line 1
+				//   else has "attack"       -> old scheme: attack   = line 0, survival   = line 1
+				//   else (lone "survival")  -> new scheme, and line 1 stays 0 so neither line draws
+				const json& d = r["difficulty"];
 				auto clamp15 = [](int v){ return (v < 1) ? 0 : (v > 5 ? 5 : v); };
-				def.difficultyAttack   = clamp15(getInt(r["difficulty"], "attack", 0));
-				def.difficultySurvival = clamp15(getInt(r["difficulty"], "survival", 0));
+				int line0 = 0, line1 = 0;
+				if ( d.contains("complexity") )
+				{
+					line0 = clamp15(getInt(d, "survival", 0));
+					line1 = clamp15(getInt(d, "complexity", 0));
+					if ( d.contains("attack") )
+					{
+						SAM_WARN(MOD, "Class [" + def.id + "] ratings.difficulty mixes the old name "
+							"'attack' with the new 'complexity'. Using survival/complexity and ignoring "
+							"'attack'. Remove it.");
+					}
+				}
+				else if ( d.contains("attack") )
+				{
+					line0 = clamp15(getInt(d, "attack", 0));
+					line1 = clamp15(getInt(d, "survival", 0));
+				}
+				else
+				{
+					line0 = clamp15(getInt(d, "survival", 0));
+				}
+				def.difficultyAttack   = line0;   // legacy field name; drives the Survival line
+				def.difficultySurvival = line1;   // ... and the Complexity line
 			}
 		}
 
@@ -712,6 +812,21 @@ static void validateClassSemantics(const SAMClassDef& def, const std::string& fi
 	};
 	checkRolls(def.strongRolls, "strong_rolls");
 	checkRolls(def.weakRolls, "weak_rolls");
+	// weights uses the same six names, but as KEYS. It was the one growth field with no
+	// validation: a typo like "Int" or "INTEL" is dropped by the engine's name lookup and the
+	// attribute silently falls back to neutral, so a class quietly grows nothing like its JSON
+	// reads. Same check, same "did you mean" hint as the roll lists.
+	for ( const auto& kv : def.statGrowthWeights )
+	{
+		if ( !listHas(kRollNames, kv.first) )
+		{
+			const std::string sug = SAMErrors::suggest(kv.first, kRollNames);
+			SAMErrors::reportSemantic(MOD, fileLabel, "/stat_growth/weights", kv.first,
+				"not a known stat", "one of STR, DEX, CON, INT, PER, CHR",
+				sug.empty() ? "" : ("did you mean \"" + sug + "\"?"),
+				"that attribute keeps neutral growth.", /*warn=*/true);
+		}
+	}
 }
 
 void SAMClasses::applyStats(int classnum, Stat* stat)

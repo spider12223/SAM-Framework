@@ -1468,6 +1468,47 @@ namespace
 	}
 #endif
 
+	// sam_get_monster_type(uid) -> "rat" / "skeleton" / ... or null. The creature's SPECIES,
+	// as the lowercase name the engine uses in monstertypename[]. This is the BASE type: a
+	// custom monster is a variant of a vanilla species, so a mod's "Rathalos" built on a bat
+	// answers "bat". Lua parity: lua_sam_get_monster_type.
+	JSValue js_sam_get_monster_type(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_NULL; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+#ifdef SAM_JS_HAVE_BARONY
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { return JS_NULL; }
+		const int t = (int)e->getStats()->type;
+		if ( t < 0 || t >= NUMMONSTERS ) { return JS_NULL; }
+		return JS_NewString(ctx, monstertypename[t]);
+#else
+		(void)uid; return JS_NULL;
+#endif
+	}
+
+	// sam_get_monster_name(uid) -> the creature's DISPLAY name, or null. For a custom monster
+	// this is its variant name ("Rathalos"); vanilla creatures carry an empty variant name, so
+	// fall back to the species. Lua parity: lua_sam_get_monster_name.
+	JSValue js_sam_get_monster_name(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_NULL; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+#ifdef SAM_JS_HAVE_BARONY
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { return JS_NULL; }
+		Stat* st = e->getStats();
+		if ( st->name[0] ) { return JS_NewString(ctx, st->name); }
+		const int t = (int)st->type;
+		if ( t < 0 || t >= NUMMONSTERS ) { return JS_NULL; }
+		return JS_NewString(ctx, monstertypename[t]);
+#else
+		(void)uid; return JS_NULL;
+#endif
+	}
+
 	JSValue js_sam_get_monster_stat(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
@@ -2450,6 +2491,8 @@ namespace
 		JS_SetPropertyStr(ctx, g, "sam_get_effect_strength", JS_NewCFunction(ctx, js_sam_get_effect_strength, "sam_get_effect_strength", 2));
 		JS_SetPropertyStr(ctx, g, "sam_get_effects", JS_NewCFunction(ctx, js_sam_get_effects, "sam_get_effects", 1));
 		JS_SetPropertyStr(ctx, g, "sam_get_monster_stat", JS_NewCFunction(ctx, js_sam_get_monster_stat, "sam_get_monster_stat", 2));
+		JS_SetPropertyStr(ctx, g, "sam_get_monster_type", JS_NewCFunction(ctx, js_sam_get_monster_type, "sam_get_monster_type", 1));
+		JS_SetPropertyStr(ctx, g, "sam_get_monster_name", JS_NewCFunction(ctx, js_sam_get_monster_name, "sam_get_monster_name", 1));
 		JS_SetPropertyStr(ctx, g, "sam_monster_has_effect", JS_NewCFunction(ctx, js_sam_monster_has_effect, "sam_monster_has_effect", 2));
 		JS_SetPropertyStr(ctx, g, "sam_monster_has_trait", JS_NewCFunction(ctx, js_sam_monster_has_trait, "sam_monster_has_trait", 2));
 		JS_SetPropertyStr(ctx, g, "sam_get_item_category", JS_NewCFunction(ctx, js_sam_get_item_category, "sam_get_item_category", 1));

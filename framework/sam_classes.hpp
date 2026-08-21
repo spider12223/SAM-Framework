@@ -131,6 +131,12 @@ struct SAMClassDef
 	// UI icons are path-based, not sprite-index-based.
 	std::string portrait;
 	std::string portraitPath;
+	// Optional SECOND icon, shown while this class is selected or hovered in the grid.
+	// Vanilla ships two PNGs per class (a dim one and a bright "On" one) and swaps between
+	// them; without this a custom class was pinned at one brightness in every state.
+	// Empty portraitSelectedPath simply means "use portraitPath in every state".
+	std::string portraitSelected;
+	std::string portraitSelectedPath;
 };
 
 // v0.7.0 Feature 5: a runtime override of a class's STARTING stats, applied at the

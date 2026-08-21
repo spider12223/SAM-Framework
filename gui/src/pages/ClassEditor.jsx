@@ -241,6 +241,15 @@ export default function ClassEditor() {
   const [previewSex, setPreviewSex] = useState('male');
   const [gold, setGold] = useState(draft?.gold ?? editDef?.gold ?? 0);
   const [portrait, setPortrait] = useState(draft?.portrait ?? { path: editDef?.portrait ?? '', dataUrl: '' });
+  const [portraitSel, setPortraitSel] = useState(draft?.portraitSel ?? { path: editDef?.portrait_selected ?? '', dataUrl: '' });
+  // Character-select card ratings. These were readable by the engine but had no editor, so
+  // opening a hand-written class here and exporting silently deleted them.
+  const [statBars, setStatBars] = useState(() =>
+    draft?.statBars ?? Object.fromEntries(CORE_ATTRIBUTES.map((k) => [k, editDef?.ratings?.stats?.[k] ?? ''])));
+  const [survivalStars, setSurvivalStars] = useState(
+    draft?.survivalStars ?? editDef?.ratings?.difficulty?.survival ?? editDef?.ratings?.difficulty?.attack ?? '');
+  const [complexityStars, setComplexityStars] = useState(
+    draft?.complexityStars ?? editDef?.ratings?.difficulty?.complexity ?? editDef?.ratings?.difficulty?.survival ?? '');
   const [portraitError, setPortraitError] = useState('');
   const [scriptLang, setScriptLang] = useState(draft?.scriptLang ?? existingScript?.lang ?? 'lua');
   const [scriptCode, setScriptCode] = useState(draft?.scriptCode ?? existingScript?.code ?? '');
@@ -262,14 +271,14 @@ export default function ClassEditor() {
   // durable home until "Save Class", so they must be in here.
   useEffect(() => {
     const d = { name, description, attrs, offsets, skills, items, spells, growth, hpMpGrowth,
-      mpRegenBase, mpRegenMult, mpRegenScaling, looks, surviveShift, bodyModel, gold, portrait, scriptLang, scriptCode, scriptBlocks };
+      mpRegenBase, mpRegenMult, mpRegenScaling, looks, surviveShift, bodyModel, gold, portrait, portraitSel, statBars, survivalStars, complexityStars, scriptLang, scriptCode, scriptBlocks };
     try { localStorage.setItem(DRAFT_KEY, JSON.stringify(d)); }
     catch { // a very large portrait can blow the quota — keep the rest, drop the image bytes
       try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ ...d, portrait: { path: portrait.path, dataUrl: '' } })); } catch { /* give up quietly */ }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [name, description, attrs, offsets, skills, items, spells, growth, hpMpGrowth,
-    mpRegenBase, mpRegenMult, mpRegenScaling, looks, surviveShift, bodyModel, gold, portrait, scriptLang, scriptCode, scriptBlocks]);
+    mpRegenBase, mpRegenMult, mpRegenScaling, looks, surviveShift, bodyModel, gold, portrait, portraitSel, statBars, survivalStars, complexityStars, scriptLang, scriptCode, scriptBlocks]);
 
   const namespace = meta.namespace || 'mymod';
   const classId = `${namespace}:${slugify(name)}`;
@@ -389,6 +398,17 @@ export default function ClassEditor() {
     }
     if (gold > 0) def.gold = gold;
     if (portrait.path.trim()) def.portrait = portrait.path.trim();
+    if (portraitSel.path.trim()) def.portrait_selected = portraitSel.path.trim();
+    const bars = {};
+    for (const k of CORE_ATTRIBUTES) { if (statBars[k]) bars[k] = statBars[k]; }
+    const diff = {};
+    if (survivalStars !== '') diff.survival = Number(survivalStars);
+    if (complexityStars !== '') diff.complexity = Number(complexityStars);
+    if (Object.keys(bars).length || Object.keys(diff).length) {
+      def.ratings = {};
+      if (Object.keys(bars).length) def.ratings.stats = bars;
+      if (Object.keys(diff).length) def.ratings.difficulty = diff;
+    }
     return def;
   };
 
@@ -415,7 +435,8 @@ export default function ClassEditor() {
   const def = useMemo(buildDef,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [name, description, attrs, offsets, skills, items, spells, growth, gold, portrait, namespace,
-      hpMpGrowth, mpRegenBase, mpRegenMult, mpRegenScaling, looks, surviveShift, bodyModel]);
+      hpMpGrowth, mpRegenBase, mpRegenMult, mpRegenScaling, looks, surviveShift, bodyModel,
+      portraitSel, statBars, survivalStars, complexityStars]);
   const preview = useMemo(() => JSON.stringify(def, null, 2), [def]);
   const hints = useMemo(() => checkBalance('class', def), [def]);
 
@@ -474,6 +495,17 @@ export default function ClassEditor() {
               placeholder={defaultPortraitPath}
             />
           </Field>
+          <div />
+          <Field
+            label="Selected icon path (optional)"
+            hint="Vanilla classes ship two icons: a dim one and a bright one shown while the class is selected or hovered. Add a second PNG here to match that. Leave empty and your one portrait is used in every state."
+          >
+            <TextInput
+              value={portraitSel.path}
+              onChange={(v) => setPortraitSel((p) => ({ ...p, path: v }))}
+              placeholder={`portraits/${slugify(name)}_on.png`}
+            />
+          </Field>
         </div>
         {portrait.dataUrl && (
           <div className="mt-2 text-xs" style={{ color: '#6b5a35' }}>
@@ -482,6 +514,43 @@ export default function ClassEditor() {
           </div>
         )}
         {portraitError && <div className="sam-error text-sm mt-1">{portraitError}</div>}
+      </Panel>
+
+      {/* --------------------------------------------- character select card */}
+      <Panel title="Character Select Card">
+        <div className="text-xs mb-3" style={{ color: '#8a7749' }}>
+          Purely cosmetic: the bars and stars a player sees before picking this class. Leave it
+          all empty and the card shows blank grey bars. HP and MP are worked out from your
+          attribute offsets, so there is nothing to set for them here.
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          {CORE_ATTRIBUTES.map((k) => (
+            <Field key={k} label={`${ATTR_ICONS[k] ?? ''} ${k} bar`}>
+              <select
+                className="sam-input"
+                value={statBars[k] ?? ''}
+                onChange={(e) => setStatBars({ ...statBars, [k]: e.target.value })}
+              >
+                {['', 'bad', 'poor', 'average', 'decent', 'good'].map((r) => (
+                  <option key={r || 'none'} value={r}>{r === '' ? '— none —' : r}</option>
+                ))}
+              </select>
+            </Field>
+          ))}
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+          <Field label="Survival" hint="1 to 5. Higher is tougher, and shows blue. Vanilla: Warrior 4, Wizard 2, Joker 1.">
+            <NumberInput value={survivalStars} min={1} max={5} onChange={setSurvivalStars} placeholder="—" />
+          </Field>
+          <Field label="Complexity" hint="1 to 5. Higher is harder to play, and shows red. Vanilla: Warrior 1, Wizard 2, Sexton 4.">
+            <NumberInput value={complexityStars} min={1} max={5} onChange={setComplexityStars} placeholder="—" />
+          </Field>
+        </div>
+        {((survivalStars === '') !== (complexityStars === '')) && (
+          <div className="mt-2 text-xs" style={{ color: '#a03327' }}>
+            Set both stars or neither — the game only draws the two lines when both have a value.
+          </div>
+        )}
       </Panel>
 
       {/* ------------------------------------------- attributes + skills */}
