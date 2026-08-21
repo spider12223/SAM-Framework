@@ -440,7 +440,11 @@ export const CONDITIONS = [
     // total that "stat compares to a value" reads. on_xp_gained carries `amount` (this
     // gain) and `new_total`; this reads `amount`. Gated on `new_total` (unique to XP).
     id: 'xp_amount_cmp', label: 'xp just gained compares to', negatable: false,
-    needs: 'new_total', pollable: false,
+    // Gated by trigger id, not by a payload field. This used to say needs: 'new_total',
+    // and NO event carries new_total -- so the condition was filtered out of every
+    // trigger and never appeared in the builder at all. The obvious field to gate on
+    // instead, source_type, is also on player.on_damage_taken, which would leak it.
+    onlyOn: ['player.on_xp_gained'], pollable: false,
     params: [
       { name: 'op', type: 'select', values: ['<', '<=', '==', '>=', '>'], default: '>=' },
       { name: 'value', type: 'number', default: 10 },

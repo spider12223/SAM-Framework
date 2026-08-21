@@ -81,6 +81,27 @@
       ],
       "default": "sword"
     },
+    "traits": {
+      "type": "array",
+      "description": "Engine behaviours this item opts into. Barony answers questions like 'is this a bow?' or 'can this hold arrows?' from hardcoded lists of vanilla item types, and a custom item can never be on those lists. Naming a trait here puts it on. A trait makes the item RECOGNISED; what it then does is up to your script.",
+      "items": {
+        "type": "string",
+        "enum": [
+          "ranged",
+          "quiver",
+          "foci",
+          "instrument",
+          "thrown_ball",
+          "shield_slot",
+          "potion_bad",
+          "automaton_food",
+          "tinker_throwable",
+          "usable",
+          "beatitude_ac"
+        ]
+      },
+      "uniqueItems": true
+    },
     "weight": {
       "type": "integer",
       "minimum": 0,

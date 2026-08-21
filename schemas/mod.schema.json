@@ -38,7 +38,7 @@
     "framework_min_version": {
       "type": "string",
       "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
-      "description": "Minimum S.A.M framework version this mod needs, in MAJOR.MINOR.PATCH form. If S.A.M is older, the mod is loaded anyway with a warning (it may use features that aren't present yet) \u2014 S.A.M never hard-blocks on a version mismatch."
+      "description": "Minimum S.A.M framework version this mod needs, in MAJOR.MINOR.PATCH form. If S.A.M is older, the mod is loaded anyway with a warning (it may use features that aren't present yet) — S.A.M never hard-blocks on a version mismatch."
     },
     "framework_max_version": {
       "type": "string",
@@ -152,7 +152,7 @@
     },
     "plugins": {
       "type": "array",
-      "description": "PLANNED \u2014 the S.A.M plugin system is not yet implemented; declared .dll files are counted but NOT loaded. Leave this empty for now. (Relative paths to compiled plugin .dll files.)",
+      "description": "PLANNED — the S.A.M plugin system is not yet implemented; declared .dll files are counted but NOT loaded. Leave this empty for now. (Relative paths to compiled plugin .dll files.)",
       "items": {
         "type": "string",
         "pattern": "\\.dll$",
@@ -161,7 +161,7 @@
     },
     "models": {
       "type": "array",
-      "description": "Standalone custom .vox models NOT tied to any item or class \u2014 for sam_spawn_companion (floating 'Stand'/familiar followers) and other decorative entities. Each entry registers one model under a friendly id that scripts pass to sam_spawn_companion. Barony SLAB .vox format only (MagicaVoxel exports are rejected). v1.4.0+.",
+      "description": "Standalone custom .vox models NOT tied to any item or class — for sam_spawn_companion (floating 'Stand'/familiar followers) and other decorative entities. Each entry registers one model under a friendly id that scripts pass to sam_spawn_companion. Barony SLAB .vox format only (MagicaVoxel exports are rejected). v1.4.0+.",
       "items": {
         "type": "object",
         "required": [
@@ -180,6 +180,41 @@
             "pattern": "\\.vox$",
             "description": "Mod-relative path to the .vox file (Barony slab format), e.g. \"models/star_platinum/star_platinum.vox\"."
           }
+        }
+      }
+    },
+    "images": {
+      "type": "array",
+      "description": "Pictures this mod ships and draws itself \u2014 sam_show_image (a full-screen overlay that removes itself: a jumpscare, a title card, a death splash) and sam_hud_image (a persistent picture in the script HUD). Declaring them here rather than passing a raw path means a missing or misspelled file is reported when the mod LOADS, instead of a picture that silently never appears. v1.10.3+.",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "file"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9_]+:[a-z0-9_./-]+$",
+            "description": "How a script names this picture, e.g. \"mymod:jumpscare\". Pass this to sam_show_image / sam_hud_image."
+          },
+          "file": {
+            "type": "string",
+            "pattern": "\\.(png|jpg|jpeg|bmp)$",
+            "description": "Mod-relative path to the image file, e.g. \"art/jumpscare.png\". PNG keeps transparency; around 1280x720 is a good size for a full-screen overlay."
+          }
+        }
+      }
+    },
+    "rooms": {
+      "type": "object",
+      "description": "Prefab rooms added to an EXISTING levelset, so your content appears in the ordinary dungeon instead of only in your own branch. Keys are levelset names as Barony uses them (\"mine\", \"swamp\", \"labyrinth\", \"ruins\", \"caves\", \"citadel\"), values are mod-relative paths to .lmp room files built in Barony's level editor. Rooms repeat rather than being used up, so adding rooms raises variety, not density. In multiplayer every player must have the same mods enabled or you will generate different dungeons.",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "pattern": "\\.lmp$"
         }
       }
     },

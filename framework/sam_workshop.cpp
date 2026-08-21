@@ -257,6 +257,24 @@ static bool parseManifest(const std::string& jsonText, const std::string& modPat
 	out.baronyMaxVersion = getString("barony_max_version");
 	out.incompatibleWithBaronyVersion = getString("incompatible_with_barony_version");
 	out.description = getString("description");
+	// "rooms": { "<levelset>": ["rooms/foo.lmp", ...] } -- prefab rooms added to an
+	// existing levelset's pool. Parsed here; ordering/validation happens in SAMRooms.
+	{
+		auto it = j.find("rooms");
+		if ( it != j.end() && it->is_object() )
+		{
+			for ( auto r = it->begin(); r != it->end(); ++r )
+			{
+				if ( !r.value().is_array() ) { continue; }
+				std::vector<std::string> paths;
+				for ( const auto& el : r.value() )
+				{
+					if ( el.is_string() ) { paths.push_back(el.get<std::string>()); }
+				}
+				if ( !paths.empty() ) { out.rooms.emplace_back(r.key(), paths); }
+			}
+		}
+	}
 	out.dependencies = getStringArray("dependencies", false); // namespaces, not paths
 	out.classes = getStringArray("classes", true);
 	out.items = getStringArray("items", true);
@@ -288,6 +306,29 @@ static bool parseManifest(const std::string& jsonText, const std::string& modPat
 					continue;
 				}
 				out.models.push_back({ id, file });
+			}
+		}
+	}
+
+	// v1.10.3 -- pictures the mod draws itself. Same shape as "models": an array of
+	// { "id": "ns:name", "file": "art/x.png" }.
+	{
+		auto it = j.find("images");
+		if ( it != j.end() && it->is_array() )
+		{
+			for ( const auto& el : *it )
+			{
+				if ( !el.is_object() ) { continue; }
+				std::string id, file;
+				if ( auto idIt = el.find("id"); idIt != el.end() && idIt->is_string() ) { id = idIt->get<std::string>(); }
+				if ( auto fIt = el.find("file"); fIt != el.end() && fIt->is_string() ) { file = fIt->get<std::string>(); }
+				if ( id.empty() || file.empty() ) { continue; }
+				if ( SAMErrors::relPathEscapes(file) )
+				{
+					SAM_WARN(MOD, std::string("Manifest 'images' file '") + file + "' escapes the mod folder - ignored.");
+					continue;
+				}
+				out.images.push_back({ id, file });
 			}
 		}
 	}

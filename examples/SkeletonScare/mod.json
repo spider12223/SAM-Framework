@@ -1,0 +1,13 @@
+{
+  "$schema": "https://spider12223.github.io/SAM-Framework/schemas/mod.schema.json",
+  "namespace": "runner",
+  "name": "Running Skeleton",
+  "author": "S.A.M Framework",
+  "version": "1.0.0",
+  "framework_min_version": "1.10.3",
+  "description": "A worked example of the picture API. A skeleton hunts you down the corridor, and when it reaches you the screen is yours. Replace art/scare.png with your own picture and this is your mod.",
+
+  "images": [
+    { "id": "runner:scare", "file": "art/scare.png" }
+  ]
+}

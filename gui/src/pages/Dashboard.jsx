@@ -10,7 +10,7 @@ import { useMod } from '@/state/ModContext.jsx';
 import { Panel, GoldButton } from '@/components/ui.jsx';
 
 /** The framework's own version (mods declare their own framework_min_version). */
-const SAM_FRAMEWORK_VERSION = '1.10.2';
+const SAM_FRAMEWORK_VERSION = '1.10.3';
 
 /** Where players get S.A.M itself (the framework is a dependency, not a mod). */
 const WORKSHOP_URL = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472';
@@ -28,20 +28,20 @@ const TRAVELS = [
  * thing a returning modder sees, and the point is 'here is what you can do now that you
  * could not before', not a changelog. */
 const WHATS_NEW = [
-  ['Ship your own dungeon',
-   'Barony builds a floor by stamping prefab rooms into an open arena, which means a mod can ship a whole procedurally generated branch as data. Three map files is the minimum. Point a portal at it and it generates, no scripting and no editing the level list.'],
-  ['Steer monsters from a script',
-   'Barony has no per creature AI at all, just one shared brain nothing could drive. Four new functions steer it: path to a tile with real pathfinding, face a tile, swing now, or charge.'],
-  ['A charge attack that was already in the game',
-   'The engine has a fully written charge behaviour that nothing ever triggered. sam_monster_charge reaches it. Aim it with face, and it stops itself on impact.'],
-  ['Know if you are the host',
-   'Most functions are host only and quietly refuse on a client. sam_is_host, sam_player_count and sam_local_player let a co-op mod branch instead of filling the log.'],
-  ['Custom status effects can have their own icon',
-   'The icon field was read but never used, held back by a note about a limitation that had already been fixed.'],
-  ['Two ways a mod could corrupt memory, closed',
-   'A map name longer than 127 characters overran a buffer on every other player in the game, and a mod shipping its own tile or sprite list wrote past the end of a heap array. Both are fixed.'],
-  ['Two things that already worked, now written down',
-   'Any texture or font in the game can be replaced just by shipping a file at the same path, and a tile whose filename contains lava or water becomes real lava or water, pathfinding included.'],
+  ['Put your own pictures in the game',
+   'A mod could always replace one of the game\'s images. It could never add one. sam_show_image covers the screen with your art for as long as you say and then takes it away by itself, and sam_hud_image pins a picture to the HUD until you clear it. Declare the file in mod.json and a typo is a line in the log at load time instead of nothing happening for no reason.'],
+  ['Scripts can finally see doors, chests, levers and loot',
+   'The old nearby lookup skipped anything that was not a monster or a player, so every mechanism and every dropped item was invisible. sam_find_entities takes a kind and returns what is actually there.'],
+  ['Open a door, throw a lever',
+   'The framework already told you when a door opened or a switch flipped, while giving you no way to do either. sam_set_door, sam_set_door_locked, sam_toggle_switch and sam_power_entity close that.'],
+  ['Ask what the map really looks like',
+   'Read or write any tile, ask whether a point is a sane place to spawn something, trace real line of sight, and check that the exit is still reachable before an edit seals it in.'],
+  ['A HUD of your own',
+   'Text and bars you position yourself, in the same coordinate space the vanilla HUD uses, so a mod lines up at any resolution. Widgets persist until you change them, and the whole thing is dropped when the mod unloads.'],
+  ['Read the numbers the game actually uses',
+   'Not the raw sheet value but the one the damage formula sees, gear and effects folded in. Armor class, effective stats and proficiency ranks are all readable now, and skill names work in either spelling.'],
+  ['Know where you are and who else is loaded',
+   'The floor number alone could not tell a secret branch from the main one. sam_get_level_info can, and sam_get_mods lets a mod light up extra content when a partner mod is present.'],
 ];
 
 /** sam-well stat box: big gold number over a small-caps label. */

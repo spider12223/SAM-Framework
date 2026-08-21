@@ -6,6 +6,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "sync:schemas": "node scripts/sync-schemas.mjs",
+    "prebuild": "node scripts/sync-schemas.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "test": "node --import ./test/alias-loader.mjs test/codegen.test.mjs"

@@ -288,6 +288,63 @@ quest items and anything a class starts with.
 
 ---
 
+## Your own pictures on screen
+
+A mod can put its **own** art on the screen. Two lifetimes, because the two uses want
+opposite things.
+
+**An overlay** covers the view for a set time and then removes itself. This is the
+jumpscare, the title card, the death splash. There is nothing to clean up.
+
+**A HUD picture** stays where you put it until you clear it. This is the portrait, the
+custom gauge, the marker.
+
+Declare the picture once in `mod.json`:
+
+```json
+"images": [
+  { "id": "mymod:jumpscare", "file": "art/jumpscare.png" }
+]
+```
+
+Then use it:
+
+```lua
+-- full screen on player 0 for 900 milliseconds, then gone
+sam_show_image(0, "mymod:jumpscare", 900)
+
+-- placed, and it stays until you clear it
+sam_hud_image("portrait", 24, 24, 96, 96, "mymod:jumpscare")
+sam_hud_clear("portrait")
+```
+
+PNG and JPG both work. PNG keeps transparency. Around 1280x720 is a good size for a
+full-screen overlay; pass `"contain"` as the last argument if you would rather letterbox
+it than stretch it to the screen shape.
+
+**Name a picture three ways**, tried in this order:
+
+| What you pass | What it means |
+|---|---|
+| `"mymod:jumpscare"` | an id from any loaded mod's `images` list |
+| `"jumpscare"` | the same id, with your own namespace assumed |
+| `"art/jumpscare.png"` | a path inside your own mod folder |
+
+The first two are worth preferring. A declared image is checked when the mod loads, so a
+typo is one line in `sam_log.txt` at load time. A raw path can only fail at the moment you
+try to draw it, which looks like nothing happening for no reason.
+
+`sam_get_image_size(image)` gives you the picture's own pixel size, so you can centre or
+scale it instead of hard-coding the numbers you exported at. It also returns nothing when
+the picture cannot be loaded, which makes it the cheapest way to check a name resolves.
+
+**In multiplayer** the picture appears on the screen of the player you named, even when
+that player is on another machine. Scripts run on the host, so the host sends the image
+**name** and the client draws it from its own copy of the mod. A client without the mod
+draws nothing rather than desyncing.
+
+---
+
 ## Two other things worth knowing
 
 **Weapons need to say what they are.** A custom weapon with no `weapon_skill` trains no
@@ -327,3 +384,7 @@ world loot, a thrown item that becomes a real trap, a rewritten damage number, a
 equip, monster traits, and crafting at the Hunter's Workbench.
 
 Copy the folder, change `namespace` in `mod.json`, delete the sections you don't want.
+
+`examples/SkeletonScare/` is the smallest useful mod on this page: one skeleton runs you
+down the corridor, and when it reaches you the mod's own picture takes the whole screen.
+Replace `art/scare.png` with your own picture and it is your mod.

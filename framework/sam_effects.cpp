@@ -155,7 +155,23 @@ void SAMEffects::loadFromManifest(const SAMModManifest& manifest)
 		def.curable   = getBool("curable", false);
 		def.modNamespace = manifest.ns;
 		def.modPath = manifest.modPath;
-		if ( !getStr("icon").empty() ) { def.icon = joinPath(manifest.modPath, getStr("icon")); }
+		// Every other mod-supplied path in the framework passes relPathEscapes -- sounds,
+		// models, images, rooms. This one did not, so an effect JSON reading
+		// "icon": "../../../<anything>.png" resolved outside the mod folder and the engine
+		// then DISPLAYED it in the status bar. Same check, same refusal, same warning.
+		if ( !getStr("icon").empty() )
+		{
+			const std::string iconRel = getStr("icon");
+			if ( SAMErrors::relPathEscapes(iconRel) )
+			{
+				SAM_WARN(MOD, "Effect [" + def.id + "] icon path '" + iconRel
+					+ "' escapes the mod folder -- ignoring it.");
+			}
+			else
+			{
+				def.icon = joinPath(manifest.modPath, iconRel);
+			}
+		}
 
 		// stat_modifiers: { "STR": 5, "DEX": -3, ... }
 		auto sm = j.find("stat_modifiers");

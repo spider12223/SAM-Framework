@@ -24,7 +24,11 @@ const TMP = join(HERE, '.tmp');
 mkdirSync(TMP, { recursive: true });
 
 function findLua() {
-  const candidates = [process.env.SAM_LUA, 'lua', 'lua5.4', 'lua54'].filter(Boolean);
+  // tools/lua/lua.exe is the 5.4.7 interpreter built from framework/lua54, checked in so
+  // `npm test` actually RUNS instead of printing SKIP and exiting 0 -- a green skip reads
+  // exactly like a pass in CI and in a terminal you glanced at.
+  const vendored = fileURLToPath(new URL('../../tools/lua/lua' + (process.platform === 'win32' ? '.exe' : ''), import.meta.url));
+  const candidates = [process.env.SAM_LUA, vendored, 'lua', 'lua5.4', 'lua54'].filter(Boolean);
   for (const c of candidates) {
     try { execFileSync(c, ['-v'], { stdio: 'pipe' }); return c; } catch { /* keep looking */ }
   }

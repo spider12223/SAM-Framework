@@ -16,7 +16,12 @@
 #include "sam_races.hpp"
 #include "sam_sounds.hpp"
 #include "sam_recipes.hpp"
-#include "sam_workbench.hpp"   // the framework's built-in Hunter's Workbench
+#include "sam_workbench.hpp"
+#include "sam_rooms.hpp"     // prefab rooms injected into vanilla levelsets
+#ifndef EDITOR
+#include "sam_hud.hpp"   // script HUD, cleared on unload
+#include "sam_images.hpp" // mod-supplied pictures (overlay + HUD art)
+#endif   // the framework's built-in Hunter's Workbench
 #include "sam_monster_patches.hpp" // v0.7.0 F5 monster stat overrides — both builds
 #ifndef EDITOR
 #include "sam_sync.hpp"    // multiplayer sync — game build only (not in EDITOR_SOURCES)
@@ -60,6 +65,11 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 	SAMSounds::clear(); // drop staged custom sounds (engine table reset on next append)
 	SAMRecipes::clear(); // drop tinkering recipes -> vanilla craftable grid
 	SAMWorkbench::clear(); // and the built-in bench, so it re-installs this cycle
+	SAMRooms::clear(); // drop injected rooms -> vanilla room pools
+#ifndef EDITOR
+	SAMHud::clearAll(); // a mod's HUD must never outlive the mod that drew it
+	SAMImages::clear(); // drop the image registry + every live overlay
+#endif
 	SAMMonsterPatch::clear(); // v0.7.0 F5: drop any prior monster stat overrides
 #ifndef EDITOR
 	SAMSpells::clear(); // custom-spell registry — rebuild fresh each load
@@ -99,6 +109,7 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 	// private prepend-mounted overlay. Barony reads these lazily at map
 	// generation (long after this hook), so the mount alone suffices.
 	SAMMonsters::applyAll(mods);
+	SAMRooms::applyAll(mods);   // prefab rooms added to existing levelsets (sorted for MP determinism)
 #endif
 
 	// S.A.M: re-install the framework's own built-in content BEFORE the per-mod loop, so a
@@ -144,6 +155,7 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 #ifndef EDITOR
 		// Custom spells (Session 1: metadata registry only — no in-engine spell yet).
 		SAMSpells::loadFromManifest(m);
+		SAMImages::loadFromManifest(m); // pictures the mod ships (validated here, not at draw time)
 
 		// S.A.M scripting: auto-load behavior scripts. A script (.ts/.js/.lua) defines
 		// on_event(event) and/or on_tick(event); once loaded it receives EVERY dispatched
@@ -290,8 +302,23 @@ void SAMLoader::unload()
 	SAMRecipes::clear();       // drop tinkering recipes
 	SAMWorkbench::clear();     // drop the built-in bench registration
 	SAMMonsterPatch::clear();  // reverts sam_patch_monster overrides (F5)
+	// Rooms are NOT optional to clear. The registry holds ABSOLUTE paths, so unmounting the
+	// mod's PhysFS folder does not stop generateDungeon from loading the .lmp files: with a
+	// stale registry `SAMRooms::any()` stays true, the room pool stays inflated, and
+	// `map_rng.rand() % numlevels` draws from a different range -- the same seed generates a
+	// DIFFERENT dungeon after the player pressed Unload Mods. In multiplayer that desyncs a
+	// host who unloaded against a client who never had the mod, silently. It also re-fails
+	// verifyMapHash, which sets disableSteamAchievements back on four lines after
+	// Mods::unloadMods just cleared it.
+	SAMRooms::clear();         // drop injected rooms -> vanilla room pools
 #ifndef EDITOR
 	SAMSpells::clear();   // drop the custom-spell registry
+	SAMImages::clear();   // drop mod pictures + any overlay still on screen
+	// Same promise sam_hud.hpp makes: a HUD must never outlive the mod that drew it. Nothing
+	// else takes it down on this path -- Mods::unloadMods shows a loading screen WITH a
+	// background, which skips the Frame::guiDestroy branch -- so without this the mod's
+	// widgets keep drawing over a main menu that now claims to be vanilla.
+	SAMHud::clearAll();   // drop the script HUD container and every widget under it
 	// NOTE: do NOT call SAMModels::clear() here. The id->index map IS the append-time
 	// duplicate guard: appendModels skips an id already in it. Dropping the map on unload
 	// makes the next load re-append every .vox the engine still holds, growing the model

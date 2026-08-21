@@ -70,6 +70,10 @@ extern "C" {
 #	include "sam_spells.hpp"  // custom-spell registry (sam_grant_spell)
 #	include "sam_sounds.hpp"  // custom sounds (resolve "ns:sound" ids in sam_play_sound)
 #	include "sam_races.hpp"   // custom races (sam_get_race id lookup)
+#	include "sam_hud.hpp"     // script-driven HUD layer
+#	include "sam_images.hpp"  // the mod's own pictures (overlay + HUD art)
+#	include "sam_world.hpp"   // world queries, terrain, mechanisms
+#	include "sam_workshop.hpp" // SAMModManifest (sam_get_mods)
 #	include "magic/magic.hpp" // addSpell (grant a spell to a player)
 #	include <cctype>
 #endif
@@ -209,6 +213,17 @@ namespace
 		}
 		return obj;
 	}
+	// An optional argument is "given" only if it is present AND not undefined/null.
+	//
+	// argc alone is not enough. QuickJS converts undefined to 0 and reports SUCCESS
+	// (JS_ToInt32Free, JS_TAG_UNDEFINED -> 0), and JS_ToBool(undefined) is false -- so a
+	// caller writing the perfectly ordinary `sam_show_image(p, img, ms, opts.alpha)` with no
+	// alpha in opts passes argc=4 with argv[3]=undefined, silently overriding a default of
+	// 255 with 0. The Lua side gets this right for free because lua_isnoneornil covers both.
+	static bool samHasArg(int argc, JSValueConst* argv, int i)
+	{
+		return ( argc > i && !JS_IsUndefined(argv[i]) && !JS_IsNull(argv[i]) );
+	}
 
 	// ---- host functions exposed to scripts ------------------------------------
 	JSValue js_sam_log(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
@@ -226,9 +241,9 @@ namespace
 	{
 		SAMLogger::noteApiCall();
 		int32_t player = -1;
-		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
 		std::string name;
-		if ( argc >= 2 ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
+		if ( samHasArg(argc, argv, 1) ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
 
 #ifdef SAM_JS_HAVE_BARONY
 		if ( multiplayer == CLIENT )
@@ -262,9 +277,9 @@ namespace
 		// Optional trailing args: beatitude (blessed +N / cursed -N), status (0=BROKEN .. 4=
 		// EXCELLENT), count. The 2-arg call (plain, uncursed, one item) is unchanged.
 		int32_t beatitudeArg = 0, statusArg = (int)EXCELLENT, countArg = 1;
-		if ( argc >= 3 ) { JS_ToInt32(ctx, &beatitudeArg, argv[2]); }
-		if ( argc >= 4 ) { JS_ToInt32(ctx, &statusArg, argv[3]); }
-		if ( argc >= 5 ) { JS_ToInt32(ctx, &countArg, argv[4]); }
+		if ( samHasArg(argc, argv, 2) ) { JS_ToInt32(ctx, &beatitudeArg, argv[2]); }
+		if ( samHasArg(argc, argv, 3) ) { JS_ToInt32(ctx, &statusArg, argv[3]); }
+		if ( samHasArg(argc, argv, 4) ) { JS_ToInt32(ctx, &countArg, argv[4]); }
 		const Sint16 beatitude = (Sint16)beatitudeArg;
 		if ( statusArg < (int)BROKEN ) { statusArg = (int)BROKEN; }
 		if ( statusArg > (int)EXCELLENT ) { statusArg = (int)EXCELLENT; }
@@ -317,8 +332,8 @@ namespace
 	{
 		SAMLogger::noteApiCall();
 		int32_t player = -1, amount = 0;
-		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
-		if ( argc >= 2 ) { JS_ToInt32(ctx, &amount, argv[1]); }
+		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( samHasArg(argc, argv, 1) ) { JS_ToInt32(ctx, &amount, argv[1]); }
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_grant_gold refused: host only."); return JS_NewBool(ctx, 0); }
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !stats[player] )
 		{ SAM_ERROR("JS", "sam_grant_gold: invalid player index " + std::to_string(player) + "."); return JS_NewBool(ctx, 0); }
@@ -342,11 +357,11 @@ namespace
 		SAMLogger::noteApiCall();
 		int32_t player = -1, ticks = 0;
 		std::string name;
-		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
-		if ( argc >= 2 ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
-		if ( argc >= 3 ) { JS_ToInt32(ctx, &ticks, argv[2]); }
+		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( samHasArg(argc, argv, 1) ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
+		if ( samHasArg(argc, argv, 2) ) { JS_ToInt32(ctx, &ticks, argv[2]); }
 		int32_t strength = 0;
-		if ( argc >= 4 ) { JS_ToInt32(ctx, &strength, argv[3]); } // optional tier/magnitude
+		if ( samHasArg(argc, argv, 3) ) { JS_ToInt32(ctx, &strength, argv[3]); } // optional tier/magnitude
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_apply_effect refused: host only."); return JS_NewBool(ctx, 0); }
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity )
 		{ SAM_ERROR("JS", "sam_apply_effect: invalid player index " + std::to_string(player) + "."); return JS_NewBool(ctx, 0); }
@@ -371,8 +386,8 @@ namespace
 		SAMLogger::noteApiCall();
 		int32_t player = -1;
 		std::string name;
-		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
-		if ( argc >= 2 ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
+		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( samHasArg(argc, argv, 1) ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_remove_effect refused: host only."); return JS_NewBool(ctx, 0); }
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity )
 		{ SAM_ERROR("JS", "sam_remove_effect: invalid player index " + std::to_string(player) + "."); return JS_NewBool(ctx, 0); }
@@ -387,7 +402,7 @@ namespace
 	JSValue js_sam_clear_effects(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_clear_effects refused: host only."); return JS_NewInt32(ctx, 0); }
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity || !stats[player] )
 		{ SAM_ERROR("JS", "sam_clear_effects: invalid player index " + std::to_string(player) + "."); return JS_NewInt32(ctx, 0); }
@@ -403,9 +418,9 @@ namespace
 	{
 		SAMLogger::noteApiCall();
 		int32_t player = -1, ticks = 0; std::string name;
-		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
-		if ( argc >= 2 ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
-		if ( argc >= 3 ) { JS_ToInt32(ctx, &ticks, argv[2]); }
+		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( samHasArg(argc, argv, 1) ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
+		if ( samHasArg(argc, argv, 2) ) { JS_ToInt32(ctx, &ticks, argv[2]); }
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_set_effect_duration refused: host only."); return JS_NewBool(ctx, 0); }
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity || !stats[player] )
 		{ SAM_ERROR("JS", "sam_set_effect_duration: invalid player index " + std::to_string(player) + "."); return JS_NewBool(ctx, 0); }
@@ -420,9 +435,9 @@ namespace
 	{
 		SAMLogger::noteApiCall();
 		int32_t player = -1, strength = 0; std::string name;
-		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
-		if ( argc >= 2 ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
-		if ( argc >= 3 ) { JS_ToInt32(ctx, &strength, argv[2]); }
+		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( samHasArg(argc, argv, 1) ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
+		if ( samHasArg(argc, argv, 2) ) { JS_ToInt32(ctx, &strength, argv[2]); }
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_set_effect_strength refused: host only."); return JS_NewBool(ctx, 0); }
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity || !stats[player] )
 		{ SAM_ERROR("JS", "sam_set_effect_strength: invalid player index " + std::to_string(player) + "."); return JS_NewBool(ctx, 0); }
@@ -440,8 +455,8 @@ namespace
 		SAMLogger::noteApiCall();
 		int32_t player = -1;
 		std::string name;
-		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
-		if ( argc >= 2 ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
+		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( samHasArg(argc, argv, 1) ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_get_stat refused: host only."); return JS_NewInt32(ctx, 0); }
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !stats[player] )
 		{ SAM_ERROR("JS", "sam_get_stat: invalid player index " + std::to_string(player) + "."); return JS_NewInt32(ctx, 0); }
@@ -471,9 +486,9 @@ namespace
 		SAMLogger::noteApiCall();
 		int32_t player = -1, value = 0;
 		std::string name;
-		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
-		if ( argc >= 2 ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
-		if ( argc >= 3 ) { JS_ToInt32(ctx, &value, argv[2]); }
+		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( samHasArg(argc, argv, 1) ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
+		if ( samHasArg(argc, argv, 2) ) { JS_ToInt32(ctx, &value, argv[2]); }
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_set_stat refused: host only."); return JS_NewBool(ctx, 0); }
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !stats[player] )
 		{ SAM_ERROR("JS", "sam_set_stat: invalid player index " + std::to_string(player) + "."); return JS_NewBool(ctx, 0); }
@@ -516,8 +531,8 @@ namespace
 		SAMLogger::noteApiCall();
 		int32_t player = -1;
 		double mult = 1.0;
-		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
-		if ( argc >= 2 ) { JS_ToFloat64(ctx, &mult, argv[1]); }
+		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( samHasArg(argc, argv, 1) ) { JS_ToFloat64(ctx, &mult, argv[1]); }
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_set_move_speed refused: host only."); return JS_NewBool(ctx, 0); }
 		if ( player < 0 || player >= MAXPLAYERS )
 		{ SAM_ERROR("JS", "sam_set_move_speed: invalid player index " + std::to_string(player) + "."); return JS_NewBool(ctx, 0); }
@@ -531,7 +546,7 @@ namespace
 	{
 		SAMLogger::noteApiCall();
 		int32_t player = -1;
-		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
 		return JS_NewFloat64(ctx, SAMLua::getMoveSpeedMult(player));
 	}
 
@@ -542,8 +557,8 @@ namespace
 		SAMLogger::noteApiCall();
 		int32_t player = -1;
 		double delta = 0.0;
-		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
-		if ( argc >= 2 ) { JS_ToFloat64(ctx, &delta, argv[1]); }
+		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( samHasArg(argc, argv, 1) ) { JS_ToFloat64(ctx, &delta, argv[1]); }
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_add_move_speed refused: host only."); return JS_NewBool(ctx, 0); }
 		if ( player < 0 || player >= MAXPLAYERS )
 		{ SAM_ERROR("JS", "sam_add_move_speed: invalid player index " + std::to_string(player) + "."); return JS_NewBool(ctx, 0); }
@@ -557,8 +572,8 @@ namespace
 	{
 		SAMLogger::noteApiCall();
 		int32_t player = -1, count = 1;
-		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
-		if ( argc >= 2 ) { JS_ToInt32(ctx, &count, argv[1]); }
+		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( samHasArg(argc, argv, 1) ) { JS_ToInt32(ctx, &count, argv[1]); }
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_level_up refused: host only."); return JS_NewBool(ctx, 0); }
 #ifdef SAM_JS_HAVE_BARONY
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !stats[player] )
@@ -584,9 +599,9 @@ namespace
 		SAMLogger::noteApiCall();
 		int32_t x = 0, y = 0;
 		std::string name;
-		if ( argc >= 1 ) { JS_ToInt32(ctx, &x, argv[0]); }
-		if ( argc >= 2 ) { JS_ToInt32(ctx, &y, argv[1]); }
-		if ( argc >= 3 ) { const char* s = JS_ToCString(ctx, argv[2]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
+		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &x, argv[0]); }
+		if ( samHasArg(argc, argv, 1) ) { JS_ToInt32(ctx, &y, argv[1]); }
+		if ( samHasArg(argc, argv, 2) ) { const char* s = JS_ToCString(ctx, argv[2]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_spawn_item refused: host only."); return JS_NewBool(ctx, 0); }
 		// Resolve a custom "namespace:item" id first, else a vanilla name (case-insensitive),
 		// matching sam_grant_item. Without the first tier a mod could not drop its OWN items,
@@ -646,8 +661,8 @@ namespace
 		SAMLogger::noteApiCall();
 		int32_t player = -1;
 		std::string text;
-		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
-		if ( argc >= 2 ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { text = s; JS_FreeCString(ctx, s); } }
+		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( samHasArg(argc, argv, 1) ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { text = s; JS_FreeCString(ctx, s); } }
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_message refused: host only."); return JS_NewBool(ctx, 0); }
 		if ( player < 0 || player >= MAXPLAYERS )
 		{ SAM_ERROR("JS", "sam_message: invalid player index " + std::to_string(player) + "."); return JS_NewBool(ctx, 0); }
@@ -666,7 +681,7 @@ namespace
 			if ( nm ) { JS_FreeCString(ctx, nm); }
 			if ( soundId < 0 ) { SAM_ERROR("JS", "sam_play_sound: unknown sound name."); return JS_NewBool(ctx, 0); }
 		}
-		else if ( argc >= 1 ) { JS_ToInt32(ctx, &soundId, argv[0]); }
+		else if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &soundId, argv[0]); }
 		if ( argc >= 2 && !JS_IsUndefined(argv[1]) ) { JS_ToInt32(ctx, &vol, argv[1]); }
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_play_sound refused: host only."); return JS_NewBool(ctx, 0); }
 		if ( soundId < 0 || (Uint32)soundId >= numsounds )
@@ -687,8 +702,8 @@ namespace
 		SAMLogger::noteApiCall();
 		int32_t player = -1;
 		double radiusTiles = 0.0;
-		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
-		if ( argc >= 2 ) { JS_ToFloat64(ctx, &radiusTiles, argv[1]); }
+		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( samHasArg(argc, argv, 1) ) { JS_ToFloat64(ctx, &radiusTiles, argv[1]); }
 		JSValue arr = JS_NewArray(ctx);
 		if ( multiplayer == CLIENT ) { return arr; }
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity || !map.entities ) { return arr; }
@@ -740,8 +755,8 @@ namespace
 	JSValue js_sam_get_equipped_item(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
-		std::string slot; if ( argc >= 2 ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { slot = s; JS_FreeCString(ctx, s); } }
+		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		std::string slot; if ( samHasArg(argc, argv, 1) ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { slot = s; JS_FreeCString(ctx, s); } }
 		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return JS_NULL; }
 		for ( char& c : slot ) { c = (char)std::toupper((unsigned char)c); }
 		Item* it = samEquippedSlotJs(player, slot);
@@ -756,8 +771,8 @@ namespace
 	JSValue js_sam_get_equipped_item_id(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
-		std::string slot; if ( argc >= 2 ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { slot = s; JS_FreeCString(ctx, s); } }
+		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		std::string slot; if ( samHasArg(argc, argv, 1) ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { slot = s; JS_FreeCString(ctx, s); } }
 		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return JS_NULL; }
 		for ( char& c : slot ) { c = (char)std::toupper((unsigned char)c); }
 		Item* it = samEquippedSlotJs(player, slot);
@@ -770,7 +785,7 @@ namespace
 	JSValue js_sam_is_defending(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
 		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return JS_NewBool(ctx, 0); }
 		return JS_NewBool(ctx, stats[player]->defending ? 1 : 0);
 	}
@@ -780,8 +795,8 @@ namespace
 	JSValue js_sam_is_action_held(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
-		std::string action; if ( argc >= 2 ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { action = s; JS_FreeCString(ctx, s); } }
+		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		std::string action; if ( samHasArg(argc, argv, 1) ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { action = s; JS_FreeCString(ctx, s); } }
 		return JS_NewBool(ctx, SAMLua::isActionHeld(player, action) ? 1 : 0);
 	}
 
@@ -790,8 +805,8 @@ namespace
 	JSValue js_sam_get_action_binding(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
-		std::string action; if ( argc >= 2 ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { action = s; JS_FreeCString(ctx, s); } }
+		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		std::string action; if ( samHasArg(argc, argv, 1) ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { action = s; JS_FreeCString(ctx, s); } }
 		const char* b = SAMLua::actionBinding(player, action);
 		if ( !b || !b[0] ) { return JS_NULL; }
 		return JS_NewString(ctx, b);
@@ -800,8 +815,8 @@ namespace
 	JSValue js_sam_get_inventory_count(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
-		std::string name; if ( argc >= 2 ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
+		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		std::string name; if ( samHasArg(argc, argv, 1) ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
 		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return JS_NewInt32(ctx, 0); }
 		std::string lower = name; for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
 		int wantType = -1;
@@ -821,8 +836,8 @@ namespace
 	JSValue js_sam_has_effect(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
-		std::string name; if ( argc >= 2 ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
+		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		std::string name; if ( samHasArg(argc, argv, 1) ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
 		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return JS_NewBool(ctx, 0); }
 		const int eff = samEffectNameToId(name.c_str());
 		if ( eff < 0 ) { SAM_WARN("JS", "sam_has_effect: unknown effect '" + name + "'. Valid: " + SAMLua::effectNameHint()); return JS_NewBool(ctx, 0); }
@@ -832,7 +847,7 @@ namespace
 	JSValue js_sam_get_class(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
 		if ( player < 0 || player >= MAXPLAYERS ) { return JS_NULL; }
 		// SAM-aware, mirroring the Lua binding: custom ids resolve from the registry, since
 		// playerClassLangEntry returns a bogus string for them (see the Lua samClassName note).
@@ -850,7 +865,7 @@ namespace
 	JSValue js_sam_get_race(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
 		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return JS_NULL; }
 		const int race = stats[player]->playerRace;
 		if ( race >= SAM_RACE_ID_BASE )
@@ -866,7 +881,7 @@ namespace
 	JSValue js_sam_get_kills(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
 		return JS_NewInt64(ctx, SAMLua::getKills(player)); // shared session counter
 	}
 
@@ -906,7 +921,7 @@ namespace
 		const std::string key = keyC ? keyC : "";
 		if ( keyC ) { JS_FreeCString(ctx, keyC); }
 		if ( g_currentNs.empty() ) { SAM_WARN("JS", "sam_save_data: no owning mod namespace — ignored."); return JS_NewBool(ctx, 0); }
-		JSValueConst v = ( argc >= 2 ) ? argv[1] : JS_NULL;
+		JSValueConst v = ( samHasArg(argc, argv, 1) ) ? argv[1] : JS_NULL;
 		JSValue jstr = JS_JSONStringify(ctx, v, JS_UNDEFINED, JS_UNDEFINED);
 		std::string json = "null";
 		if ( !JS_IsException(jstr) && !JS_IsUndefined(jstr) )
@@ -1182,7 +1197,7 @@ namespace
 	JSValue js_sam_get_player_uid(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity ) { return JS_NULL; }
 		return JS_NewInt64(ctx, (int64_t)players[player]->entity->getUID());
 	}
@@ -1191,7 +1206,7 @@ namespace
 	JSValue js_sam_get_position(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int64_t uid = 0; if ( argc >= 1 ) { JS_ToInt64(ctx, &uid, argv[0]); }
+		int64_t uid = 0; if ( samHasArg(argc, argv, 0) ) { JS_ToInt64(ctx, &uid, argv[0]); }
 		Entity* e = uidToEntity((Sint32)uid);
 		if ( !e ) { return JS_NULL; }
 		JSValue arr = JS_NewArray(ctx);
@@ -1206,9 +1221,9 @@ namespace
 	{
 		SAMLogger::noteApiCall();
 		int64_t uid = 0; int32_t tx = 0, ty = 0;
-		if ( argc >= 1 ) { JS_ToInt64(ctx, &uid, argv[0]); }
-		if ( argc >= 2 ) { JS_ToInt32(ctx, &tx, argv[1]); }
-		if ( argc >= 3 ) { JS_ToInt32(ctx, &ty, argv[2]); }
+		if ( samHasArg(argc, argv, 0) ) { JS_ToInt64(ctx, &uid, argv[0]); }
+		if ( samHasArg(argc, argv, 1) ) { JS_ToInt32(ctx, &tx, argv[1]); }
+		if ( samHasArg(argc, argv, 2) ) { JS_ToInt32(ctx, &ty, argv[2]); }
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_set_position refused: host only."); return JS_NewBool(ctx, 0); }
 		Entity* e = uidToEntity((Sint32)uid);
 		if ( !e ) { SAM_WARN("JS", "sam_set_position: no entity uid " + std::to_string(uid) + "."); return JS_NewBool(ctx, 0); }
@@ -1232,9 +1247,9 @@ namespace
 	{
 		SAMLogger::noteApiCall();
 		int32_t tx = 0, ty = 0; std::string monName;
-		if ( argc >= 1 ) { JS_ToInt32(ctx, &tx, argv[0]); }
-		if ( argc >= 2 ) { JS_ToInt32(ctx, &ty, argv[1]); }
-		if ( argc >= 3 ) { const char* s = JS_ToCString(ctx, argv[2]); if ( s ) { monName = s; JS_FreeCString(ctx, s); } }
+		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &tx, argv[0]); }
+		if ( samHasArg(argc, argv, 1) ) { JS_ToInt32(ctx, &ty, argv[1]); }
+		if ( samHasArg(argc, argv, 2) ) { const char* s = JS_ToCString(ctx, argv[2]); if ( s ) { monName = s; JS_FreeCString(ctx, s); } }
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_spawn_monster refused: host only."); return JS_NULL; }
 		const int creature = samMonsterNameToId(monName.c_str());
 		if ( creature <= 0 ) { SAM_ERROR("JS", "sam_spawn_monster: unknown monster '" + monName + "'."); return JS_NULL; }
@@ -1262,8 +1277,8 @@ namespace
 	{
 		SAMLogger::noteApiCall();
 		int32_t tx = 0, ty = 0;
-		if ( argc >= 1 ) { JS_ToInt32(ctx, &tx, argv[0]); }
-		if ( argc >= 2 ) { JS_ToInt32(ctx, &ty, argv[1]); }
+		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &tx, argv[0]); }
+		if ( samHasArg(argc, argv, 1) ) { JS_ToInt32(ctx, &ty, argv[1]); }
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_spawn_portal refused: host only."); return JS_NULL; }
 		if ( tx < 0 || tx >= (int)map.width || ty < 0 || ty >= (int)map.height )
 		{ SAM_ERROR("JS", "sam_spawn_portal: tile out of bounds."); return JS_NULL; }
@@ -1306,10 +1321,10 @@ namespace
 	{
 		SAMLogger::noteApiCall();
 		int32_t player = -1;
-		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
-		const char* modelC = ( argc >= 2 ) ? JS_ToCString(ctx, argv[1]) : nullptr;
+		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		const char* modelC = ( samHasArg(argc, argv, 1) ) ? JS_ToCString(ctx, argv[1]) : nullptr;
 		double scale = 1.0;
-		if ( argc >= 3 ) { JS_ToFloat64(ctx, &scale, argv[2]); }
+		if ( samHasArg(argc, argv, 2) ) { JS_ToFloat64(ctx, &scale, argv[2]); }
 		const unsigned long long uid = SAMLua::spawnCompanion(player, modelC ? modelC : "", scale);
 		if ( modelC ) { JS_FreeCString(ctx, modelC); }
 		if ( uid == 0 ) { return JS_NULL; }
@@ -1331,7 +1346,7 @@ namespace
 	{
 		SAMLogger::noteApiCall();
 		int32_t player = -1;
-		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
 		const double yaw = SAMLua::getFacing(player);
 		if ( yaw < 0.0 ) { return JS_NULL; }
 		return JS_NewFloat64(ctx, yaw);
@@ -1344,12 +1359,12 @@ namespace
 		SAMLogger::noteApiCall();
 		int32_t player = -1, r = 0, g = 0, b = 0, ms = 180;
 		double inten = 1.0;
-		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
-		if ( argc >= 2 ) { JS_ToInt32(ctx, &r, argv[1]); }
-		if ( argc >= 3 ) { JS_ToInt32(ctx, &g, argv[2]); }
-		if ( argc >= 4 ) { JS_ToInt32(ctx, &b, argv[3]); }
-		if ( argc >= 5 ) { JS_ToFloat64(ctx, &inten, argv[4]); }
-		if ( argc >= 6 ) { JS_ToInt32(ctx, &ms, argv[5]); }
+		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( samHasArg(argc, argv, 1) ) { JS_ToInt32(ctx, &r, argv[1]); }
+		if ( samHasArg(argc, argv, 2) ) { JS_ToInt32(ctx, &g, argv[2]); }
+		if ( samHasArg(argc, argv, 3) ) { JS_ToInt32(ctx, &b, argv[3]); }
+		if ( samHasArg(argc, argv, 4) ) { JS_ToFloat64(ctx, &inten, argv[4]); }
+		if ( samHasArg(argc, argv, 5) ) { JS_ToInt32(ctx, &ms, argv[5]); }
 #ifdef SAM_JS_HAVE_BARONY
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] ) { return JS_FALSE; }
 		SAMLua::triggerScreenFlash(player, r, g, b, inten, ms, 0, 0); // style 0 = plain fill
@@ -1367,13 +1382,13 @@ namespace
 		SAMLogger::noteApiCall();
 		int32_t player = -1, r = 0, g = 0, b = 0, ms = 220, lines = 110;
 		double inten = 1.0;
-		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
-		if ( argc >= 2 ) { JS_ToInt32(ctx, &r, argv[1]); }
-		if ( argc >= 3 ) { JS_ToInt32(ctx, &g, argv[2]); }
-		if ( argc >= 4 ) { JS_ToInt32(ctx, &b, argv[3]); }
-		if ( argc >= 5 ) { JS_ToFloat64(ctx, &inten, argv[4]); }
-		if ( argc >= 6 ) { JS_ToInt32(ctx, &ms, argv[5]); }
-		if ( argc >= 7 ) { JS_ToInt32(ctx, &lines, argv[6]); }
+		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( samHasArg(argc, argv, 1) ) { JS_ToInt32(ctx, &r, argv[1]); }
+		if ( samHasArg(argc, argv, 2) ) { JS_ToInt32(ctx, &g, argv[2]); }
+		if ( samHasArg(argc, argv, 3) ) { JS_ToInt32(ctx, &b, argv[3]); }
+		if ( samHasArg(argc, argv, 4) ) { JS_ToFloat64(ctx, &inten, argv[4]); }
+		if ( samHasArg(argc, argv, 5) ) { JS_ToInt32(ctx, &ms, argv[5]); }
+		if ( samHasArg(argc, argv, 6) ) { JS_ToInt32(ctx, &lines, argv[6]); }
 #ifdef SAM_JS_HAVE_BARONY
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] ) { return JS_FALSE; }
 		SAMLua::triggerScreenFlash(player, r, g, b, inten, ms, 1, lines); // style 1 = manga burst
@@ -1390,8 +1405,8 @@ namespace
 		SAMLogger::noteApiCall();
 		int32_t player = -1;
 		double mag = 0.0;
-		if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
-		if ( argc >= 2 ) { JS_ToFloat64(ctx, &mag, argv[1]); }
+		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( samHasArg(argc, argv, 1) ) { JS_ToFloat64(ctx, &mag, argv[1]); }
 #ifdef SAM_JS_HAVE_BARONY
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] ) { return JS_FALSE; }
 		SAMLua::triggerCameraShake(player, mag);
@@ -1407,7 +1422,7 @@ namespace
 	{
 		SAMLogger::noteApiCall();
 		int32_t ms = 0;
-		if ( argc >= 1 ) { JS_ToInt32(ctx, &ms, argv[0]); }
+		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &ms, argv[0]); }
 #ifdef SAM_JS_HAVE_BARONY
 		if ( multiplayer != SINGLE ) { return JS_FALSE; }
 		SAMLua::triggerHitstop(ms);
@@ -1423,7 +1438,7 @@ namespace
 	JSValue js_sam_get_inventory(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
 		JSValue arr = JS_NewArray(ctx);
 		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return arr; }
 		uint32_t idx = 0;
@@ -1450,7 +1465,7 @@ namespace
 	JSValue js_sam_remove_item(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int64_t uid = 0; if ( argc >= 1 ) { JS_ToInt64(ctx, &uid, argv[0]); }
+		int64_t uid = 0; if ( samHasArg(argc, argv, 0) ) { JS_ToInt64(ctx, &uid, argv[0]); }
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_remove_item refused: host only."); return JS_NewBool(ctx, 0); }
 		Item* it = uidToItem((Uint32)uid);
 		if ( !it ) { SAM_WARN("JS", "sam_remove_item: no item uid " + std::to_string(uid) + "."); return JS_NewBool(ctx, 0); }
@@ -1612,7 +1627,7 @@ namespace
 		if ( argc < 1 ) { return JS_FALSE; }
 		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
 		int32_t ticks = 50;
-		if ( argc >= 2 ) { JS_ToInt32(ctx, &ticks, argv[1]); }
+		if ( samHasArg(argc, argv, 1) ) { JS_ToInt32(ctx, &ticks, argv[1]); }
 #ifdef SAM_JS_HAVE_BARONY
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_monster_charge refused: host only."); return JS_FALSE; }
 		Entity* e = samResolveMonster(uid);
@@ -1624,6 +1639,603 @@ namespace
 		return JS_TRUE;
 #else
 		(void)uid; (void)ticks; return JS_FALSE;
+#endif
+	}
+
+	// ---- mod-defined networking ---------------------------------------------------------
+	//
+	// Barony's packets are a fixed table of four-character ids, so a mod could never send
+	// anything of its own: a co-op mod had no way to tell the other machine ANYTHING. This
+	// adds one generic envelope, "SAMP", carrying a mod-chosen tag and an opaque payload.
+	//
+	// Deliberately NOT chunked. NET_PACKET_SIZE is 512 and this is a single datagram, so an
+	// oversized send is REFUSED with a clear error rather than silently truncated -- a mod
+	// that loses the tail of its own message is a much worse bug to chase than one that was
+	// told no. Send several small messages, or use sam_save_data for bulk state.
+
+	// sam_send_packet(target, tag, payload) -> boolean. Lua parity: lua_sam_send_packet.
+	JSValue js_sam_send_packet(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_FALSE; }
+		int32_t target = -1; JS_ToInt32(ctx, &target, argv[0]);
+		const char* tagC = JS_ToCString(ctx, argv[1]);
+		const char* payC = ( samHasArg(argc, argv, 2) ) ? JS_ToCString(ctx, argv[2]) : nullptr;
+		const std::string tag = tagC ? tagC : "";
+		const std::string pay = payC ? payC : "";
+		if ( tagC ) { JS_FreeCString(ctx, tagC); }
+		if ( payC ) { JS_FreeCString(ctx, payC); }
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == SINGLE ) { return JS_FALSE; }
+		if ( tag.empty() || tag.size() > SAMLua::SAM_PACKET_MAX_TAG )
+		{
+			SAM_ERROR("JS", "sam_send_packet: tag must be 1.." + std::to_string(SAMLua::SAM_PACKET_MAX_TAG)
+				+ " characters. Packet not sent.");
+			return JS_FALSE;
+		}
+		if ( pay.size() > SAMLua::SAM_PACKET_MAX_PAYLOAD )
+		{
+			SAM_ERROR("JS", "sam_send_packet: payload is " + std::to_string(pay.size())
+				+ " bytes, the limit is " + std::to_string(SAMLua::SAM_PACKET_MAX_PAYLOAD)
+				+ " (one datagram). Packet not sent.");
+			return JS_FALSE;
+		}
+		return SAMLua::sendModPacket(target, tag, pay) ? JS_TRUE : JS_FALSE;
+#else
+		(void)target; return JS_FALSE;
+#endif
+	}
+
+	// ---- script HUD (Lua parity: sam_hud_text / _bar / _clear) ---------------------------
+	static Uint32 samHudColorJS(JSContext* ctx, int argc, JSValueConst* argv, int idx, Uint32 dflt)
+	{
+		// samHasArg, not argc: an explicit undefined here would convert to 0, i.e.
+		// makeColor(0,0,0,0) -- a fully transparent widget rather than the default colour.
+		if ( !samHasArg(argc, argv, idx) ) { return dflt; }
+		int64_t v = 0; JS_ToInt64(ctx, &v, argv[idx]);
+		const unsigned long long u = (unsigned long long)v;
+		return makeColor((Uint8)((u >> 24) & 0xFF), (Uint8)((u >> 16) & 0xFF),
+		                 (Uint8)((u >> 8) & 0xFF),  (Uint8)(u & 0xFF));
+	}
+
+	JSValue js_sam_hud_text(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 4 ) { return JS_FALSE; }
+		const char* id = JS_ToCString(ctx, argv[0]);
+		int32_t x = 0, y = 0; JS_ToInt32(ctx, &x, argv[1]); JS_ToInt32(ctx, &y, argv[2]);
+		const char* val = JS_ToCString(ctx, argv[3]);
+		const Uint32 col = samHudColorJS(ctx, argc, argv, 4, makeColor(255, 255, 255, 255));
+		const bool ok = SAMHud::text(g_currentNs, id ? id : "", x, y, val ? val : "", col);
+		if ( id ) { JS_FreeCString(ctx, id); }
+		if ( val ) { JS_FreeCString(ctx, val); }
+		return ok ? JS_TRUE : JS_FALSE;
+	}
+
+	JSValue js_sam_hud_bar(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 6 ) { return JS_FALSE; }
+		const char* id = JS_ToCString(ctx, argv[0]);
+		int32_t x = 0, y = 0, w = 0, h = 0;
+		JS_ToInt32(ctx, &x, argv[1]); JS_ToInt32(ctx, &y, argv[2]);
+		JS_ToInt32(ctx, &w, argv[3]); JS_ToInt32(ctx, &h, argv[4]);
+		double frac = 0.0; JS_ToFloat64(ctx, &frac, argv[5]);
+		const Uint32 col = samHudColorJS(ctx, argc, argv, 6, makeColor(200, 40, 40, 255));
+		const bool ok = SAMHud::bar(g_currentNs, id ? id : "", x, y, w, h, frac, col);
+		if ( id ) { JS_FreeCString(ctx, id); }
+		return ok ? JS_TRUE : JS_FALSE;
+	}
+
+	JSValue js_sam_hud_clear(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		// No id means "clear MY HUD", not everybody's (Lua parity).
+		if ( !samHasArg(argc, argv, 0) ) { SAMHud::clearNamespace(g_currentNs); return JS_TRUE; }
+		const char* id = JS_ToCString(ctx, argv[0]);
+		const bool ok = SAMHud::clear(g_currentNs, id ? id : "");
+		if ( id ) { JS_FreeCString(ctx, id); }
+		return ok ? JS_TRUE : JS_FALSE;
+	}
+
+	// ---- the mod's own pictures (Lua parity: sam_show_image / _at / sam_hide_image /
+	//      sam_hud_image / sam_get_image_size) ---------------------------------------------
+	// Same naming rules as the Lua side: "ns:name" from a manifest, a bare "name" meaning one
+	// of this mod's declared images, or a path inside this mod's folder.
+
+	static int samImageFitJS(JSContext* ctx, int argc, JSValueConst* argv, int idx)
+	{
+		if ( !samHasArg(argc, argv, idx) ) { return SAMImages::FIT_STRETCH; }
+		if ( JS_IsNumber(argv[idx]) )
+		{
+			int32_t v = 0; JS_ToInt32(ctx, &v, argv[idx]);
+			return (int)v;
+		}
+		const char* fs = JS_ToCString(ctx, argv[idx]);
+		const bool contain = ( fs && (strcmp(fs, "contain") == 0 || strcmp(fs, "fit") == 0) );
+		if ( fs ) { JS_FreeCString(ctx, fs); }
+		return contain ? SAMImages::FIT_CONTAIN : SAMImages::FIT_STRETCH;
+	}
+
+	// sam_show_image(player, image [, durationMs [, alpha [, "stretch"|"contain" ]]]) -> boolean
+	JSValue js_sam_show_image(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_FALSE; }
+		int32_t player = 0, ms = 0, alpha = 255;
+		JS_ToInt32(ctx, &player, argv[0]);
+		const char* img = JS_ToCString(ctx, argv[1]);
+		if ( samHasArg(argc, argv, 2) ) { JS_ToInt32(ctx, &ms, argv[2]); }
+		if ( samHasArg(argc, argv, 3) ) { JS_ToInt32(ctx, &alpha, argv[3]); }
+		const int fit = samImageFitJS(ctx, argc, argv, 4);
+		const bool ok = SAMImages::show(player, g_currentNs, img ? img : "",
+			ms, alpha, fit, 0, 0, 0, 0);
+		if ( img ) { JS_FreeCString(ctx, img); }
+		return ok ? JS_TRUE : JS_FALSE;
+	}
+
+	// sam_show_image_at(player, image, x, y, w, h [, durationMs [, alpha ]]) -> boolean
+	JSValue js_sam_show_image_at(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 6 ) { return JS_FALSE; }
+		int32_t player = 0, x = 0, y = 0, w = 0, h = 0, ms = 0, alpha = 255;
+		JS_ToInt32(ctx, &player, argv[0]);
+		const char* img = JS_ToCString(ctx, argv[1]);
+		JS_ToInt32(ctx, &x, argv[2]); JS_ToInt32(ctx, &y, argv[3]);
+		JS_ToInt32(ctx, &w, argv[4]); JS_ToInt32(ctx, &h, argv[5]);
+		if ( samHasArg(argc, argv, 6) ) { JS_ToInt32(ctx, &ms, argv[6]); }
+		if ( samHasArg(argc, argv, 7) ) { JS_ToInt32(ctx, &alpha, argv[7]); }
+		const bool ok = SAMImages::show(player, g_currentNs, img ? img : "",
+			ms, alpha, SAMImages::FIT_RECT, x, y, w, h);
+		if ( img ) { JS_FreeCString(ctx, img); }
+		return ok ? JS_TRUE : JS_FALSE;
+	}
+
+	// sam_hide_image([player]) -> boolean. No player clears every player's overlay.
+	JSValue js_sam_hide_image(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 )
+		{
+			bool any = false;
+			for ( int c = 0; c < MAXPLAYERS; ++c ) { if ( SAMImages::hide(c) ) { any = true; } }
+			return any ? JS_TRUE : JS_FALSE;
+		}
+		int32_t player = 0; JS_ToInt32(ctx, &player, argv[0]);
+		return SAMImages::hide(player) ? JS_TRUE : JS_FALSE;
+	}
+
+	// sam_hud_image(id, x, y, w, h, image [, 0xRRGGBBAA]) -> boolean
+	JSValue js_sam_hud_image(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 6 ) { return JS_FALSE; }
+		const char* id = JS_ToCString(ctx, argv[0]);
+		int32_t x = 0, y = 0, w = 0, h = 0;
+		JS_ToInt32(ctx, &x, argv[1]); JS_ToInt32(ctx, &y, argv[2]);
+		JS_ToInt32(ctx, &w, argv[3]); JS_ToInt32(ctx, &h, argv[4]);
+		const char* img = JS_ToCString(ctx, argv[5]);
+		const Uint32 col = samHudColorJS(ctx, argc, argv, 6, makeColor(255, 255, 255, 255));
+		const std::string path = SAMImages::resolve(g_currentNs, img ? img : "");
+		const bool ok = !path.empty() && SAMHud::image(g_currentNs, id ? id : "", x, y, w, h, path, col);
+		if ( id ) { JS_FreeCString(ctx, id); }
+		if ( img ) { JS_FreeCString(ctx, img); }
+		return ok ? JS_TRUE : JS_FALSE;
+	}
+
+	// sam_get_image_size(image) -> [width, height], or null. Array rather than two returns:
+	// the JS side mirrors every multi-value Lua function this way (see sam_get_position).
+	JSValue js_sam_get_image_size(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_NULL; }
+		const char* img = JS_ToCString(ctx, argv[0]);
+		int w = 0, h = 0;
+		const bool ok = SAMImages::size(g_currentNs, img ? img : "", w, h);
+		if ( img ) { JS_FreeCString(ctx, img); }
+		if ( !ok ) { return JS_NULL; }
+		JSValue arr = JS_NewArray(ctx);
+		JS_SetPropertyUint32(ctx, arr, 0, JS_NewInt32(ctx, w));
+		JS_SetPropertyUint32(ctx, arr, 1, JS_NewInt32(ctx, h));
+		return arr;
+	}
+
+	// ===== world, perception and truth (Lua parity) =======================================
+	// Same argument convention as the Lua side: everything here takes a UID, never a player
+	// index, because the split convention in the older API fails silently.
+
+	static int samSkillFromNameJS(const char* nameC)
+	{
+		if ( !nameC ) { return -1; }
+		std::string n = nameC;
+		for ( char& c : n ) { c = (char)std::toupper((unsigned char)c); }
+		if ( n.rfind("PRO_", 0) != 0 ) { n = "PRO_" + n; }
+		static const std::map<std::string, int> m = {
+			{ "PRO_LOCKPICKING", PRO_LOCKPICKING }, { "PRO_STEALTH", PRO_STEALTH },
+			{ "PRO_TRADING", PRO_TRADING },          { "PRO_APPRAISAL", PRO_APPRAISAL },
+			{ "PRO_LEADERSHIP", PRO_LEADERSHIP },    { "PRO_RANGED", PRO_RANGED },
+			{ "PRO_SWORD", PRO_SWORD },              { "PRO_MACE", PRO_MACE },
+			{ "PRO_AXE", PRO_AXE },                  { "PRO_POLEARM", PRO_POLEARM },
+			{ "PRO_SHIELD", PRO_SHIELD },            { "PRO_UNARMED", PRO_UNARMED },
+			{ "PRO_ALCHEMY", PRO_ALCHEMY },          { "PRO_THAUMATURGY", PRO_THAUMATURGY },
+			{ "PRO_MYSTICISM", PRO_MYSTICISM },      { "PRO_SORCERY", PRO_SORCERY },
+			{ "PRO_TINKERING", PRO_LOCKPICKING },    { "PRO_LORE", PRO_APPRAISAL },
+			{ "PRO_BLOCKING", PRO_SHIELD },
+		};
+		auto it = m.find(n);
+		return ( it != m.end() ) ? it->second : -1;
+	}
+
+	JSValue js_sam_get_tile(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_NULL; }
+		int32_t x = 0, y = 0; JS_ToInt32(ctx, &x, argv[0]); JS_ToInt32(ctx, &y, argv[1]);
+		const SAMWorld::TileInfo t = SAMWorld::tile(x, y);
+		if ( !t.valid ) { return JS_NULL; }
+		JSValue o = JS_NewObject(ctx);
+		JS_SetPropertyStr(ctx, o, "wall", JS_NewInt32(ctx, t.wall));
+		JS_SetPropertyStr(ctx, o, "floor", JS_NewInt32(ctx, t.floor));
+		JS_SetPropertyStr(ctx, o, "ceiling", JS_NewInt32(ctx, t.ceiling));
+		JS_SetPropertyStr(ctx, o, "solid", JS_NewBool(ctx, t.solid));
+		JS_SetPropertyStr(ctx, o, "water", JS_NewBool(ctx, t.water));
+		JS_SetPropertyStr(ctx, o, "lava", JS_NewBool(ctx, t.lava));
+		JS_SetPropertyStr(ctx, o, "walkable", JS_NewBool(ctx, t.walkable));
+		return o;
+	}
+
+	JSValue js_sam_set_tile(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 4 ) { return JS_FALSE; }
+		int32_t x = 0, y = 0, l = 0, id = 0;
+		JS_ToInt32(ctx, &x, argv[0]); JS_ToInt32(ctx, &y, argv[1]);
+		JS_ToInt32(ctx, &l, argv[2]); JS_ToInt32(ctx, &id, argv[3]);
+		return SAMWorld::setTile(x, y, l, id) ? JS_TRUE : JS_FALSE;
+	}
+
+	JSValue js_sam_is_spawnable(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_FALSE; }
+		int32_t x = 0, y = 0; JS_ToInt32(ctx, &x, argv[0]); JS_ToInt32(ctx, &y, argv[1]);
+		return SAMWorld::spawnable(x, y) ? JS_TRUE : JS_FALSE;
+	}
+
+	JSValue js_sam_line_of_sight(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 4 ) { return JS_FALSE; }
+		double x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+		JS_ToFloat64(ctx, &x1, argv[0]); JS_ToFloat64(ctx, &y1, argv[1]);
+		JS_ToFloat64(ctx, &x2, argv[2]); JS_ToFloat64(ctx, &y2, argv[3]);
+		const bool ents = ( samHasArg(argc, argv, 4) ) ? (JS_ToBool(ctx, argv[4]) > 0) : false;
+		int bx = -1, by = -1;
+		const bool ok = SAMWorld::lineOfSight(x1, y1, x2, y2, ents, bx, by);
+		// JS gets an object rather than multiple returns.
+		JSValue o = JS_NewObject(ctx);
+		JS_SetPropertyStr(ctx, o, "visible", JS_NewBool(ctx, ok));
+		JS_SetPropertyStr(ctx, o, "blocked_x", JS_NewInt32(ctx, bx));
+		JS_SetPropertyStr(ctx, o, "blocked_y", JS_NewInt32(ctx, by));
+		return o;
+	}
+
+	JSValue js_sam_tiles_connected(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 4 ) { return JS_FALSE; }
+		int32_t x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+		JS_ToInt32(ctx, &x1, argv[0]); JS_ToInt32(ctx, &y1, argv[1]);
+		JS_ToInt32(ctx, &x2, argv[2]); JS_ToInt32(ctx, &y2, argv[3]);
+		const bool fly = ( samHasArg(argc, argv, 4) ) ? (JS_ToBool(ctx, argv[4]) > 0) : false;
+		return SAMWorld::connected(x1, y1, x2, y2, fly) ? JS_TRUE : JS_FALSE;
+	}
+
+	JSValue js_sam_get_light_at(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_NewInt32(ctx, 0); }
+		int32_t x = 0, y = 0; JS_ToInt32(ctx, &x, argv[0]); JS_ToInt32(ctx, &y, argv[1]);
+		// -1 default, matching Lua: the shared lightmap the monster AI reads.
+		int32_t pl = -1; if ( samHasArg(argc, argv, 2) ) { JS_ToInt32(ctx, &pl, argv[2]); }
+		return JS_NewInt32(ctx, SAMWorld::lightAt(x, y, pl));
+	}
+
+	JSValue js_sam_find_entities(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 3 ) { return JS_NewArray(ctx); }
+		int32_t x = 0, y = 0; JS_ToInt32(ctx, &x, argv[0]); JS_ToInt32(ctx, &y, argv[1]);
+		double r = 0; JS_ToFloat64(ctx, &r, argv[2]);
+		const char* kindC = ( samHasArg(argc, argv, 3) ) ? JS_ToCString(ctx, argv[3]) : nullptr;
+		const std::string kind = kindC ? kindC : "any";
+		if ( kindC ) { JS_FreeCString(ctx, kindC); }
+		const std::vector<uint32_t> ids = SAMWorld::findEntities(x, y, r, kind);
+		JSValue arr = JS_NewArray(ctx);
+		uint32_t i = 0;
+		for ( uint32_t u : ids ) { JS_SetPropertyUint32(ctx, arr, i++, JS_NewInt64(ctx, (int64_t)u)); }
+		return arr;
+	}
+
+	JSValue js_sam_get_container_items(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_NULL; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+		std::vector<SAMWorld::ItemInfo> found;
+		if ( !SAMWorld::containerItems((uint32_t)uid, found) ) { return JS_NULL; }
+		JSValue arr = JS_NewArray(ctx);
+		uint32_t i = 0;
+		for ( const auto& it : found )
+		{
+			JSValue o = JS_NewObject(ctx);
+			JS_SetPropertyStr(ctx, o, "type", JS_NewInt32(ctx, it.type));
+			JS_SetPropertyStr(ctx, o, "name", JS_NewString(ctx, it.name.c_str()));
+			JS_SetPropertyStr(ctx, o, "count", JS_NewInt32(ctx, it.count));
+			JS_SetPropertyStr(ctx, o, "status", JS_NewInt32(ctx, it.status));
+			JS_SetPropertyStr(ctx, o, "beatitude", JS_NewInt32(ctx, it.beatitude));
+			JS_SetPropertyStr(ctx, o, "identified", JS_NewBool(ctx, it.identified));
+			JS_SetPropertyUint32(ctx, arr, i++, o);
+		}
+		return arr;
+	}
+
+	JSValue js_sam_set_door(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_FALSE; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+		return SAMWorld::setDoor((uint32_t)uid, JS_ToBool(ctx, argv[1]) > 0) ? JS_TRUE : JS_FALSE;
+	}
+
+	JSValue js_sam_set_door_locked(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_FALSE; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+		return SAMWorld::setDoorLocked((uint32_t)uid, JS_ToBool(ctx, argv[1]) > 0) ? JS_TRUE : JS_FALSE;
+	}
+
+	JSValue js_sam_power_entity(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_FALSE; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+		return SAMWorld::powerEntity((uint32_t)uid, JS_ToBool(ctx, argv[1]) > 0) ? JS_TRUE : JS_FALSE;
+	}
+
+	JSValue js_sam_toggle_switch(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_FALSE; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+		return SAMWorld::toggleSwitch((uint32_t)uid) ? JS_TRUE : JS_FALSE;
+	}
+
+	JSValue js_sam_get_level_info(JSContext* ctx, JSValueConst, int, JSValueConst*)
+	{
+		SAMLogger::noteApiCall();
+		const SAMWorld::LevelInfo l = SAMWorld::level();
+		JSValue o = JS_NewObject(ctx);
+		JS_SetPropertyStr(ctx, o, "floor", JS_NewInt32(ctx, l.floor));
+		JS_SetPropertyStr(ctx, o, "name", JS_NewString(ctx, l.name.c_str()));
+		JS_SetPropertyStr(ctx, o, "author", JS_NewString(ctx, l.author.c_str()));
+		JS_SetPropertyStr(ctx, o, "width", JS_NewInt32(ctx, l.width));
+		JS_SetPropertyStr(ctx, o, "height", JS_NewInt32(ctx, l.height));
+		JS_SetPropertyStr(ctx, o, "secret", JS_NewBool(ctx, l.secret));
+		JS_SetPropertyStr(ctx, o, "skybox", JS_NewInt32(ctx, l.skybox));
+		JS_SetPropertyStr(ctx, o, "no_digging", JS_NewBool(ctx, l.noDigging));
+		JS_SetPropertyStr(ctx, o, "no_teleport", JS_NewBool(ctx, l.noTeleport));
+		JS_SetPropertyStr(ctx, o, "no_levitation", JS_NewBool(ctx, l.noLevitation));
+		return o;
+	}
+
+	JSValue js_sam_get_effective_stat(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_NULL; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+		const char* nameC = JS_ToCString(ctx, argv[1]);
+		const std::string n = samUpper(nameC ? nameC : "");
+		if ( nameC ) { JS_FreeCString(ctx, nameC); }
+#ifdef SAM_JS_HAVE_BARONY
+		Entity* e = uidToEntity((Sint32)uid);
+		if ( !e || !e->getStats() ) { return JS_NULL; }
+		Stat* st = e->getStats();
+		long long v = 0;
+		if      ( n == "STR" ) { v = statGetSTR(st, e); }
+		else if ( n == "DEX" ) { v = statGetDEX(st, e); }
+		else if ( n == "CON" ) { v = statGetCON(st, e); }
+		else if ( n == "INT" ) { v = statGetINT(st, e); }
+		else if ( n == "PER" ) { v = statGetPER(st, e); }
+		else if ( n == "CHR" ) { v = statGetCHR(st, e); }
+		else { SAM_WARN("JS", "sam_get_effective_stat: unknown stat '" + n + "'."); return JS_NULL; }
+		return JS_NewInt64(ctx, v);
+#else
+		return JS_NULL;
+#endif
+	}
+
+	JSValue js_sam_get_ac(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_NULL; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+#ifdef SAM_JS_HAVE_BARONY
+		Entity* e = uidToEntity((Sint32)uid);
+		if ( !e || !e->getStats() ) { return JS_NULL; }
+		return JS_NewInt32(ctx, AC(e->getStats()));
+#else
+		return JS_NULL;
+#endif
+	}
+
+	JSValue js_sam_get_skill(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_NULL; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+		const char* nameC = JS_ToCString(ctx, argv[1]);
+		const int skill = samSkillFromNameJS(nameC);
+		if ( nameC ) { JS_FreeCString(ctx, nameC); }
+		const bool eff = ( samHasArg(argc, argv, 2) ) ? (JS_ToBool(ctx, argv[2]) > 0) : true;
+#ifdef SAM_JS_HAVE_BARONY
+		if ( skill < 0 ) { SAM_WARN("JS", "sam_get_skill: unknown skill."); return JS_NULL; }
+		Entity* e = uidToEntity((Sint32)uid);
+		if ( !e || !e->getStats() ) { return JS_NULL; }
+		Stat* st = e->getStats();
+		return JS_NewInt32(ctx, eff ? st->getModifiedProficiency(skill) : st->getProficiency(skill));
+#else
+		(void)eff; return JS_NULL;
+#endif
+	}
+
+	static JSValue samFactionCheckJS(JSContext* ctx, int argc, JSValueConst* argv, bool wantEnemy)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_FALSE; }
+		int64_t a = 0, b = 0; JS_ToInt64(ctx, &a, argv[0]); JS_ToInt64(ctx, &b, argv[1]);
+#ifdef SAM_JS_HAVE_BARONY
+		Entity* ea = uidToEntity((Sint32)a);
+		Entity* eb = uidToEntity((Sint32)b);
+		if ( !ea || !eb ) { return JS_FALSE; }
+		return (wantEnemy ? ea->checkEnemy(eb) : ea->checkFriend(eb)) ? JS_TRUE : JS_FALSE;
+#else
+		(void)wantEnemy; return JS_FALSE;
+#endif
+	}
+	JSValue js_sam_is_enemy(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{ return samFactionCheckJS(ctx, argc, argv, true); }
+	JSValue js_sam_is_friend(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{ return samFactionCheckJS(ctx, argc, argv, false); }
+
+	JSValue js_sam_get_mods(JSContext* ctx, JSValueConst, int, JSValueConst*)
+	{
+		SAMLogger::noteApiCall();
+		JSValue arr = JS_NewArray(ctx);
+#ifdef SAM_JS_HAVE_BARONY
+		uint32_t i = 0;
+		for ( const SAMModManifest& m : SAMWorkshop::manifests() )
+		{
+			JSValue o = JS_NewObject(ctx);
+			JS_SetPropertyStr(ctx, o, "ns", JS_NewString(ctx, m.ns.c_str()));
+			JS_SetPropertyStr(ctx, o, "name", JS_NewString(ctx, m.name.c_str()));
+			JS_SetPropertyStr(ctx, o, "version", JS_NewString(ctx, m.version.c_str()));
+			JS_SetPropertyStr(ctx, o, "author", JS_NewString(ctx, m.author.c_str()));
+			JS_SetPropertyUint32(ctx, arr, i++, o);
+		}
+#endif
+		return arr;
+	}
+
+	JSValue js_sam_is_mod_loaded(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_FALSE; }
+		const char* nsC = JS_ToCString(ctx, argv[0]);
+		const std::string want = nsC ? nsC : "";
+		if ( nsC ) { JS_FreeCString(ctx, nsC); }
+#ifdef SAM_JS_HAVE_BARONY
+		for ( const SAMModManifest& m : SAMWorkshop::manifests() )
+		{
+			if ( m.ns == want ) { return JS_TRUE; }
+		}
+#endif
+		return JS_FALSE;
+	}
+
+	static int samResolveSoundIdJS(JSContext* ctx, JSValueConst v)
+	{
+		if ( JS_IsString(v) )
+		{
+			const char* nm = JS_ToCString(ctx, v);
+			const int id = SAMSounds::soundIndexForId(nm ? nm : "");
+			if ( nm ) { JS_FreeCString(ctx, nm); }
+			return id;
+		}
+		int32_t n = -1; JS_ToInt32(ctx, &n, v); return n;
+	}
+
+	// ---- world-space presentation (Lua parity) --------------------------------------------
+
+	JSValue js_sam_play_sound_at(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 3 ) { return JS_FALSE; }
+		const int snd = samResolveSoundIdJS(ctx, argv[0]);
+		double tx = 0, ty = 0; JS_ToFloat64(ctx, &tx, argv[1]); JS_ToFloat64(ctx, &ty, argv[2]);
+		int32_t vol = 128; if ( samHasArg(argc, argv, 3) ) { JS_ToInt32(ctx, &vol, argv[3]); }
+#ifdef SAM_JS_HAVE_BARONY
+		if ( snd < 0 || snd >= (int)numsounds ) { return JS_FALSE; }
+		if ( vol < 0 ) { vol = 0; } if ( vol > 255 ) { vol = 255; }
+		playSoundPos(tx * 16.0 + 8.0, ty * 16.0 + 8.0, (Uint16)snd, (Uint8)vol);
+		return JS_TRUE;
+#else
+		return JS_FALSE;
+#endif
+	}
+
+	JSValue js_sam_play_sound_entity(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_FALSE; }
+		const int snd = samResolveSoundIdJS(ctx, argv[0]);
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[1]);
+		int32_t vol = 128; if ( samHasArg(argc, argv, 2) ) { JS_ToInt32(ctx, &vol, argv[2]); }
+#ifdef SAM_JS_HAVE_BARONY
+		if ( snd < 0 || snd >= (int)numsounds ) { return JS_FALSE; }
+		Entity* e = uidToEntity((Sint32)uid);
+		if ( !e ) { return JS_FALSE; }
+		if ( vol < 0 ) { vol = 0; } if ( vol > 255 ) { vol = 255; }
+		playSoundEntity(e, (Uint16)snd, (Uint8)vol);
+		return JS_TRUE;
+#else
+		return JS_FALSE;
+#endif
+	}
+
+	JSValue js_sam_spawn_particle(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 3 ) { return JS_FALSE; }
+		const char* kindC = JS_ToCString(ctx, argv[0]);
+		const std::string k = kindC ? kindC : "";
+		if ( kindC ) { JS_FreeCString(ctx, kindC); }
+		double tx = 0, ty = 0, z = 0, scale = 1.0;
+		JS_ToFloat64(ctx, &tx, argv[1]); JS_ToFloat64(ctx, &ty, argv[2]);
+		if ( samHasArg(argc, argv, 3) ) { JS_ToFloat64(ctx, &z, argv[3]); }
+		if ( samHasArg(argc, argv, 4) ) { JS_ToFloat64(ctx, &scale, argv[4]); }
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_spawn_particle refused: host only."); return JS_FALSE; }
+		const Sint16 px = (Sint16)(tx * 16.0 + 8.0), py = (Sint16)(ty * 16.0 + 8.0), pz = (Sint16)z;
+		Entity* made = nullptr;
+		if      ( k == "poof" )      { made = spawnPoof(px, py, pz, scale, true); }
+		else if ( k == "explosion" ) { made = spawnExplosion(px, py, pz); }
+		else if ( k == "bang" )      { made = spawnBang(px, py, pz); }
+		else if ( k == "sleep" )     { made = spawnSleepZ(px, py, pz); }
+		else { SAM_WARN("JS", "sam_spawn_particle: unknown kind '" + k + "'."); return JS_FALSE; }
+		return made ? JS_TRUE : JS_FALSE;
+#else
+		return JS_FALSE;
+#endif
+	}
+
+	JSValue js_sam_damage_number(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_FALSE; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+		int32_t amount = 0; JS_ToInt32(ctx, &amount, argv[1]);
+		int32_t gibType = 0; if ( samHasArg(argc, argv, 2) ) { JS_ToInt32(ctx, &gibType, argv[2]); }
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_damage_number refused: host only."); return JS_FALSE; }
+		Entity* e = uidToEntity((Sint32)uid);
+		if ( !e ) { return JS_FALSE; }
+		spawnDamageGib(e, amount, gibType, 0, true);
+		return JS_TRUE;
+#else
+		return JS_FALSE;
 #endif
 	}
 
@@ -1855,7 +2467,7 @@ namespace
 	JSValue js_sam_get_monster_effects(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int64_t uid = 0; if ( argc >= 1 ) { JS_ToInt64(ctx, &uid, argv[0]); }
+		int64_t uid = 0; if ( samHasArg(argc, argv, 0) ) { JS_ToInt64(ctx, &uid, argv[0]); }
 		JSValue arr = JS_NewArray(ctx);
 #ifdef SAM_JS_HAVE_BARONY
 		Entity* e = samResolveMonster(uid);
@@ -2044,8 +2656,8 @@ namespace
 	JSValue js_sam_get_effect_duration(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
-		std::string name; if ( argc >= 2 ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
+		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		std::string name; if ( samHasArg(argc, argv, 1) ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
 		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return JS_NewInt32(ctx, 0); }
 		const int eff = samEffectNameToId(name.c_str());
 		if ( eff < 0 || stats[player]->getEffectActive(eff) == 0 ) { return JS_NewInt32(ctx, 0); }
@@ -2056,8 +2668,8 @@ namespace
 	JSValue js_sam_get_effect_strength(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
-		std::string name; if ( argc >= 2 ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
+		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		std::string name; if ( samHasArg(argc, argv, 1) ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
 		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return JS_NewInt32(ctx, 0); }
 		const int eff = samEffectNameToId(name.c_str());
 		if ( eff < 0 ) { return JS_NewInt32(ctx, 0); }
@@ -2068,7 +2680,7 @@ namespace
 	JSValue js_sam_get_effects(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
 		JSValue arr = JS_NewArray(ctx);
 		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return arr; }
 		uint32_t n = 0;
@@ -2505,7 +3117,7 @@ namespace
 	JSValue js_sam_get_spells(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( argc >= 1 ) { JS_ToInt32(ctx, &player, argv[0]); }
+		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
 		JSValue arr = JS_NewArray(ctx);
 #ifdef SAM_JS_HAVE_BARONY
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] ) { return arr; }
@@ -2610,6 +3222,40 @@ namespace
 		JS_SetPropertyStr(ctx, g, "sam_get_effects", JS_NewCFunction(ctx, js_sam_get_effects, "sam_get_effects", 1));
 		JS_SetPropertyStr(ctx, g, "sam_get_monster_stat", JS_NewCFunction(ctx, js_sam_get_monster_stat, "sam_get_monster_stat", 2));
 		JS_SetPropertyStr(ctx, g, "sam_is_host", JS_NewCFunction(ctx, js_sam_is_host, "sam_is_host", 0));
+		JS_SetPropertyStr(ctx, g, "sam_play_sound_at", JS_NewCFunction(ctx, js_sam_play_sound_at, "sam_play_sound_at", 4));
+		JS_SetPropertyStr(ctx, g, "sam_play_sound_entity", JS_NewCFunction(ctx, js_sam_play_sound_entity, "sam_play_sound_entity", 3));
+		JS_SetPropertyStr(ctx, g, "sam_spawn_particle", JS_NewCFunction(ctx, js_sam_spawn_particle, "sam_spawn_particle", 5));
+		JS_SetPropertyStr(ctx, g, "sam_damage_number", JS_NewCFunction(ctx, js_sam_damage_number, "sam_damage_number", 3));
+		JS_SetPropertyStr(ctx, g, "sam_get_tile", JS_NewCFunction(ctx, js_sam_get_tile, "sam_get_tile", 2));
+		JS_SetPropertyStr(ctx, g, "sam_set_tile", JS_NewCFunction(ctx, js_sam_set_tile, "sam_set_tile", 4));
+		JS_SetPropertyStr(ctx, g, "sam_is_spawnable", JS_NewCFunction(ctx, js_sam_is_spawnable, "sam_is_spawnable", 2));
+		JS_SetPropertyStr(ctx, g, "sam_line_of_sight", JS_NewCFunction(ctx, js_sam_line_of_sight, "sam_line_of_sight", 5));
+		JS_SetPropertyStr(ctx, g, "sam_tiles_connected", JS_NewCFunction(ctx, js_sam_tiles_connected, "sam_tiles_connected", 5));
+		JS_SetPropertyStr(ctx, g, "sam_get_light_at", JS_NewCFunction(ctx, js_sam_get_light_at, "sam_get_light_at", 2));
+		JS_SetPropertyStr(ctx, g, "sam_find_entities", JS_NewCFunction(ctx, js_sam_find_entities, "sam_find_entities", 4));
+		JS_SetPropertyStr(ctx, g, "sam_get_container_items", JS_NewCFunction(ctx, js_sam_get_container_items, "sam_get_container_items", 1));
+		JS_SetPropertyStr(ctx, g, "sam_set_door", JS_NewCFunction(ctx, js_sam_set_door, "sam_set_door", 2));
+		JS_SetPropertyStr(ctx, g, "sam_set_door_locked", JS_NewCFunction(ctx, js_sam_set_door_locked, "sam_set_door_locked", 2));
+		JS_SetPropertyStr(ctx, g, "sam_power_entity", JS_NewCFunction(ctx, js_sam_power_entity, "sam_power_entity", 2));
+		JS_SetPropertyStr(ctx, g, "sam_toggle_switch", JS_NewCFunction(ctx, js_sam_toggle_switch, "sam_toggle_switch", 1));
+		JS_SetPropertyStr(ctx, g, "sam_get_level_info", JS_NewCFunction(ctx, js_sam_get_level_info, "sam_get_level_info", 0));
+		JS_SetPropertyStr(ctx, g, "sam_get_effective_stat", JS_NewCFunction(ctx, js_sam_get_effective_stat, "sam_get_effective_stat", 2));
+		JS_SetPropertyStr(ctx, g, "sam_get_ac", JS_NewCFunction(ctx, js_sam_get_ac, "sam_get_ac", 1));
+		JS_SetPropertyStr(ctx, g, "sam_get_skill", JS_NewCFunction(ctx, js_sam_get_skill, "sam_get_skill", 3));
+		JS_SetPropertyStr(ctx, g, "sam_is_enemy", JS_NewCFunction(ctx, js_sam_is_enemy, "sam_is_enemy", 2));
+		JS_SetPropertyStr(ctx, g, "sam_is_friend", JS_NewCFunction(ctx, js_sam_is_friend, "sam_is_friend", 2));
+		JS_SetPropertyStr(ctx, g, "sam_get_mods", JS_NewCFunction(ctx, js_sam_get_mods, "sam_get_mods", 0));
+		JS_SetPropertyStr(ctx, g, "sam_is_mod_loaded", JS_NewCFunction(ctx, js_sam_is_mod_loaded, "sam_is_mod_loaded", 1));
+		JS_SetPropertyStr(ctx, g, "sam_hud_text", JS_NewCFunction(ctx, js_sam_hud_text, "sam_hud_text", 5));
+		JS_SetPropertyStr(ctx, g, "sam_hud_bar", JS_NewCFunction(ctx, js_sam_hud_bar, "sam_hud_bar", 7));
+		JS_SetPropertyStr(ctx, g, "sam_hud_clear", JS_NewCFunction(ctx, js_sam_hud_clear, "sam_hud_clear", 1));
+		// v1.10.3 -- the mod's own pictures (overlay + HUD art).
+		JS_SetPropertyStr(ctx, g, "sam_show_image", JS_NewCFunction(ctx, js_sam_show_image, "sam_show_image", 5));
+		JS_SetPropertyStr(ctx, g, "sam_show_image_at", JS_NewCFunction(ctx, js_sam_show_image_at, "sam_show_image_at", 8));
+		JS_SetPropertyStr(ctx, g, "sam_hide_image", JS_NewCFunction(ctx, js_sam_hide_image, "sam_hide_image", 1));
+		JS_SetPropertyStr(ctx, g, "sam_hud_image", JS_NewCFunction(ctx, js_sam_hud_image, "sam_hud_image", 7));
+		JS_SetPropertyStr(ctx, g, "sam_get_image_size", JS_NewCFunction(ctx, js_sam_get_image_size, "sam_get_image_size", 1));
+		JS_SetPropertyStr(ctx, g, "sam_send_packet", JS_NewCFunction(ctx, js_sam_send_packet, "sam_send_packet", 3));
 		JS_SetPropertyStr(ctx, g, "sam_player_count", JS_NewCFunction(ctx, js_sam_player_count, "sam_player_count", 0));
 		JS_SetPropertyStr(ctx, g, "sam_local_player", JS_NewCFunction(ctx, js_sam_local_player, "sam_local_player", 0));
 		JS_SetPropertyStr(ctx, g, "sam_monster_path_to", JS_NewCFunction(ctx, js_sam_monster_path_to, "sam_monster_path_to", 3));
@@ -2989,7 +3635,13 @@ bool g_lastDispatchCancelled = false;
 				// returned a normal value. Surface + clear it so it neither lingers on
 				// the shared runtime nor is silently swallowed.
 				JSValue pend = JS_GetException(sc.ctx);
-				if ( !JS_IsNull(pend) )
+				// JS_GetException returns JS_UNINITIALIZED -- not JS_NULL -- when nothing is
+				// pending; QuickJS's own JS_HasException is literally
+				// !JS_IsUninitialized(current_exception). Testing for null alone was never
+				// true, so this warned on EVERY dispatch of every JS script and printed the
+				// sentinel itself as the message ("[uninitialized]"). 1169 lines in a
+				// five-minute session, none of them a real error.
+				if ( !JS_IsNull(pend) && !JS_IsUninitialized(pend) )
 				{
 					const char* pc = JS_ToCString(sc.ctx, pend);
 					SAM_WARN("JS", "on_event in '" + sc.path + "' left a pending host-API error: "

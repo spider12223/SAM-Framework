@@ -54,6 +54,17 @@ struct SAMModManifest
 	// file = the mod-relative .vox path (Barony slab format). v1.4.0.
 	std::vector<std::pair<std::string, std::string>> models;
 
+	// Pictures a mod ships and draws itself (sam_show_image / sam_hud_image). Each is
+	// { id, file }: id = "ns:name" scripts refer to, file = the mod-relative .png/.jpg.
+	// Declared rather than referenced by raw path so a missing file is caught at LOAD.
+	std::vector<std::pair<std::string, std::string>> images;
+
+	// Prefab rooms injected into an EXISTING levelset, so a mod's content appears in the
+	// ordinary dungeon rather than only in its own branch:
+	//   "rooms": { "mine": ["rooms/collapsed_shaft.lmp"], "swamp": [...] }
+	// levelset name -> mod-relative .lmp paths.
+	std::vector<std::pair<std::string, std::vector<std::string>>> rooms;
+
 	std::string modPath;      // absolute directory this mod was loaded from
 	std::string displayName;  // Workshop/local display name (from mountedFilepaths)
 };

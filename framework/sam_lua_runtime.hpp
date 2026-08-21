@@ -141,6 +141,21 @@ namespace SAMLua
 	// Fire on_action_pressed/on_action_released for a player. Called by pollActions on
 	// the host, and by the 'SAMA' packet handler for a remote client's edges.
 	void dispatchAction(int player, int actionIndex, bool pressed);
+
+	// ---- mod-defined networking ("SAMP") ------------------------------------------
+	// One generic envelope so a mod can send its own data between host and clients.
+	// Bounded to a single datagram: NET_PACKET_SIZE is 512, and the 4-byte id, the sender
+	// index and the tag length take 6 of it. Oversize is REFUSED, never truncated.
+	static const size_t SAM_PACKET_MAX_TAG = 32;
+	static const size_t SAM_PACKET_MAX_PAYLOAD = 400;
+
+	// Send a mod packet. On the host, target is a player index or -1 for all clients;
+	// on a client the target is ignored and it always goes to the host.
+	bool sendModPacket(int target, const std::string& tag, const std::string& payload);
+
+	// Deliver a received mod packet to every script as an "on_packet" event.
+	// Called from the net.cpp handlers on both sides. Dispatches to JS too.
+	void dispatchModPacket(int fromPlayer, const std::string& tag, const std::string& payload);
 	// Wire format for 'SAMA' — index into the action table. Returns "" if out of range.
 	const char* actionNameForIndex(int index);
 	// Backs sam_is_action_held / sam_get_action_binding.
