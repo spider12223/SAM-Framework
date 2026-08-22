@@ -39,6 +39,22 @@ namespace SAMModels
 	{
 		std::string id;
 		std::string physfsPath;
+		// Who asked for it -- an item id, a class id, a namespace. Only used to make the
+		// log line name the thing the modder has to go and edit, instead of naming the path
+		// twice and leaving them to guess which JSON file mentions it. Optional: older call
+		// sites brace-init two members and this stays empty.
+		std::string owner;
+	};
+
+	// One registered model, for /sam_models and anything else that needs to see the table.
+	struct Entry
+	{
+		std::string id;
+		std::string path;
+		int index = -1;
+		// True when this resolved to a base-game file rather than the mod's own. Decided by
+		// the loader and carried here, so a caller cannot re-derive it and disagree.
+		bool baseGame = false;
 	};
 
 	// Append every requested model to the engine's model table, building geometry and
@@ -51,6 +67,13 @@ namespace SAMModels
 	// Engine model index for a registered "namespace:name", or -1 if unknown.
 	// This is what makes an item's `model` field resolvable.
 	int modelIndexForId(const std::string& id);
+
+	// The file a registered id was loaded from, or "" if that id is unknown.
+	std::string pathForId(const std::string& id);
+
+	// Everything registered, id-sorted. Powers /sam_models: the model registry is the one a
+	// mod is most likely to get wrong, and it was the only one with no way to inspect it.
+	std::vector<Entry> list();
 
 	// Number of models S.A.M has appended this session.
 	int count();

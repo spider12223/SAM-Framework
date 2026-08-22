@@ -18,13 +18,24 @@ BossExample/
   main.lua                     phases, telegraphed attack, adds, death drop
 ```
 
+## About the XP
+
+There is no way to make a boss award *extra* XP. `xp_award_percent` is a percentage of the
+normal award and the engine clamps it to 100, so it can only ever reduce. An earlier version
+of this example set it to 400, which failed the schema and did nothing at all.
+
 ## About the model
 
-One `.vox` file. Make it in MagicaVoxel and export as `.vox`.
+One `.vox` file, in Barony's **slab** format.
+
+This is the single most common way a custom model fails, so read this bit twice. MagicaVoxel
+is fine for *building* the model, but its own `.vox` export is a completely different format
+that happens to share the extension. Barony cannot read it and the load is refused with a log
+line saying so. Export or convert to slab `.vox`.
 
 **Build it big.** Do not try to scale it up in the game: model scale is capped just under 2x
 and in multiplayer a scale of exactly 2.0 wraps to zero and the creature vanishes. Size it in
-MagicaVoxel instead.
+your voxel editor instead.
 
 **Use `rat` as the `base_type` for anything large.** This matters more than it sounds. Most
 Barony creatures are assembled from separate limb models: a skeleton is ten pieces, a human

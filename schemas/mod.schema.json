@@ -161,7 +161,7 @@
     },
     "models": {
       "type": "array",
-      "description": "Standalone custom .vox models NOT tied to any item or class — for sam_spawn_companion (floating 'Stand'/familiar followers) and other decorative entities. Each entry registers one model under a friendly id that scripts pass to sam_spawn_companion. Barony SLAB .vox format only (MagicaVoxel exports are rejected). v1.4.0+.",
+      "description": "Register a custom .vox under a friendly \"namespace:id\" so the rest of the mod can refer to it. Use the id for a class appearance.body_model or head, for a monster body.model, or from a script with sam_spawn_companion. (An item's model field is different: it takes a path, and the path is its own id.) Barony SLAB .vox format only. Barony SLAB .vox format only (MagicaVoxel exports are rejected). v1.4.0+.",
       "items": {
         "type": "object",
         "required": [

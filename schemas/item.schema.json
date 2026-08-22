@@ -131,7 +131,7 @@
     },
     "icon": {
       "type": "string",
-      "description": "Path (relative to the mod folder) to a PNG used as the item's 2D inventory/hotbar icon, e.g. 'items/shadowblade.png'. Loaded at runtime and drawn like the class-select portrait. If the file is missing, a placeholder icon cloned from a similar vanilla item is used. (Only the 2D icon is loaded — the 3D 'model'/'model_fp' are still planned.)"
+      "description": "Path (relative to the mod folder) to a PNG used as the item's 2D inventory/hotbar icon, e.g. 'items/shadowblade.png'. Loaded at runtime and drawn like the class-select portrait. If the file is missing, a placeholder icon cloned from a similar vanilla item is used. (Only the 2D icon is loaded — the 3D 'model'/'model_fp' are supported via the model field below.)"
     },
     "attributes": {
       "type": "object",

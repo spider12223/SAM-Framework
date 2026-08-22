@@ -516,8 +516,26 @@ void SAMClasses::loadFromManifest(const SAMModManifest& manifest)
 	}
 }
 
+namespace
+{
+	// Every head index this framework registered, so the engine's hardcoded
+	// isPlayerHeadSprite switch can be widened to accept them.
+	//
+	// Declared up here rather than beside resolveAppearance because SAMClasses::clear() has
+	// to empty it too -- leaving it further down made clear() a forward reference.
+	std::set<int> s_customHeadSprites;
+}
+
 void SAMClasses::clear()
 {
+	// resolveAppearance() is the only other place this set is emptied, and the unload path
+	// never calls it -- Mods::unloadMods -> SAMLoader::unload -> here. Without this, every
+	// model index the last-loaded class registered stays in the set for the life of the
+	// process, so Entity::isPlayerHeadSprite() keeps answering yes for vanilla content after
+	// the player has turned mods off.
+#ifndef EDITOR
+	s_customHeadSprites.clear();
+#endif
 	s_registry.clear();
 	s_nextClassId = SAM_CLASS_ID_BASE;
 	// v0.7.0 Feature 5: emptying the overlays fully reverts sam_patch_class + class
@@ -914,10 +932,6 @@ void SAMClasses::applyStatOverrides(int classnum, Stat* stat)
 
 namespace
 {
-	// Every head index this framework registered, so the engine's hardcoded
-	// isPlayerHeadSprite switch can be widened to accept them.
-	std::set<int> s_customHeadSprites;
-
 	// Barony's RACE_* -> the Monster enum name a modder writes in "races". Kept local so
 	// this file doesn't depend on the engine's race tables; an unknown key simply never
 	// matches and falls through to "default", which is the safe outcome.
@@ -960,19 +974,40 @@ void SAMClasses::resolveAppearance()
 			// A custom .vox registered by SAMModels wins; otherwise fall back to a plain
 			// numeric index so a modder can name a vanilla head directly.
 			int idx = SAMModels::modelIndexForId(hv.second);
+			bool headExplained = false;   // a precise message was already emitted below
 			if ( idx < 0 )
 			{
 				char* end = nullptr;
 				const long n = std::strtol(hv.second.c_str(), &end, 10);
-				if ( end && *end == '\0' && n >= 0 ) { idx = (int)n; }
+				// Same bounds as body_model below. class.schema.json advertises the raw
+				// numeric form for heads as well, and an out-of-range or zero index here has
+				// the identical failure mode: opengl.cpp silently draws nothing, so the head
+				// vanishes with no log line and /sam_models shows nothing, because no model
+				// was ever registered.
+				if ( end && *end == '\0' && n > 0 && n < (long)nummodels )
+				{
+					idx = (int)n;
+				}
+				else if ( end && *end == '\0' )
+				{
+					SAM_ERROR(MOD, "Class [" + def.id + "] head for " + hv.first + " is model index "
+						+ std::to_string(n) + ", which is "
+						+ ( n == 0 ? std::string("models/system/null.vox, the engine's EMPTY model")
+						            : std::string("past the end of the table (this game has ")
+						              + std::to_string((long long)nummodels) + " models, 1.."
+						              + std::to_string((long long)nummodels - 1) + ")" )
+						+ ". The head would draw as nothing, so it is ignored."
+						" Remember models.txt line N is index N-1.");
+					headExplained = true;
+				}
 			}
-			if ( idx < 0 )
+			if ( idx < 0 && !headExplained )
 			{
 				SAM_WARN(MOD, "Class [" + def.id + "] appearance head '" + hv.second
 					+ "' for race '" + hv.first + "' is not a registered model — ignoring it "
 					+ "(that race keeps its normal head).");
-				continue;
 			}
+			if ( idx < 0 ) { continue; }
 			def.appearanceHeadIdx[hv.first] = idx;
 			// Only OUR models need the isPlayerHeadSprite widening; a vanilla index is
 			// already in the engine's switch.
@@ -987,22 +1022,72 @@ void SAMClasses::resolveAppearance()
 		if ( !def.bodyModel.empty() )
 		{
 			int bidx = SAMModels::modelIndexForId(def.bodyModel);
+			const bool wasRegistered = ( bidx >= 0 );
+			// Set when we have already said something specific about why this failed, so the
+			// generic "here are the three accepted forms" note below stays quiet. Saying both
+			// makes the precise message look like boilerplate.
+			bool alreadyExplained = false;
 			if ( bidx < 0 )
 			{
 				char* end = nullptr;
 				const long n = std::strtol(def.bodyModel.c_str(), &end, 10);
-				if ( end && *end == '\0' && n >= 0 ) { bidx = (int)n; }
+				if ( end && *end == '\0' && n >= 0 )
+				{
+					// A raw vanilla model index. Two things bite people here.
+					//
+					// (1) It was completely unbounded, so a number past the end of the table was
+					// accepted and the player rendered as NOTHING -- invisible, no log line, and no
+					// way to guess why.
+					//
+					// (2) models.txt is 1-based when you read it and 0-based when you index it
+					// (init.cpp:742 prints "listed at line %d" as c + 1). Someone greps the file,
+					// sees line 1026, writes 1026, and silently gets the model on line 1027. We
+					// cannot detect that one, so the message says it out loud.
+					// Index 0 is models/system/null.vox, the engine's EMPTY model. It passes
+					// every bound and then draws nothing -- the exact outcome this check was
+					// added to prevent, except now with a success line in the log claiming it
+					// resolved, which is worse to diagnose than silence.
+					if ( n == 0 )
+					{
+						SAM_ERROR(MOD, "Class [" + def.id + "] body_model '0' is model index 0, which is"
+							" models/system/null.vox -- the engine's EMPTY model. The class would render as"
+							" nothing at all, so this is ignored. Model indices start at 1 for real content.");
+						alreadyExplained = true;
+					}
+					else if ( n >= (long)nummodels )
+					{
+						SAM_ERROR(MOD, "Class [" + def.id + "] body_model '" + def.bodyModel
+							+ "' is model index " + std::to_string(n) + ", but this game only has "
+							+ std::to_string((long long)nummodels) + " models, and index 0 is the empty"
+							" model, so the usable range is 1.."
+							+ std::to_string((long long)nummodels - 1) + ". Ignoring it, or the class"
+							" would render as nothing at all. Remember models.txt line N is index N-1.");
+						alreadyExplained = true;
+					}
+					else
+					{
+						bidx = (int)n;
+					}
+				}
 			}
 			if ( bidx >= 0 )
 			{
 				def.bodyModelIdx = bidx;
 				s_customHeadSprites.insert(bidx);
-				SAM_DEBUG(MOD, "  [" + def.id + "] body model -> " + std::to_string(bidx));
+				// INFO, not DEBUG. When a class body does not appear this is the line that says
+				// whether it resolved at all, and DEBUG needs an environment variable that no
+				// player and almost no modder has ever set -- so nobody has ever read it.
+				const std::string from = wasRegistered ? SAMModels::pathForId(def.bodyModel) : std::string();
+				SAM_INFO(MOD, "  [" + def.id + "] body_model '" + def.bodyModel + "' -> model index "
+					+ std::to_string(bidx) + (from.empty() ? "" : "  (" + from + ")"));
 			}
-			else
+			else if ( !alreadyExplained )
 			{
 				SAM_WARN(MOD, "Class [" + def.id + "] body_model '" + def.bodyModel
-					+ "' is not a registered model — ignoring (class keeps its normal body).");
+					+ "' did not resolve - the class keeps its normal body. body_model takes a path"
+					" to a .vox your mod ships (e.g. models/mymod/jet.vox), an id you declared in"
+					" mod.json \"models\", or a raw vanilla model index. A bare name is none of"
+					" those. Run /sam_models to see what is registered.");
 			}
 		}
 	}

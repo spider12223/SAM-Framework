@@ -244,8 +244,17 @@ model. Point it at one of your own `.vox` files instead:
 }
 ```
 
-The model id is one you declared in your mod's top-level `models` list, the same way item
-models work.
+The model id is one you declared in your mod's top-level `models` list:
+
+```json
+"models": [
+  { "id": "mymod:rathalos_body", "file": "models/mymod/rathalos.vox" }
+]
+```
+
+Note this is **not** how item models work. An item's `model` field takes a path, and the path
+is its own id. A monster body needs a declared `ns:id`. See [custom-models.md](custom-models.md)
+for the whole picture, and run `/sam_models` in game to see what actually registered.
 
 It changes **only how the creature looks**. Its behaviour, AI, hitbox, speed and attacks all
 still come from `base_type` — so choose the base whose movement suits you, and set the stats

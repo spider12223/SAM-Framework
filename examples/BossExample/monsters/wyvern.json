@@ -12,8 +12,5 @@
   "stats": {
     "HP": 900, "MAXHP": 900,
     "STR": 22, "DEX": 6, "CON": 15, "INT": 5, "PER": 12, "CHR": 0
-  },
-  "properties": {
-    "xp_award_percent": 400
   }
 }

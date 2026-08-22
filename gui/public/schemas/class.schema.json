@@ -955,7 +955,7 @@
         },
         "body_model": {
           "type": "string",
-          "description": "Optional WHOLE-BODY model: a custom \"models/<ns>/foo.vox\" (or a raw vanilla model index) drawn INSTEAD of the humanoid body on every player of this class, regardless of race OR equipped armour — e.g. a jet. When set, the model is drawn as the player's body and every limb (plus the first-person arm and weapon) is hidden. Race-independent; takes precedence over a forced head. The .vox must be Barony slab format (MagicaVoxel exports are rejected)."
+          "description": "Optional WHOLE-BODY model. Three forms are accepted: a mod-relative path to your own .vox (\"models/<ns>/foo.vox\"), an id you declared in mod.json \"models\" (\"<ns>:name\"), or a raw vanilla model index (1..nummodels-1; models.txt line N is index N-1, and 0 is the engine\u2019s empty model) drawn INSTEAD of the humanoid body on every player of this class, regardless of race OR equipped armour — e.g. a jet. When set, the model is drawn as the player's body and every limb (plus the first-person arm and weapon) is hidden. Race-independent; takes precedence over a forced head. The .vox must be Barony slab format (MagicaVoxel exports are rejected)."
         },
         "races": {
           "type": "object",
@@ -969,7 +969,7 @@
               "properties": {
                 "head": {
                   "type": "string",
-                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                  "description": "Head model for this race: a custom \"namespace:model\" (declared in mod.json \"models\" as { id, file }, or a mod-relative path to your own .vox), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
                 }
               }
             },
@@ -980,7 +980,7 @@
               "properties": {
                 "head": {
                   "type": "string",
-                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                  "description": "Head model for this race: a custom \"namespace:model\" (declared in mod.json \"models\" as { id, file }, or a mod-relative path to your own .vox), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
                 }
               }
             },
@@ -991,7 +991,7 @@
               "properties": {
                 "head": {
                   "type": "string",
-                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                  "description": "Head model for this race: a custom \"namespace:model\" (declared in mod.json \"models\" as { id, file }, or a mod-relative path to your own .vox), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
                 }
               }
             },
@@ -1002,7 +1002,7 @@
               "properties": {
                 "head": {
                   "type": "string",
-                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                  "description": "Head model for this race: a custom \"namespace:model\" (declared in mod.json \"models\" as { id, file }, or a mod-relative path to your own .vox), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
                 }
               }
             },
@@ -1013,7 +1013,7 @@
               "properties": {
                 "head": {
                   "type": "string",
-                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                  "description": "Head model for this race: a custom \"namespace:model\" (declared in mod.json \"models\" as { id, file }, or a mod-relative path to your own .vox), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
                 }
               }
             },
@@ -1024,7 +1024,7 @@
               "properties": {
                 "head": {
                   "type": "string",
-                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                  "description": "Head model for this race: a custom \"namespace:model\" (declared in mod.json \"models\" as { id, file }, or a mod-relative path to your own .vox), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
                 }
               }
             },
@@ -1035,7 +1035,7 @@
               "properties": {
                 "head": {
                   "type": "string",
-                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                  "description": "Head model for this race: a custom \"namespace:model\" (declared in mod.json \"models\" as { id, file }, or a mod-relative path to your own .vox), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
                 }
               }
             },
@@ -1046,7 +1046,7 @@
               "properties": {
                 "head": {
                   "type": "string",
-                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                  "description": "Head model for this race: a custom \"namespace:model\" (declared in mod.json \"models\" as { id, file }, or a mod-relative path to your own .vox), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
                 }
               }
             },
@@ -1057,7 +1057,7 @@
               "properties": {
                 "head": {
                   "type": "string",
-                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                  "description": "Head model for this race: a custom \"namespace:model\" (declared in mod.json \"models\" as { id, file }, or a mod-relative path to your own .vox), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
                 }
               }
             },
@@ -1068,7 +1068,7 @@
               "properties": {
                 "head": {
                   "type": "string",
-                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                  "description": "Head model for this race: a custom \"namespace:model\" (declared in mod.json \"models\" as { id, file }, or a mod-relative path to your own .vox), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
                 }
               }
             },
@@ -1079,7 +1079,7 @@
               "properties": {
                 "head": {
                   "type": "string",
-                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                  "description": "Head model for this race: a custom \"namespace:model\" (declared in mod.json \"models\" as { id, file }, or a mod-relative path to your own .vox), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
                 }
               }
             },
@@ -1090,7 +1090,7 @@
               "properties": {
                 "head": {
                   "type": "string",
-                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                  "description": "Head model for this race: a custom \"namespace:model\" (declared in mod.json \"models\" as { id, file }, or a mod-relative path to your own .vox), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
                 }
               }
             },
@@ -1101,7 +1101,7 @@
               "properties": {
                 "head": {
                   "type": "string",
-                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                  "description": "Head model for this race: a custom \"namespace:model\" (declared in mod.json \"models\" as { id, file }, or a mod-relative path to your own .vox), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
                 }
               }
             },
@@ -1112,7 +1112,7 @@
               "properties": {
                 "head": {
                   "type": "string",
-                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                  "description": "Head model for this race: a custom \"namespace:model\" (declared in mod.json \"models\" as { id, file }, or a mod-relative path to your own .vox), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
                 }
               }
             },
@@ -1123,7 +1123,7 @@
               "properties": {
                 "head": {
                   "type": "string",
-                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                  "description": "Head model for this race: a custom \"namespace:model\" (declared in mod.json \"models\" as { id, file }, or a mod-relative path to your own .vox), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
                 }
               }
             },
@@ -1134,7 +1134,7 @@
               "properties": {
                 "head": {
                   "type": "string",
-                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                  "description": "Head model for this race: a custom \"namespace:model\" (declared in mod.json \"models\" as { id, file }, or a mod-relative path to your own .vox), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
                 }
               }
             },
@@ -1145,7 +1145,7 @@
               "properties": {
                 "head": {
                   "type": "string",
-                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                  "description": "Head model for this race: a custom \"namespace:model\" (declared in mod.json \"models\" as { id, file }, or a mod-relative path to your own .vox), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
                 }
               }
             },
@@ -1156,7 +1156,7 @@
               "properties": {
                 "head": {
                   "type": "string",
-                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                  "description": "Head model for this race: a custom \"namespace:model\" (declared in mod.json \"models\" as { id, file }, or a mod-relative path to your own .vox), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
                 }
               }
             },
@@ -1167,7 +1167,7 @@
               "properties": {
                 "head": {
                   "type": "string",
-                  "description": "Head model for this race: a custom \"namespace:model\" (registered by an item's `model` field), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
+                  "description": "Head model for this race: a custom \"namespace:model\" (declared in mod.json \"models\" as { id, file }, or a mod-relative path to your own .vox), or a raw vanilla model index. Only the HEAD can be forced — it is the one limb the engine assigns every frame regardless of equipment. Torso/arms/legs are only assigned when that armour slot is EMPTY, so a forced body look would vanish the moment the player equips anything."
                 }
               }
             }

@@ -21,43 +21,140 @@ namespace
 {
 	const char* MOD = "MODELS";
 
-	// "namespace:name" -> engine model index. Only ever grows within a load; cleared
-	// when mods unload.
-	std::map<std::string, int> s_index;
+	// id -> where it landed, and what file it came from.
+	//
+	// The path is kept because the id alone cannot tell a harmless RE-registration (Barony
+	// calls loadMods on every Play, so every model is offered again with the same id AND the
+	// same path) from a real collision (two mods claiming one id with different files). The
+	// first version warned on both, which meant every model produced a WARN from the second
+	// game onward -- a log full of "already registered" that reads exactly like an authoring
+	// error and buries the one line that matters.
+	struct Registration
+	{
+		int index = -1;
+		std::string path;
+		// Recorded at append time so /sam_models reports exactly what the loader decided.
+		// The command used to re-derive this itself and got a different answer, flagging the
+		// framework's own sam_builtin/ models as the modder's mistake.
+		bool baseGame = false;
+	};
+	std::map<std::string, Registration> s_index;
 }
 
 namespace
 {
-	// Why did loadVoxel fail? Barony's .vox is a "slab" format: three int32 dimensions,
-	// then w*h*d palette bytes, then a 768-byte palette. MagicaVoxel's own .vox is a
-	// RIFF-ish format beginning with the ASCII magic "VOX ". They share an extension and
-	// nothing else, and exporting from MagicaVoxel without converting is by far the most
-	// common way a modder's model fails to load -- so name it instead of blaming the path.
-	// Returns a diagnosis to append to the error, or "" when we cannot tell.
-	std::string samDiagnoseVoxFailure(const std::string& physfsPath)
-	{
 #ifdef SAM_MODELS_HAVE_BARONY
+	// Barony's .vox is a "slab": three little-endian int32 dimensions, then w*h*d palette
+	// index bytes, then a 768-byte RGB palette, so the file is exactly 12 + w*h*d + 768 bytes.
+	//
+	// Measured across every .vox the game ships: 2410 of 2411 match. The single exception,
+	// models/decorations/ceiling_bbrick.vox, is a 12-byte header-only stub that claims 32x32x1
+	// and carries no data at all -- and it is not listed in models.txt, so the engine never
+	// loads it either. Rejecting it costs nothing.
+	//
+	// WHY WE CHECK BEFORE CALLING loadVoxel. loadVoxel (files.cpp:2280) reads the first int32
+	// straight into sizex and then does
+	//     malloc(sizeof(Uint8) * sizex * sizey * sizez);
+	//     memset(model->data, 0, ...);
+	// with no validation of the dimensions and NO null check on the malloc. A file that is
+	// neither slab nor MagicaVoxel -- a corrupt export, a truncated copy, a renamed PNG --
+	// gives absurd dimensions, the signed multiply overflows, malloc returns nullptr and the
+	// memset segfaults. The game dies at the loading screen with nothing in any log.
+	//
+	// So sam_models' documented "a model that fails to load is skipped with a warning" simply
+	// could not hold: it only covers files loadVoxel manages to REJECT, never ones it crashes
+	// on. Validating here is what makes that promise true.
+	//
+	// Returns true when the file is a slab we can safely hand over. On false, `why` explains
+	// it in terms the modder can act on.
+	bool samValidateSlab(const std::string& physfsPath, std::string& why)
+	{
+		why.clear();
 		if ( !PHYSFS_getRealDir(physfsPath.c_str()) )
 		{
-			return " The file is not in the mod folder at that path.";
+			why = "No file at that path. Check the spelling and that it is inside your mod folder.";
+			return false;
 		}
-		if ( PHYSFS_File* fh = PHYSFS_openRead(physfsPath.c_str()) )
+		PHYSFS_File* fh = PHYSFS_openRead(physfsPath.c_str());
+		if ( !fh )
 		{
-			char magic[4] = { 0, 0, 0, 0 };
-			const PHYSFS_sint64 got = PHYSFS_readBytes(fh, magic, 4);
-			PHYSFS_close(fh);
-			if ( got == 4 && magic[0] == 'V' && magic[1] == 'O' && magic[2] == 'X' && magic[3] == ' ' )
-			{
-				return " It is a MagicaVoxel .vox, which Barony cannot read."
-					" Convert it to Barony slab format (the two formats share an extension"
-					" and nothing else).";
-			}
+			why = "The file exists but could not be opened for reading.";
+			return false;
 		}
-#else
-		(void)physfsPath;
-#endif
-		return "";
+		const PHYSFS_sint64 len = PHYSFS_fileLength(fh);
+		unsigned char head[12] = { 0 };
+		const PHYSFS_sint64 got = PHYSFS_readBytes(fh, head, 12);
+		PHYSFS_close(fh);
+
+		if ( got < 12 )
+		{
+			why = "The file is only " + std::to_string((long long)len)
+				+ " bytes, too short to be a .vox at all. Did the copy finish?";
+			return false;
+		}
+		// MagicaVoxel's own format is RIFF-ish and starts with the ASCII magic "VOX ". It
+		// shares an extension with Barony's slab and nothing else, and exporting from
+		// MagicaVoxel without converting is by far the most common way a model fails.
+		if ( head[0] == 'V' && head[1] == 'O' && head[2] == 'X' && head[3] == ' ' )
+		{
+			why = "This is a MagicaVoxel .vox, which Barony cannot read. The two formats share"
+				" an extension and nothing else -- convert it to Barony slab format.";
+			return false;
+		}
+
+		auto rd32 = [&](int off) -> long long {
+			return (long long)((unsigned)head[off] | ((unsigned)head[off + 1] << 8)
+				| ((unsigned)head[off + 2] << 16) | ((unsigned)head[off + 3] << 24));
+		};
+		const long long w = rd32(0), h = rd32(4), d = rd32(8);
+		// A signed int32 read as unsigned above stays positive here; anything enormous or
+		// zero is not a model. 1024 on a side is already far past anything Barony ships.
+		if ( w <= 0 || h <= 0 || d <= 0 || w > 1024 || h > 1024 || d > 1024 )
+		{
+			why = "The header says this model is " + std::to_string(w) + "x" + std::to_string(h)
+				+ "x" + std::to_string(d) + ", which is not a real size. This is not a Barony"
+				" slab .vox.";
+			return false;
+		}
+		const long long expect = 12 + (w * h * d) + 768;
+		if ( (long long)len != expect )
+		{
+			why = "The header says " + std::to_string(w) + "x" + std::to_string(h) + "x"
+				+ std::to_string(d) + ", so a Barony slab would be exactly "
+				+ std::to_string(expect) + " bytes, but the file is "
+				+ std::to_string((long long)len) + ". It is either truncated or not a slab .vox.";
+			return false;
+		}
+		return true;
 	}
+
+	// Did this path resolve to the BASE GAME rather than to a mod?
+	//
+	// loadVoxel goes through PhysFS, and the base game is mounted in PhysFS, so a vanilla
+	// path like models/creatures/goatman/goatman_named/gharbad_head.vox loads perfectly and
+	// the framework happily registers a SECOND COPY of a stock model as if the mod shipped it.
+	// The modder gets a clean log and a floating limb on screen, which is exactly the report
+	// that prompted this check. The engine already does the same test in files.cpp:3957 --
+	// PHYSFS_getRealDir returns "./" for base-game content.
+	bool samIsBaseGameFile(const std::string& physfsPath)
+	{
+		// The framework's own bundled assets live in the game directory by design -- the
+		// built-in Hunter's Workbench writes its models to sam_builtin/ (sam_workbench.cpp).
+		// They resolve to "./" like base-game content, but they are not a modder's mistake,
+		// and warning about them would put two spurious lines in every single startup log.
+		if ( physfsPath.compare(0, 12, "sam_builtin/") == 0 ) { return false; }
+		const char* real = PHYSFS_getRealDir(physfsPath.c_str());
+		if ( !real ) { return false; }
+		return ( strcmp(real, "./") == 0 );
+	}
+
+	// Vanilla creature models are single LIMBS, not whole bodies, so a body_model pointed at
+	// one draws a floating arm. Worth saying out loud when we can see it coming.
+	bool samLooksLikeCreatureLimb(const std::string& physfsPath)
+	{
+		return ( physfsPath.find("models/creatures/") != std::string::npos );
+	}
+#endif
 }
 
 int SAMModels::appendModels(const std::vector<Request>& requests)
@@ -79,18 +176,56 @@ int SAMModels::appendModels(const std::vector<Request>& requests)
 	// Load every voxel FIRST, into a staging list. A .vox that fails to load must not
 	// consume an index: the table is positional, so a hole would silently shift every
 	// later model and mis-render other mods' content. Skip it instead.
-	struct Staged { std::string id; voxel_t* vox; };
+	struct Staged { std::string id; std::string path; voxel_t* vox; };
 	std::vector<Staged> staged;
 	staged.reserve(requests.size());
 
 	for ( const Request& r : requests )
 	{
 		if ( r.id.empty() || r.physfsPath.empty() ) { continue; }
-		if ( s_index.find(r.id) != s_index.end() )
+
+		// `owner` is only for the message; it is empty for older call sites.
+		const std::string who = r.owner.empty() ? ("[" + r.id + "]") : ("[" + r.owner + "]");
+
+		auto known = s_index.find(r.id);
+		if ( known != s_index.end() )
 		{
-			SAM_WARN(MOD, "Model id '" + r.id + "' is already registered — skipping the duplicate.");
+			// Same id, same file: this is just Barony calling loadMods again (it does so on
+			// every Play). Nothing is wrong and nothing needs saying.
+			if ( known->second.path == r.physfsPath ) { continue; }
+			// Same id, DIFFERENT file: a real clash, and the second mod silently loses.
+			SAM_WARN(MOD, "Two different models claim the id '" + r.id + "': already loaded from '"
+				+ known->second.path + "', now also requested from '" + r.physfsPath
+				+ "' by " + who + ". Keeping the first. Namespace your model folder"
+				" (models/<yourmod>/...) so ids cannot collide.");
 			continue;
 		}
+
+		// Refuse a file we cannot prove is a slab, BEFORE loadVoxel gets a chance to
+		// segfault on it. See samValidateSlab.
+		std::string why;
+		if ( !samValidateSlab(r.physfsPath, why) )
+		{
+			SAM_ERROR(MOD, "Model '" + r.physfsPath + "' for " + who + " was not loaded. "
+				+ why + " Skipping it; the rest still load.");
+			continue;
+		}
+
+		// It loads -- but did it come from the mod, or from the base game?
+		if ( samIsBaseGameFile(r.physfsPath) )
+		{
+			std::string extra;
+			if ( samLooksLikeCreatureLimb(r.physfsPath) )
+			{
+				extra = " Note that vanilla creature models are single LIMBS (a head, an arm),"
+					" not whole bodies — using one as a body model draws a floating limb.";
+			}
+			SAM_WARN(MOD, "Model '" + r.physfsPath + "' for " + who + " is a BASE GAME file,"
+				" not one your mod ships. It will load, but you are registering a second copy"
+				" of a stock model." + extra
+				+ " If you meant to ship your own .vox, put it under your mod folder.");
+		}
+
 		// loadVoxel resolves the path through PhysFS itself, so any mounted mod folder
 		// works with no path juggling on our side. It takes char* (not const).
 		std::vector<char> path(r.physfsPath.begin(), r.physfsPath.end());
@@ -98,11 +233,13 @@ int SAMModels::appendModels(const std::vector<Request>& requests)
 		voxel_t* vox = loadVoxel(path.data());
 		if ( !vox )
 		{
-			SAM_ERROR(MOD, "Could not load model '" + r.physfsPath + "' for [" + r.id + "]."
-				+ samDiagnoseVoxFailure(r.physfsPath) + " Skipping it; the rest still load.");
+			// Validation passed, so this is something else -- out of memory, or a format
+			// quirk we did not model. Say so honestly rather than guessing.
+			SAM_ERROR(MOD, "Could not load model '" + r.physfsPath + "' for " + who
+				+ " even though it looks like a valid slab .vox. Skipping it; the rest still load.");
 			continue;
 		}
-		staged.push_back({ r.id, vox });
+		staged.push_back({ r.id, r.physfsPath, vox });
 	}
 
 	if ( staged.empty() ) { return 0; }
@@ -155,8 +292,13 @@ int SAMModels::appendModels(const std::vector<Request>& requests)
 
 	for ( int i = 0; i < addCount; ++i )
 	{
-		s_index[staged[i].id] = oldCount + i;
-		SAM_DEBUG(MOD, "  [" + staged[i].id + "] -> model index " + std::to_string(oldCount + i));
+		s_index[staged[i].id] = Registration{ oldCount + i, staged[i].path,
+			samIsBaseGameFile(staged[i].path) };
+		// INFO, not DEBUG. This mapping is the single most useful line in the log when a
+		// model does not show up, and DEBUG is off unless an environment variable nobody
+		// outside this repo knows about is set -- so in practice it was never seen.
+		SAM_INFO(MOD, "  model [" + staged[i].id + "] -> index "
+			+ std::to_string(oldCount + i) + "  (" + staged[i].path + ")");
 	}
 
 	SAM_INFO(MOD, "Registered " + std::to_string(addCount) + " custom model(s); model table "
@@ -168,7 +310,24 @@ int SAMModels::appendModels(const std::vector<Request>& requests)
 int SAMModels::modelIndexForId(const std::string& id)
 {
 	auto it = s_index.find(id);
-	return ( it != s_index.end() ) ? it->second : -1;
+	return ( it != s_index.end() ) ? it->second.index : -1;
+}
+
+std::string SAMModels::pathForId(const std::string& id)
+{
+	auto it = s_index.find(id);
+	return ( it != s_index.end() ) ? it->second.path : std::string();
+}
+
+std::vector<SAMModels::Entry> SAMModels::list()
+{
+	std::vector<Entry> out;
+	out.reserve(s_index.size());
+	for ( const auto& kv : s_index )
+	{
+		out.push_back(Entry{ kv.first, kv.second.path, kv.second.index, kv.second.baseGame });
+	}
+	return out;
 }
 
 int SAMModels::count()

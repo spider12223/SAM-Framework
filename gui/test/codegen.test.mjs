@@ -537,6 +537,54 @@ function assert(name, cond) {
 }
 
 // ---------------------------------------------------------------------------------
+// Reducer action shapes.
+//
+// A page that dispatches the wrong key does not throw: the reducer spreads `undefined`, the
+// state is unchanged, and the UI looks like it worked. ModelEditor shipped that way -- it
+// sent { meta } where the reducer reads { patch }, so every declared model vanished on save.
+// These drive the reducer directly, which is the only level that catches it.
+{
+  const { reducer } = await import('@/state/modReducer.js');
+  const base = { meta: { namespace: 'mymod', models: [] }, assets: {} };
+
+  const afterMeta = reducer(base, { type: 'setMeta', patch: { models: [{ id: 'mymod:a', file: 'models/mymod/a.vox' }] } });
+  assert('setMeta patch actually changes meta', afterMeta.meta.models.length === 1);
+  assert('setMeta patch keeps other meta keys', afterMeta.meta.namespace === 'mymod');
+
+  // The exact bug: the wrong key must not silently look like success.
+  const afterWrongKey = reducer(base, { type: 'setMeta', meta: { models: [{ id: 'x', file: 'y' }] } });
+  assert('setMeta with the WRONG key is a no-op (so a test must catch it, not the user)',
+    (afterWrongKey.meta.models || []).length === 0);
+
+  const afterAsset = reducer(base, { type: 'setAsset', path: 'models/mymod/a.vox', dataUrl: 'data:,x' });
+  assert('setAsset stores under its path', afterAsset.assets['models/mymod/a.vox'] === 'data:,x');
+  const afterRemove = reducer(afterAsset, { type: 'removeAsset', path: 'models/mymod/a.vox' });
+  assert('removeAsset drops it', afterRemove.assets['models/mymod/a.vox'] === undefined);
+}
+
+// Every setMeta dispatch in the app must use `patch`, since the reducer reads nothing else.
+{
+  const { readdirSync, readFileSync, statSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const SRC = fileURLToPath(new URL('../src/', import.meta.url));
+  const walk = (d) => readdirSync(d).flatMap((f) => {
+    const p = join(d, f);
+    return statSync(p).isDirectory() ? walk(p) : [p];
+  });
+  const offenders = [];
+  for (const file of walk(SRC).filter((f) => /\.(jsx?|mjs)$/.test(f))) {
+    const text = readFileSync(file, 'utf8');
+    const re = /dispatch\(\{\s*type:\s*'setMeta'\s*,\s*([A-Za-z_$][\w$]*)/g;
+    let m;
+    while ((m = re.exec(text))) {
+      if (m[1] !== 'patch') offenders.push(`${file.slice(SRC.length)}: setMeta with '${m[1]}'`);
+    }
+  }
+  assert(`no setMeta dispatch uses a key other than 'patch'${offenders.length ? ' -- ' + offenders.join('; ') : ''}`,
+    offenders.length === 0);
+}
+
+// ---------------------------------------------------------------------------------
 if (!LUA) {
   console.log('SKIP: no lua interpreter found (set SAM_LUA=/path/to/lua.exe).');
   console.log('      Build one from framework/lua54 — it is the same 5.4.7 the game runs.');
