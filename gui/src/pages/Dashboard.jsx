@@ -10,7 +10,7 @@ import { useMod } from '@/state/ModContext.jsx';
 import { Panel, GoldButton } from '@/components/ui.jsx';
 
 /** The framework's own version (mods declare their own framework_min_version). */
-const SAM_FRAMEWORK_VERSION = '1.10.4';
+const SAM_FRAMEWORK_VERSION = '1.11.0';
 
 /** Where players get S.A.M itself (the framework is a dependency, not a mod). */
 const WORKSHOP_URL = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472';
@@ -28,20 +28,18 @@ const TRAVELS = [
  * thing a returning modder sees, and the point is 'here is what you can do now that you
  * could not before', not a changelog. */
 const WHATS_NEW = [
-  ['Put your own pictures in the game',
-   'A mod could always replace one of the game\'s images. It could never add one. sam_show_image covers the screen with your art for as long as you say and then takes it away by itself, and sam_hud_image pins a picture to the HUD until you clear it. Declare the file in mod.json and a typo is a line in the log at load time instead of nothing happening for no reason.'],
-  ['Scripts can finally see doors, chests, levers and loot',
-   'The old nearby lookup skipped anything that was not a monster or a player, so every mechanism and every dropped item was invisible. sam_find_entities takes a kind and returns what is actually there.'],
-  ['Open a door, throw a lever',
-   'The framework already told you when a door opened or a switch flipped, while giving you no way to do either. sam_set_door, sam_set_door_locked, sam_toggle_switch and sam_power_entity close that.'],
-  ['Ask what the map really looks like',
-   'Read or write any tile, ask whether a point is a sane place to spawn something, trace real line of sight, and check that the exit is still reachable before an edit seals it in.'],
-  ['A HUD of your own',
-   'Text and bars you position yourself, in the same coordinate space the vanilla HUD uses, so a mod lines up at any resolution. Widgets persist until you change them, and the whole thing is dropped when the mod unloads.'],
-  ['Read the numbers the game actually uses',
-   'Not the raw sheet value but the one the damage formula sees, gear and effects folded in. Armor class, effective stats and proficiency ranks are all readable now, and skill names work in either spelling.'],
-  ['Know where you are and who else is loaded',
-   'The floor number alone could not tell a secret branch from the main one. sam_get_level_info can, and sam_get_mods lets a mod light up extra content when a partner mod is present.'],
+  ['Your mod can have its own windows',
+   'Until now a script could write to the screen and nothing more, so a shop, a quest log, a crafting bench or a settings screen could not be built at all. Panels give you buttons, pictures, scrolling lists and text boxes, and tell you when the player clicks or types. Nothing about the look is fixed by the framework: set your own colours, borders and fonts, or make the background transparent and draw whatever you like.'],
+  ['A home you can go back to',
+   'Barony floors are strictly one way. A ladder only ever counts upward, so no previous version could return a party to a floor it had left, which ruled out a hub, a home base, or a shop you walk back to. sam_travel_to_level sends everyone to any floor, including back up.'],
+  ['A stash that follows you down',
+   'Every floor is regenerated from a seed, so a chest you filled on floor one was gone the moment you climbed down. sam_set_chest_stash turns a chest into permanent storage: what you leave in it survives descending, dying later, quitting and loading. It is the game\'s own void chest underneath, so the window and the save round trip are vanilla.'],
+  ['Progress that belongs to one character',
+   'The existing saved data is shared by every character you ever roll and outlives the save that made it, which is right for a mod\'s settings and wrong for a character\'s progress. sam_world_save stores values inside one savegame instead, so a new character never starts holding the last one\'s unlocks.'],
+  ['Fire something of your own',
+   'The only thing a script could launch was a fixed vanilla spell, which ruled out ranged enemies with real attack patterns, telegraphed boss volleys, traps, and weapons that shoot anything but an arrow. sam_spawn_projectile takes a speed, a model, damage and a range, and tells you what it hit.'],
+  ['Read the game itself',
+   'A script could ask about the item in your hand and nothing else, so an index of the game could not be written. List every item, monster and spell the game knows about, with the numbers behind a tooltip. Anything a mod added shows up too, so a browser or a shop can be built from real data.'],
 ];
 
 /** sam-well stat box: big gold number over a small-caps label. */

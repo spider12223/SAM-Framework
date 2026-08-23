@@ -107,8 +107,9 @@ export const SAM_FUNCTIONS = [
     params: [{ name: "player", type: "int" }, { name: "amount", type: "int" }],
     returns: "true on success (boolean)", desc: "Add gold to a player (clamped to >= 0), syncing the client HUD." },
   { name: "sam_spawn_item", category: "Rewards", hostOnly: true,
-    params: [{ name: "x", type: "int" }, { name: "y", type: "int" }, { name: "item_name", type: "string" }],
-    returns: "true on success (boolean)", desc: "Spawn a ground item (vanilla name) at map tile (x, y)." },
+    params: [{ name: "x", type: "int" }, { name: "y", type: "int" }, { name: "item_name", type: "string (a vanilla name, or a custom \"namespace:item\")" }, { name: "status", type: "int (optional, default EXCELLENT; clamped BROKEN..EXCELLENT)" }, { name: "beatitude", type: "int (optional, default 0; negative is cursed, positive blessed; clamped -100..100)" }, { name: "count", type: "int (optional, default 1; clamped 1..1000)" }],
+    returns: "the spawned item's entity uid (int), or nil/null if the tile was invalid",
+    desc: "Spawn a ground item at a map tile. status, beatitude and count let you put an item back exactly as you found it — without them a stash could record that you owned a cursed, worn ring and then only ever hand back a pristine one. The uid comes back so you can move it (sam_set_position) or clear it (sam_remove_entity) later; a uid is never 0, so an older `if sam_spawn_item(...)` check still behaves as it did." },
   { name: "sam_item_id", category: "Rewards", hostOnly: false,
     params: [{ name: "name", type: "string", values: ["vanilla ITEM name", "\"namespace:item\" (custom)"] }],
     returns: "the item's numeric type id (int), or nil/null if unknown",
@@ -589,6 +590,145 @@ export const SAM_FUNCTIONS = [
     params: [{ name: "target", type: "int (player 0..3, or -1 for every client)" }, { name: "tag", type: "string" }, { name: "payload", type: "string" }],
     returns: "true if sent (boolean)",
     desc: "Send a mod-defined message to another machine. Barony's packet ids are a fixed table, so before this a co-op mod had no way to tell the other side anything at all. On a client the target is ignored and the packet always goes to the host. The other side receives an \"on_packet\" event with .from, .tag and .payload. One datagram only — use sam_save_data for bulk state." },
+
+  // ---- Panels (v1.11.0) --------------------------------------------------------
+  // COORDINATES: every x/y/w/h below is in VIRTUAL screen units, not your monitor's
+  // pixels -- 1280x720 on a 16:9 display at the default UI scale, whatever the real
+  // resolution is. A panel placed past that edge is not drawn AT ALL (no panel, no
+  // widgets, no input), though sam_ui_open still returns true; the framework logs a
+  // warning when it spots this. Widget x/y are relative to their panel's top-left.
+  //
+  // A mod's own interactive window: labels, buttons, pictures, scrolling lists and
+  // text inputs. Before this a script could only WRITE to the screen (sam_hud_*), so
+  // a shop, a quest log, a crafting bench or a settings screen could not be built.
+  // Widgets are declared into a panel by id; declaring the same id again updates it
+  // in place rather than stacking a second copy, so it is safe to call these from a
+  // refresh routine. Interaction arrives as ui.on_click (a button), ui.on_select (a
+  // list row) or ui.on_submit (a text box), each carrying .mod, .panel, .widget and
+  // .value. Panels are LOCAL to the machine that opened them.
+  { name: "sam_ui_open", category: "Panels", hostOnly: false,
+    params: [{ name: "panel", type: "string (your id for this panel)" }, { name: "x", type: "int" }, { name: "y", type: "int" }, { name: "w", type: "int" }, { name: "h", type: "int" }, { name: "title", type: "string (optional, \"\" for none)" }, { name: "modal", type: "boolean (optional, default false)" }],
+    returns: "true if the panel opened (boolean)",
+    desc: "Open one of your mod's panels at a position and size given in VIRTUAL screen units (1280x720 at the default UI scale, not your monitor's pixels). modal = true frees the mouse cursor so the player can click your widgets, and hands camera control back when the panel closes \u2014 use it for anything with buttons. A non-modal panel is display-only and leaves the player in normal look-around mode. Opening a panel id that is already open re-positions it instead of opening a second one." },
+  { name: "sam_ui_close", category: "Panels", hostOnly: false,
+    params: [{ name: "panel", type: "string (optional \u2014 omit to close ALL of your mod's panels)" }],
+    returns: "true, or false if that panel was not open (boolean)",
+    desc: "Close one panel, or every panel your mod has open if you pass nothing. Closing the last modal panel restores the player's camera control. Always close your panels on player.on_death and game.on_game_start so a leftover window cannot follow the player into the next run." },
+  { name: "sam_ui_clear", category: "Panels", hostOnly: false,
+    params: [{ name: "panel", type: "string" }],
+    returns: "true, or false if the panel is not open (boolean)",
+    desc: "Remove every widget from a panel but leave the panel itself open. This is how you rebuild a changing screen \u2014 clear, then re-declare the rows \u2014 without the window flickering shut and open again." },
+  { name: "sam_ui_is_open", category: "Panels", hostOnly: false,
+    params: [{ name: "panel", type: "string" }],
+    returns: "true if that panel is currently open (boolean)",
+    desc: "Ask whether one of your panels is on screen. Useful to make a key or an item toggle a window instead of re-opening it, and to skip expensive refresh work while it is closed." },
+  { name: "sam_ui_label", category: "Panels", hostOnly: false,
+    params: [{ name: "panel", type: "string" }, { name: "id", type: "string (your id for this widget)" }, { name: "x", type: "int (relative to the panel)" }, { name: "y", type: "int" }, { name: "w", type: "int" }, { name: "text", type: "string" }, { name: "color", type: "colour (optional, default warm parchment)" }],
+    returns: "true, or false if that panel is not open (boolean)",
+    desc: "Put a line of text in a panel. x/y are measured from the panel's top-left corner, not the screen. Give w enough room for the text or it will be cut off \u2014 sam_ui_text_size measures a string before you place it. Re-declaring the same id replaces the text, which is how you update a running total." },
+  { name: "sam_ui_button", category: "Panels", hostOnly: false,
+    params: [{ name: "panel", type: "string" }, { name: "id", type: "string" }, { name: "x", type: "int" }, { name: "y", type: "int" }, { name: "w", type: "int" }, { name: "h", type: "int" }, { name: "text", type: "string" }],
+    returns: "true, or false if that panel is not open (boolean)",
+    desc: "Put a clickable button in a panel. Clicking it fires a \"ui.on_click\" event whose .panel and .widget match what you passed here, so one handler can serve every button by switching on .widget. The panel must have been opened with modal = true or the player will have no cursor to click with." },
+  { name: "sam_ui_image", category: "Panels", hostOnly: false,
+    params: [{ name: "panel", type: "string" }, { name: "id", type: "string" }, { name: "x", type: "int" }, { name: "y", type: "int" }, { name: "w", type: "int" }, { name: "h", type: "int" }, { name: "image", type: "string (\"ns:id\", a bare name, or a path inside your mod)" }, { name: "color", type: "colour (optional, default white = untinted)" }],
+    returns: "true, or false if the picture could not be resolved (boolean)",
+    desc: "Put one of your mod's pictures in a panel, scaled to w by h. Resolves the same way sam_show_image does. The colour argument tints the picture and its alpha fades it, so the same file can be reused greyed-out for a locked entry." },
+  { name: "sam_ui_list", category: "Panels", hostOnly: false,
+    params: [{ name: "panel", type: "string" }, { name: "id", type: "string" }, { name: "x", type: "int" }, { name: "y", type: "int" }, { name: "w", type: "int" }, { name: "h", type: "int" }],
+    returns: "true, or false if that panel is not open (boolean)",
+    desc: "Create an empty scrolling list in a panel. Fill it with sam_ui_list_add. This is the widget for a shop's stock, a bestiary, a recipe index or a quest log \u2014 anything with more entries than fit on screen." },
+  { name: "sam_ui_list_add", category: "Panels", hostOnly: false,
+    params: [{ name: "panel", type: "string" }, { name: "id", type: "string (the list's id)" }, { name: "row_id", type: "string (your id for this row)" }, { name: "text", type: "string" }, { name: "color", type: "colour (optional)" }],
+    returns: "true, or false if that panel or list does not exist (boolean)",
+    desc: "Append one row to a list. Clicking a row fires \"ui.on_select\" with .panel, .widget set to the list and .value set to the row_id you chose here \u2014 so make row_id something you can act on, like an item id, rather than a display string." },
+  { name: "sam_ui_list_clear", category: "Panels", hostOnly: false,
+    params: [{ name: "panel", type: "string" }, { name: "id", type: "string (the list's id)" }],
+    returns: "true, or false if that panel or list does not exist (boolean)",
+    desc: "Empty one list without touching the rest of the panel. Use this before re-filling a list from a search box or a filter, so the old results do not pile up under the new ones." },
+  { name: "sam_ui_list_row_height", category: "Panels", hostOnly: false,
+    params: [{ name: "panel", type: "string" }, { name: "id", type: "string (the list's id)" }, { name: "pixels", type: "int" }],
+    returns: "true, or false if that panel or list does not exist (boolean)",
+    desc: "Set how tall each row of a list is. Raise it if you switched that list to a larger font, or rows will overlap." },
+  { name: "sam_ui_input", category: "Panels", hostOnly: false,
+    params: [{ name: "panel", type: "string" }, { name: "id", type: "string" }, { name: "x", type: "int" }, { name: "y", type: "int" }, { name: "w", type: "int" }, { name: "h", type: "int" }, { name: "text", type: "string (optional starting contents)" }],
+    returns: "true, or false if that panel is not open (boolean)",
+    desc: "Put an editable text box in a panel \u2014 a search field, a name entry, a price offer. Read what the player typed with sam_ui_input_text. Place the box clear of any label: a label wide enough to overlap the box will sit on top of it." },
+  { name: "sam_ui_input_text", category: "Panels", hostOnly: false,
+    params: [{ name: "panel", type: "string" }, { name: "id", type: "string (the input's id)" }],
+    returns: "the current contents (string), or \"\" if there is no such input",
+    desc: "Read what the player has typed into one of your text boxes. Poll it from a button handler, or from on_tick if you want a search list to filter as they type. Pressing Enter in the box also fires \"ui.on_submit\" with the text in .value." },
+  { name: "sam_ui_font", category: "Panels", hostOnly: false,
+    params: [{ name: "panel", type: "string" }, { name: "id", type: "string (a widget's id, or \"\" to set the whole panel's font)" }, { name: "font", type: "string (a font path, e.g. \"fonts/pixel_maz_multiline.ttf#16#2\")" }],
+    returns: "true, or false if that panel or widget does not exist (boolean)",
+    desc: "Change the font of one widget, or of an entire panel by passing an empty id -- which is the only way to restyle a panel's text in one call rather than widget by widget. Panels default to a small 16px face because the game's standard 32px font makes any list look enormous. The number after the first # is the pixel size \u2014 raise it for a heading, and raise the row height to match if it is a list." },
+  { name: "sam_ui_panel_style", category: "Panels", hostOnly: false,
+    params: [{ name: "panel", type: "string" }, { name: "background", type: "colour (0 = leave unchanged)" }, { name: "border", type: "colour (0 = leave unchanged)" }, { name: "border_width", type: "int (optional, omit to leave unchanged)" }],
+    returns: "true, or false if that panel is not open (boolean)",
+    desc: "Recolour a panel's background and border. Nothing about a panel's look is fixed by the framework \u2014 set the background fully transparent for a bare overlay, or opaque for a solid window. Colours accept the same forms as the HUD calls." },
+  { name: "sam_ui_text_size", category: "Panels", hostOnly: false,
+    params: [{ name: "text", type: "string" }, { name: "font", type: "string (optional; defaults to the standard panel face, NOT whatever font you set on a particular panel — this call takes no panel)" }],
+    returns: "width, height in pixels (two ints), or nil/null if the font could not be loaded",
+    desc: "Measure a string before you place it. This is how you lay a panel out properly instead of guessing: size a label to its own text so it cannot overlap the widget beside it, right-align a column of numbers, or centre a heading in a panel of known width." },
+
+  // ---- Game content (v1.11.0) --------------------------------------------------
+  // Read the game's own registries. These walk the live tables, so anything a mod
+  // added shows up here too. They are read-only, safe on a client, and allocate a
+  // fresh list every call \u2014 call once and keep the result rather than per frame.
+  { name: "sam_list_items", category: "Game content", hostOnly: false,
+    params: [{ name: "category", type: "string (optional filter, e.g. \"WEAPON\"; omit for everything)" }],
+    returns: "array of { type, name, unidentified, category, level, weight, value, custom }",
+    desc: "List every item the game knows about, including items added by mods (those have custom = true). This is what a recipe browser, a shop's stock list or a bestiary of loot is built from \u2014 before it, a script could only ask about the item already in the player's hand." },
+  { name: "sam_get_item_info", category: "Game content", hostOnly: false,
+    params: [{ name: "item", type: "int item type, or a name / \"ns:id\" string" }],
+    returns: "{ type, name, unidentified, category, level, weight, value, custom, attributes } or nil/null if unknown",
+    desc: "Look up one item by type number or by name. The attributes sub-table is where a tooltip's numbers come from (ATK, AC and so on), so this is enough to render your own item description in a panel." },
+  { name: "sam_list_monsters", category: "Game content", hostOnly: false,
+    params: [],
+    returns: "array of { type, name }",
+    desc: "List the game's monster types. Note what this does NOT include: a S.A.M custom monster is a variant of a base species rather than a new entry in the engine's table, so it will not appear here as its own row \u2014 you will see the species it is built on. The NOTHING sentinel and the engine's reserved padding slots are filtered out. Pair with sam_spawn_monster for an arena mod, or with a panel for a bestiary." },
+  { name: "sam_list_spells", category: "Game content", hostOnly: false,
+    params: [],
+    returns: "array of { id, name, cost }",
+    desc: "List the spells a player can actually be given, with their mana cost. Spells the game hides from its own UI are left out, so what you get back is the set that is meaningful to show a player." },
+
+  // ---- Projectiles (v1.11.0) ---------------------------------------------------
+  { name: "sam_spawn_projectile", category: "Combat", hostOnly: true,
+    params: [{ name: "tile_x", type: "number (fractional tiles allowed)" }, { name: "tile_y", type: "number" }, { name: "angle", type: "number (radians \u2014 sam_get_facing returns one)" }, { name: "speed", type: "number (world pixels per tick; must be > 0)" }, { name: "damage", type: "int (optional, default 0)" }, { name: "lifetime", type: "int ticks (optional, default 100 \u2248 2s, max 1000)" }, { name: "model", type: "string (optional \u2014 a model from your mod's \"models\", or a vanilla model index)" }, { name: "owner", type: "int player 0..3 (optional, default -1 = unowned)" }],
+    returns: "the projectile's entity uid (int), or nil/null if it could not be spawned",
+    desc: "Fire a moving projectile with its own speed, model, damage and lifetime. Until this the only thing a script could launch was a fixed vanilla spell, which ruled out ranged enemies with real attack patterns, telegraphed boss volleys, and weapons that fire anything but an arrow. It stops on the first thing it hits and fires an \"on_projectile_hit\" event with .projectile, .target, .x, .y and .damage \u2014 spawn a follow-up there for a burst or an explosion. Giving an owner stops the shot killing the player who fired it on its first frame. Leave model empty and the projectile is INVISIBLE, which is almost never what you want. Host-only, like every other world-mutating call. MULTIPLAYER: everything that matters is decided on the host, so damage, collisions and the hit event are correct for everyone — but a connected client has no behaviour for a custom projectile and only moves it when a position update arrives, about 8 times a second, so the flight looks stepped rather than smooth on their screen. Fine for a shot that crosses a room; noticeable on a slow, long-lived one." },
+
+  // ---- Persistence: the character's own savegame (v1.11.0) ---------------------
+  // Note the split. sam_save_data writes a file shared by every character you ever
+  // roll and outlives the save that made it \u2014 right for a mod's settings, wrong
+  // for a character's progress. The three calls below live INSIDE one savegame:
+  // they are written with it, loaded with it, and go away when it does.
+  { name: "sam_world_save", category: "Persistence", hostOnly: false,
+    params: [{ name: "key", type: "string" }, { name: "value", type: "any JSON-able value" }],
+    returns: "true if stored, false if a size limit was hit (boolean)",
+    desc: "Save a value inside the CURRENT character's savegame. A brand new character starts with none of it, so a hub's unlock flags, a quest's progress or a bank balance cannot leak from one run into the next. Deliberately size-capped (8KB per value, 64KB across all mods) because oversized save data can produce a savegame that fails to load \u2014 keep flags and counters here and keep items in a stash chest, which the game persists properly on its own." },
+  { name: "sam_world_load", category: "Persistence", hostOnly: false,
+    params: [{ name: "key", type: "string" }],
+    returns: "the stored value, or nil/null if this character never stored one",
+    desc: "Read a value back from the current character's savegame. nil on a key you have never written is the signal that this is a fresh character \u2014 that is the natural place to run first-time setup, like anchoring a home floor." },
+  { name: "sam_world_clear", category: "Persistence", hostOnly: false,
+    params: [{ name: "key", type: "string" }],
+    returns: "true if there was something to remove (boolean)",
+    desc: "Forget one key for the current character. The whole store is dropped automatically when a run ends, so you only need this to reset something mid-run." },
+  { name: "sam_world_keys", category: "Persistence", hostOnly: false,
+    params: [],
+    returns: "array of your mod's stored key names (strings)",
+    desc: "List the keys your mod has saved for this character. Handy for migrating an older save's data, or for showing the player what a mod is remembering about their run." },
+
+  // ---- Stash and travel (v1.11.0) ----------------------------------------------
+  { name: "sam_set_chest_stash", category: "World", hostOnly: true,
+    params: [{ name: "chest_uid", type: "int (from sam_find_entities with kind \"chest\", or the on_chest_opened event)" }, { name: "on", type: "boolean (optional, default true)" }],
+    returns: "true if the chest was converted (boolean)",
+    desc: "Turn an existing chest into permanent storage. Its contents then live in the player's savegame instead of on the floor, surviving descending, dying later, quitting and loading. This is the game's own void-chest storage, so the window, the networking and the save round-trip are all vanilla. Two limits worth designing around: every stash chest in a run shares ONE set of contents, and the chest window holds 12 stacks \u2014 so this is a stash, not a bank. Converting a chest that already holds loot hides that loot until you turn the stash back off; prefer converting an empty one." },
+  { name: "sam_travel_to_level", category: "World", hostOnly: true,
+    params: [{ name: "floor", type: "int (absolute floor number, 0-100)" }, { name: "opts", type: "table/object (optional) \u2014 { secret = true } reads the floor from the secret levels list" }],
+    returns: "true if the trip was accepted (boolean)",
+    desc: "Send the party to any floor, including BACK UP, which the game otherwise never does \u2014 a ladder only ever counts upward, so before this no hub, home base or shop you walk back to was possible. The trip is deferred exactly as a ladder defers it, so it is safe to call from inside an event handler. Refused, with a logged reason, on a client, while another level change is already under way, or before a game has started. Nothing on the old floor is preserved: floors regenerate from the map seed, so put anything that must survive in a stash chest or in sam_world_save." },
 ];
 
 export const SAM_EVENTS = [
@@ -849,6 +989,29 @@ export const SAM_EVENTS = [
     whenFired: "a player uses a teleporter (pad or tunnel-spell)",
     payload: [{ field: "player", type: "int" }, { field: "teleporter", type: "uid" }, { field: "type", type: "int" }, { field: "dest_x", type: "int" }, { field: "dest_y", type: "int" }],
     gotcha: "same-floor teleport only; dest_x/dest_y are the destination tile. For descending floors use player.on_floor_change" },
+
+  // ---- Panels (v1.11.0) --------------------------------------------------------
+  // Every panel event carries the same four fields. `mod` is the namespace that owns the
+  // panel, so a script can ignore panels it did not open. These are delivered to whichever
+  // language the panel's owner wrote their mod in, and a mod may mix Lua and JS.
+  { name: "ui.on_click", category: "Panels", cancellable: false,
+    whenFired: "the player clicks a button you placed with sam_ui_button",
+    payload: [{ field: "mod", type: "string (owning namespace)" }, { field: "panel", type: "string" }, { field: "widget", type: "string (the button id)" }, { field: "value", type: "string (empty for a button)" }],
+    gotcha: "only reachable while the panel is open with modal = true \u2014 a non-modal panel gives the player no cursor to click with. Fires on the machine that opened the panel, which for a client is the client." },
+  { name: "ui.on_select", category: "Panels", cancellable: false,
+    whenFired: "the player clicks a row in a list you built with sam_ui_list / sam_ui_list_add",
+    payload: [{ field: "mod", type: "string" }, { field: "panel", type: "string" }, { field: "widget", type: "string (the LIST's id, not the row's)" }, { field: "value", type: "string (the row_id you passed to sam_ui_list_add)" }],
+    gotcha: "the row is in .value and the list is in .widget \u2014 easy to swap by accident. Give each row a row_id you can act on directly, such as an item id." },
+  { name: "ui.on_submit", category: "Panels", cancellable: false,
+    whenFired: "the player commits the contents of a text box placed with sam_ui_input",
+    payload: [{ field: "mod", type: "string" }, { field: "panel", type: "string" }, { field: "widget", type: "string (the input id)" }, { field: "value", type: "string (what they typed)" }],
+    gotcha: "you can also read the box at any time with sam_ui_input_text; this event just tells you when they finished." },
+
+  // ---- Projectiles (v1.11.0) ---------------------------------------------------
+  { name: "on_projectile_hit", category: "combat", cancellable: false,
+    whenFired: "a projectile from sam_spawn_projectile stops against a wall or an entity",
+    payload: [{ field: "projectile", type: "int (the uid sam_spawn_projectile returned)" }, { field: "target", type: "int (the uid it struck, or 0 for a wall)" }, { field: "x", type: "int (tile)" }, { field: "y", type: "int (tile)" }, { field: "damage", type: "int (the damage the projectile was configured with)" }],
+    gotcha: "fires just BEFORE the projectile is removed, so the uid is still valid when your handler runs but will not be a moment later -- removing it yourself from here is safe. target is 0 for a wall, so check it before treating the hit as a creature. .damage is what the projectile CARRIES, not what landed: it is reported unchanged on a wall, and on anything without a health bar nothing was actually dealt. Host-only, like the spawn call." },
 
   // ---- Custom events (sam_fire_hook) ------------------------------------------
   { name: "<namespace>:<hook_name>", category: "custom", cancellable: false,

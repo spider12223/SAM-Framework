@@ -29,7 +29,7 @@ INTO barony.exe, so:
         sidesteps binary redistribution.
 
   The description/README/INSTALL in this package are written to work with option
-  (A) or (B). Confirm your choice, then fill in the "Workshop link: TBD" spots.
+  (A) or (B). Confirm your choice; the Workshop link is already filled in.
 
 -------------------------------------------------------------------------------
   1. PREVIEW IMAGE  (you generate it)
@@ -46,9 +46,9 @@ INTO barony.exe, so:
   [ ] Pick option A, B, or C.
   [ ] If distributing the exe: create a GitHub Release on
       https://github.com/spider12223/SAM-Framework , attach barony.exe (and,
-      ideally, a zip with README.txt + INSTALL.md), tag it v0.2.0.
+      ideally, a zip with README.txt + INSTALL.md), tag it with the release version.
   [ ] Copy the release URL and paste it into:
-        - INSTALL.md  (the "Workshop link: TBD" / Option B spots)
+        - INSTALL.md  (the Option B / Workshop link section)
         - README.txt  (if you want a direct download line)
         - workshop_description.txt  (add a "Download the framework" link)
 
@@ -68,9 +68,9 @@ INTO barony.exe, so:
   [ ] Note the published Workshop item URL for the next steps.
 
 -------------------------------------------------------------------------------
-  4. FILL IN THE "TBD" LINKS  (once you have the Workshop URL)
+  4. CHECK THE WORKSHOP LINKS  (already filled in; re-check if the item id changes)
 -------------------------------------------------------------------------------
-  [ ] INSTALL.md  — replace "Workshop link: TBD" with the real URL.
+  [ ] INSTALL.md  — Workshop link is filled in (https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472).
   [ ] README.txt  — add the Workshop URL if you want it there.
   [ ] Re-upload / update the Workshop description if you referenced the URL in it.
 
@@ -100,7 +100,7 @@ INTO barony.exe, so:
 -------------------------------------------------------------------------------
   [ ] Add 2-3 extra Workshop screenshots: the GUI Mod Builder, a custom class on
       the character-select screen, a custom monster in a dungeon.
-  [ ] Add a "Change Notes" entry for v0.2.0 listing the 8 features.
+  [ ] Add a "Change Notes" entry for the release version listing what changed.
   [ ] Pin a comment / FAQ answering "why isn't it just a Subscribe button?"
       (link the distribution note in INSTALL.md).
   [ ] Keep framework_version.json in sync with the version you actually ship.

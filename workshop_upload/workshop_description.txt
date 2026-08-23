@@ -76,6 +76,11 @@ Nothing else is ever changed. S.A.M does not edit any of the game's own files, a
 [*][b]Custom .vox models.[/b] Your own voxel models, loaded at startup.
 [*][b]Tinkering recipes.[/b] Add, remove or re-cost what the tinkering kit can build.
 [*][b]Vanilla patches.[/b] Edit the game's data in layers, so two mods stack instead of overwriting each other.
+[*][b]Your own windows.[/b] Real panels with buttons, pictures, scrolling lists and text boxes, so a mod can have a shop, a quest log, a bestiary or a settings screen instead of just printing to the screen.
+[*][b]A home you can go back to.[/b] Send the party to any floor, including back UP, which the game itself never does, and give them a chest whose contents follow them down every floor and survive saving and loading.
+[*][b]Progress that belongs to one character.[/b] Save your own values inside a character's savegame, so a new character never inherits the last one's unlocks.
+[*][b]Custom projectiles.[/b] Fire something with its own speed, model, damage and range, for ranged enemies, boss volleys, traps and weapons that shoot more than arrows.
+[*][b]Read the game itself.[/b] List every item, monster and spell the game knows about, including anything mods added, so you can build an index or a shop from real data.
 [/list]
 
 [hr][/hr]
@@ -84,9 +89,9 @@ Nothing else is ever changed. S.A.M does not edit any of the game's own files, a
 
 JSON says what your content [i]is[/i]. A script says what it [i]does[/i]. Drop a .lua, .js or .ts file next to any class or item JSON and it loads automatically. TypeScript is compiled for you.
 
-[b]60 events[/b] to react to. Combat, level up, death, floor change, items (equip, use, pick up, identify, break), shops, chests, traps, monsters, key presses, a per tick handler, world things (doors, levers, fountains, teleporters, projectile hits), and bound actions that follow whatever the player rebound them to.
+[b]65 events[/b] to react to. Combat, level up, death, floor change, items (equip, use, pick up, identify, break), shops, chests, traps, monsters, key presses, a per tick handler, world things (doors, levers, fountains, teleporters, projectile hits), and bound actions that follow whatever the player rebound them to.
 
-[b]96 functions[/b] to act with. Grant items and gold at any quality, read and set stats, level a player up for real, apply and read status effects, cast spells, deal or change damage, move speed, teleport, spawn monsters and items, full monster control by id, timers, saved data that survives between runs, screen effects, and live patching that reverts when your mod unloads.
+[b]163 functions[/b] to act with. Grant items and gold at any quality, read and set stats, level a player up for real, apply and read status effects, cast spells, deal or change damage, move speed, teleport, spawn monsters and items, full monster control by id, timers, saved data that survives between runs, screen effects, and live patching that reverts when your mod unloads.
 
 Only two functions ever get called: [b]on_event(event)[/b] and [b]on_tick(event)[/b]. Everything else arrives as [b]event.name[/b] inside on_event.
 

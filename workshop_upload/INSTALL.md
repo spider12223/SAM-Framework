@@ -46,7 +46,7 @@ You have two ways to obtain the framework:
 This folder already contains the ready-to-use `barony.exe`. Skip to step 3.
 
 ### Option B — From Steam Workshop
-> **Workshop link:** _TBD — paste your published item URL here after uploading._
+> **Workshop link:** https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472
 
 1. Open the S.A.M Framework Workshop page and click **Subscribe**.
 2. Follow the Workshop page's install note (it links to the patched `barony.exe`,

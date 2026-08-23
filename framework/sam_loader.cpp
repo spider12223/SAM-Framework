@@ -21,6 +21,7 @@
 #ifndef EDITOR
 #include "sam_hud.hpp"   // script HUD, cleared on unload
 #include "sam_images.hpp" // mod-supplied pictures (overlay + HUD art)
+#include "sam_ui.hpp"     // interactive mod panels, closed on (un)load
 #endif   // the framework's built-in Hunter's Workbench
 #include "sam_monster_patches.hpp" // v0.7.0 F5 monster stat overrides — both builds
 #ifndef EDITOR
@@ -60,15 +61,16 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 	// every Play, so appending would double-register).
 	SAMClasses::clear();
 	SAMItems::clear();
+#ifndef EDITOR   // these subsystems are GAME_SOURCES only; the editor links neither
 	SAMEffects::clear(); // drop custom status effects -> vanilla
 	SAMRaces::clear(); // drop custom playable races -> vanilla
 	SAMSounds::clear(); // drop staged custom sounds (engine table reset on next append)
 	SAMRecipes::clear(); // drop tinkering recipes -> vanilla craftable grid
 	SAMWorkbench::clear(); // and the built-in bench, so it re-installs this cycle
 	SAMRooms::clear(); // drop injected rooms -> vanilla room pools
-#ifndef EDITOR
 	SAMHud::clearAll(); // a mod's HUD must never outlive the mod that drew it
 	SAMImages::clear(); // drop the image registry + every live overlay
+	SAMUi::closeAll();  // a panel must never outlive the mod that opened it
 #endif
 	SAMMonsterPatch::clear(); // v0.7.0 F5: drop any prior monster stat overrides
 #ifndef EDITOR
@@ -117,7 +119,9 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 	// and have it already exist. Unconditional: the clear() above wiped the registration
 	// that initGameDatafiles made at startup, and the bench must come back whether or not
 	// this load cycle has any mods in it.
+#ifndef EDITOR   // these subsystems are GAME_SOURCES only; the editor links neither
 	SAMWorkbench::install();
+#endif
 
 	int totalClasses = 0;
 	int totalItems = 0;
@@ -147,10 +151,12 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 		// Register the mod's classes and items into the runtime registries.
 		SAMClasses::loadFromManifest(m);
 		SAMItems::loadFromManifest(m);
+#ifndef EDITOR   // these subsystems are GAME_SOURCES only; the editor links neither
 		SAMEffects::loadFromManifest(m); // custom status effects into slots 135..159
 		SAMRaces::loadFromManifest(m); // custom playable races into ids 200..255
 		SAMSounds::loadFromManifest(m); // stage custom sounds (appended after vanilla reload)
 		SAMRecipes::loadFromManifest(m); // tinkering recipes (item ids resolved lazily at kit-open)
+#endif
 
 #ifndef EDITOR
 		// Custom spells (Session 1: metadata registry only — no in-engine spell yet).
@@ -296,11 +302,13 @@ void SAMLoader::unload()
 	SAMWorkshop::clear();
 	SAMClasses::clear();       // also reverts sam_patch_class + class passives (F5)
 	SAMItems::clear();         // also reverts sam_patch_item overrides (F5)
+#ifndef EDITOR   // these subsystems are GAME_SOURCES only; the editor links neither
 	SAMEffects::clear();       // drop custom status effects
 	SAMRaces::clear();         // drop custom playable races
 	SAMSounds::clear();        // drop staged custom sounds
 	SAMRecipes::clear();       // drop tinkering recipes
 	SAMWorkbench::clear();     // drop the built-in bench registration
+#endif
 	SAMMonsterPatch::clear();  // reverts sam_patch_monster overrides (F5)
 	// Rooms are NOT optional to clear. The registry holds ABSOLUTE paths, so unmounting the
 	// mod's PhysFS folder does not stop generateDungeon from loading the .lmp files: with a
@@ -310,10 +318,11 @@ void SAMLoader::unload()
 	// host who unloaded against a client who never had the mod, silently. It also re-fails
 	// verifyMapHash, which sets disableSteamAchievements back on four lines after
 	// Mods::unloadMods just cleared it.
+#ifndef EDITOR   // GAME_SOURCES-only subsystems
 	SAMRooms::clear();         // drop injected rooms -> vanilla room pools
-#ifndef EDITOR
 	SAMSpells::clear();   // drop the custom-spell registry
 	SAMImages::clear();   // drop mod pictures + any overlay still on screen
+	SAMUi::closeAll();    // close every mod panel
 	// Same promise sam_hud.hpp makes: a HUD must never outlive the mod that drew it. Nothing
 	// else takes it down on this path -- Mods::unloadMods shows a loading screen WITH a
 	// background, which skips the Frame::guiDestroy branch -- so without this the mod's

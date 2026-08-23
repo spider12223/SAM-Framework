@@ -61,7 +61,7 @@ Every dropdown in the tool is generated from the [schemas](schemas/) at runtime,
 
 ---
 
-## Scripting — Lua, JavaScript & TypeScript (v0.6.0)
+## Scripting — Lua, JavaScript & TypeScript
 
 **JSON defines what your content *is*. A script defines how it *behaves*.**
 
@@ -106,6 +106,8 @@ end
 
 ### Hooks & API
 
+**As of v1.11.0 the scripting surface is 163 functions and 65 events**, every one of them available in Lua, JavaScript and TypeScript alike. The full, generated reference lives in the [Mod Builder](https://spider12223.github.io/SAM-Framework/) — it is built from the engine source, so it is the one that is never out of date. What follows is the historical tour, kept because it explains the ideas rather than just listing names.
+
 **41 gameplay hooks and 26 host API functions** — every hook fires in Lua, JavaScript and TypeScript alike, host-authoritative (server/singleplayer only). The tables below are the v0.3–v0.5 core; **[New in v0.6.0](#new-in-v060)** adds 30 hooks and 14 host APIs (timers, persistent data, custom cross-runtime hooks, player queries).
 
 | Hook | Fires when | Event fields |
@@ -128,7 +130,7 @@ end
 | `sam_message(player, text)` | show a message in the player's in-game log |
 | `sam_grant_item(player, "ITEM_NAME")` | give a vanilla item to a player |
 | `sam_grant_gold(player, amount)` | give gold to a player |
-| `sam_spawn_item(x, y, "ITEM_NAME")` | spawn a ground item at a map tile |
+| `sam_spawn_item(x, y, "ITEM_NAME" [, status] [, beatitude] [, count])` | spawn a ground item at a map tile; returns its uid |
 | `sam_get_stat(player, "STAT")` → number | read `STR`/`DEX`/`CON`/`INT`/`PER`/`CHR`/`HP`/`MAXHP`/`MP`/`MAXMP`/`GOLD`/`LEVEL`/`EXP` |
 | `sam_set_stat(player, "STAT", value)` | set a stat (bounded — never exceeds max, etc.) |
 | `sam_apply_effect(player, "EFFECT", ticks)` | apply a status effect (`LEVITATING`, `INVISIBLE`, `POISONED`, …) for N ticks (50/sec) |
@@ -230,7 +232,7 @@ end
 | `sam_has_effect(player, "EFFECT")` → bool | whether a status effect is active |
 
 ```lua
--- v0.6.0 in action: persist a counter, run a timer, react to a new hook
+-- v1.11.0 in action: persist a counter, run a timer, react to a new hook
 function on_event(event)
   if event.name == "player.on_kill" then
     local kills = (sam_load_data("kills") or 0) + 1

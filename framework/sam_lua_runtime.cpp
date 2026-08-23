@@ -73,7 +73,10 @@ extern "C" {
 #	include "sam_races.hpp" // custom races (sam_get_race id lookup)
 #	include "sam_hud.hpp"  // script-driven HUD layer
 #	include "sam_images.hpp" // the mod's own pictures (overlay + HUD art)
+#	include "sam_ui.hpp"     // interactive mod panels
+#	include "sam_catalog.hpp" // reading the game content registries
 #	include "sam_world.hpp" // world queries, terrain, mechanisms
+#	include "sam_world_state.hpp" // per-character mod state carried in the savegame
 #	include "sam_workshop.hpp" // SAMModManifest (sam_get_mods)
 #	include "sam_classes.hpp" // v0.7.0 F5: SAMClasses::patchClass / addClassPassive
 #	include "sam_monster_patches.hpp" // v0.7.0 F5: SAMMonsterPatch::set
@@ -863,10 +866,28 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 			lua_pushboolean(Ls, 0);
 			return 1;
 		}
-		Entity* e = spawnGroundItem(static_cast<ItemType>(resolvedType), EXCELLENT, 0, 1, x, y);
-		if ( !e ) { SAM_ERROR("LUA", "sam_spawn_item: invalid tile (" + std::to_string(x) + "," + std::to_string(y) + ")."); lua_pushboolean(Ls, 0); return 1; }
-		SAM_INFO("LUA", "Spawned item " + itemName + " at (" + std::to_string(x) + "," + std::to_string(y) + ")");
-		lua_pushboolean(Ls, 1);
+		// v1.11.0 -- status/beatitude/count are settable, and the uid comes back.
+		//
+		// These were hardcoded to EXCELLENT/0/1, which made it impossible to put an item back
+		// the way you found it: a stash mod could save that you had a cursed, worn ring and
+		// then only ever return a pristine one. Restoring world state needs all three.
+		//
+		// Returning the uid closes a documented gap. Without it a script could place an item
+		// and then never refer to it again -- it could not move it, remove it, or check it
+		// later. Backwards compatible: a uid is non-zero, so `if sam_spawn_item(...)` still
+		// reads as true exactly where it used to.
+		const int statusArg = (int)luaL_optinteger(Ls, 4, (int)EXCELLENT);
+		const int beatitudeArg = (int)luaL_optinteger(Ls, 5, 0);
+		const int countArg = (int)luaL_optinteger(Ls, 6, 1);
+		const Status st = (Status)samClampInt(statusArg, (int)BROKEN, (int)EXCELLENT);
+		const Sint16 be = (Sint16)samClampInt(beatitudeArg, -100, 100);
+		const Sint16 ct = (Sint16)samClampInt(countArg, 1, 1000);
+
+		Entity* e = spawnGroundItem(static_cast<ItemType>(resolvedType), st, be, ct, x, y);
+		if ( !e ) { SAM_ERROR("LUA", "sam_spawn_item: invalid tile (" + std::to_string(x) + "," + std::to_string(y) + ")."); lua_pushnil(Ls); return 1; }
+		SAM_INFO("LUA", "Spawned item " + itemName + " at (" + std::to_string(x) + "," + std::to_string(y)
+			+ ") uid " + std::to_string((unsigned long long)e->getUID()));
+		lua_pushinteger(Ls, (lua_Integer)e->getUID());
 		return 1;
 	}
 
@@ -1628,6 +1649,369 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		const std::string path = SAMImages::resolve(g_currentNs, img ? img : "");
 		if ( path.empty() ) { lua_pushboolean(Ls, 0); return 1; }
 		lua_pushboolean(Ls, SAMHud::image(g_currentNs, id ? id : "", x, y, w, h, path, col) ? 1 : 0);
+		return 1;
+	}
+
+	// ===== interactive panels =============================================================
+	//
+	// sam_hud_* draws and cannot listen. These open a real panel the player can click, built
+	// on the engine's own Frame/Button widgets. A click fires the ui.on_click event carrying
+	// the panel and widget ids, rather than taking a callback function: an event crosses the
+	// Lua/JS boundary for free and cannot leave a dangling reference in a C callback.
+	//
+	// Panel and widget ids are scoped to the calling mod, so two mods can both own a "main".
+
+	// sam_ui_open(panel, x, y, w, h [, title [, modal]]) -> boolean
+	int lua_sam_ui_open(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* panel = luaL_checkstring(Ls, 1);
+		const int x = (int)luaL_checkinteger(Ls, 2);
+		const int y = (int)luaL_checkinteger(Ls, 3);
+		const int w = (int)luaL_checkinteger(Ls, 4);
+		const int h = (int)luaL_checkinteger(Ls, 5);
+		const char* title = lua_isnoneornil(Ls, 6) ? "" : luaL_checkstring(Ls, 6);
+		const bool modal = lua_isnoneornil(Ls, 7) ? false : (lua_toboolean(Ls, 7) != 0);
+		lua_pushboolean(Ls, SAMUi::open(g_currentNs, panel ? panel : "", x, y, w, h,
+			title ? title : "", modal) ? 1 : 0);
+		return 1;
+	}
+
+	// sam_ui_close([panel]) -> boolean. No panel closes every panel THIS mod opened.
+	int lua_sam_ui_close(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		if ( lua_isnoneornil(Ls, 1) )
+		{
+			SAMUi::closeNamespace(g_currentNs);
+			lua_pushboolean(Ls, 1);
+			return 1;
+		}
+		const char* panel = luaL_checkstring(Ls, 1);
+		lua_pushboolean(Ls, SAMUi::close(g_currentNs, panel ? panel : "") ? 1 : 0);
+		return 1;
+	}
+
+	// sam_ui_is_open(panel) -> boolean
+	int lua_sam_ui_is_open(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* panel = luaL_checkstring(Ls, 1);
+		lua_pushboolean(Ls, SAMUi::isOpen(g_currentNs, panel ? panel : "") ? 1 : 0);
+		return 1;
+	}
+
+	// sam_ui_clear(panel) -> boolean. Empties the panel but leaves it open -- what a search
+	// box does on every keystroke.
+	int lua_sam_ui_clear(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* panel = luaL_checkstring(Ls, 1);
+		lua_pushboolean(Ls, SAMUi::clearWidgets(g_currentNs, panel ? panel : "") ? 1 : 0);
+		return 1;
+	}
+
+	// sam_ui_label(panel, id, x, y, w, text [, 0xRRGGBBAA]) -> boolean
+	int lua_sam_ui_label(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* panel = luaL_checkstring(Ls, 1);
+		const char* id = luaL_checkstring(Ls, 2);
+		const int x = (int)luaL_checkinteger(Ls, 3);
+		const int y = (int)luaL_checkinteger(Ls, 4);
+		const int w = (int)luaL_checkinteger(Ls, 5);
+		const char* text = luaL_checkstring(Ls, 6);
+		const Uint32 col = samHudColor(Ls, 7, makeColor(220, 210, 190, 255));
+		lua_pushboolean(Ls, SAMUi::label(g_currentNs, panel ? panel : "", id ? id : "",
+			x, y, w, text ? text : "", col) ? 1 : 0);
+		return 1;
+	}
+
+	// sam_ui_button(panel, id, x, y, w, h, text) -> boolean
+	// Clicking fires ui.on_click with .mod, .panel and .widget.
+	int lua_sam_ui_button(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* panel = luaL_checkstring(Ls, 1);
+		const char* id = luaL_checkstring(Ls, 2);
+		const int x = (int)luaL_checkinteger(Ls, 3);
+		const int y = (int)luaL_checkinteger(Ls, 4);
+		const int w = (int)luaL_checkinteger(Ls, 5);
+		const int h = (int)luaL_checkinteger(Ls, 6);
+		const char* text = luaL_checkstring(Ls, 7);
+		lua_pushboolean(Ls, SAMUi::button(g_currentNs, panel ? panel : "", id ? id : "",
+			x, y, w, h, text ? text : "") ? 1 : 0);
+		return 1;
+	}
+
+	// sam_ui_image(panel, id, x, y, w, h, image [, 0xRRGGBBAA]) -> boolean
+	int lua_sam_ui_image(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* panel = luaL_checkstring(Ls, 1);
+		const char* id = luaL_checkstring(Ls, 2);
+		const int x = (int)luaL_checkinteger(Ls, 3);
+		const int y = (int)luaL_checkinteger(Ls, 4);
+		const int w = (int)luaL_checkinteger(Ls, 5);
+		const int h = (int)luaL_checkinteger(Ls, 6);
+		const char* img = luaL_checkstring(Ls, 7);
+		const Uint32 col = samHudColor(Ls, 8, makeColor(255, 255, 255, 255));
+		const std::string path = SAMImages::resolve(g_currentNs, img ? img : "");
+		if ( path.empty() ) { lua_pushboolean(Ls, 0); return 1; }
+		lua_pushboolean(Ls, SAMUi::image(g_currentNs, panel ? panel : "", id ? id : "",
+			x, y, w, h, path, col) ? 1 : 0);
+		return 1;
+	}
+
+	// sam_ui_list(panel, id, x, y, w, h) -> boolean
+	// A scrolling, clickable list -- the widget a browser is made of. Rows are added
+	// separately with sam_ui_list_add so a search box can rebuild the contents on every
+	// keystroke without recreating the list itself.
+	int lua_sam_ui_list(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* panel = luaL_checkstring(Ls, 1);
+		const char* id = luaL_checkstring(Ls, 2);
+		const int x = (int)luaL_checkinteger(Ls, 3);
+		const int y = (int)luaL_checkinteger(Ls, 4);
+		const int w = (int)luaL_checkinteger(Ls, 5);
+		const int h = (int)luaL_checkinteger(Ls, 6);
+		lua_pushboolean(Ls, SAMUi::list(g_currentNs, panel ? panel : "", id ? id : "",
+			x, y, w, h) ? 1 : 0);
+		return 1;
+	}
+
+	// sam_ui_list_add(panel, list_id, row_id, text [, 0xRRGGBBAA]) -> boolean
+	// Clicking the row fires ui.on_select with row_id in .value.
+	int lua_sam_ui_list_add(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* panel = luaL_checkstring(Ls, 1);
+		const char* id = luaL_checkstring(Ls, 2);
+		const char* rowId = luaL_checkstring(Ls, 3);
+		const char* text = luaL_checkstring(Ls, 4);
+		const Uint32 col = samHudColor(Ls, 5, makeColor(220, 210, 190, 255));
+		lua_pushboolean(Ls, SAMUi::listAdd(g_currentNs, panel ? panel : "", id ? id : "",
+			rowId ? rowId : "", text ? text : "", col) ? 1 : 0);
+		return 1;
+	}
+
+	// sam_ui_list_clear(panel, list_id) -> boolean
+	int lua_sam_ui_list_clear(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* panel = luaL_checkstring(Ls, 1);
+		const char* id = luaL_checkstring(Ls, 2);
+		lua_pushboolean(Ls, SAMUi::listClear(g_currentNs, panel ? panel : "", id ? id : "") ? 1 : 0);
+		return 1;
+	}
+
+	// sam_ui_input(panel, id, x, y, w, h [, initial_text]) -> boolean
+	// An editable text box. Pressing enter fires ui.on_submit with the text in .value.
+	int lua_sam_ui_input(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* panel = luaL_checkstring(Ls, 1);
+		const char* id = luaL_checkstring(Ls, 2);
+		const int x = (int)luaL_checkinteger(Ls, 3);
+		const int y = (int)luaL_checkinteger(Ls, 4);
+		const int w = (int)luaL_checkinteger(Ls, 5);
+		const int h = (int)luaL_checkinteger(Ls, 6);
+		const char* text = lua_isnoneornil(Ls, 7) ? "" : luaL_checkstring(Ls, 7);
+		lua_pushboolean(Ls, SAMUi::input(g_currentNs, panel ? panel : "", id ? id : "",
+			x, y, w, h, text ? text : "") ? 1 : 0);
+		return 1;
+	}
+
+	// sam_ui_input_text(panel, id) -> string. What the player has typed so far, without
+	// waiting for them to press enter.
+	int lua_sam_ui_input_text(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* panel = luaL_checkstring(Ls, 1);
+		const char* id = luaL_checkstring(Ls, 2);
+		lua_pushstring(Ls, SAMUi::inputText(g_currentNs, panel ? panel : "", id ? id : "").c_str());
+		return 1;
+	}
+
+	// ---- appearance. Nothing about a mod's panel should look like "the S.A.M style". ----
+
+	// sam_ui_panel_style(panel [, bg [, border [, border_width]]]) -> boolean
+	// Colours are 0xRRGGBBAA; 0 or omitted leaves that one alone.
+	int lua_sam_ui_panel_style(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* panel = luaL_checkstring(Ls, 1);
+		const Uint32 bg = samHudColor(Ls, 2, 0);
+		const Uint32 border = samHudColor(Ls, 3, 0);
+		const int bw = lua_isnoneornil(Ls, 4) ? -1 : (int)luaL_checkinteger(Ls, 4);
+		lua_pushboolean(Ls, SAMUi::panelStyle(g_currentNs, panel ? panel : "", bg, border, bw) ? 1 : 0);
+		return 1;
+	}
+
+	// sam_ui_font(panel, widget_or_empty, font) -> boolean
+	// An empty widget id sets the whole panel's font, including widgets added later.
+	// Faces the game ships: fonts/pixel_maz_multiline.ttf#16#2 (the panel default),
+	// fonts/pixelmix.ttf#16#2, fonts/kongtext.ttf#16#2, fonts/pixel_maz.ttf#32#2 (large).
+	int lua_sam_ui_font(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* panel = luaL_checkstring(Ls, 1);
+		const char* id = luaL_checkstring(Ls, 2);
+		const char* f = luaL_checkstring(Ls, 3);
+		lua_pushboolean(Ls, SAMUi::font(g_currentNs, panel ? panel : "", id ? id : "",
+			f ? f : "") ? 1 : 0);
+		return 1;
+	}
+
+	// sam_ui_list_row_height(panel, list_id, px) -> boolean. 0 derives it from the font.
+	int lua_sam_ui_list_row_height(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* panel = luaL_checkstring(Ls, 1);
+		const char* id = luaL_checkstring(Ls, 2);
+		const int px = (int)luaL_checkinteger(Ls, 3);
+		lua_pushboolean(Ls, SAMUi::listRowHeight(g_currentNs, panel ? panel : "",
+			id ? id : "", px) ? 1 : 0);
+		return 1;
+	}
+
+	// sam_ui_text_size(text [, font]) -> width, height (nil if the font could not load).
+	// Measure before you place. This is the answer to a label silently running underneath
+	// the widget beside it.
+	int lua_sam_ui_text_size(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* text = luaL_checkstring(Ls, 1);
+		const char* f = lua_isnoneornil(Ls, 2) ? "" : luaL_checkstring(Ls, 2);
+		int w = 0, h = 0;
+		if ( !SAMUi::textSize(text ? text : "", f ? f : "", w, h) ) { lua_pushnil(Ls); return 1; }
+		lua_pushinteger(Ls, w);
+		lua_pushinteger(Ls, h);
+		return 2;
+	}
+
+	// ===== reading the game's own content =================================================
+	//
+	// Until now a script could ask about the item in your hand and nothing else, so an index
+	// of the game -- a recipe browser, a bestiary, a drop reference -- could not be written at
+	// all. These walk the engine's live tables, so modded content is included automatically.
+	//
+	// They are read-only and therefore not host-gated: a client can browse safely.
+	// They walk the whole table, so call once and keep the result rather than per frame.
+
+	// sam_list_items([category]) -> array of { type, name, unidentified, category, level,
+	//                                          weight, value, custom }
+	int lua_sam_list_items(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* cat = lua_isnoneornil(Ls, 1) ? "" : luaL_checkstring(Ls, 1);
+		const std::vector<SAMCatalog::ItemEntry> list = SAMCatalog::items(cat ? cat : "");
+		lua_newtable(Ls);
+		int n = 0;
+		for ( const SAMCatalog::ItemEntry& e : list )
+		{
+			lua_newtable(Ls);
+			lua_pushinteger(Ls, e.type);            lua_setfield(Ls, -2, "type");
+			lua_pushstring(Ls, e.name.c_str());     lua_setfield(Ls, -2, "name");
+			lua_pushstring(Ls, e.unidName.c_str()); lua_setfield(Ls, -2, "unidentified");
+			lua_pushstring(Ls, e.category.c_str()); lua_setfield(Ls, -2, "category");
+			lua_pushinteger(Ls, e.level);           lua_setfield(Ls, -2, "level");
+			lua_pushinteger(Ls, e.weight);          lua_setfield(Ls, -2, "weight");
+			lua_pushinteger(Ls, e.value);           lua_setfield(Ls, -2, "value");
+			lua_pushboolean(Ls, e.custom ? 1 : 0);  lua_setfield(Ls, -2, "custom");
+			lua_rawseti(Ls, -2, ++n);
+		}
+		return 1;
+	}
+
+	// sam_get_item_info(type_or_name) -> table | nil. Adds an `attributes` sub-table, which
+	// is where a tooltip's numbers come from.
+	int lua_sam_get_item_info(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		int type = -1;
+		if ( lua_isnumber(Ls, 1) ) { type = (int)lua_tointeger(Ls, 1); }
+		else { type = SAMCatalog::itemTypeFor(luaL_checkstring(Ls, 1)); }
+
+		SAMCatalog::ItemEntry e;
+		std::map<std::string, int> attrs;
+		if ( !SAMCatalog::itemInfo(type, e, attrs) ) { lua_pushnil(Ls); return 1; }
+
+		lua_newtable(Ls);
+		lua_pushinteger(Ls, e.type);            lua_setfield(Ls, -2, "type");
+		lua_pushstring(Ls, e.name.c_str());     lua_setfield(Ls, -2, "name");
+		lua_pushstring(Ls, e.unidName.c_str()); lua_setfield(Ls, -2, "unidentified");
+		lua_pushstring(Ls, e.category.c_str()); lua_setfield(Ls, -2, "category");
+		lua_pushinteger(Ls, e.level);           lua_setfield(Ls, -2, "level");
+		lua_pushinteger(Ls, e.weight);          lua_setfield(Ls, -2, "weight");
+		lua_pushinteger(Ls, e.value);           lua_setfield(Ls, -2, "value");
+		lua_pushboolean(Ls, e.custom ? 1 : 0);  lua_setfield(Ls, -2, "custom");
+		lua_newtable(Ls);
+		for ( const auto& kv : attrs )
+		{
+			lua_pushinteger(Ls, kv.second);
+			lua_setfield(Ls, -2, kv.first.c_str());
+		}
+		lua_setfield(Ls, -2, "attributes");
+		return 1;
+	}
+
+	// sam_list_monsters() -> array of { type, name }
+	int lua_sam_list_monsters(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const std::vector<SAMCatalog::MonsterEntry> list = SAMCatalog::monsters();
+		lua_newtable(Ls);
+		int n = 0;
+		for ( const SAMCatalog::MonsterEntry& e : list )
+		{
+			lua_newtable(Ls);
+			lua_pushinteger(Ls, e.type);        lua_setfield(Ls, -2, "type");
+			lua_pushstring(Ls, e.name.c_str()); lua_setfield(Ls, -2, "name");
+			lua_rawseti(Ls, -2, ++n);
+		}
+		return 1;
+	}
+
+	// sam_list_spells() -> array of { id, name, cost }
+	int lua_sam_list_spells(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const std::vector<SAMCatalog::SpellEntry> list = SAMCatalog::spells();
+		lua_newtable(Ls);
+		int n = 0;
+		for ( const SAMCatalog::SpellEntry& e : list )
+		{
+			lua_newtable(Ls);
+			lua_pushinteger(Ls, e.id);          lua_setfield(Ls, -2, "id");
+			lua_pushstring(Ls, e.name.c_str()); lua_setfield(Ls, -2, "name");
+			lua_pushinteger(Ls, e.cost);        lua_setfield(Ls, -2, "cost");
+			lua_rawseti(Ls, -2, ++n);
+		}
+		return 1;
+	}
+
+	// sam_spawn_projectile(x, y, angle, speed [, damage [, lifetime_ticks [, model [, owner]]]])
+	//   -> uid | nil
+	// angle is radians (sam_get_facing's convention), speed is world pixels per tick -- a
+	// vanilla arrow is about 8. On contact it fires on_projectile_hit with .projectile,
+	// .target, .x, .y and .damage. Host only.
+	int lua_sam_spawn_projectile(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const double x = (double)luaL_checknumber(Ls, 1);
+		const double y = (double)luaL_checknumber(Ls, 2);
+		const double angle = (double)luaL_checknumber(Ls, 3);
+		const double speed = (double)luaL_checknumber(Ls, 4);
+		const int dmg = (int)luaL_optinteger(Ls, 5, 0);
+		const int life = (int)luaL_optinteger(Ls, 6, 100);
+		const char* model = lua_isnoneornil(Ls, 7) ? "" : luaL_checkstring(Ls, 7);
+		const int owner = (int)luaL_optinteger(Ls, 8, -1);
+		const unsigned long long uid = SAMLua::spawnProjectile(owner, x, y, angle, speed,
+			dmg, life, model ? model : "");
+		if ( uid == 0 ) { lua_pushnil(Ls); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)uid);
 		return 1;
 	}
 
@@ -3110,6 +3494,118 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		// ENTU broadcast would only waste bandwidth / risk a behavior-less ghost on clients.
 		// Host/SP local rendering doesn't use that flag anyway (the portal omits it too).
 	}
+
+	// ---- v1.11.0 custom projectiles -------------------------------------------------------
+	//
+	// Until now the only thing a script could launch was a fixed vanilla spell. There was no
+	// way to fire something with its own speed, model, damage and lifetime, which ruled out
+	// ranged enemies with real attack patterns, bosses with telegraphed volleys, weapons that
+	// fire anything other than an arrow, and traps.
+	//
+	// Skill layout, sharing the marker space already used by portals (skill[19]==1) and
+	// companions (skill[19]==2):
+	//   skill[19] = 3   S.A.M projectile marker
+	//   skill[2]  = owner player index, or -1 for an unowned/monster shot
+	//   skill[17] = damage to deal on contact
+	//   skill[18] = ticks of life remaining
+	//   fskill[2] / fskill[3] = velocity per tick, in world pixels
+	constexpr int SAM_PROJECTILE_MARKER = 3;
+
+	void samProjectileBehavior(Entity* my)
+	{
+		// Host-authoritative, like every other framework behavior: a client would otherwise
+		// simulate its own copy and the two would disagree about what got hit.
+		if ( multiplayer == CLIENT ) { return; }
+
+		my->flags[PASSABLE] = true;   // we resolve our own collisions via clipMove
+
+		if ( my->skill[18] <= 0 )
+		{
+			if ( my->mynode ) { list_RemoveNode(my->mynode); }
+			return;
+		}
+		--my->skill[18];
+
+		const real_t vx = my->fskill[2];
+		const real_t vy = my->fskill[3];
+
+		// clipMove advances x/y and returns how far it actually got, filling the global `hit`
+		// with whatever stopped it -- the same call actArrow uses (actarrow.cpp:434).
+		const hit_t savedHit = hit;
+		const real_t want = sqrt(vx * vx + vy * vy);
+		const real_t got = clipMove(&my->x, &my->y, vx, vy, my);
+		const bool blocked = ( got != want );
+		Entity* struck = hit.entity;
+		const real_t hx = my->x, hy = my->y;
+		hit = savedHit;   // never leave the engine's global perturbed by our move
+
+		if ( !blocked ) { return; }
+
+		// Do not let a shot immediately kill itself on the thing that fired it.
+		if ( struck && my->parent != 0 && struck->getUID() == (Uint32)my->parent )
+		{
+			return;
+		}
+
+		const int dmg = my->skill[17];
+		Uint32 targetUid = 0;
+		if ( struck )
+		{
+			targetUid = struck->getUID();
+			Stat* hitstats = struck->getStats();
+			if ( dmg > 0 && hitstats )
+			{
+				Entity* owner = my->parent ? uidToEntity((Sint32)my->parent) : nullptr;
+				struck->modHP(-dmg);
+				// modHP installs a generic "mysterious causes" death message, so say what
+				// actually happened whether or not the shooter is still around -- an
+				// unowned or monster-fired shot used to leave the victim's death unexplained.
+				struck->setObituary("was shot down.");
+
+				// Attribute the hit the way the engine attributes an arrow (actarrow.cpp:1272
+				// and :1288). Without this a projectile kill granted NO experience, no
+				// compendium credit, and left the victim placidly unaware of who shot it --
+				// so a mod's ranged enemy could be farmed for free, and a mod's ranged weapon
+				// levelled nothing.
+				if ( owner )
+				{
+					if ( hitstats->HP <= 0 )
+					{
+						owner->awardXP(struck, true, true);
+					}
+					else if ( struck->behavior == &actMonster )
+					{
+						// The trailing type test is the engine's boss guard, applied by every
+						// other damage source in the game (actarrow.cpp:1286 and eleven more).
+						// Bosses between LICH and SHOPKEEPER run their own scripted state
+						// machines, and forcing an attack target yanks them out of it -- so a
+						// mod projectile could break a Lich, Minotaur or Devil fight.
+						if ( struck->monsterAlertBeforeHit(owner)
+							&& struck->monsterState != MONSTER_STATE_ATTACK
+							&& ( hitstats->type < LICH || hitstats->type >= SHOPKEEPER ) )
+						{
+							struck->monsterAcquireAttackTarget(*owner, MONSTER_STATE_PATH, true);
+						}
+					}
+				}
+			}
+		}
+
+		// Tell the script what happened before the entity goes away, so a handler can spawn a
+		// follow-up (a burst, an explosion) at the point of impact.
+		//
+		// The handler is HANDED OUR OWN UID, so calling sam_remove_entity on it is a normal
+		// thing for a mod to do -- and doing so frees this very entity while we are still
+		// inside its behavior. Remember the uid across the call and re-resolve afterwards
+		// rather than touching `my` again: reading my->mynode on a freed entity is a
+		// use-after-free, and removing it twice corrupts the entity list.
+		const Uint32 selfUid = my->getUID();
+		SAMLua::dispatchProjectileHit((unsigned long long)selfUid,
+			(unsigned long long)targetUid, (int)(hx / 16.0), (int)(hy / 16.0), dmg);
+
+		Entity* self = uidToEntity((Sint32)selfUid);
+		if ( self && self->mynode ) { list_RemoveNode(self->mynode); }
+	}
 #endif // SAM_LUA_HAVE_BARONY
 
 	// sam_spawn_companion(player, model_id [, scale]) -> uid | nil. Spawns a floating
@@ -3288,6 +3784,13 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		Entity* e = uidToEntity((Sint32)uid);
 		if ( !e ) { lua_pushboolean(Ls, 0); return 1; }
 		if ( e->behavior == &actPlayer ) { SAM_WARN("LUA", "sam_remove_entity refused: cannot remove a player."); lua_pushboolean(Ls, 0); return 1; }
+		// A chest that is open right now is ALSO stored in openedChest[], and neither
+		// list_RemoveNode nor ~Entity clears that array -- so deleting the entity here left
+		// a dangling pointer behind for the still-open chest UI to read on its next frame.
+		// Reachable without trying: a script tidying up its hub while a player is standing
+		// in it with the chest open. closeChest() is itself guarded by `if (chestStatus)`,
+		// so this is a no-op for a chest nobody has open.
+		if ( e->behavior == &actChest ) { e->closeChest(); }
 		e->removeLightField();              // drop any light it owns (e.g. a decorative portal)
 		if ( e->mynode ) { list_RemoveNode(e->mynode); }
 		lua_pushboolean(Ls, 1);
@@ -3295,6 +3798,181 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 #else
 		(void)uid; lua_pushboolean(Ls, 0); return 1;
 #endif
+	}
+
+	// ===== v1.11.0 persistent world state ==================================================
+	//
+	// Barony throws floors away: every level is regenerated from `mapseed`, and no map
+	// content is written to the save at all. That ruled out a whole family of mods -- a
+	// home base you return to, a bank, anything that remembers what you did two floors ago.
+	//
+	// Rather than bolt a second save system onto the side of the game (which is how saves
+	// get corrupted), these bindings expose the places the ENGINE already persists things
+	// correctly:
+	//
+	//   stash -> the void chest's inventory, written into the savegame with full item
+	//            fidelity and read back on load.
+	//   hub   -> the level-travel globals, which already move a party to any floor.
+	//   flags -> SaveGameInfo::additional_data, already saved and already hashed.
+
+	// sam_set_chest_stash(chest_uid [, on]) -> bool
+	//
+	// Turns a chest the mod already placed into permanent storage. Its contents then live
+	// in the player's savegame instead of on the floor, so they survive descending, dying
+	// on a later floor, quitting, and loading again. This is the game's own void chest: the
+	// GUI, the networking and the save round-trip are all vanilla, and we only flip which
+	// list the chest reads from.
+	//
+	// Contents are shared by every stash chest in a run (there is one storage list) and the
+	// chest window holds 12 stacks. That makes this a stash, not a bank.
+	int lua_sam_set_chest_stash(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const bool on = lua_isnoneornil(Ls, 2) ? true : lua_toboolean(Ls, 2) != 0;
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_set_chest_stash refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		Entity* e = uidToEntity((Sint32)uid);
+		if ( !e ) { SAM_WARN("LUA", "sam_set_chest_stash: no entity with uid " + std::to_string(uid) + "."); lua_pushboolean(Ls, 0); return 1; }
+		if ( e->behavior != &actChest )
+		{
+			SAM_WARN("LUA", "sam_set_chest_stash: uid " + std::to_string(uid) + " is not a chest.");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		// -1 rather than a positive count: the engine only counts this timer down while it
+		// is > 0, but every "is this void storage" test is != 0. So -1 never expires and
+		// still reads correctly at every site. One behavioural difference is deliberate --
+		// vanilla drops a void chest's items when it is smashed, by resetting the state to
+		// 0 first, and that reset is also `> 0`. A permanent stash therefore keeps its
+		// contents instead of spilling the shared storage list onto the floor.
+		// Two things must be handled before the routing is flipped underneath the chest.
+		//
+		// 1. If the chest is OPEN right now, its window is already bound to the old item
+		//    list. Swapping which list the chest reads from while that window is up leaves
+		//    the player looking at contents the chest no longer owns. Close it first --
+		//    closeChest() is a no-op when nobody has it open.
+		if ( e->chestStatus ) { e->closeChest(); }
+		//
+		// 2. A chest that already holds loot does not lose it, but that loot becomes
+		//    unreachable for as long as the chest is a stash (its own list is still there,
+		//    the chest is simply reading the shared storage list instead). That is
+		//    recoverable and turning the stash back off restores it, but it looks exactly
+		//    like the items were deleted -- so say so rather than let a modder guess.
+		if ( on && e->chestVoidState == 0 )
+		{
+			int held = 0;
+			if ( e->children.first && e->children.first->element )
+			{
+				list_t* own = (list_t*)e->children.first->element;
+				for ( node_t* n = own->first; n != nullptr; n = n->next ) { ++held; }
+			}
+			if ( held > 0 )
+			{
+				SAM_WARN("LUA", "sam_set_chest_stash: this chest already holds "
+					+ std::to_string(held) + " item stack(s). They are not destroyed, but they"
+					" are hidden while it is a stash; turn the stash off to reach them again."
+					" Prefer converting an empty chest.");
+			}
+		}
+		e->chestVoidState = on ? -1 : 0;
+		serverUpdateEntitySkill(e, 17);
+		SAM_INFO("LUA", std::string("Chest ") + std::to_string(uid)
+			+ (on ? " is now a stash." : " is a normal chest again."));
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)uid; (void)on; lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_travel_to_level(floor [, opts]) -> bool
+	//   opts.secret = true  -> take the floor from the secret levels list instead
+	//
+	// Sends the party to an absolute floor number, including BACK UP, which the game
+	// otherwise never does. Travel is deferred exactly the way a ladder defers it -- the
+	// engine consumes the request at a safe point later in the frame -- so it is fine to
+	// call this from inside an event handler.
+	int lua_sam_travel_to_level(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int target = (int)luaL_checkinteger(Ls, 1);
+		bool secret = false;
+		if ( lua_istable(Ls, 2) )
+		{
+			lua_getfield(Ls, 2, "secret");
+			secret = lua_toboolean(Ls, -1) != 0;
+			lua_pop(Ls, 1);
+		}
+		lua_pushboolean(Ls, SAMLua::travelToLevel(target, secret, "LUA") ? 1 : 0);
+		return 1;
+	}
+
+	// sam_world_save(key, value) -> bool
+	//
+	// Saves a value INSIDE the current character's savegame. Compare sam_save_data, which
+	// writes a file shared by every character and outlives the save that made it: that is
+	// the right home for a mod's settings and the wrong home for a character's progress.
+	// Use this one for anything a new character must not inherit.
+	//
+	// Values are size-capped (see sam_world_state.hpp). Keep flags and counters here, and
+	// keep items in a stash chest, which the engine persists properly on its own.
+	int lua_sam_world_save(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* keyC = luaL_checkstring(Ls, 1);
+		const std::string key = keyC ? keyC : "";
+		if ( g_currentNs.empty() ) { SAM_WARN("LUA", "sam_world_save: no owning mod namespace - ignored."); lua_pushboolean(Ls, 0); return 1; }
+		nlohmann::json j = luaToJson(Ls, 2, 0);
+		const std::string encoded = j.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+		lua_pushboolean(Ls, SAMWorldState::set(g_currentNs, key, encoded) ? 1 : 0);
+		return 1;
+	}
+
+	// sam_world_load(key) -> value | nil
+	int lua_sam_world_load(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* keyC = luaL_checkstring(Ls, 1);
+		const std::string key = keyC ? keyC : "";
+		if ( g_currentNs.empty() ) { lua_pushnil(Ls); return 1; }
+		std::string raw;
+		if ( !SAMWorldState::get(g_currentNs, key, raw) ) { lua_pushnil(Ls); return 1; }
+		// This value came out of a save file, which a player can edit and which a bad
+		// shutdown can truncate, so a parse failure is expected rather than exceptional:
+		// report it and hand back nil instead of throwing across the C boundary into Lua.
+		nlohmann::json j = nlohmann::json::parse(raw, nullptr, false);
+		if ( j.is_discarded() )
+		{
+			SAM_WARN("LUA", "sam_world_load: saved value for '" + key + "' is corrupt - ignoring it.");
+			lua_pushnil(Ls); return 1;
+		}
+		jsonToLua(Ls, j, 0);
+		return 1;
+	}
+
+	// sam_world_clear(key) -> bool
+	int lua_sam_world_clear(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* keyC = luaL_checkstring(Ls, 1);
+		if ( g_currentNs.empty() ) { lua_pushboolean(Ls, 0); return 1; }
+		lua_pushboolean(Ls, SAMWorldState::erase(g_currentNs, keyC ? keyC : "") ? 1 : 0);
+		return 1;
+	}
+
+	// sam_world_keys() -> array of this mod's saved keys
+	int lua_sam_world_keys(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		lua_newtable(Ls);
+		if ( g_currentNs.empty() ) { return 1; }
+		int n = 0;
+		for ( const std::string& k : SAMWorldState::keys(g_currentNs) )
+		{
+			lua_pushstring(Ls, k.c_str());
+			lua_rawseti(Ls, -2, ++n);
+		}
+		return 1;
 	}
 
 	int lua_sam_spawn_monsters(lua_State* Ls)
@@ -4111,6 +4789,29 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		lua_pushcfunction(L, lua_sam_hide_image);          lua_setglobal(L, "sam_hide_image");
 		lua_pushcfunction(L, lua_sam_hud_image);           lua_setglobal(L, "sam_hud_image");
 		lua_pushcfunction(L, lua_sam_get_image_size);      lua_setglobal(L, "sam_get_image_size");
+		// v1.11.0 -- interactive panels.
+		lua_pushcfunction(L, lua_sam_ui_open);             lua_setglobal(L, "sam_ui_open");
+		lua_pushcfunction(L, lua_sam_ui_close);            lua_setglobal(L, "sam_ui_close");
+		lua_pushcfunction(L, lua_sam_ui_is_open);          lua_setglobal(L, "sam_ui_is_open");
+		lua_pushcfunction(L, lua_sam_ui_clear);            lua_setglobal(L, "sam_ui_clear");
+		lua_pushcfunction(L, lua_sam_ui_label);            lua_setglobal(L, "sam_ui_label");
+		lua_pushcfunction(L, lua_sam_ui_button);           lua_setglobal(L, "sam_ui_button");
+		lua_pushcfunction(L, lua_sam_ui_image);            lua_setglobal(L, "sam_ui_image");
+		lua_pushcfunction(L, lua_sam_ui_list);             lua_setglobal(L, "sam_ui_list");
+		lua_pushcfunction(L, lua_sam_ui_list_add);         lua_setglobal(L, "sam_ui_list_add");
+		lua_pushcfunction(L, lua_sam_ui_list_clear);       lua_setglobal(L, "sam_ui_list_clear");
+		lua_pushcfunction(L, lua_sam_ui_input);            lua_setglobal(L, "sam_ui_input");
+		lua_pushcfunction(L, lua_sam_ui_input_text);       lua_setglobal(L, "sam_ui_input_text");
+		lua_pushcfunction(L, lua_sam_ui_panel_style);      lua_setglobal(L, "sam_ui_panel_style");
+		lua_pushcfunction(L, lua_sam_ui_font);             lua_setglobal(L, "sam_ui_font");
+		lua_pushcfunction(L, lua_sam_ui_list_row_height);  lua_setglobal(L, "sam_ui_list_row_height");
+		lua_pushcfunction(L, lua_sam_ui_text_size);        lua_setglobal(L, "sam_ui_text_size");
+		// v1.11.0 -- reading the game's own content.
+		lua_pushcfunction(L, lua_sam_list_items);          lua_setglobal(L, "sam_list_items");
+		lua_pushcfunction(L, lua_sam_get_item_info);       lua_setglobal(L, "sam_get_item_info");
+		lua_pushcfunction(L, lua_sam_list_monsters);       lua_setglobal(L, "sam_list_monsters");
+		lua_pushcfunction(L, lua_sam_list_spells);         lua_setglobal(L, "sam_list_spells");
+		lua_pushcfunction(L, lua_sam_spawn_projectile);    lua_setglobal(L, "sam_spawn_projectile");
 		lua_pushcfunction(L, lua_sam_send_packet);         lua_setglobal(L, "sam_send_packet");
 		lua_pushcfunction(L, lua_sam_player_count);        lua_setglobal(L, "sam_player_count");
 		lua_pushcfunction(L, lua_sam_local_player);        lua_setglobal(L, "sam_local_player");
@@ -4130,6 +4831,18 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		lua_setglobal(L, "sam_spawn_portal");
 		lua_pushcfunction(L, lua_sam_remove_entity);
 		lua_setglobal(L, "sam_remove_entity");
+		lua_pushcfunction(L, lua_sam_set_chest_stash);
+		lua_setglobal(L, "sam_set_chest_stash");
+		lua_pushcfunction(L, lua_sam_travel_to_level);
+		lua_setglobal(L, "sam_travel_to_level");
+		lua_pushcfunction(L, lua_sam_world_save);
+		lua_setglobal(L, "sam_world_save");
+		lua_pushcfunction(L, lua_sam_world_load);
+		lua_setglobal(L, "sam_world_load");
+		lua_pushcfunction(L, lua_sam_world_clear);
+		lua_setglobal(L, "sam_world_clear");
+		lua_pushcfunction(L, lua_sam_world_keys);
+		lua_setglobal(L, "sam_world_keys");
 		lua_pushcfunction(L, lua_sam_get_inventory);
 		lua_setglobal(L, "sam_get_inventory");
 		lua_pushcfunction(L, lua_sam_remove_item);
@@ -4649,6 +5362,104 @@ namespace SAMLua
 #endif
 	}
 
+	bool travelToLevel(int target, bool secret, const char* tag)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		// Three preconditions the engine does not enforce, because until now nothing but a
+		// ladder ever set these globals, and a ladder cannot be touched when they are unsafe.
+		//
+		// 1. Only the host may move the party: the block that consumes these globals lives
+		//    inside `if ( multiplayer != CLIENT )`, so a client would arm a request that
+		//    never fires and then leaks into its next game.
+		if ( multiplayer == CLIENT )
+		{
+			SAM_WARN(tag, "sam_travel_to_level refused: host only.");
+			return false;
+		}
+		// 2. A level change already in flight -- overwriting it would apply both offsets.
+		if ( loadnextlevel )
+		{
+			SAM_WARN(tag, "sam_travel_to_level refused: a level change is already under way.");
+			return false;
+		}
+		// 3. We must actually be in a game; firing this from a menu would run the level
+		//    loader against a map that is not there.
+		if ( intro || loading )
+		{
+			SAM_WARN(tag, "sam_travel_to_level refused: not in a game yet.");
+			return false;
+		}
+		if ( target < 0 || target > 100 )
+		{
+			SAM_WARN(tag, "sam_travel_to_level: floor " + std::to_string(target)
+				+ " is out of range (0-100).");
+			return false;
+		}
+
+		// 4. And two destinations that work perfectly in single player but SPLIT THE PARTY
+		//    in multiplayer. The host announces the move with an LVLC packet, and the
+		//    client's own handler discards exactly these two cases before acting on it:
+		//
+		//        if ( currentlevel == data[13] && secretlevel == data[4] ) return;
+		//        if ( data[13] == 0 ) return;   // "dont warp back to start level"
+		//
+		//    (net.cpp:5552-5560; the host sends data[13] = the NEW currentlevel and
+		//    data[4] = the NEW secretlevel, game.cpp:2169/2172.)
+		//
+		//    So a mod sending everyone to floor 0 -- a perfectly natural home for a hub --
+		//    or reloading the floor they are standing on would travel the host and leave
+		//    every client behind on a map the host has left. Refuse loudly instead.
+		if ( multiplayer != SINGLE )
+		{
+			if ( target == 0 )
+			{
+				SAM_WARN(tag, "sam_travel_to_level refused: floor 0 cannot be reached in"
+					" multiplayer -- a connected client ignores a move to it and would be"
+					" left behind. Put a hub on any other floor.");
+				return false;
+			}
+			if ( target == currentlevel && secret == secretlevel )
+			{
+				SAM_WARN(tag, "sam_travel_to_level refused: reloading the floor the party is"
+					" already on would move the host only, splitting the party. (Changing the"
+					" secret flag at the same time is fine.)");
+				return false;
+			}
+		}
+
+		// The consuming code adds skipLevelsOnLoad and then adds one MORE unless the skip
+		// was positive, so the arithmetic differs above and below the current floor:
+		//     skip > 0  ->  currentlevel += skip
+		//     otherwise ->  currentlevel += skip; ++currentlevel
+		// Inverting that for an absolute destination gives exactly this.
+		skipLevelsOnLoad = ( target > currentlevel ) ? ( target - currentlevel )
+		                                             : ( target - currentlevel - 1 );
+		secretlevel = secret;
+		loadnextlevel = true;
+		SAM_INFO(tag, "Travelling to floor " + std::to_string(target)
+			+ (secret ? " (secret list)." : "."));
+		return true;
+#else
+		(void)target; (void)secret; (void)tag;
+		return false;
+#endif
+	}
+
+	void dispatchUiEvent(const std::string& eventName, const std::string& ns,
+		const std::string& panel, const std::string& widget, const std::string& value)
+	{
+		// Cross-runtime, same as on_packet: the click has to reach whichever language the
+		// panel's owner wrote their mod in, and a mod may mix the two.
+		Event ev;
+		ev.setName(eventName.c_str()).s("mod", ns).s("panel", panel).s("widget", widget).s("value", value);
+		dispatchEvent(ev);
+#ifndef SAM_LUA_NO_JS
+		SAMJs::Event jev;
+		jev.setName(eventName.c_str()).s("mod", ns).s("panel", panel).s("widget", widget).s("value", value);
+		SAMJs::dispatchEvent(jev);
+#endif
+	}
+
 	void dispatchModPacket(int fromPlayer, const std::string& tag, const std::string& payload)
 	{
 		Event ev;
@@ -4981,6 +5792,104 @@ namespace SAMLua
 		return (unsigned long long)e->getUID();
 #else
 		(void)player; (void)modelId; (void)scale; return 0;
+#endif
+	}
+
+	unsigned long long spawnProjectile(int owner, double tileX, double tileY, double angle,
+		double speed, int damage, int lifetimeTicks, const std::string& modelId)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT )
+		{
+			SAM_WARN("SAM", "sam_spawn_projectile refused: host only.");
+			return 0;
+		}
+		if ( !map.entities ) { return 0; }
+
+		// Reject non-finite geometry before it reaches an Entity. Lua raises a clean error
+		// for a nil argument, but QuickJS turns `undefined` into NaN and reports SUCCESS --
+		// so a JS mod passing the result of a failed lookup got a projectile whose position
+		// was NaN, which then propagates into the entity list rather than failing loudly.
+		// Checked here, in the shared spawner, so both runtimes behave the same way.
+		if ( !std::isfinite(tileX) || !std::isfinite(tileY)
+			|| !std::isfinite(angle) || !std::isfinite(speed) )
+		{
+			SAM_WARN("SAM", "sam_spawn_projectile: position, angle and speed must be real"
+				" numbers (got a NaN or infinity -- check the values you passed in).");
+			return 0;
+		}
+		// A projectile with no speed never moves and never expires by distance, so it would
+		// sit in the world burning a slot until its lifetime ran out. Refuse it.
+		if ( !(speed > 0.0) )
+		{
+			SAM_WARN("SAM", "sam_spawn_projectile: speed must be greater than 0.");
+			return 0;
+		}
+		int life = lifetimeTicks;
+		if ( life <= 0 ) { life = 100; }        // ~2 seconds at 50 ticks/sec
+		if ( life > 1000 ) { life = 1000; }     // a projectile is a shot, not a pet
+
+		int sprite = 0;
+		if ( !modelId.empty() )
+		{
+			sprite = SAMModels::modelIndexForId(modelId);
+			if ( sprite < 0 )
+			{
+				char* end = nullptr;
+				const long n = std::strtol(modelId.c_str(), &end, 10);
+				if ( end && *end == '\0' && n > 0 && n < (long)nummodels ) { sprite = (int)n; }
+			}
+			if ( sprite < 0 )
+			{
+				SAM_WARN("SAM", "sam_spawn_projectile: model '" + modelId
+					+ "' is not registered. Declare it in mod.json \"models\", or pass a vanilla"
+					" model index. Firing an invisible projectile instead.");
+				sprite = 0;
+			}
+		}
+
+		Entity* e = newEntity(sprite, 1, map.entities, nullptr);
+		if ( !e ) { return 0; }
+		e->x = tileX * 16.0 + 8.0;
+		e->y = tileY * 16.0 + 8.0;
+		e->z = 0.0;
+		e->yaw = angle;
+		e->sizex = 1;
+		e->sizey = 1;
+		e->behavior = &samProjectileBehavior;
+		e->flags[UPDATENEEDED] = true;
+		e->flags[PASSABLE] = true;
+		e->skill[19] = SAM_PROJECTILE_MARKER;
+		e->skill[2] = ( owner >= 0 && owner < MAXPLAYERS ) ? owner : -1;
+		e->skill[17] = damage < 0 ? 0 : damage;
+		e->skill[18] = life;
+		e->fskill[2] = cos(angle) * speed;
+		e->fskill[3] = sin(angle) * speed;
+		// parent is what fired it, so the shot cannot kill its owner on frame one.
+		if ( owner >= 0 && owner < MAXPLAYERS && players[owner] && players[owner]->entity )
+		{
+			e->parent = players[owner]->entity->getUID();
+		}
+		return (unsigned long long)e->getUID();
+#else
+		(void)owner; (void)tileX; (void)tileY; (void)angle; (void)speed;
+		(void)damage; (void)lifetimeTicks; (void)modelId;
+		return 0;
+#endif
+	}
+
+	void dispatchProjectileHit(unsigned long long projectile, unsigned long long target,
+		int x, int y, int damage)
+	{
+		Event ev;
+		ev.setName("on_projectile_hit").i("projectile", (long long)projectile)
+			.i("target", (long long)target).i("x", x).i("y", y).i("damage", damage);
+		dispatchEvent(ev);
+#ifndef SAM_LUA_NO_JS
+		SAMJs::Event jev;
+		jev.setName("on_projectile_hit").i("projectile", (long long)projectile)
+			.i("target", (long long)target).i("x", x).i("y", y).i("damage", damage);
+		SAMJs::dispatchEvent(jev);
 #endif
 	}
 

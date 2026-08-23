@@ -292,6 +292,34 @@ namespace SAMLua
 	bool hitstopActive();
 	void resetImpact();
 
+	// v1.11.0 -- a mod panel was clicked. Called from the ONE C callback every S.A.M button
+	// shares (sam_ui.cpp), because Button::setCallback takes a bare function pointer with no
+	// user data. Dispatches ui.on_click to Lua and JS alike, so a panel behaves the same in
+	// either runtime.
+	// `value` is the payload the event carries in .value: the clicked row's id for
+	// ui.on_select, the committed text for ui.on_submit, empty for ui.on_click.
+	// Shared by sam_travel_to_level in BOTH runtimes. The preconditions here are subtle
+	// enough that duplicating them per runtime is how they drift apart -- which is this
+	// project's most repeated bug. One implementation, two thin bindings.
+	bool travelToLevel(int target, bool secret, const char* tag);
+
+	void dispatchUiEvent(const std::string& eventName, const std::string& ns,
+		const std::string& panel, const std::string& widget, const std::string& value);
+
+	// v1.11.0 -- custom projectiles. The only thing a script could previously launch was a
+	// fixed vanilla spell, which ruled out ranged attack patterns, telegraphed boss volleys,
+	// weapons that fire anything but an arrow, and traps.
+	//   owner: player index that fired it, or -1 for an unowned shot
+	//   angle: radians, same convention as sam_get_facing
+	//   speed: world pixels per tick (a vanilla arrow is around 8)
+	// Returns the projectile's uid, or 0 on failure. Host only.
+	unsigned long long spawnProjectile(int owner, double tileX, double tileY, double angle,
+		double speed, int damage, int lifetimeTicks, const std::string& modelId);
+
+	// Fired by the projectile behavior on contact, to Lua and JS alike.
+	void dispatchProjectileHit(unsigned long long projectile, unsigned long long target,
+		int x, int y, int damage);
+
 	// Tear down the VM and release all script references.
 	void shutdown();
 

@@ -72,7 +72,10 @@ extern "C" {
 #	include "sam_races.hpp"   // custom races (sam_get_race id lookup)
 #	include "sam_hud.hpp"     // script-driven HUD layer
 #	include "sam_images.hpp"  // the mod's own pictures (overlay + HUD art)
+#	include "sam_ui.hpp"      // interactive mod panels
+#	include "sam_catalog.hpp"  // reading the game content registries
 #	include "sam_world.hpp"   // world queries, terrain, mechanisms
+#	include "sam_world_state.hpp" // per-character mod state carried in the savegame
 #	include "sam_workshop.hpp" // SAMModManifest (sam_get_mods)
 #	include "magic/magic.hpp" // addSpell (grant a spell to a player)
 #	include <cctype>
@@ -624,10 +627,22 @@ namespace
 				+ "' (expected a vanilla name like \"IRON_DAGGER\" or a custom \"namespace:item\").");
 			return JS_NewBool(ctx, 0);
 		}
-		Entity* e = spawnGroundItem(static_cast<ItemType>(resolvedType), EXCELLENT, 0, 1, x, y);
-		if ( !e ) { SAM_ERROR("JS", "sam_spawn_item: invalid tile (" + std::to_string(x) + "," + std::to_string(y) + ")."); return JS_NewBool(ctx, 0); }
-		SAM_INFO("JS", "Spawned item " + name + " at (" + std::to_string(x) + "," + std::to_string(y) + ")");
-		return JS_NewBool(ctx, 1);
+		// Lua parity: status/beatitude/count settable, uid returned. See the Lua binding for
+		// why -- restoring saved world state needs the item to come back as it was, and a
+		// script needs a handle to what it placed.
+		int32_t statusArg = (int)EXCELLENT, beatitudeArg = 0, countArg = 1;
+		if ( samHasArg(argc, argv, 3) ) { JS_ToInt32(ctx, &statusArg, argv[3]); }
+		if ( samHasArg(argc, argv, 4) ) { JS_ToInt32(ctx, &beatitudeArg, argv[4]); }
+		if ( samHasArg(argc, argv, 5) ) { JS_ToInt32(ctx, &countArg, argv[5]); }
+		const Status st = (Status)samClampInt(statusArg, (int)BROKEN, (int)EXCELLENT);
+		const Sint16 be = (Sint16)samClampInt(beatitudeArg, -100, 100);
+		const Sint16 ct = (Sint16)samClampInt(countArg, 1, 1000);
+
+		Entity* e = spawnGroundItem(static_cast<ItemType>(resolvedType), st, be, ct, x, y);
+		if ( !e ) { SAM_ERROR("JS", "sam_spawn_item: invalid tile (" + std::to_string(x) + "," + std::to_string(y) + ")."); return JS_NULL; }
+		SAM_INFO("JS", "Spawned item " + name + " at (" + std::to_string(x) + "," + std::to_string(y)
+			+ ") uid " + std::to_string((unsigned long long)e->getUID()));
+		return JS_NewInt64(ctx, (int64_t)e->getUID());
 	}
 
 	// sam_item_id("VANILLA_NAME" | "namespace:item") -> number|null. Resolve an item
@@ -959,6 +974,140 @@ namespace
 		if ( JS_IsException(v) ) { JS_FreeValue(ctx, v); SAM_WARN("JS", "sam_load_data: corrupt data for key '" + key + "' — undefined."); return JS_UNDEFINED; }
 		SAM_INFO("SAM", "Loaded data key '" + key + "' for [" + g_currentNs + "]");
 		return v;
+	}
+
+	// ---- v1.11.0 persistent world state (Lua parity: sam_set_chest_stash /
+	//      sam_travel_to_level / sam_world_save / _load / _clear / _keys) ------------------
+	// Rationale and the engine details are documented once, on the Lua side.
+
+	JSValue js_sam_set_chest_stash(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_FALSE; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+		const bool on = samHasArg(argc, argv, 1) ? ( JS_ToBool(ctx, argv[1]) > 0 ) : true;
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_set_chest_stash refused: host only."); return JS_FALSE; }
+		Entity* e = uidToEntity((Sint32)uid);
+		if ( !e ) { SAM_WARN("JS", "sam_set_chest_stash: no entity with uid " + std::to_string(uid) + "."); return JS_FALSE; }
+		if ( e->behavior != &actChest )
+		{
+			SAM_WARN("JS", "sam_set_chest_stash: uid " + std::to_string(uid) + " is not a chest.");
+			return JS_FALSE;
+		}
+		// Two things must be handled before the routing is flipped underneath the chest.
+		//
+		// 1. If the chest is OPEN right now, its window is already bound to the old item
+		//    list. Swapping which list the chest reads from while that window is up leaves
+		//    the player looking at contents the chest no longer owns. Close it first --
+		//    closeChest() is a no-op when nobody has it open.
+		if ( e->chestStatus ) { e->closeChest(); }
+		//
+		// 2. A chest that already holds loot does not lose it, but that loot becomes
+		//    unreachable for as long as the chest is a stash (its own list is still there,
+		//    the chest is simply reading the shared storage list instead). That is
+		//    recoverable and turning the stash back off restores it, but it looks exactly
+		//    like the items were deleted -- so say so rather than let a modder guess.
+		if ( on && e->chestVoidState == 0 )
+		{
+			int held = 0;
+			if ( e->children.first && e->children.first->element )
+			{
+				list_t* own = (list_t*)e->children.first->element;
+				for ( node_t* n = own->first; n != nullptr; n = n->next ) { ++held; }
+			}
+			if ( held > 0 )
+			{
+				SAM_WARN("JS", "sam_set_chest_stash: this chest already holds "
+					+ std::to_string(held) + " item stack(s). They are not destroyed, but they"
+					" are hidden while it is a stash; turn the stash off to reach them again."
+					" Prefer converting an empty chest.");
+			}
+		}
+		e->chestVoidState = on ? -1 : 0;
+		serverUpdateEntitySkill(e, 17);
+		SAM_INFO("JS", std::string("Chest ") + std::to_string(uid)
+			+ (on ? " is now a stash." : " is a normal chest again."));
+		return JS_TRUE;
+	}
+
+	JSValue js_sam_travel_to_level(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_FALSE; }
+		int32_t target = 0; JS_ToInt32(ctx, &target, argv[0]);
+		bool secret = false;
+		if ( samHasArg(argc, argv, 1) && JS_IsObject(argv[1]) )
+		{
+			JSValue sv = JS_GetPropertyStr(ctx, argv[1], "secret");
+			secret = ( JS_ToBool(ctx, sv) > 0 );
+			JS_FreeValue(ctx, sv);
+		}
+		// Same shared implementation the Lua binding calls -- see SAMLua::travelToLevel.
+		return JS_NewBool(ctx, SAMLua::travelToLevel(target, secret, "JS") ? 1 : 0);
+	}
+
+	JSValue js_sam_world_save(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_NewBool(ctx, 0); }
+		const char* keyC = JS_ToCString(ctx, argv[0]);
+		const std::string key = keyC ? keyC : "";
+		if ( keyC ) { JS_FreeCString(ctx, keyC); }
+		if ( g_currentNs.empty() ) { SAM_WARN("JS", "sam_world_save: no owning mod namespace - ignored."); return JS_NewBool(ctx, 0); }
+		JSValueConst v = ( samHasArg(argc, argv, 1) ) ? argv[1] : JS_NULL;
+		JSValue jstr = JS_JSONStringify(ctx, v, JS_UNDEFINED, JS_UNDEFINED);
+		std::string json = "null";
+		if ( !JS_IsException(jstr) && !JS_IsUndefined(jstr) )
+		{
+			const char* c = JS_ToCString(ctx, jstr);
+			if ( c ) { json = c; JS_FreeCString(ctx, c); }
+		}
+		JS_FreeValue(ctx, jstr);
+		return JS_NewBool(ctx, SAMWorldState::set(g_currentNs, key, json) ? 1 : 0);
+	}
+
+	JSValue js_sam_world_load(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_UNDEFINED; }
+		const char* keyC = JS_ToCString(ctx, argv[0]);
+		const std::string key = keyC ? keyC : "";
+		if ( keyC ) { JS_FreeCString(ctx, keyC); }
+		if ( g_currentNs.empty() ) { return JS_UNDEFINED; }
+		std::string raw;
+		if ( !SAMWorldState::get(g_currentNs, key, raw) ) { return JS_UNDEFINED; }
+		JSValue v = JS_ParseJSON(ctx, raw.c_str(), raw.size(), "sam_world_state");
+		if ( JS_IsException(v) )
+		{
+			JS_FreeValue(ctx, v);
+			SAM_WARN("JS", "sam_world_load: saved value for '" + key + "' is corrupt - ignoring it.");
+			return JS_UNDEFINED;
+		}
+		return v;
+	}
+
+	JSValue js_sam_world_clear(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_NewBool(ctx, 0); }
+		const char* keyC = JS_ToCString(ctx, argv[0]);
+		const std::string key = keyC ? keyC : "";
+		if ( keyC ) { JS_FreeCString(ctx, keyC); }
+		if ( g_currentNs.empty() ) { return JS_NewBool(ctx, 0); }
+		return JS_NewBool(ctx, SAMWorldState::erase(g_currentNs, key) ? 1 : 0);
+	}
+
+	JSValue js_sam_world_keys(JSContext* ctx, JSValueConst, int, JSValueConst*)
+	{
+		SAMLogger::noteApiCall();
+		JSValue arr = JS_NewArray(ctx);
+		if ( g_currentNs.empty() ) { return arr; }
+		uint32_t n = 0;
+		for ( const std::string& k : SAMWorldState::keys(g_currentNs) )
+		{
+			JS_SetPropertyUint32(ctx, arr, n++, JS_NewString(ctx, k.c_str()));
+		}
+		return arr;
 	}
 
 	JSValue js_sam_delete_data(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
@@ -1309,6 +1458,10 @@ namespace
 		Entity* e = uidToEntity((Sint32)uid);
 		if ( !e ) { return JS_FALSE; }
 		if ( e->behavior == &actPlayer ) { SAM_WARN("JS", "sam_remove_entity refused: cannot remove a player."); return JS_FALSE; }
+		// See the Lua binding: an open chest is also held in openedChest[], which nothing
+		// here clears, so removing the entity left a dangling pointer for the still-open
+		// chest UI. closeChest() is a no-op when the chest is not open.
+		if ( e->behavior == &actChest ) { e->closeChest(); }
 		e->removeLightField();
 		if ( e->mynode ) { list_RemoveNode(e->mynode); }
 		return JS_TRUE;
@@ -1822,6 +1975,363 @@ namespace
 		if ( id ) { JS_FreeCString(ctx, id); }
 		if ( img ) { JS_FreeCString(ctx, img); }
 		return ok ? JS_TRUE : JS_FALSE;
+	}
+
+	// ---- interactive panels (Lua parity: sam_ui_open / _close / _is_open / _clear /
+	//      _label / _button / _image) ------------------------------------------------------
+	// A click fires the ui.on_click EVENT rather than invoking a callback, so it reaches Lua
+	// and JS identically and cannot leave a dangling function reference in a C callback.
+
+	JSValue js_sam_ui_open(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 5 ) { return JS_FALSE; }
+		const char* panel = JS_ToCString(ctx, argv[0]);
+		int32_t x = 0, y = 0, w = 0, h = 0;
+		JS_ToInt32(ctx, &x, argv[1]); JS_ToInt32(ctx, &y, argv[2]);
+		JS_ToInt32(ctx, &w, argv[3]); JS_ToInt32(ctx, &h, argv[4]);
+		const char* title = samHasArg(argc, argv, 5) ? JS_ToCString(ctx, argv[5]) : nullptr;
+		const bool modal = samHasArg(argc, argv, 6) ? (JS_ToBool(ctx, argv[6]) > 0) : false;
+		const bool ok = SAMUi::open(g_currentNs, panel ? panel : "", x, y, w, h,
+			title ? title : "", modal);
+		if ( panel ) { JS_FreeCString(ctx, panel); }
+		if ( title ) { JS_FreeCString(ctx, title); }
+		return ok ? JS_TRUE : JS_FALSE;
+	}
+
+	JSValue js_sam_ui_close(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( !samHasArg(argc, argv, 0) ) { SAMUi::closeNamespace(g_currentNs); return JS_TRUE; }
+		const char* panel = JS_ToCString(ctx, argv[0]);
+		const bool ok = SAMUi::close(g_currentNs, panel ? panel : "");
+		if ( panel ) { JS_FreeCString(ctx, panel); }
+		return ok ? JS_TRUE : JS_FALSE;
+	}
+
+	JSValue js_sam_ui_is_open(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_FALSE; }
+		const char* panel = JS_ToCString(ctx, argv[0]);
+		const bool ok = SAMUi::isOpen(g_currentNs, panel ? panel : "");
+		if ( panel ) { JS_FreeCString(ctx, panel); }
+		return ok ? JS_TRUE : JS_FALSE;
+	}
+
+	JSValue js_sam_ui_clear(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_FALSE; }
+		const char* panel = JS_ToCString(ctx, argv[0]);
+		const bool ok = SAMUi::clearWidgets(g_currentNs, panel ? panel : "");
+		if ( panel ) { JS_FreeCString(ctx, panel); }
+		return ok ? JS_TRUE : JS_FALSE;
+	}
+
+	JSValue js_sam_ui_label(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 6 ) { return JS_FALSE; }
+		const char* panel = JS_ToCString(ctx, argv[0]);
+		const char* id = JS_ToCString(ctx, argv[1]);
+		int32_t x = 0, y = 0, w = 0;
+		JS_ToInt32(ctx, &x, argv[2]); JS_ToInt32(ctx, &y, argv[3]); JS_ToInt32(ctx, &w, argv[4]);
+		const char* text = JS_ToCString(ctx, argv[5]);
+		const Uint32 col = samHudColorJS(ctx, argc, argv, 6, makeColor(220, 210, 190, 255));
+		const bool ok = SAMUi::label(g_currentNs, panel ? panel : "", id ? id : "",
+			x, y, w, text ? text : "", col);
+		if ( panel ) { JS_FreeCString(ctx, panel); }
+		if ( id ) { JS_FreeCString(ctx, id); }
+		if ( text ) { JS_FreeCString(ctx, text); }
+		return ok ? JS_TRUE : JS_FALSE;
+	}
+
+	JSValue js_sam_ui_button(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 7 ) { return JS_FALSE; }
+		const char* panel = JS_ToCString(ctx, argv[0]);
+		const char* id = JS_ToCString(ctx, argv[1]);
+		int32_t x = 0, y = 0, w = 0, h = 0;
+		JS_ToInt32(ctx, &x, argv[2]); JS_ToInt32(ctx, &y, argv[3]);
+		JS_ToInt32(ctx, &w, argv[4]); JS_ToInt32(ctx, &h, argv[5]);
+		const char* text = JS_ToCString(ctx, argv[6]);
+		const bool ok = SAMUi::button(g_currentNs, panel ? panel : "", id ? id : "",
+			x, y, w, h, text ? text : "");
+		if ( panel ) { JS_FreeCString(ctx, panel); }
+		if ( id ) { JS_FreeCString(ctx, id); }
+		if ( text ) { JS_FreeCString(ctx, text); }
+		return ok ? JS_TRUE : JS_FALSE;
+	}
+
+	JSValue js_sam_ui_image(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 7 ) { return JS_FALSE; }
+		const char* panel = JS_ToCString(ctx, argv[0]);
+		const char* id = JS_ToCString(ctx, argv[1]);
+		int32_t x = 0, y = 0, w = 0, h = 0;
+		JS_ToInt32(ctx, &x, argv[2]); JS_ToInt32(ctx, &y, argv[3]);
+		JS_ToInt32(ctx, &w, argv[4]); JS_ToInt32(ctx, &h, argv[5]);
+		const char* img = JS_ToCString(ctx, argv[6]);
+		const Uint32 col = samHudColorJS(ctx, argc, argv, 7, makeColor(255, 255, 255, 255));
+		const std::string path = SAMImages::resolve(g_currentNs, img ? img : "");
+		const bool ok = !path.empty() && SAMUi::image(g_currentNs, panel ? panel : "",
+			id ? id : "", x, y, w, h, path, col);
+		if ( panel ) { JS_FreeCString(ctx, panel); }
+		if ( id ) { JS_FreeCString(ctx, id); }
+		if ( img ) { JS_FreeCString(ctx, img); }
+		return ok ? JS_TRUE : JS_FALSE;
+	}
+
+	JSValue js_sam_ui_list(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 6 ) { return JS_FALSE; }
+		const char* panel = JS_ToCString(ctx, argv[0]);
+		const char* id = JS_ToCString(ctx, argv[1]);
+		int32_t x = 0, y = 0, w = 0, h = 0;
+		JS_ToInt32(ctx, &x, argv[2]); JS_ToInt32(ctx, &y, argv[3]);
+		JS_ToInt32(ctx, &w, argv[4]); JS_ToInt32(ctx, &h, argv[5]);
+		const bool ok = SAMUi::list(g_currentNs, panel ? panel : "", id ? id : "", x, y, w, h);
+		if ( panel ) { JS_FreeCString(ctx, panel); }
+		if ( id ) { JS_FreeCString(ctx, id); }
+		return ok ? JS_TRUE : JS_FALSE;
+	}
+
+	JSValue js_sam_ui_list_add(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 4 ) { return JS_FALSE; }
+		const char* panel = JS_ToCString(ctx, argv[0]);
+		const char* id = JS_ToCString(ctx, argv[1]);
+		const char* rowId = JS_ToCString(ctx, argv[2]);
+		const char* text = JS_ToCString(ctx, argv[3]);
+		const Uint32 col = samHudColorJS(ctx, argc, argv, 4, makeColor(220, 210, 190, 255));
+		const bool ok = SAMUi::listAdd(g_currentNs, panel ? panel : "", id ? id : "",
+			rowId ? rowId : "", text ? text : "", col);
+		if ( panel ) { JS_FreeCString(ctx, panel); }
+		if ( id ) { JS_FreeCString(ctx, id); }
+		if ( rowId ) { JS_FreeCString(ctx, rowId); }
+		if ( text ) { JS_FreeCString(ctx, text); }
+		return ok ? JS_TRUE : JS_FALSE;
+	}
+
+	JSValue js_sam_ui_list_clear(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_FALSE; }
+		const char* panel = JS_ToCString(ctx, argv[0]);
+		const char* id = JS_ToCString(ctx, argv[1]);
+		const bool ok = SAMUi::listClear(g_currentNs, panel ? panel : "", id ? id : "");
+		if ( panel ) { JS_FreeCString(ctx, panel); }
+		if ( id ) { JS_FreeCString(ctx, id); }
+		return ok ? JS_TRUE : JS_FALSE;
+	}
+
+	JSValue js_sam_ui_input(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 6 ) { return JS_FALSE; }
+		const char* panel = JS_ToCString(ctx, argv[0]);
+		const char* id = JS_ToCString(ctx, argv[1]);
+		int32_t x = 0, y = 0, w = 0, h = 0;
+		JS_ToInt32(ctx, &x, argv[2]); JS_ToInt32(ctx, &y, argv[3]);
+		JS_ToInt32(ctx, &w, argv[4]); JS_ToInt32(ctx, &h, argv[5]);
+		const char* text = samHasArg(argc, argv, 6) ? JS_ToCString(ctx, argv[6]) : nullptr;
+		const bool ok = SAMUi::input(g_currentNs, panel ? panel : "", id ? id : "",
+			x, y, w, h, text ? text : "");
+		if ( panel ) { JS_FreeCString(ctx, panel); }
+		if ( id ) { JS_FreeCString(ctx, id); }
+		if ( text ) { JS_FreeCString(ctx, text); }
+		return ok ? JS_TRUE : JS_FALSE;
+	}
+
+	JSValue js_sam_ui_input_text(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_NewString(ctx, ""); }
+		const char* panel = JS_ToCString(ctx, argv[0]);
+		const char* id = JS_ToCString(ctx, argv[1]);
+		const std::string t = SAMUi::inputText(g_currentNs, panel ? panel : "", id ? id : "");
+		if ( panel ) { JS_FreeCString(ctx, panel); }
+		if ( id ) { JS_FreeCString(ctx, id); }
+		return JS_NewString(ctx, t.c_str());
+	}
+
+	JSValue js_sam_ui_panel_style(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_FALSE; }
+		const char* panel = JS_ToCString(ctx, argv[0]);
+		const Uint32 bg = samHudColorJS(ctx, argc, argv, 1, 0);
+		const Uint32 border = samHudColorJS(ctx, argc, argv, 2, 0);
+		int32_t bw = -1; if ( samHasArg(argc, argv, 3) ) { JS_ToInt32(ctx, &bw, argv[3]); }
+		const bool ok = SAMUi::panelStyle(g_currentNs, panel ? panel : "", bg, border, bw);
+		if ( panel ) { JS_FreeCString(ctx, panel); }
+		return ok ? JS_TRUE : JS_FALSE;
+	}
+
+	JSValue js_sam_ui_font(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 3 ) { return JS_FALSE; }
+		const char* panel = JS_ToCString(ctx, argv[0]);
+		const char* id = JS_ToCString(ctx, argv[1]);
+		const char* f = JS_ToCString(ctx, argv[2]);
+		const bool ok = SAMUi::font(g_currentNs, panel ? panel : "", id ? id : "", f ? f : "");
+		if ( panel ) { JS_FreeCString(ctx, panel); }
+		if ( id ) { JS_FreeCString(ctx, id); }
+		if ( f ) { JS_FreeCString(ctx, f); }
+		return ok ? JS_TRUE : JS_FALSE;
+	}
+
+	JSValue js_sam_ui_list_row_height(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 3 ) { return JS_FALSE; }
+		const char* panel = JS_ToCString(ctx, argv[0]);
+		const char* id = JS_ToCString(ctx, argv[1]);
+		int32_t px = 0; JS_ToInt32(ctx, &px, argv[2]);
+		const bool ok = SAMUi::listRowHeight(g_currentNs, panel ? panel : "", id ? id : "", px);
+		if ( panel ) { JS_FreeCString(ctx, panel); }
+		if ( id ) { JS_FreeCString(ctx, id); }
+		return ok ? JS_TRUE : JS_FALSE;
+	}
+
+	// [width, height] or null -- array form, matching sam_get_image_size.
+	JSValue js_sam_ui_text_size(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_NULL; }
+		const char* text = JS_ToCString(ctx, argv[0]);
+		const char* f = samHasArg(argc, argv, 1) ? JS_ToCString(ctx, argv[1]) : nullptr;
+		int w = 0, h = 0;
+		const bool ok = SAMUi::textSize(text ? text : "", f ? f : "", w, h);
+		if ( text ) { JS_FreeCString(ctx, text); }
+		if ( f ) { JS_FreeCString(ctx, f); }
+		if ( !ok ) { return JS_NULL; }
+		JSValue arr = JS_NewArray(ctx);
+		JS_SetPropertyUint32(ctx, arr, 0, JS_NewInt32(ctx, w));
+		JS_SetPropertyUint32(ctx, arr, 1, JS_NewInt32(ctx, h));
+		return arr;
+	}
+
+	// ---- reading the game's own content (Lua parity: sam_list_items / sam_get_item_info /
+	//      sam_list_monsters / sam_list_spells) --------------------------------------------
+
+	JSValue js_sam_list_items(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		const char* cat = samHasArg(argc, argv, 0) ? JS_ToCString(ctx, argv[0]) : nullptr;
+		const std::vector<SAMCatalog::ItemEntry> list = SAMCatalog::items(cat ? cat : "");
+		if ( cat ) { JS_FreeCString(ctx, cat); }
+		JSValue arr = JS_NewArray(ctx);
+		uint32_t n = 0;
+		for ( const SAMCatalog::ItemEntry& e : list )
+		{
+			JSValue o = JS_NewObject(ctx);
+			JS_SetPropertyStr(ctx, o, "type", JS_NewInt32(ctx, e.type));
+			JS_SetPropertyStr(ctx, o, "name", JS_NewString(ctx, e.name.c_str()));
+			JS_SetPropertyStr(ctx, o, "unidentified", JS_NewString(ctx, e.unidName.c_str()));
+			JS_SetPropertyStr(ctx, o, "category", JS_NewString(ctx, e.category.c_str()));
+			JS_SetPropertyStr(ctx, o, "level", JS_NewInt32(ctx, e.level));
+			JS_SetPropertyStr(ctx, o, "weight", JS_NewInt32(ctx, e.weight));
+			JS_SetPropertyStr(ctx, o, "value", JS_NewInt32(ctx, e.value));
+			JS_SetPropertyStr(ctx, o, "custom", JS_NewBool(ctx, e.custom));
+			JS_SetPropertyUint32(ctx, arr, n++, o);
+		}
+		return arr;
+	}
+
+	JSValue js_sam_get_item_info(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_NULL; }
+		int type = -1;
+		if ( JS_IsNumber(argv[0]) )
+		{
+			int32_t t = -1; JS_ToInt32(ctx, &t, argv[0]); type = t;
+		}
+		else
+		{
+			const char* nm = JS_ToCString(ctx, argv[0]);
+			type = SAMCatalog::itemTypeFor(nm ? nm : "");
+			if ( nm ) { JS_FreeCString(ctx, nm); }
+		}
+		SAMCatalog::ItemEntry e;
+		std::map<std::string, int> attrs;
+		if ( !SAMCatalog::itemInfo(type, e, attrs) ) { return JS_NULL; }
+
+		JSValue o = JS_NewObject(ctx);
+		JS_SetPropertyStr(ctx, o, "type", JS_NewInt32(ctx, e.type));
+		JS_SetPropertyStr(ctx, o, "name", JS_NewString(ctx, e.name.c_str()));
+		JS_SetPropertyStr(ctx, o, "unidentified", JS_NewString(ctx, e.unidName.c_str()));
+		JS_SetPropertyStr(ctx, o, "category", JS_NewString(ctx, e.category.c_str()));
+		JS_SetPropertyStr(ctx, o, "level", JS_NewInt32(ctx, e.level));
+		JS_SetPropertyStr(ctx, o, "weight", JS_NewInt32(ctx, e.weight));
+		JS_SetPropertyStr(ctx, o, "value", JS_NewInt32(ctx, e.value));
+		JS_SetPropertyStr(ctx, o, "custom", JS_NewBool(ctx, e.custom));
+		JSValue a = JS_NewObject(ctx);
+		for ( const auto& kv : attrs )
+		{
+			JS_SetPropertyStr(ctx, a, kv.first.c_str(), JS_NewInt32(ctx, kv.second));
+		}
+		JS_SetPropertyStr(ctx, o, "attributes", a);
+		return o;
+	}
+
+	JSValue js_sam_list_monsters(JSContext* ctx, JSValueConst, int, JSValueConst*)
+	{
+		SAMLogger::noteApiCall();
+		const std::vector<SAMCatalog::MonsterEntry> list = SAMCatalog::monsters();
+		JSValue arr = JS_NewArray(ctx);
+		uint32_t n = 0;
+		for ( const SAMCatalog::MonsterEntry& e : list )
+		{
+			JSValue o = JS_NewObject(ctx);
+			JS_SetPropertyStr(ctx, o, "type", JS_NewInt32(ctx, e.type));
+			JS_SetPropertyStr(ctx, o, "name", JS_NewString(ctx, e.name.c_str()));
+			JS_SetPropertyUint32(ctx, arr, n++, o);
+		}
+		return arr;
+	}
+
+	JSValue js_sam_list_spells(JSContext* ctx, JSValueConst, int, JSValueConst*)
+	{
+		SAMLogger::noteApiCall();
+		const std::vector<SAMCatalog::SpellEntry> list = SAMCatalog::spells();
+		JSValue arr = JS_NewArray(ctx);
+		uint32_t n = 0;
+		for ( const SAMCatalog::SpellEntry& e : list )
+		{
+			JSValue o = JS_NewObject(ctx);
+			JS_SetPropertyStr(ctx, o, "id", JS_NewInt32(ctx, e.id));
+			JS_SetPropertyStr(ctx, o, "name", JS_NewString(ctx, e.name.c_str()));
+			JS_SetPropertyStr(ctx, o, "cost", JS_NewInt32(ctx, e.cost));
+			JS_SetPropertyUint32(ctx, arr, n++, o);
+		}
+		return arr;
+	}
+
+	JSValue js_sam_spawn_projectile(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 4 ) { return JS_NULL; }
+		double x = 0, y = 0, angle = 0, speed = 0;
+		JS_ToFloat64(ctx, &x, argv[0]); JS_ToFloat64(ctx, &y, argv[1]);
+		JS_ToFloat64(ctx, &angle, argv[2]); JS_ToFloat64(ctx, &speed, argv[3]);
+		int32_t dmg = 0, life = 100, owner = -1;
+		if ( samHasArg(argc, argv, 4) ) { JS_ToInt32(ctx, &dmg, argv[4]); }
+		if ( samHasArg(argc, argv, 5) ) { JS_ToInt32(ctx, &life, argv[5]); }
+		const char* model = samHasArg(argc, argv, 6) ? JS_ToCString(ctx, argv[6]) : nullptr;
+		if ( samHasArg(argc, argv, 7) ) { JS_ToInt32(ctx, &owner, argv[7]); }
+		const unsigned long long uid = SAMLua::spawnProjectile(owner, x, y, angle, speed,
+			dmg, life, model ? model : "");
+		if ( model ) { JS_FreeCString(ctx, model); }
+		if ( uid == 0 ) { return JS_NULL; }
+		return JS_NewInt64(ctx, (int64_t)uid);
 	}
 
 	// sam_get_image_size(image) -> [width, height], or null. Array rather than two returns:
@@ -3255,6 +3765,28 @@ namespace
 		JS_SetPropertyStr(ctx, g, "sam_hide_image", JS_NewCFunction(ctx, js_sam_hide_image, "sam_hide_image", 1));
 		JS_SetPropertyStr(ctx, g, "sam_hud_image", JS_NewCFunction(ctx, js_sam_hud_image, "sam_hud_image", 7));
 		JS_SetPropertyStr(ctx, g, "sam_get_image_size", JS_NewCFunction(ctx, js_sam_get_image_size, "sam_get_image_size", 1));
+		// v1.11.0 -- interactive panels.
+		JS_SetPropertyStr(ctx, g, "sam_ui_open", JS_NewCFunction(ctx, js_sam_ui_open, "sam_ui_open", 7));
+		JS_SetPropertyStr(ctx, g, "sam_ui_close", JS_NewCFunction(ctx, js_sam_ui_close, "sam_ui_close", 1));
+		JS_SetPropertyStr(ctx, g, "sam_ui_is_open", JS_NewCFunction(ctx, js_sam_ui_is_open, "sam_ui_is_open", 1));
+		JS_SetPropertyStr(ctx, g, "sam_ui_clear", JS_NewCFunction(ctx, js_sam_ui_clear, "sam_ui_clear", 1));
+		JS_SetPropertyStr(ctx, g, "sam_ui_label", JS_NewCFunction(ctx, js_sam_ui_label, "sam_ui_label", 7));
+		JS_SetPropertyStr(ctx, g, "sam_ui_button", JS_NewCFunction(ctx, js_sam_ui_button, "sam_ui_button", 7));
+		JS_SetPropertyStr(ctx, g, "sam_ui_image", JS_NewCFunction(ctx, js_sam_ui_image, "sam_ui_image", 8));
+		JS_SetPropertyStr(ctx, g, "sam_ui_list", JS_NewCFunction(ctx, js_sam_ui_list, "sam_ui_list", 6));
+		JS_SetPropertyStr(ctx, g, "sam_ui_list_add", JS_NewCFunction(ctx, js_sam_ui_list_add, "sam_ui_list_add", 5));
+		JS_SetPropertyStr(ctx, g, "sam_ui_list_clear", JS_NewCFunction(ctx, js_sam_ui_list_clear, "sam_ui_list_clear", 2));
+		JS_SetPropertyStr(ctx, g, "sam_ui_input", JS_NewCFunction(ctx, js_sam_ui_input, "sam_ui_input", 7));
+		JS_SetPropertyStr(ctx, g, "sam_ui_input_text", JS_NewCFunction(ctx, js_sam_ui_input_text, "sam_ui_input_text", 2));
+		JS_SetPropertyStr(ctx, g, "sam_ui_panel_style", JS_NewCFunction(ctx, js_sam_ui_panel_style, "sam_ui_panel_style", 4));
+		JS_SetPropertyStr(ctx, g, "sam_ui_font", JS_NewCFunction(ctx, js_sam_ui_font, "sam_ui_font", 3));
+		JS_SetPropertyStr(ctx, g, "sam_ui_list_row_height", JS_NewCFunction(ctx, js_sam_ui_list_row_height, "sam_ui_list_row_height", 3));
+		JS_SetPropertyStr(ctx, g, "sam_ui_text_size", JS_NewCFunction(ctx, js_sam_ui_text_size, "sam_ui_text_size", 2));
+		JS_SetPropertyStr(ctx, g, "sam_list_items", JS_NewCFunction(ctx, js_sam_list_items, "sam_list_items", 1));
+		JS_SetPropertyStr(ctx, g, "sam_get_item_info", JS_NewCFunction(ctx, js_sam_get_item_info, "sam_get_item_info", 1));
+		JS_SetPropertyStr(ctx, g, "sam_list_monsters", JS_NewCFunction(ctx, js_sam_list_monsters, "sam_list_monsters", 0));
+		JS_SetPropertyStr(ctx, g, "sam_list_spells", JS_NewCFunction(ctx, js_sam_list_spells, "sam_list_spells", 0));
+		JS_SetPropertyStr(ctx, g, "sam_spawn_projectile", JS_NewCFunction(ctx, js_sam_spawn_projectile, "sam_spawn_projectile", 8));
 		JS_SetPropertyStr(ctx, g, "sam_send_packet", JS_NewCFunction(ctx, js_sam_send_packet, "sam_send_packet", 3));
 		JS_SetPropertyStr(ctx, g, "sam_player_count", JS_NewCFunction(ctx, js_sam_player_count, "sam_player_count", 0));
 		JS_SetPropertyStr(ctx, g, "sam_local_player", JS_NewCFunction(ctx, js_sam_local_player, "sam_local_player", 0));
@@ -3311,7 +3843,7 @@ namespace
 		JS_SetPropertyStr(ctx, g, "sam_get_move_speed", JS_NewCFunction(ctx, js_sam_get_move_speed, "sam_get_move_speed", 1));
 		JS_SetPropertyStr(ctx, g, "sam_level_up", JS_NewCFunction(ctx, js_sam_level_up, "sam_level_up", 2));
 		JS_SetPropertyStr(ctx, g, "sam_get_floor", JS_NewCFunction(ctx, js_sam_get_floor, "sam_get_floor", 0));
-		JS_SetPropertyStr(ctx, g, "sam_spawn_item", JS_NewCFunction(ctx, js_sam_spawn_item, "sam_spawn_item", 3));
+		JS_SetPropertyStr(ctx, g, "sam_spawn_item", JS_NewCFunction(ctx, js_sam_spawn_item, "sam_spawn_item", 6));
 		JS_SetPropertyStr(ctx, g, "sam_item_id", JS_NewCFunction(ctx, js_sam_item_id, "sam_item_id", 1));
 		JS_SetPropertyStr(ctx, g, "sam_message", JS_NewCFunction(ctx, js_sam_message, "sam_message", 2));
 		JS_SetPropertyStr(ctx, g, "sam_play_sound", JS_NewCFunction(ctx, js_sam_play_sound, "sam_play_sound", 2));
@@ -3334,6 +3866,12 @@ namespace
 		JS_SetPropertyStr(ctx, g, "sam_spawn_monster", JS_NewCFunction(ctx, js_sam_spawn_monster, "sam_spawn_monster", 4));
 		JS_SetPropertyStr(ctx, g, "sam_spawn_portal", JS_NewCFunction(ctx, js_sam_spawn_portal, "sam_spawn_portal", 2));
 		JS_SetPropertyStr(ctx, g, "sam_remove_entity", JS_NewCFunction(ctx, js_sam_remove_entity, "sam_remove_entity", 1));
+		JS_SetPropertyStr(ctx, g, "sam_set_chest_stash", JS_NewCFunction(ctx, js_sam_set_chest_stash, "sam_set_chest_stash", 2));
+		JS_SetPropertyStr(ctx, g, "sam_travel_to_level", JS_NewCFunction(ctx, js_sam_travel_to_level, "sam_travel_to_level", 2));
+		JS_SetPropertyStr(ctx, g, "sam_world_save", JS_NewCFunction(ctx, js_sam_world_save, "sam_world_save", 2));
+		JS_SetPropertyStr(ctx, g, "sam_world_load", JS_NewCFunction(ctx, js_sam_world_load, "sam_world_load", 1));
+		JS_SetPropertyStr(ctx, g, "sam_world_clear", JS_NewCFunction(ctx, js_sam_world_clear, "sam_world_clear", 1));
+		JS_SetPropertyStr(ctx, g, "sam_world_keys", JS_NewCFunction(ctx, js_sam_world_keys, "sam_world_keys", 0));
 		JS_SetPropertyStr(ctx, g, "sam_get_inventory", JS_NewCFunction(ctx, js_sam_get_inventory, "sam_get_inventory", 1));
 		JS_SetPropertyStr(ctx, g, "sam_remove_item", JS_NewCFunction(ctx, js_sam_remove_item, "sam_remove_item", 1));
 		// v1.4.0 — floating companion ("Stand") + facing reader.

@@ -29,6 +29,7 @@
 #include <fstream>
 #include <sstream>
 #include <set>
+#include <cstdint>
 
 #ifndef EDITOR
 #include "main.hpp"          // MAXPLAYERS, CLIENT, multiplayer
@@ -65,7 +66,11 @@ static std::map<int, std::set<int>> s_classPassives;
 // grants them. Barony's own ClassHotbarConfig_t::assignHotbarSlots() runs a few frames
 // LATER and zeroes every hotbar slot, so the pins have to be re-applied after it — see
 // reapplyHotbarPins(), called at the end of assignHotbarSlots.
-static std::map<int, std::vector<std::pair<int, Uint32>>> s_hotbarPins;
+// uint32_t rather than SDL's Uint32: this declaration is at file scope, but Uint32 only
+// arrives with main.hpp, which is included under #ifndef EDITOR below. The editor build
+// therefore failed to compile this file at all. The two types are the same width and
+// the same type on every platform we build for, so nothing else changes.
+static std::map<int, std::vector<std::pair<int, uint32_t>>> s_hotbarPins;
 
 static bool readWholeFile(const std::string& path, std::string& out)
 {
