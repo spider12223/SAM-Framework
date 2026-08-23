@@ -17,6 +17,8 @@ import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { generateLua } from '../src/lib/codegen.js';
+import { ACTIONS, CONDITIONS } from '../src/data/blocks.js';
+import { SNIPPETS } from '../src/data/snippets.js';
 import { untilCandidates, findAction, ENGINE_WRITTEN_STATS, conditionsFor, findTrigger, findCondition } from '../src/data/blocks.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -582,6 +584,82 @@ function assert(name, cond) {
   }
   assert(`no setMeta dispatch uses a key other than 'patch'${offenders.length ? ' -- ' + offenders.join('; ') : ''}`,
     offenders.length === 0);
+}
+
+// ---------------------------------------------------------------------------------
+// EVERY block must generate Lua that at least PARSES.
+//
+// The cases above are hand written, so a block nobody wrote a case for was never run at
+// all -- nine blocks were added at one point and the suite still reported the same number
+// of tests. A typo in one of those would have shipped and only surfaced as a mod that
+// silently did nothing. This sweeps the whole catalog with each block's own defaults, so
+// a new block is covered the moment it exists.
+//
+// Parsing is a low bar on purpose: it cannot know what a block SHOULD do. It is here to
+// catch the class of error that makes a block inert rather than wrong.
+// ---------------------------------------------------------------------------------
+if (LUA) {
+  const broken = [];
+  const probe = (kind, b) => {
+    const p = {};
+    for (const q of (b.params || [])) p[q.name] = q.default;
+    let body;
+    try { body = b.lua(p); }
+    catch (e) { broken.push(`${kind} '${b.id}': generator threw -- ${e.message}`); return; }
+    if (typeof body !== 'string' || !body.trim()) {
+      broken.push(`${kind} '${b.id}': produced no Lua`); return;
+    }
+    // A condition is an expression; an action is a statement. Wrap each so it is valid
+    // where the real codegen puts it, with the same locals in scope.
+    const src = kind === 'condition'
+      ? `local player, event = 0, {}
+local _ = (${body})
+`
+      : `local player, event = 0, {}
+${body}
+`;
+    const f = join(TMP, 'probe.lua');
+    writeFileSync(f, src);
+    const luaPath = JSON.stringify(f.split('\\').join('/'));
+    const oneLiner = `local fn, err = loadfile(${luaPath}); if not fn then io.write(tostring(err)) end`;
+    try {
+      const err = execFileSync(LUA, ['-e', oneLiner], { encoding: 'utf8' }).trim();
+      if (err) broken.push(`${kind} '${b.id}': ${err}`);
+    } catch (e) { broken.push(`${kind} '${b.id}': lua crashed -- ${e.message}`); }
+  };
+  for (const b of ACTIONS) probe('action', b);
+  for (const b of CONDITIONS) probe('condition', b);
+  assert(`all ${ACTIONS.length} actions and ${CONDITIONS.length} conditions generate parseable Lua`
+    + (broken.length ? ` -- ${broken.join(' | ')}` : ''), broken.length === 0);
+}
+
+// ---------------------------------------------------------------------------------
+// Every SNIPPET must be valid in BOTH languages.
+//
+// Snippets are copy-paste starters, so a broken one does not fail loudly -- it teaches a
+// modder something wrong and costs them an evening. Both forms are checked because the
+// pair is meant to be the same script in two languages, and it is easy to fix one and
+// forget the other.
+// ---------------------------------------------------------------------------------
+if (LUA) {
+  const bad = [];
+  for (const sn of SNIPPETS) {
+    const f = join(TMP, 'snippet.lua');
+    writeFileSync(f, sn.lua || '');
+    const luaPath = JSON.stringify(f.replace(/\\/g, '/'));
+    try {
+      const err = execFileSync(LUA, ['-e',
+        `local fn, e = loadfile(${luaPath}); if not fn then io.write(tostring(e)) end`],
+        { encoding: 'utf8' }).trim();
+      if (err) bad.push(`'${sn.title}' lua: ${err}`);
+    } catch (e) { bad.push(`'${sn.title}' lua crashed: ${e.message}`); }
+
+    // The JS form goes through the same parser the browser will use.
+    try { new Function(sn.js || ''); }
+    catch (e) { bad.push(`'${sn.title}' js: ${e.message}`); }
+  }
+  assert(`all ${SNIPPETS.length} snippets are valid Lua and valid JS`
+    + (bad.length ? ` -- ${bad.join(' | ')}` : ''), bad.length === 0);
 }
 
 // ---------------------------------------------------------------------------------

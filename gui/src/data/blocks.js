@@ -334,6 +334,24 @@ function hpChange(stat, p) {
  * `negatable` gives solidius's "having no effect" for free.
  */
 export const CONDITIONS = [
+  // ---- v1.11.0 -------------------------------------------------------------------
+  {
+    id: 'remembered_is', label: 'something remembered is a value', negatable: true,
+    params: [
+      { name: 'key', type: 'text', default: 'visited_hub', label: 'name for it' },
+      { name: 'value', type: 'text', default: 'yes', label: 'equals' },
+    ],
+    lua: (p) => `sam_world_load(${q(p.key)}) == ${q(p.value)}`,
+    phrase: (p) => `"${p.key}" is "${p.value}" for this character`,
+    phraseNeg: (p) => `"${p.key}" is NOT "${p.value}" for this character`,
+  },
+  {
+    id: 'has_remembered', label: 'something has been remembered', negatable: true,
+    params: [{ name: 'key', type: 'text', default: 'visited_hub', label: 'name for it' }],
+    lua: (p) => `sam_world_load(${q(p.key)}) ~= nil`,
+    phrase: (p) => `this character has "${p.key}" remembered`,
+    phraseNeg: (p) => `this character has never had "${p.key}" remembered`,
+  },
   {
     id: 'has_effect', label: 'is under an effect', negatable: true,
     params: [{ name: 'effect', type: 'select', values: EFFECTS, default: 'POISONED' }],
@@ -575,6 +593,119 @@ export const CONDITIONS = [
  * that has no killer_uid and silently does nothing forever.
  */
 export const ACTIONS = [
+  // ---- v1.11.0 -------------------------------------------------------------------
+  // These wrap the things that were script-only until now. Each one is written as an
+  // OUTCOME rather than as one block per function, because a person using the Basic tab
+  // is thinking "send them home", not "set skipLevelsOnLoad".
+  {
+    id: 'travel_to_floor', label: 'send the player to a floor', category: 'World',
+    params: [
+      { name: 'floor', type: 'number', default: 1, min: 1, max: 100, label: 'floor number' },
+    ],
+    lua: (p) => `sam_travel_to_level(${Math.max(1, Math.trunc(Number(p.floor) || 1))})`,
+    note: 'Works in both directions -- this is the only way to go back UP, which the game '
+        + 'itself never does, so it is what a hub or a home base is built on. It moves the '
+        + 'whole party, not one player. Floor 0 and "the floor you are already on" are '
+        + 'refused in multiplayer because a connected player would be left behind.',
+  },
+  {
+    id: 'make_chest_stash', label: 'turn a nearby chest into a stash', category: 'World',
+    params: [
+      { name: 'radius', type: 'number', default: 4, min: 1, max: 20, label: 'search radius (tiles)' },
+    ],
+    lua: (p) => {
+      const r = Math.max(1, Math.trunc(Number(p.radius) || 4));
+      return [
+        'do',
+        '  local uid = sam_get_player_uid(player)',
+        '  local px, py = nil, nil',
+        '  if uid then px, py = sam_get_position(uid) end',
+        '  if px then',
+        `    local found = sam_find_entities(px, py, ${r}, "chest")`,
+        '    if found and found[1] then sam_set_chest_stash(found[1], true) end',
+        '  end',
+        'end',
+      ].join('\n');
+    },
+    note: 'Whatever the player leaves in that chest follows them down every floor and '
+        + 'survives saving and loading. Every stash chest in a run shares one set of '
+        + 'contents and the window holds 12 stacks, so it is a stash, not a bank. Prefer '
+        + 'an empty chest: converting one that already holds loot hides that loot until '
+        + 'you turn the stash back off.',
+  },
+  {
+    id: 'remember_value', label: 'remember something (this character only)', category: 'Memory',
+    params: [
+      { name: 'key', type: 'text', default: 'visited_hub', label: 'name for it' },
+      { name: 'value', type: 'text', default: 'yes', label: 'value to store' },
+    ],
+    lua: (p) => `sam_world_save(${q(p.key)}, ${q(p.value)})`,
+    note: 'Stored INSIDE this character\u2019s savegame, so a brand new character never '
+        + 'inherits it. That is the difference from the older saved data, which is shared '
+        + 'by every character you ever roll. Use this for unlocks and quest progress; keep '
+        + 'items in a stash chest instead.',
+  },
+  {
+    id: 'forget_value', label: 'forget something remembered', category: 'Memory',
+    params: [{ name: 'key', type: 'text', default: 'visited_hub', label: 'name for it' }],
+    lua: (p) => `sam_world_clear(${q(p.key)})`,
+    note: 'Only needed to reset something mid-run -- everything remembered is dropped '
+        + 'automatically when the run ends.',
+  },
+  {
+    id: 'fire_projectile', label: 'fire a projectile', category: 'Combat',
+    params: [
+      { name: 'damage', type: 'number', default: 5, min: 0, label: 'damage' },
+      { name: 'speed', type: 'number', default: 6, min: 1, max: 20, label: 'speed' },
+      { name: 'model', type: 'text', default: '166', label: 'model (a number, or ns:model)' },
+      { name: 'range', type: 'number', default: 2, min: 0.2, max: 20, label: 'range (seconds)' },
+    ],
+    lua: (p) => {
+      const dmg = Math.max(0, Math.trunc(Number(p.damage) || 0));
+      const spd = Math.min(20, Math.max(1, Number(p.speed) || 6));
+      const life = Math.round(Math.min(20, Math.max(0.2, Number(p.range) || 2)) * 50);
+      return [
+        'do',
+        '  local uid = sam_get_player_uid(player)',
+        '  local px, py = nil, nil',
+        '  if uid then px, py = sam_get_position(uid) end',
+        '  local yaw = sam_get_facing(player)',
+        '  if px and yaw then',
+        `    sam_spawn_projectile(px, py, yaw, ${spd}, ${dmg}, ${life}, ${q(p.model)}, player)`,
+        '  end',
+        'end',
+      ].join('\n');
+    },
+    note: 'Fires from the player, in the direction they are looking. Leave the model blank '
+        + 'and the shot is invisible, which is almost never what you want -- 166 is an '
+        + 'arrow. Range is how long it flies before giving up. It stops on the first thing '
+        + 'it hits and fires the "on_projectile_hit" trigger, so you can chain an explosion.',
+  },
+  {
+    id: 'show_window', label: 'show a window with a message', category: 'Windows',
+    params: [
+      { name: 'title', type: 'text', default: 'Notice', label: 'title bar' },
+      { name: 'text', type: 'text', default: 'Something happened.', label: 'message' },
+      { name: 'button', type: 'text', default: 'OK', label: 'button text' },
+    ],
+    lua: (p) => [
+      `sam_ui_open("blockwin", 340, 240, 600, 240, ${q(p.title)}, true)`,
+      `sam_ui_label("blockwin", "msg", 20, 20, 560, ${q(p.text)})`,
+      `sam_ui_button("blockwin", "ok", 20, 170, 160, 40, ${q(p.button)})`,
+    ].join('\n'),
+    note: 'A simple notice the player has to acknowledge. The button fires the '
+        + '"ui.on_click" trigger, so pair this with a "close the window" action there. '
+        + 'Coordinates are a fixed 1280x720 space, not your monitor\u2019s pixels. For a '
+        + 'shop or a browser -- anything with lists and typing -- write a script; a single '
+        + 'block cannot describe a whole interface.',
+  },
+  {
+    id: 'close_window', label: 'close the window', category: 'Windows',
+    params: [],
+    lua: () => 'sam_ui_close("blockwin")',
+    note: 'Closes the window the block above opened, and gives the player their mouse '
+        + 'back. Put this on the "ui.on_click" trigger.',
+  },
   {
     id: 'grant_item', label: 'give an item', category: 'Rewards',
     params: [
