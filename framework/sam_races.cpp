@@ -22,8 +22,10 @@
 #include "mod_tools.hpp" // ItemTooltips.spellItems (vanilla spell-name resolve)
 #include "magic/magic.hpp" // addSpell
 #include "sam_spells.hpp"  // grant custom "ns:spell" innate race spells
+#include "sam_models.hpp"  // SAMModels::modelIndexForId (resolve a race's limb models)
 
 #include <algorithm>
+#include <set>
 #include <fstream>
 #include <sstream>
 #include <map>
@@ -76,6 +78,22 @@ namespace
 		for ( int i = 0; i < NUMMONSTERS; ++i ) { if ( want == monstertypename[i] ) { return i; } }
 		return -1;
 	}
+
+	// The five limbs the player draw path can be told to replace, and the JSON name for
+	// each. "head" is deliberately absent: the engine sets the head on the player entity
+	// itself, not through setDefaultPlayerModel, so it is carried separately.
+	struct LimbSlot { const char* key; int limbType; };
+	const LimbSlot kLimbSlots[] = {
+		{ "torso",     LIMB_HUMANOID_TORSO    },
+		{ "leg_right", LIMB_HUMANOID_RIGHTLEG },
+		{ "leg_left",  LIMB_HUMANOID_LEFTLEG  },
+		{ "arm_right", LIMB_HUMANOID_RIGHTARM },
+		{ "arm_left",  LIMB_HUMANOID_LEFTARM  },
+	};
+
+	// Every model index any registered race uses as a head. Rebuilt by resolveLimbModels
+	// and consulted by isRaceHeadSprite; empty in vanilla.
+	std::set<int> s_raceHeadSprites;
 
 	// Registry — EMPTY in vanilla (the whole no-op guarantee).
 	std::map<int, SAMRaceDef> s_byId;            // runtime id 200..255 -> def
@@ -194,6 +212,20 @@ void SAMRaces::loadFromManifest(const SAMModManifest& manifest)
 				out.push_back(m);
 			}
 		};
+		// limb_models: kept as written and resolved later — the model table does not exist
+		// during mod load, so an index cannot be validated or looked up here.
+		auto lm = j.find("limb_models");
+		if ( lm != j.end() && lm->is_object() )
+		{
+			for ( auto it = lm->begin(); it != lm->end(); ++it )
+			{
+				if ( it.value().is_string() && !it.value().get<std::string>().empty() )
+				{
+					def.limbModels[it.key()] = it.value().get<std::string>();
+				}
+			}
+		}
+
 		readMonsterList("allies", def.allies);
 		readMonsterList("enemies", def.enemies);
 
@@ -243,6 +275,106 @@ void SAMRaces::loadFromManifest(const SAMModManifest& manifest)
 	}
 }
 
+namespace
+{
+	// Resolve one model reference three ways, in the order a modder expects: a model this
+	// mod declared, then a mod-relative .vox path (which registration turned into an id),
+	// then a raw vanilla index.
+	//
+	// A bad reference is REPORTED, never silently dropped. Both failure modes here are
+	// invisible in game -- opengl.cpp draws index 0 and out-of-range indices as nothing at
+	// all, with no log line and nothing in /sam_models, because no model was ever
+	// registered -- so the message is the only thing standing between a modder and an
+	// afternoon of wondering why their arm vanished.
+	int resolveModelRef(const std::string& ref, const std::string& raceId, const std::string& slot)
+	{
+		int idx = SAMModels::modelIndexForId(ref);
+		if ( idx >= 0 ) { return idx; }
+
+		char* end = nullptr;
+		const long n = std::strtol(ref.c_str(), &end, 10);
+		if ( end && *end == '\0' )
+		{
+			if ( n > 0 && n < (long)nummodels ) { return (int)n; }
+			SAM_ERROR(MOD, "Race [" + raceId + "] limb_models." + slot + " is model index "
+				+ std::to_string(n) + ", which is "
+				+ ( n == 0 ? std::string("models/system/null.vox, the engine's EMPTY model")
+				           : std::string("past the end of the table (this game has ")
+				             + std::to_string((long long)nummodels) + " models, 1.."
+				             + std::to_string((long long)nummodels - 1) + ")" )
+				+ ". That limb would draw as nothing, so it is ignored."
+				" Remember models.txt line N is index N-1.");
+			return -1;
+		}
+
+		SAM_WARN(MOD, "Race [" + raceId + "] limb_models." + slot + " '" + ref
+			+ "' is not a registered model — ignoring it (that limb keeps the host body's"
+			" own model). Declare it in mod.json \"models\", or use a raw vanilla index.");
+		return -1;
+	}
+}
+
+void SAMRaces::resolveLimbModels()
+{
+	s_raceHeadSprites.clear();
+	for ( auto& kv : s_byId )
+	{
+		SAMRaceDef& def = kv.second;
+		def.limbModelIdx.clear();
+		def.headModelIdx = -1;
+		if ( def.limbModels.empty() ) { continue; }
+
+		for ( const LimbSlot& slot : kLimbSlots )
+		{
+			auto it = def.limbModels.find(slot.key);
+			if ( it == def.limbModels.end() ) { continue; }
+			const int idx = resolveModelRef(it->second, def.id, slot.key);
+			if ( idx >= 0 ) { def.limbModelIdx[slot.limbType] = idx; }
+		}
+
+		auto head = def.limbModels.find("head");
+		if ( head != def.limbModels.end() )
+		{
+			const int idx = resolveModelRef(head->second, def.id, "head");
+			if ( idx >= 0 )
+			{
+				def.headModelIdx = idx;
+				// Whatever the head resolved to -- our .vox or a vanilla monster limb --
+				// the engine has to agree it is a player head, or multiplayer breaks.
+				s_raceHeadSprites.insert(idx);
+			}
+		}
+
+		if ( !def.limbModelIdx.empty() || def.headModelIdx >= 0 )
+		{
+			SAM_INFO(MOD, "  " + def.name + " body: "
+				+ std::to_string((int)def.limbModelIdx.size() + (def.headModelIdx >= 0 ? 1 : 0))
+				+ " custom limb model(s) on the " + def.hostBodyName + " frame");
+		}
+	}
+}
+
+int SAMRaces::limbModelFor(int raceId, int limbType)
+{
+	if ( raceId < SAM_RACE_ID_BASE || s_byId.empty() ) { return -1; }
+	auto it = s_byId.find(raceId);
+	if ( it == s_byId.end() ) { return -1; }
+	auto lit = it->second.limbModelIdx.find(limbType);
+	return ( lit == it->second.limbModelIdx.end() ) ? -1 : lit->second;
+}
+
+int SAMRaces::headModelFor(int raceId)
+{
+	if ( raceId < SAM_RACE_ID_BASE || s_byId.empty() ) { return -1; }
+	auto it = s_byId.find(raceId);
+	return ( it == s_byId.end() ) ? -1 : it->second.headModelIdx;
+}
+
+bool SAMRaces::isRaceHeadSprite(int sprite)
+{
+	return !s_raceHeadSprites.empty() && s_raceHeadSprites.count(sprite) > 0;
+}
+
 int SAMRaces::declaredAllegiance(int raceId, int monsterType)
 {
 	// Ordered cheapest-first. For a vanilla race raceId is 0, so this returns on the
@@ -264,6 +396,9 @@ int SAMRaces::declaredAllegiance(int raceId, int monsterType)
 
 void SAMRaces::clear()
 {
+	// The head set outlives the defs otherwise, and a stale entry makes
+	// isPlayerHeadSprite answer true for a model no race uses any more.
+	s_raceHeadSprites.clear();
 	s_byId.clear();
 	s_byIdString.clear();
 	s_nextId = SAM_RACE_ID_BASE;

@@ -68,6 +68,18 @@ struct SAMRaceDef
 	// -- the host body's own relations stand untouched.
 	std::vector<int> allies;
 	std::vector<int> enemies;
+
+	// Optional "limb_models": this race's OWN body, one model per limb, instead of the
+	// host body's. host_body still decides the skeleton -- the limb offsets, the
+	// animation, which slots exist -- and these decide what is drawn in each slot.
+	//
+	// limbModels holds the reference exactly as the JSON wrote it; limbModelIdx and
+	// headModelIdx hold it resolved to an engine model index, which cannot happen at
+	// parse time because the model table does not exist yet. -1 means "not set", which
+	// is different from 0: index 0 is models/system/null.vox and draws nothing.
+	std::map<std::string, std::string> limbModels;
+	std::map<int, int> limbModelIdx;   // LIMB_HUMANOID_* -> engine model index
+	int headModelIdx = -1;
 };
 
 class SAMRaces
@@ -132,4 +144,25 @@ public:
 	// that declared nothing, which is what keeps the engine sites a true no-op. Callers
 	// must treat -1 as "leave the verdict alone", never as a boolean.
 	static int declaredAllegiance(int raceId, int monsterType);
+
+	// --- custom limb models ---------------------------------------------------------
+	// Turn every declared limb_models reference into an engine model index. Must run
+	// AFTER the model table is built and after a mod's own .vox files are appended to
+	// it, which is why it is a separate pass and not part of loadFromManifest.
+	static void resolveLimbModels();
+
+	// The model this race draws for one limb (a LIMB_HUMANOID_* constant), or -1 to
+	// leave the host body's own model alone. -1 for every vanilla race.
+	static int limbModelFor(int raceId, int limbType);
+
+	// The model this race draws as its head, or -1. Kept apart from limbModelFor
+	// because the engine sets the head on the player entity itself rather than through
+	// the limb path, and never gates it behind an equipment check.
+	static int headModelFor(int raceId);
+
+	// True iff this model index is some registered race's head. The engine's
+	// isPlayerHeadSprite is a hardcoded list of vanilla PLAYER heads; a race head is
+	// not in it (Gharbad's head is a monster limb, not a player head), and answering
+	// false there breaks the client's player-entity binding in multiplayer.
+	static bool isRaceHeadSprite(int sprite);
 };

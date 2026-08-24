@@ -23,6 +23,17 @@ const HOST_BODIES = [
   'myconid', 'salamander', 'troll', 'spider', 'imp', 'rat',
 ];
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+
+// The six limbs a race can supply its own model for. Order is head-down, so the panel
+// reads like a body rather than like the engine's limb enum.
+const LIMB_SLOTS = [
+  ['head', 'Head', 'Always visible — no armour ever replaces it.'],
+  ['torso', 'Torso', 'Covered by a breastplate.'],
+  ['arm_right', 'Right arm', 'Covered by sleeves and gloves.'],
+  ['arm_left', 'Left arm', 'Covered by sleeves and gloves.'],
+  ['leg_right', 'Right leg', 'Covered by boots and greaves.'],
+  ['leg_left', 'Left leg', 'Covered by boots and greaves.'],
+];
 const prettyMonster = (m) => m.split('_').map(cap).join(' ');
 
 // A removable chip list. Same shape the class editor uses for starting spells, so the two
@@ -65,6 +76,8 @@ export default function RaceEditor() {
   // Declared allegiance. Empty is not "no allies" — it means "inherit the host body's
   // relations", which is why neither list is written to the JSON when it is empty.
   const [allies, setAllies] = useState(editDef?.allies ?? []);
+  const [limbModels, setLimbModels] = useState(() =>
+    Object.fromEntries(LIMB_SLOTS.map(([k]) => [k, editDef?.limb_models?.[k] ?? ''])));
   const [enemies, setEnemies] = useState(editDef?.enemies ?? []);
   const [spellError, setSpellError] = useState('');
   const [scriptLang, setScriptLang] = useState(existingScript?.lang ?? 'lua');
@@ -91,6 +104,9 @@ export default function RaceEditor() {
     if (Object.keys(sm).length) def.stat_modifiers = sm;
     if (bloodDiet) def.blood_diet = true;
     if (startingSpells.length) def.starting_spells = startingSpells;
+    const lm = {};
+    for (const [k] of LIMB_SLOTS) { const v = (limbModels[k] ?? '').trim(); if (v) lm[k] = v; }
+    if (Object.keys(lm).length) def.limb_models = lm;
     if (allies.length) def.allies = allies;
     if (enemies.length) def.enemies = enemies;
     return def;
@@ -125,7 +141,7 @@ export default function RaceEditor() {
 
   const def = useMemo(buildDef,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [name, description, hostBody, mods, bloodDiet, startingSpells, allies, enemies, namespace]);
+    [name, description, hostBody, mods, bloodDiet, startingSpells, allies, enemies, limbModels, namespace]);
   const preview = useMemo(() => JSON.stringify(def, null, 2), [def]);
   const setMod = (a, v) => setMods((prev) => ({ ...prev, [a]: v }));
 
@@ -175,6 +191,33 @@ export default function RaceEditor() {
           </div>
         </Panel>
       </div>
+
+      <Panel title="Body (optional)">
+        <div className="text-xs mb-3" style={{ color: '#8a7749' }}>
+          Leave these blank and you wear the host body's own models, which is what most
+          races want. Fill one in to replace just that limb, or all six for a body of your
+          own. The host body still decides the skeleton: the animation, the limb positions,
+          and which slots exist — these only change what is drawn in each slot.
+          <br />
+          Each takes a model you declared in <span className="sam-mono">mod.json</span>{' '}
+          (<span className="sam-mono">{namespace}:name</span>), a path to your own .vox, or a
+          raw vanilla model index. Remember <span className="sam-mono">models.txt</span> line
+          N is index N-1.
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {LIMB_SLOTS.map(([key, label, hint]) => (
+            <Field key={key} label={label} hint={hint}>
+              <TextInput value={limbModels[key]}
+                onChange={(v) => setLimbModels((p) => ({ ...p, [key]: v }))}
+                placeholder="blank = host body" />
+            </Field>
+          ))}
+        </div>
+        <div className="text-xs mt-3" style={{ color: '#6b5a35' }}>
+          First-person view keeps the host body's arm — the game has no first-person model
+          for most creatures, so there is nothing to swap it for.
+        </div>
+      </Panel>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
         <Panel title="Allegiance">

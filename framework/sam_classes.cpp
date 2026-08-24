@@ -41,8 +41,7 @@
 #include "mod_tools.hpp"     // ItemTooltips (itemNameStringToItemID, spellItems)
 #include "magic/magic.hpp"   // addSpell
 #include "sam_spells.hpp"    // SAMSpells::getSpellByName (custom starting spells)
-#include "sam_races.hpp"     // SAMRaces::hostMonsterForRace (head override for custom races)
-#include "monster.hpp"       // Monster enum (map a custom race's host body to a race key)
+#include "monster.hpp"       // Monster enum (samRaceKey maps the drawn body to a race key)
 #include <cctype>
 #include <cstdlib>           // free
 #include <system_error>
@@ -942,68 +941,43 @@ namespace
 	// Barony's RACE_* -> the Monster enum name a modder writes in "races". Kept local so
 	// this file doesn't depend on the engine's race tables; an unknown key simply never
 	// matches and falls through to "default", which is the safe outcome.
+	// The character-select "race" a class appearance entry is keyed by, from the MONSTER
+	// the player is drawn as.
+	//
+	// Takes a Monster, not a PlayerRaces id, because a Monster is what the call site has:
+	// actPlayer resolves playerRace through getMonsterFromPlayerRace long before the head
+	// is set. It used to switch on 0-17 as though those were PlayerRaces constants, which
+	// silently mapped a human (Monster HUMAN == 1) to "SKELETON" and a goatman (29) to
+	// nothing at all -- so a per-race head landed on the wrong race or vanished.
+	//
+	// Reading the MONSTER also makes S.A.M custom races work with no extra arm: they reach
+	// here already resolved to the body they wear, so a head authored for GOATMAN applies
+	// to a goatman-bodied custom race. That is the correct key as well as the convenient
+	// one -- the limb offset table is indexed by monster type, so the head lands on the
+	// focal point it was drawn for.
 	const char* samRaceKey(int playerRace)
 	{
 		switch ( playerRace )
 		{
-			case 0:  return "HUMAN";
-			case 1:  return "SKELETON";
-			case 2:  return "VAMPIRE";
-			case 3:  return "SUCCUBUS";
-			case 4:  return "GOATMAN";
-			case 5:  return "AUTOMATON";
-			case 6:  return "INCUBUS";
-			case 7:  return "GOBLIN";
-			case 8:  return "INSECTOID";
-			case 9:  return "RAT";
-			case 10: return "TROLL";
-			case 11: return "SPIDER";
-			case 12: return "IMP";
-			case 13: return "GNOME";
-			case 14: return "GREMLIN";
-			case 15: return "DRYAD";
-			case 16: return "MYCONID";
-			case 17: return "SALAMANDER";
-			default: break;
-		}
-
-		// A S.A.M custom race (id >= 200) answers for the body it WEARS. Without this it
-		// answered "" and fell through to "default", so a class that wrote a GOATMAN head
-		// silently did nothing for a goatman-bodied custom race — and silently, because a
-		// head that is never overridden looks exactly like one you did not write.
-		//
-		// Resolving through the host body is not merely convenient, it is the correct key:
-		// the limb offset table is indexed by the host MONSTER type, which is the reason
-		// this function refuses to force a head onto a race nobody authored for. A race
-		// riding the goatman body sits at the goatman's focal points, so a head authored
-		// for GOATMAN lands exactly where it should.
-		//
-		// Guarded rather than relying on hostMonsterForRace's HUMAN default: an id between
-		// RACE_ENUM_END and 200 is not a race at all, and answering "HUMAN" for it would
-		// force a human head onto a player whose race we could not identify.
-		if ( playerRace < SAM_RACE_ID_BASE ) { return ""; }
-
-		switch ( SAMRaces::hostMonsterForRace(playerRace) )
-		{
-			case HUMAN:      return "HUMAN";
-			case SKELETON:   return "SKELETON";
-			case VAMPIRE:    return "VAMPIRE";
-			case SUCCUBUS:   return "SUCCUBUS";
-			case GOATMAN:    return "GOATMAN";
-			case AUTOMATON:  return "AUTOMATON";
-			case INCUBUS:    return "INCUBUS";
-			case GOBLIN:     return "GOBLIN";
-			case INSECTOID:  return "INSECTOID";
-			case RAT:        return "RAT";
-			case TROLL:      return "TROLL";
-			case SPIDER:     return "SPIDER";
+			case HUMAN:        return "HUMAN";
+			case SKELETON:     return "SKELETON";
+			case VAMPIRE:      return "VAMPIRE";
+			case SUCCUBUS:     return "SUCCUBUS";
+			case GOATMAN:      return "GOATMAN";
+			case AUTOMATON:    return "AUTOMATON";
+			case INCUBUS:      return "INCUBUS";
+			case GOBLIN:       return "GOBLIN";
+			case INSECTOID:    return "INSECTOID";
+			case RAT:          return "RAT";
+			case TROLL:        return "TROLL";
+			case SPIDER:       return "SPIDER";
 			case CREATURE_IMP: return "IMP";
-			case GNOME:      return "GNOME";
-			case GREMLIN:    return "GREMLIN";
-			case DRYAD:      return "DRYAD";
-			case MYCONID:    return "MYCONID";
-			case SALAMANDER: return "SALAMANDER";
-			default:         return "";
+			case GNOME:        return "GNOME";
+			case GREMLIN:      return "GREMLIN";
+			case DRYAD:        return "DRYAD";
+			case MYCONID:      return "MYCONID";
+			case SALAMANDER:   return "SALAMANDER";
+			default:           return "";
 		}
 	}
 }
@@ -1055,9 +1029,13 @@ void SAMClasses::resolveAppearance()
 			}
 			if ( idx < 0 ) { continue; }
 			def.appearanceHeadIdx[hv.first] = idx;
-			// Only OUR models need the isPlayerHeadSprite widening; a vanilla index is
-			// already in the engine's switch.
-			if ( SAMModels::modelIndexForId(hv.second) >= 0 ) { s_customHeadSprites.insert(idx); }
+			// Widen isPlayerHeadSprite for whatever this resolved to, ours or vanilla.
+			// It used to widen only for our own .vox on the theory that "a vanilla index is
+			// already in the engine's switch" -- but that switch lists the vanilla PLAYER
+			// heads, and the interesting vanilla indices to point a class at are monster
+			// limbs (Gharbad's head, say), which are not in it. Leaving those unwidened
+			// broke the client's player-entity binding in multiplayer.
+			s_customHeadSprites.insert(idx);
 			SAM_DEBUG(MOD, "  [" + def.id + "] head for " + hv.first + " -> model " + std::to_string(idx));
 		}
 

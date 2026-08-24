@@ -211,6 +211,37 @@
       },
       "uniqueItems": true,
       "description": "Monster types that are always hostile to this race, even ones the host body gets along with. Listing a type in both allies and enemies makes it an enemy, and the game log says so."
+    },
+    "limb_models": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "This race's own body, one model per limb, instead of the host body's. host_body still decides the skeleton: the limb offsets, the animation, and which slots exist. These decide what is drawn in each slot. Omit a limb and it keeps the host body's model, so you can replace just a head or the whole body. Every limb except the head is only visible when that armour slot is empty, which is how every race in the game already works.",
+      "properties": {
+        "head": {
+          "type": "string",
+          "description": "The head. This is the one limb no armour ever replaces, so it always shows. Three forms are accepted: an id you declared in mod.json \"models\" (\"<ns>:name\"), a mod-relative path to your own .vox (\"models/<ns>/foo.vox\"), or a raw vanilla model index (1..nummodels-1; remember models.txt line N is index N-1)."
+        },
+        "torso": {
+          "type": "string",
+          "description": "The chest. Shown bare; a breastplate covers it, exactly as it does for any other race. Three forms are accepted: an id you declared in mod.json \"models\" (\"<ns>:name\"), a mod-relative path to your own .vox (\"models/<ns>/foo.vox\"), or a raw vanilla model index (1..nummodels-1; remember models.txt line N is index N-1)."
+        },
+        "arm_right": {
+          "type": "string",
+          "description": "The right arm. Shown bare; sleeves and gloves cover it. Three forms are accepted: an id you declared in mod.json \"models\" (\"<ns>:name\"), a mod-relative path to your own .vox (\"models/<ns>/foo.vox\"), or a raw vanilla model index (1..nummodels-1; remember models.txt line N is index N-1)."
+        },
+        "arm_left": {
+          "type": "string",
+          "description": "The left arm. Shown bare; sleeves and gloves cover it. Three forms are accepted: an id you declared in mod.json \"models\" (\"<ns>:name\"), a mod-relative path to your own .vox (\"models/<ns>/foo.vox\"), or a raw vanilla model index (1..nummodels-1; remember models.txt line N is index N-1)."
+        },
+        "leg_right": {
+          "type": "string",
+          "description": "The right leg. Shown bare; boots and greaves cover it. Three forms are accepted: an id you declared in mod.json \"models\" (\"<ns>:name\"), a mod-relative path to your own .vox (\"models/<ns>/foo.vox\"), or a raw vanilla model index (1..nummodels-1; remember models.txt line N is index N-1)."
+        },
+        "leg_left": {
+          "type": "string",
+          "description": "The left leg. Shown bare; boots and greaves cover it. Three forms are accepted: an id you declared in mod.json \"models\" (\"<ns>:name\"), a mod-relative path to your own .vox (\"models/<ns>/foo.vox\"), or a raw vanilla model index (1..nummodels-1; remember models.txt line N is index N-1)."
+        }
+      }
     }
   }
 }
