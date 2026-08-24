@@ -93,7 +93,7 @@ JSON says what your content [i]is[/i]. A script says what it [i]does[/i]. Drop a
 
 [b]65 events[/b] to react to. Combat, level up, death, floor change, items (equip, use, pick up, identify, break), shops, chests, traps, monsters, key presses, a per tick handler, world things (doors, levers, fountains, teleporters, projectile hits), and bound actions that follow whatever the player rebound them to.
 
-[b]165 functions[/b] to act with. Grant items and gold at any quality, read and set stats, level a player up for real, apply and read status effects, cast spells, deal or change damage, move speed, teleport, spawn monsters and items, full monster control by id, timers, saved data that survives between runs, screen effects, and live patching that reverts when your mod unloads.
+[b]168 functions[/b] to act with. Grant items and gold at any quality, read and set stats, level a player up for real, apply and read status effects, cast spells, deal or change damage, move speed, teleport, spawn monsters and items, full monster control by id, timers, saved data that survives between runs, screen effects, and live patching that reverts when your mod unloads.
 
 Only two functions ever get called: [b]on_event(event)[/b] and [b]on_tick(event)[/b]. Everything else arrives as [b]event.name[/b] inside on_event.
 
