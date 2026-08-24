@@ -24,7 +24,7 @@
 
 ## What is S.A.M?
 
-**S.A.M (Support All Mods)** is a patched Barony executable that turns Barony into a data-driven modding platform. Instead of writing and compiling C++, modders describe custom **classes**, **items**, and **weapons** in plain JSON files. S.A.M reads those files at launch — from any mod folder Barony already mounts — and registers the content into the running game: custom classes appear on the character-select screen with their own portraits, stats, skills, starting gear and spells; custom items slot into the game's item table. A built-in multiplayer sync check warns players when a lobby's mods don't match. No C++ knowledge required.
+**S.A.M (Support All Mods)** is a patched Barony executable that turns Barony into a data-driven modding platform. Instead of writing and compiling C++, modders describe custom **classes**, **items**, **monsters**, **playable races**, **spells**, **status effects**, **sounds** and **models** in plain JSON files. S.A.M reads those files at launch — from any mod folder Barony already mounts — and registers the content into the running game: custom classes appear on the character-select screen with their own portraits, stats, skills, starting gear and spells; custom items slot into the game's item table; a custom race appears in the race picker wearing a body you chose, limb by limb. A built-in multiplayer sync check warns players when a lobby's mods don't match. No C++ knowledge required.
 
 > S.A.M is a **framework**, not a standalone game. You need to own **[Barony on Steam](https://store.steampowered.com/app/371970/Barony/)** to use it.
 
@@ -106,7 +106,7 @@ end
 
 ### Hooks & API
 
-**As of v2.0 the scripting surface is 168 functions and 65 events**, every one of them available in Lua, JavaScript and TypeScript alike. The full, generated reference lives in the [Mod Builder](https://spider12223.github.io/SAM-Framework/) — it is built from the engine source, so it is the one that is never out of date. What follows is the historical tour, kept because it explains the ideas rather than just listing names.
+**As of v2.1 the scripting surface is 168 functions and 65 events**, every one of them available in Lua, JavaScript and TypeScript alike. The full, generated reference lives in the [Mod Builder](https://spider12223.github.io/SAM-Framework/) — it is built from the engine source, so it is the one that is never out of date. What follows is the historical tour, kept because it explains the ideas rather than just listing names.
 
 **41 gameplay hooks and 26 host API functions** — every hook fires in Lua, JavaScript and TypeScript alike, host-authoritative (server/singleplayer only). The tables below are the v0.3–v0.5 core; **[New in v0.6.0](#new-in-v060)** adds 30 hooks and 14 host APIs (timers, persistent data, custom cross-runtime hooks, player queries).
 
@@ -319,6 +319,12 @@ All content is validated against JSON Schemas (draft-07), which are the single s
 | [`mod.schema.json`](schemas/mod.schema.json) | The `mod.json` manifest |
 | [`class.schema.json`](schemas/class.schema.json) | A custom class |
 | [`item.schema.json`](schemas/item.schema.json) | A custom item / weapon |
+| [`monster.schema.json`](schemas/monster.schema.json) | A monster variant, with its own stats, gear and spawns |
+| [`race.schema.json`](schemas/race.schema.json) | A playable race: host body, its own limb models, allegiances |
+| [`spell.schema.json`](schemas/spell.schema.json) | A castable custom spell |
+| [`effect.schema.json`](schemas/effect.schema.json) | A custom status effect |
+| [`sound.schema.json`](schemas/sound.schema.json) | An `.ogg` your mod ships |
+| [`recipe.schema.json`](schemas/recipe.schema.json) | What the tinkering kit can build |
 | [`patch.schema.json`](schemas/patch.schema.json) | A layered patch to an existing data file |
 
 A human-readable, always-in-sync field reference is generated from these: **[Schema Reference →](https://spider12223.github.io/SAM-Framework/docs/schema-reference.html)** (or open [`docs/schema-reference.html`](docs/schema-reference.html) locally).

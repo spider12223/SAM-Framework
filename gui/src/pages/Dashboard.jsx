@@ -28,16 +28,14 @@ const TRAVELS = [
  * thing a returning modder sees, and the point is 'here is what you can do now that you
  * could not before', not a changelog. */
 const WHATS_NEW = [
-  ['Your creatures can think for themselves',
-   'Barony runs every thing in the world through a function once per frame, and until now that function was always ours. sam_register_behavior lets your script BE it. A turret that tracks and leads a moving target, a boss that changes the rules at half health, a companion that actually pathfinds -- none of that is picked from a list of things we thought of. You get the frame and decide what to spend it on.'],
-  ['Mods can change what happens, not just hear about it',
-   'Sixty-one of sixty-five events used to be announcements: your mod learned a player was hit, after they were hit. Now assigning to the event changes it. event.damage = event.damage / 2 really halves the blow, and returning false refuses it outright. Two mods that both reduce damage BOTH apply -- each sees what the one before it left, instead of overwriting from the original.'],
-  ['A place to come back to',
-   'Barony floors are strictly one way; a ladder only ever counts upward. sam_travel_to_level goes anywhere, including back UP, and sam_set_chest_stash turns a chest into storage that survives descending, dying later, quitting and loading.'],
-  ['Progress that belongs to one character',
-   'sam_world_save stores values inside one savegame, so a brand new character never inherits the last one\'s unlocks. Saves now also record which mods made them and say so plainly if that set changes -- because content ids used to shift when you reordered your mod list, quietly turning saved custom items into different ones.'],
-  ['Windows, projectiles, and the game\'s own data',
-   'Real panels with buttons, lists and text boxes. Projectiles with their own speed, model and damage. And read access to every item, monster and spell the game knows about, so a shop or a bestiary can be built from real data instead of a hand-written table.'],
+  ["Your race can bring its own body",
+   "host_body already gave a race a real creature to wear: its limbs, its animation, its armour behaviour. What it could not do was DIFFER from that creature. limb_models gives you a model per limb (head, torso, both arms, both legs) drawn on the host body's frame. Omit a limb and it keeps the host's, so this covers a new head and a whole new body with one field. Armour still covers what armour covers, because it hooks the same place the game already decides that."],
+  ["Your race can decide who it gets along with",
+   "A race already inherited its host body's relations: a goatman-bodied race is ignored by goatmen without asking for it. allies and enemies are for the relations the host body does NOT have. List a gnome as an ally and gnomes leave you alone, on top of whatever the body already gave you. Shopkeepers stay under the game's own wanted level, so declaring shops friendly does not make robbing them free."],
+  ["The race editor can reach the whole schema",
+   "It gained the body panel and the two allegiance pickers, plus blood_diet and starting_spells. Those last two have been in the schema since 1.3.0 with no way to set them short of editing JSON by hand."],
+  ["A fix worth knowing about if you write classes",
+   "A class could always force a per-race head, and it has been landing on the wrong race since it shipped: the lookup compared two different kinds of number, so a human read as a skeleton and a goatman matched nothing at all. If you wrote one of those and quietly gave up on it, try it again."],
 ];
 
 /** sam-well stat box: big gold number over a small-caps label. */
@@ -87,12 +85,12 @@ export default function Dashboard() {
       {/* --------------------------------------------------- what is new */}
       <Panel title={`New in ${SAM_FRAMEWORK_VERSION}`}>
         <p className="m-0" style={{ color: 'var(--color-parchment)' }}>
-          This one is about reach.{' '}
+          This one is about who you are.{' '}
           <strong style={{ color: 'var(--color-gold)' }}>
-            Mods can now ship whole dungeons and drive monsters themselves.
+            A custom race is a body now, not a costume.
           </strong>{' '}
-          Some of it is new, and some of it turned out to be sitting in the engine already,
-          working and undocumented.
+          It can wear its own models, limb by limb, and it can decide for itself which
+          creatures leave it alone.
         </p>
         <ul className="mt-3 mb-0 space-y-2" style={{ listStyle: 'none', padding: 0 }}>
           {WHATS_NEW.map(([title, blurb]) => (
