@@ -117,6 +117,18 @@ static bool fileExists(const std::string& path)
 	return f.is_open();
 }
 
+// The keys appearance.races accepts. Must stay in step with samRaceKey below, which is
+// what the draw-time lookup is matched against; "default" is the catch-all entry.
+static bool isKnownAppearanceRace(const std::string& key)
+{
+	static const std::set<std::string> kNames = {
+		"default", "HUMAN", "SKELETON", "VAMPIRE", "SUCCUBUS", "GOATMAN", "AUTOMATON",
+		"INCUBUS", "GOBLIN", "INSECTOID", "RAT", "TROLL", "SPIDER", "IMP", "GNOME",
+		"GREMLIN", "DRYAD", "MYCONID", "SALAMANDER",
+	};
+	return kNames.count(key) > 0;
+}
+
 /*-------------------------------------------------------------------------------
 	SAMClasses::loadFromManifest
 -------------------------------------------------------------------------------*/
@@ -325,6 +337,22 @@ void SAMClasses::loadFromManifest(const SAMModManifest& manifest)
 			{
 				for ( auto it = a["races"].begin(); it != a["races"].end(); ++it )
 				{
+					// The lookup at draw time is an exact match against samRaceKey's output,
+					// which is upper case. A key that is merely close -- "human" for "HUMAN"
+					// -- stored fine, matched nothing, and quietly fell back to "default", so
+					// the class dressed every race instead of the one it named. Reject it here
+					// where the file and the field can be pointed at.
+					if ( !isKnownAppearanceRace(it.key()) )
+					{
+						SAMErrors::reportSemantic(MOD, fileLabel,
+							"/appearance/races/" + it.key(), "", "not a race name",
+							"\"default\", or one of HUMAN SKELETON VAMPIRE SUCCUBUS GOATMAN"
+							" AUTOMATON INCUBUS GOBLIN INSECTOID RAT TROLL SPIDER IMP GNOME"
+							" GREMLIN DRYAD MYCONID SALAMANDER (upper case)",
+							"check the spelling and the case",
+							"that entry ignored; the rest of the class loaded.", true);
+						continue;
+					}
 					if ( !it.value().is_object() ) { continue; }
 					const json& entry = it.value();
 					const std::string head = getStr(entry, "head");
