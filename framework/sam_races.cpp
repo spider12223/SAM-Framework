@@ -407,6 +407,19 @@ int SAMRaces::headModelFor(int raceId)
 	return ( it == s_byId.end() ) ? -1 : it->second.headModelIdx;
 }
 
+bool SAMRaces::clientEnemyView(int player, int monsterType, bool vanilla)
+{
+	if ( s_byId.empty() ) { return vanilla; }
+	if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return vanilla; }
+	if ( stats[player]->stat_appearance != 0 ) { return vanilla; }
+	// A shopkeeper's opinion of you is the wanted level's to give, and it already accounts
+	// for a race that cannot shop. Answering here as well would let the two disagree.
+	if ( monsterType == SHOPKEEPER ) { return vanilla; }
+
+	const int rel = declaredAllegiance(stats[player]->playerRace, monsterType);
+	return ( rel < 0 ) ? vanilla : (rel == 0);
+}
+
 bool SAMRaces::isRaceHeadSprite(int sprite)
 {
 	return !s_raceHeadSprites.empty() && s_raceHeadSprites.count(sprite) > 0;

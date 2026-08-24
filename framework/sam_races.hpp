@@ -165,4 +165,15 @@ public:
 	// not in it (Gharbad's head is a monster limb, not a player head), and answering
 	// false there breaks the client's player-entity binding in multiplayer.
 	static bool isRaceHeadSprite(int sprite);
+
+	// Does this player SEE that monster type as hostile?
+	//
+	// For the client-side sites that read the allegiance table directly because
+	// checkEnemy is host-only there: the callout markers and the aim-assist cone. Pass
+	// what the table said as `vanilla` and it is handed straight back for every vanilla
+	// race, every unregistered id, and every relation nobody declared -- so those sites
+	// keep their exact behaviour and only a declared relation changes the answer.
+	//
+	// Shopkeepers are excluded on purpose: their disposition belongs to the wanted level.
+	static bool clientEnemyView(int player, int monsterType, bool vanilla);
 };
