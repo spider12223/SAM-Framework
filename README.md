@@ -106,7 +106,7 @@ end
 
 ### Hooks & API
 
-**As of v1.11.0 the scripting surface is 163 functions and 65 events**, every one of them available in Lua, JavaScript and TypeScript alike. The full, generated reference lives in the [Mod Builder](https://spider12223.github.io/SAM-Framework/) — it is built from the engine source, so it is the one that is never out of date. What follows is the historical tour, kept because it explains the ideas rather than just listing names.
+**As of v2.0 the scripting surface is 165 functions and 65 events**, every one of them available in Lua, JavaScript and TypeScript alike. The full, generated reference lives in the [Mod Builder](https://spider12223.github.io/SAM-Framework/) — it is built from the engine source, so it is the one that is never out of date. What follows is the historical tour, kept because it explains the ideas rather than just listing names.
 
 **41 gameplay hooks and 26 host API functions** — every hook fires in Lua, JavaScript and TypeScript alike, host-authoritative (server/singleplayer only). The tables below are the v0.3–v0.5 core; **[New in v0.6.0](#new-in-v060)** adds 30 hooks and 14 host APIs (timers, persistent data, custom cross-runtime hooks, player queries).
 

@@ -10,7 +10,7 @@ import { useMod } from '@/state/ModContext.jsx';
 import { Panel, GoldButton } from '@/components/ui.jsx';
 
 /** The framework's own version (mods declare their own framework_min_version). */
-const SAM_FRAMEWORK_VERSION = '1.11.0';
+const SAM_FRAMEWORK_VERSION = '2.0.0';
 
 /** Where players get S.A.M itself (the framework is a dependency, not a mod). */
 const WORKSHOP_URL = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472';
@@ -28,18 +28,16 @@ const TRAVELS = [
  * thing a returning modder sees, and the point is 'here is what you can do now that you
  * could not before', not a changelog. */
 const WHATS_NEW = [
-  ['Your mod can have its own windows',
-   'Until now a script could write to the screen and nothing more, so a shop, a quest log, a crafting bench or a settings screen could not be built at all. Panels give you buttons, pictures, scrolling lists and text boxes, and tell you when the player clicks or types. Nothing about the look is fixed by the framework: set your own colours, borders and fonts, or make the background transparent and draw whatever you like.'],
-  ['A home you can go back to',
-   'Barony floors are strictly one way. A ladder only ever counts upward, so no previous version could return a party to a floor it had left, which ruled out a hub, a home base, or a shop you walk back to. sam_travel_to_level sends everyone to any floor, including back up.'],
-  ['A stash that follows you down',
-   'Every floor is regenerated from a seed, so a chest you filled on floor one was gone the moment you climbed down. sam_set_chest_stash turns a chest into permanent storage: what you leave in it survives descending, dying later, quitting and loading. It is the game\'s own void chest underneath, so the window and the save round trip are vanilla.'],
+  ['Your creatures can think for themselves',
+   'Barony runs every thing in the world through a function once per frame, and until now that function was always ours. sam_register_behavior lets your script BE it. A turret that tracks and leads a moving target, a boss that changes the rules at half health, a companion that actually pathfinds -- none of that is picked from a list of things we thought of. You get the frame and decide what to spend it on.'],
+  ['Mods can change what happens, not just hear about it',
+   'Sixty-one of sixty-five events used to be announcements: your mod learned a player was hit, after they were hit. Now assigning to the event changes it. event.damage = event.damage / 2 really halves the blow, and returning false refuses it outright. Two mods that both reduce damage BOTH apply -- each sees what the one before it left, instead of overwriting from the original.'],
+  ['A place to come back to',
+   'Barony floors are strictly one way; a ladder only ever counts upward. sam_travel_to_level goes anywhere, including back UP, and sam_set_chest_stash turns a chest into storage that survives descending, dying later, quitting and loading.'],
   ['Progress that belongs to one character',
-   'The existing saved data is shared by every character you ever roll and outlives the save that made it, which is right for a mod\'s settings and wrong for a character\'s progress. sam_world_save stores values inside one savegame instead, so a new character never starts holding the last one\'s unlocks.'],
-  ['Fire something of your own',
-   'The only thing a script could launch was a fixed vanilla spell, which ruled out ranged enemies with real attack patterns, telegraphed boss volleys, traps, and weapons that shoot anything but an arrow. sam_spawn_projectile takes a speed, a model, damage and a range, and tells you what it hit.'],
-  ['Read the game itself',
-   'A script could ask about the item in your hand and nothing else, so an index of the game could not be written. List every item, monster and spell the game knows about, with the numbers behind a tooltip. Anything a mod added shows up too, so a browser or a shop can be built from real data.'],
+   'sam_world_save stores values inside one savegame, so a brand new character never inherits the last one\'s unlocks. Saves now also record which mods made them and say so plainly if that set changes -- because content ids used to shift when you reordered your mod list, quietly turning saved custom items into different ones.'],
+  ['Windows, projectiles, and the game\'s own data',
+   'Real panels with buttons, lists and text boxes. Projectiles with their own speed, model and damage. And read access to every item, monster and spell the game knows about, so a shop or a bestiary can be built from real data instead of a hand-written table.'],
 ];
 
 /** sam-well stat box: big gold number over a small-caps label. */
