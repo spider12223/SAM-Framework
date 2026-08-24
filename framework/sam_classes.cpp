@@ -41,6 +41,8 @@
 #include "mod_tools.hpp"     // ItemTooltips (itemNameStringToItemID, spellItems)
 #include "magic/magic.hpp"   // addSpell
 #include "sam_spells.hpp"    // SAMSpells::getSpellByName (custom starting spells)
+#include "sam_races.hpp"     // SAMRaces::hostMonsterForRace (head override for custom races)
+#include "monster.hpp"       // Monster enum (map a custom race's host body to a race key)
 #include <cctype>
 #include <cstdlib>           // free
 #include <system_error>
@@ -962,7 +964,46 @@ namespace
 			case 15: return "DRYAD";
 			case 16: return "MYCONID";
 			case 17: return "SALAMANDER";
-			default: return "";
+			default: break;
+		}
+
+		// A S.A.M custom race (id >= 200) answers for the body it WEARS. Without this it
+		// answered "" and fell through to "default", so a class that wrote a GOATMAN head
+		// silently did nothing for a goatman-bodied custom race — and silently, because a
+		// head that is never overridden looks exactly like one you did not write.
+		//
+		// Resolving through the host body is not merely convenient, it is the correct key:
+		// the limb offset table is indexed by the host MONSTER type, which is the reason
+		// this function refuses to force a head onto a race nobody authored for. A race
+		// riding the goatman body sits at the goatman's focal points, so a head authored
+		// for GOATMAN lands exactly where it should.
+		//
+		// Guarded rather than relying on hostMonsterForRace's HUMAN default: an id between
+		// RACE_ENUM_END and 200 is not a race at all, and answering "HUMAN" for it would
+		// force a human head onto a player whose race we could not identify.
+		if ( playerRace < SAM_RACE_ID_BASE ) { return ""; }
+
+		switch ( SAMRaces::hostMonsterForRace(playerRace) )
+		{
+			case HUMAN:      return "HUMAN";
+			case SKELETON:   return "SKELETON";
+			case VAMPIRE:    return "VAMPIRE";
+			case SUCCUBUS:   return "SUCCUBUS";
+			case GOATMAN:    return "GOATMAN";
+			case AUTOMATON:  return "AUTOMATON";
+			case INCUBUS:    return "INCUBUS";
+			case GOBLIN:     return "GOBLIN";
+			case INSECTOID:  return "INSECTOID";
+			case RAT:        return "RAT";
+			case TROLL:      return "TROLL";
+			case SPIDER:     return "SPIDER";
+			case CREATURE_IMP: return "IMP";
+			case GNOME:      return "GNOME";
+			case GREMLIN:    return "GREMLIN";
+			case DRYAD:      return "DRYAD";
+			case MYCONID:    return "MYCONID";
+			case SALAMANDER: return "SALAMANDER";
+			default:         return "";
 		}
 	}
 }
