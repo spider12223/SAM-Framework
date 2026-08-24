@@ -117,6 +117,33 @@ The framework now warns when a model path resolves to a base-game file:
 **If you want to look like an existing creature, use a custom race instead**, which keeps all
 the limbs. See `race.schema.json` and its `host_body` field.
 
+A race can also bring its OWN models for each limb, with `limb_models`:
+
+```json
+"host_body": "goatman",
+"limb_models": {
+  "head": "1025", "torso": "1028",
+  "arm_right": "1023", "arm_left": "1021",
+  "leg_right": "1027", "leg_left": "1026"
+}
+```
+
+`host_body` still decides the skeleton -- the animation, the limb positions, which slots
+exist -- and `limb_models` decides what is drawn in each slot. Omit a limb and it keeps the
+host body's model, so this covers "just the head" and "a whole new body" with one field.
+
+Two things follow from that, and neither is a bug:
+
+- **Everything except the head is only visible when that armour slot is empty.** A custom
+  torso shows bare-chested and a breastplate covers it. That is how every race in the game
+  already works, and it is why a whole-body `body_model` is the wrong tool here.
+- **Pick limbs that fit the host body.** They are drawn at the host's focal points. Models
+  from the same creature family line up; a troll arm on a gnome frame will not.
+
+The **first-person** arm keeps the host body's model. The game ships a first-person arm per
+playable race, not per creature, so for a race built from vanilla creature models there is
+nothing to swap it for.
+
 ### 2. The model index is not the line number
 
 `models.txt` line **N** is model index **N-1**. Grep the file, see `1026:...gharbad_head.vox`,

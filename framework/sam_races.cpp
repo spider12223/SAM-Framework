@@ -91,6 +91,15 @@ namespace
 		{ "arm_left",  LIMB_HUMANOID_LEFTARM  },
 	};
 
+	// "head" is not in kLimbSlots (the engine sets it outside the limb path), so the
+	// accepted-name check has to include it explicitly or a valid file would be rejected.
+	bool isKnownLimbSlot(const std::string& key)
+	{
+		if ( key == "head" ) { return true; }
+		for ( const LimbSlot& s : kLimbSlots ) { if ( key == s.key ) { return true; } }
+		return false;
+	}
+
 	// Every model index any registered race uses as a head. Rebuilt by resolveLimbModels
 	// and consulted by isRaceHeadSprite; empty in vanilla.
 	std::set<int> s_raceHeadSprites;
@@ -197,7 +206,14 @@ void SAMRaces::loadFromManifest(const SAMModManifest& manifest)
 			if ( arr == j.end() || !arr->is_array() ) { return; }
 			for ( const json& e : *arr )
 			{
-				if ( !e.is_string() ) { continue; }
+				if ( !e.is_string() )
+				{
+					SAMErrors::reportSemantic(MOD, fileLabel, std::string("/") + key, e.dump(),
+						"not a string", "a quoted monster name, e.g. \"goatman\"",
+						"put quotes around it",
+						"that entry ignored; the rest of the race loaded.", true);
+					continue;
+				}
 				const std::string nm = e.get<std::string>();
 				const int m = monsterFromName(nm);
 				if ( m <= 0 )   // 0 is "nothing", which is not a creature
@@ -219,10 +235,31 @@ void SAMRaces::loadFromManifest(const SAMModManifest& manifest)
 		{
 			for ( auto it = lm->begin(); it != lm->end(); ++it )
 			{
-				if ( it.value().is_string() && !it.value().get<std::string>().empty() )
+				// A slot name the draw path never asks for would sit in the map doing
+				// nothing, which is indistinguishable from a race that declared no body at
+				// all. Say so instead: "arm-right" and "rightArm" are the obvious typos and
+				// neither is a JSON error, so nothing else would ever catch them.
+				if ( !isKnownLimbSlot(it.key()) )
 				{
-					def.limbModels[it.key()] = it.value().get<std::string>();
+					SAMErrors::reportSemantic(MOD, fileLabel, "/limb_models/" + it.key(), "",
+						"not a limb this race can replace",
+						"one of: head, torso, arm_right, arm_left, leg_right, leg_left",
+						"check the spelling", "that entry ignored; the rest of the race loaded.", true);
+					continue;
 				}
+				if ( !it.value().is_string() )
+				{
+					// A bare 1025 rather than "1025" is the easy mistake, and the schema
+					// only catches it for people using the builder.
+					SAMErrors::reportSemantic(MOD, fileLabel, "/limb_models/" + it.key(),
+						it.value().dump(), "not a string",
+						"a quoted model reference, e.g. \"1025\" or \"" + manifest.ns + ":body\"",
+						"put quotes around it",
+						"that limb keeps the host body's model.", true);
+					continue;
+				}
+				if ( it.value().get<std::string>().empty() ) { continue; }
+				def.limbModels[it.key()] = it.value().get<std::string>();
 			}
 		}
 
