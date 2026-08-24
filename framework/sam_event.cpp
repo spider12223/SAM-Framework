@@ -63,10 +63,20 @@ bool SamEvent::fire()
 	// from that store, so an edit made in either language is visible to the other and to the
 	// engine site afterwards.
 	SAMLua::dispatchEvent(lua);
+
+	// Capture Lua's verdict HERE, before the JS pass. The two runtimes keep SEPARATE cancel
+	// latches, and SAMLua::dispatchEvent resets its own on entry -- so a JS handler that
+	// calls sam_fire_hook re-enters the Lua dispatcher and wipes the answer a Lua handler
+	// just gave. Reading it afterwards would silently lose that veto.
+	bool cancelled = SAMLua::lastDispatchCancelled();
 #ifndef SAM_LUA_NO_JS
 	SAMJs::dispatchEvent(js);
+	// And ask JS too. Returning only Lua's answer would mean a JS mod's `return false` did
+	// nothing while the byte-identical Lua mod worked -- the exact divergence this type was
+	// built to make impossible, sitting in the one method that decides anything.
+	if ( SAMJs::lastDispatchCancelled() ) { cancelled = true; }
 #endif
-	return !SAMLua::lastDispatchCancelled();
+	return !cancelled;
 }
 
 long long SamEvent::get(const char* key, long long fallback) const
