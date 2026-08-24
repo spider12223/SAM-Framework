@@ -127,6 +127,16 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 	int totalItems = 0;
 	int totalMonsters = 0;
 	int totalPlugins = 0;
+	// Log the order content ids are handed out in. This is now derived only from WHICH mods
+	// are loaded (dependencies first, then namespace order), never from how the player
+	// arranged their list -- so the same set produces the same ids on every machine and after
+	// any reshuffle. Printing it makes that checkable instead of a claim.
+	{
+		std::string order;
+		for ( const auto& m : mods ) { if ( !order.empty() ) { order += " -> "; } order += m.ns; }
+		if ( !order.empty() ) { SAM_INFO("WORKSHOP", "Content id order: " + order); }
+	}
+
 	for ( const auto& m : mods )
 	{
 		totalClasses += static_cast<int>(m.classes.size());

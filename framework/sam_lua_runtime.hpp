@@ -71,6 +71,64 @@ namespace SAMLua
 	// was successfully delivered to.
 	int dispatchEvent(const Event& ev);
 
+	// ---- reading back what a handler CHANGED --------------------------------------------
+	//
+	// The event table is an in/out parameter. A handler that assigns to one of the event's
+	// own numeric or string fields is proposing a new value, and the engine site decides
+	// whether to honour it:
+	//
+	//     SAMLua::Event ev; ev.setName("player.on_damage_taken").i("damage", dmg);
+	//     SAMLua::dispatchEvent(ev);
+	//     if ( SAMLua::lastDispatchCancelled() ) { dmg = 0; }
+	//     else { dmg = SAMLua::lastEventInt("damage", dmg); }
+	//
+	// Only fields the engine PUT on the event are read back, so a script cannot invent a
+	// field and have it mean something. The fallback is returned when the handler left the
+	// field alone, made it a non-number, or when no script is loaded -- so a site that adopts
+	// this reads exactly as it did before whenever nothing is listening.
+	//
+	// Both runtimes write into the same store and the JS pass runs after the Lua one, so a
+	// value changed in either language is visible here.
+	// ---- script-registered entity behaviours ---------------------------------------------
+	//
+	// Barony runs every entity through a function pointer once per frame. registerBehavior
+	// puts a SCRIPT function behind one of those pointers, so a mod can define what a thing
+	// does rather than choosing from what the framework exposes.
+	//
+	// Returns a registry index, or -1. The index -- not the name -- is what an entity carries,
+	// so the per-frame path is an array lookup rather than a string compare.
+	int  registerBehavior(const std::string& fullName, const std::string& ns, int luaFnRef);
+	int  registerBehaviorJs(const std::string& fullName, const std::string& ns, void* jsFn);
+	int  behaviorIndexFor(const std::string& fullName);
+	// Invoked by the trampoline every frame for one entity. Runs ONLY the owning script.
+	void runBehavior(int index, unsigned long long uid);
+	// Dropped when mods reload, so a behaviour cannot outlive the script that defined it.
+	void clearBehaviors();
+	// Detach a behaviour's function by name without touching the row's identity. Used by the
+	// JS runtime when a behaviour errors, so the pointer is cleared before the value is freed.
+	void clearBehaviorFn(const std::string& fullName);
+	// Turn an entity. Shared by both runtimes. `radians` is the same convention
+	// sam_get_facing returns and sam_spawn_projectile takes. Returns false for an unknown
+	// uid, a player (their facing is theirs), or a non-finite angle.
+	bool setEntityFacing(unsigned long long uid, double radians);
+	// Turn `uid` to face `targetUid`. Returns false if either is unknown.
+	bool lookAt(unsigned long long uid, unsigned long long targetUid);
+	// Read an entity's facing, or a negative number if the uid is unknown.
+	double entityFacing(unsigned long long uid);
+
+	// Shared by both runtimes' sam_spawn_entity. Returns the new uid, or 0.
+	unsigned long long spawnScriptedEntity(double tileX, double tileY,
+		const std::string& behaviourName, const std::string& modelId, const std::string& ns);
+
+	// Used by the JS runtime to feed the same store, so a value changed in either language
+	// is visible to the engine site through the readers below. Not for engine sites.
+	void recordEventWriteBackNumber(const char* field, double v);
+	void recordEventWriteBackString(const char* field, const std::string& v);
+
+	long long   lastEventInt(const char* field, long long fallback);
+	double      lastEventNumber(const char* field, double fallback);
+	std::string lastEventString(const char* field, const std::string& fallback);
+
 	// Did any handler of the LAST dispatchEvent return false, i.e. ask the game not to do
 	// what it was about to do? Call this immediately after dispatchEvent at a site that
 	// offers the mod a decision. Always false when no script cancels, which is every script

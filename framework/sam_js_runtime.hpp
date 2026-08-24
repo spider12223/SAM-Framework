@@ -71,6 +71,15 @@ namespace SAMJs
 	// Call every enabled script's on_event(event) with a fresh JS object built
 	// from `ev`. A script that errors / blows its budget is disabled; others run.
 	// Returns the number of scripts the event reached.
+	// Invoked by SAMLua::runBehavior when the owning script is a JS one. Kept here so
+	// the JSValue and its context stay entirely on the JS side of the boundary.
+	// Frees a behaviour function this runtime handed out. The JS runtime owns the JSValue,
+	// so the release has to happen on this side of the boundary.
+	void releaseBehaviorFn(void* jsFn);
+
+	void runBehaviorJs(int index, void* jsFn, unsigned long long uid,
+		const std::string& ns, const std::string& name);
+
 	int dispatchEvent(const Event& ev);
 
 	// See SAMLua::lastDispatchCancelled -- same contract, JS side.

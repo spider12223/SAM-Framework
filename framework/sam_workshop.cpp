@@ -7,6 +7,7 @@
 -------------------------------------------------------------------------------*/
 
 #include "sam_workshop.hpp"
+#include <algorithm>
 #include "sam_logger.hpp"
 #include "sam_errors.hpp"
 #include "nlohmann/json.hpp"
@@ -382,6 +383,23 @@ static std::vector<SAMModManifest> sortByDependencies(const std::vector<SAMModMa
 	{
 		remaining.push_back(&m);
 	}
+
+	// DETERMINISTIC TIE-BREAK. Dependencies still come first -- that is what the loop below
+	// does -- but among mods that do not depend on each other the order was whatever order
+	// they happened to be mounted in, i.e. the arrangement of the player's mod list.
+	//
+	// That mattered far more than it looks. Custom content ids (items, classes, races,
+	// spells, effects) are handed out in load order and then written RAW into savegames and
+	// RAW onto the wire, with nothing anywhere mapping them back to a name. So reordering
+	// your mod list silently turned every saved custom item into a different mod's item, and
+	// two players with the SAME mods in a different order got different ids for the same
+	// content -- which the multiplayer fingerprint could not detect, because it compares a
+	// sorted list of names.
+	//
+	// Sorting by namespace makes the result depend only on WHICH mods are loaded, never on
+	// how they are arranged. Same set, same ids, every machine, every launch.
+	std::sort(remaining.begin(), remaining.end(),
+		[](const SAMModManifest* a, const SAMModManifest* b) { return a->ns < b->ns; });
 
 	while ( !remaining.empty() )
 	{

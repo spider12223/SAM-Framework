@@ -1,5 +1,6 @@
 #include "sam_world_state.hpp"
 #include "sam_logger.hpp"
+#include "sam_sync.hpp"   // the mod-set fingerprint this save was made with
 
 #include <cstring>
 #include <map>
@@ -12,6 +13,11 @@ namespace SAMWorldState
 		std::map<std::string, std::map<std::string, std::string>> s_data;
 
 		constexpr const char* kPrefix = "sam:";
+		// Deliberately NOT under the "sam:<ns>:" prefix, so absorb() never mistakes it for a
+		// mod's own key and no mod can write to it.
+		constexpr const char* kModSetKey = "sam_modset";
+		std::string s_savedModSet;   // what the save being loaded was made with
+		bool        s_haveSavedModSet = false;
 
 		size_t entryBytes(const std::string& ns, const std::string& key, const std::string& v)
 		{
@@ -119,6 +125,12 @@ namespace SAMWorldState
 
 	void collect(std::vector<std::pair<std::string, std::string>>& out)
 	{
+		// Record the mod set even when no mod stored anything: the point is to know what this
+		// save's ids were allocated against, and that is true whether or not a script used
+		// the world store. Costs one short string, and nothing at all with no mods loaded.
+		const std::string fp = SAMSync::generateFingerprint();
+		if ( !fp.empty() ) { out.push_back(std::make_pair(std::string(kModSetKey), fp)); }
+
 		for ( const auto& nsEntry : s_data )
 		{
 			for ( const auto& kv : nsEntry.second )
@@ -131,6 +143,9 @@ namespace SAMWorldState
 
 	void beginLoad()
 	{
+		s_savedModSet.clear();
+		s_haveSavedModSet = false;
+
 		// A save is authoritative for its own character: whatever we were holding from a
 		// previous run must not survive into this one.
 		s_data.clear();
@@ -138,6 +153,12 @@ namespace SAMWorldState
 
 	bool absorb(const std::string& key, const std::string& value)
 	{
+		if ( key == kModSetKey )
+		{
+			s_savedModSet = value;
+			s_haveSavedModSet = true;
+			return true;
+		}
 		const size_t plen = strlen(kPrefix);
 		if ( key.compare(0, plen, kPrefix) != 0 ) { return false; }
 		const size_t sep = key.find(':', plen);
@@ -149,8 +170,38 @@ namespace SAMWorldState
 		return true;
 	}
 
+	void warnIfModSetChanged()
+	{
+		const std::string now = SAMSync::generateFingerprint();
+		if ( !s_haveSavedModSet )
+		{
+			// A save from before this existed, or a vanilla one. If mods are loaded now, the
+			// ids in it were allocated under the old load-order scheme and we cannot know
+			// what they were -- say so once rather than pretend.
+			if ( !now.empty() )
+			{
+				SAM_WARN("WORLD", "This save does not record which mods it was made with"
+					" (it predates that being written down). If any custom items in it look"
+					" wrong, that is why -- re-saving now will record the current set.");
+			}
+			return;
+		}
+		if ( s_savedModSet == now ) { return; }
+
+		// Same set means same ids, so a difference is the one thing that can silently change
+		// what a saved custom item IS. Name both sides: the player can usually fix it by
+		// re-enabling something.
+		SAM_WARN("WORLD", "This save was made with a different set of mods.");
+		SAM_WARN("WORLD", "  saved with: " + (s_savedModSet.empty() ? std::string("(none)") : s_savedModSet));
+		SAM_WARN("WORLD", "  loaded now: " + (now.empty() ? std::string("(none)") : now));
+		SAM_WARN("WORLD", "  Custom items, classes, races, spells and effects in this save may"
+			" not be the ones they were. Re-enable the missing mods to restore them.");
+	}
+
 	void clearAll()
 	{
 		s_data.clear();
+		s_savedModSet.clear();
+		s_haveSavedModSet = false;
 	}
 }

@@ -206,13 +206,21 @@ namespace
 	{
 		JSValue obj = JS_NewObject(ctx);
 		JS_SetPropertyStr(ctx, obj, "name", JS_NewString(ctx, ev.name.c_str()));
+		// Seed from the SHARED write-back store, exactly as the Lua side does. Building this
+		// from the raw engine event instead was a real bug: a Lua mod would set damage to 5,
+		// then any JS script at all -- including one whose on_event is empty -- would be
+		// handed the original 10 and record it straight back over the 5. In practice that
+		// meant a single JS mod anywhere in the load order silently reverted every Lua mod's
+		// change, and two JS mods could never chain either.
 		for ( const auto& kv : ev.ints )
 		{
-			JS_SetPropertyStr(ctx, obj, kv.first.c_str(), JS_NewInt64(ctx, (int64_t)kv.second));
+			const double v = SAMLua::lastEventNumber(kv.first.c_str(), (double)kv.second);
+			JS_SetPropertyStr(ctx, obj, kv.first.c_str(), JS_NewInt64(ctx, (int64_t)v));
 		}
 		for ( const auto& kv : ev.strings )
 		{
-			JS_SetPropertyStr(ctx, obj, kv.first.c_str(), JS_NewString(ctx, kv.second.c_str()));
+			const std::string v = SAMLua::lastEventString(kv.first.c_str(), kv.second);
+			JS_SetPropertyStr(ctx, obj, kv.first.c_str(), JS_NewString(ctx, v.c_str()));
 		}
 		return obj;
 	}
@@ -979,6 +987,86 @@ namespace
 	// ---- v1.11.0 persistent world state (Lua parity: sam_set_chest_stash /
 	//      sam_travel_to_level / sam_world_save / _load / _clear / _keys) ------------------
 	// Rationale and the engine details are documented once, on the Lua side.
+
+	// ---- v2.0 owned behaviours (Lua parity: sam_register_behavior / sam_spawn_entity) ----
+
+	JSValue js_sam_register_behavior(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_FALSE; }
+		const char* nameC = JS_ToCString(ctx, argv[0]);
+		std::string full = nameC ? nameC : "";
+		if ( nameC ) { JS_FreeCString(ctx, nameC); }
+		if ( !JS_IsFunction(ctx, argv[1]) )
+		{
+			SAM_ERROR("JS", "sam_register_behavior: second argument must be a function.");
+			return JS_FALSE;
+		}
+		if ( g_currentNs.empty() )
+		{
+			SAM_WARN("JS", "sam_register_behavior: no owning mod namespace - ignored.");
+			return JS_FALSE;
+		}
+		if ( full.find(':') == std::string::npos ) { full = g_currentNs + ":" + full; }
+
+		// QuickJS values are refcounted. Without this dup the engine would call a collected
+		// function every frame the moment the script's own reference went away.
+		JSValue* held = new JSValue(JS_DupValue(ctx, argv[1]));
+		if ( SAMLua::registerBehaviorJs(full, g_currentNs, (void*)held) < 0 )
+		{
+			JS_FreeValue(ctx, *held); delete held; return JS_FALSE;
+		}
+		return JS_TRUE;
+	}
+
+	JSValue js_sam_set_entity_facing(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_FALSE; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+		double rad = 0; JS_ToFloat64(ctx, &rad, argv[1]);   // required: undefined -> NaN -> refused
+		return JS_NewBool(ctx, SAMLua::setEntityFacing((unsigned long long)uid, rad) ? 1 : 0);
+	}
+
+	JSValue js_sam_look_at(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_FALSE; }
+		int64_t uid = 0, tgt = 0;
+		JS_ToInt64(ctx, &uid, argv[0]);
+		JS_ToInt64(ctx, &tgt, argv[1]);
+		return JS_NewBool(ctx, SAMLua::lookAt((unsigned long long)uid, (unsigned long long)tgt) ? 1 : 0);
+	}
+
+	JSValue js_sam_get_entity_facing(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_NULL; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+		const double y = SAMLua::entityFacing((unsigned long long)uid);
+		if ( y < 0.0 ) { return JS_NULL; }
+		return JS_NewFloat64(ctx, y);
+	}
+
+	JSValue js_sam_spawn_entity(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 3 ) { return JS_NULL; }
+		// NO samHasArg on these two: they are REQUIRED, and the helper would turn a missing
+		// argument into a silent 0 -- a legal tile -- instead of letting undefined become NaN
+		// and be caught by the isfinite guard in the shared spawner.
+		double x = 0, y = 0;
+		JS_ToFloat64(ctx, &x, argv[0]);
+		JS_ToFloat64(ctx, &y, argv[1]);
+		const char* behC = JS_ToCString(ctx, argv[2]);
+		const char* modelC = samHasArg(argc, argv, 3) ? JS_ToCString(ctx, argv[3]) : nullptr;
+		const unsigned long long uid = SAMLua::spawnScriptedEntity(
+			x, y, behC ? behC : "", modelC ? modelC : "", g_currentNs);
+		if ( behC ) { JS_FreeCString(ctx, behC); }
+		if ( modelC ) { JS_FreeCString(ctx, modelC); }
+		if ( uid == 0 ) { return JS_NULL; }
+		return JS_NewInt64(ctx, (int64_t)uid);
+	}
 
 	JSValue js_sam_set_chest_stash(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
 	{
@@ -3866,6 +3954,11 @@ namespace
 		JS_SetPropertyStr(ctx, g, "sam_spawn_monster", JS_NewCFunction(ctx, js_sam_spawn_monster, "sam_spawn_monster", 4));
 		JS_SetPropertyStr(ctx, g, "sam_spawn_portal", JS_NewCFunction(ctx, js_sam_spawn_portal, "sam_spawn_portal", 2));
 		JS_SetPropertyStr(ctx, g, "sam_remove_entity", JS_NewCFunction(ctx, js_sam_remove_entity, "sam_remove_entity", 1));
+		JS_SetPropertyStr(ctx, g, "sam_set_entity_facing", JS_NewCFunction(ctx, js_sam_set_entity_facing, "sam_set_entity_facing", 2));
+		JS_SetPropertyStr(ctx, g, "sam_look_at", JS_NewCFunction(ctx, js_sam_look_at, "sam_look_at", 2));
+		JS_SetPropertyStr(ctx, g, "sam_get_entity_facing", JS_NewCFunction(ctx, js_sam_get_entity_facing, "sam_get_entity_facing", 1));
+		JS_SetPropertyStr(ctx, g, "sam_register_behavior", JS_NewCFunction(ctx, js_sam_register_behavior, "sam_register_behavior", 2));
+		JS_SetPropertyStr(ctx, g, "sam_spawn_entity", JS_NewCFunction(ctx, js_sam_spawn_entity, "sam_spawn_entity", 4));
 		JS_SetPropertyStr(ctx, g, "sam_set_chest_stash", JS_NewCFunction(ctx, js_sam_set_chest_stash, "sam_set_chest_stash", 2));
 		JS_SetPropertyStr(ctx, g, "sam_travel_to_level", JS_NewCFunction(ctx, js_sam_travel_to_level, "sam_travel_to_level", 2));
 		JS_SetPropertyStr(ctx, g, "sam_world_save", JS_NewCFunction(ctx, js_sam_world_save, "sam_world_save", 2));
@@ -4115,6 +4208,52 @@ namespace SAMJs
 // runtime's flag so an engine site can ask one question and get both runtimes' answer.
 bool g_lastDispatchCancelled = false;
 
+	void releaseBehaviorFn(void* jsFn)
+	{
+		if ( !jsFn ) { return; }
+		JSValue* fn = (JSValue*)jsFn;
+		JSContext* ctx = nullptr;
+		for ( auto& sc : g_scripts ) { if ( sc.ctx ) { ctx = sc.ctx; break; } }
+		// If the runtime is already gone the JSValue died with it; just reclaim the wrapper.
+		if ( ctx ) { JS_FreeValue(ctx, *fn); }
+		delete fn;
+	}
+
+	void runBehaviorJs(int index, void* jsFn, unsigned long long uid,
+		const std::string& ns, const std::string& name)
+	{
+		(void)index;
+		if ( !jsFn || g_scripts.empty() ) { return; }
+		JSValue* fn = (JSValue*)jsFn;
+		// Every JS script shares one runtime; use the first live context to call through.
+		JSContext* ctx = nullptr;
+		for ( auto& sc : g_scripts ) { if ( sc.ctx ) { ctx = sc.ctx; break; } }
+		if ( !ctx ) { return; }
+
+		const std::string savedNs = g_currentNs;
+		g_currentNs = ns;
+		JSValue arg = JS_NewInt64(ctx, (int64_t)uid);
+		setDeadline(g_cfg.callbackBudgetMs);
+		JSValue ret = JS_Call(ctx, *fn, JS_UNDEFINED, 1, &arg);
+		clearDeadline();
+		g_currentNs = savedNs;
+		JS_FreeValue(ctx, arg);
+		if ( JS_IsException(ret) )
+		{
+			// One bad frame must not spam forever: report once and stop calling it. The
+			// entity survives but stops thinking, which is visible and debuggable.
+			SAM_ERROR("JS", "behaviour '" + name + "' errored: " + exceptionToString(ctx));
+			SAM_WARN("JS", "behaviour '" + name + "' disabled.");
+			SAMLogger::noteScriptError();
+			// Clear the registry's pointer FIRST, then free. Freeing first left a window in
+			// which the row still pointed at a dead JSValue -- and if two entities running
+			// this behaviour errored in the same frame, the second would free it again.
+			SAMLua::clearBehaviorFn(name);
+			releaseBehaviorFn(jsFn);
+		}
+		JS_FreeValue(ctx, ret);
+	}
+
 	int dispatchEvent(const Event& ev)
 	{
 		// Reset BEFORE the early-out guard below. Doing it after meant a shutdown or a
@@ -4158,6 +4297,46 @@ bool g_lastDispatchCancelled = false;
 			JSValue ret = JS_Call(sc.ctx, sc.onEvent, JS_UNDEFINED, 1, argv);
 			clearDeadline();
 			g_currentNs = savedNs;
+
+			// Read back what the handler CHANGED before the object is freed. The event
+			// object is an in/out parameter in JS exactly as it is in Lua: assigning to one
+			// of the event's own fields proposes a new value to the engine site. Only keys
+			// the engine supplied are considered, so a script cannot invent a field name.
+			// Both runtimes write into the same store (SAMLua's), and JS dispatch runs after
+			// Lua's, so a change made in either language reaches the site.
+			if ( !JS_IsException(ret) )
+			{
+				for ( const auto& kv : ev.ints )
+				{
+					JSValue f = JS_GetPropertyStr(sc.ctx, evObj, kv.first.c_str());
+					double d = 0;
+					if ( JS_IsNumber(f) && JS_ToFloat64(sc.ctx, &d, f) == 0 )
+					{
+						// Record only a real CHANGE. Re-recording an untouched field would let
+						// a script that merely reads the event overwrite an earlier script's
+						// edit with the value it happened to be handed.
+						const double seen = SAMLua::lastEventNumber(kv.first.c_str(), (double)kv.second);
+						if ( d != seen ) { SAMLua::recordEventWriteBackNumber(kv.first.c_str(), d); }
+					}
+					JS_FreeValue(sc.ctx, f);
+				}
+				for ( const auto& kv : ev.strings )
+				{
+					JSValue f = JS_GetPropertyStr(sc.ctx, evObj, kv.first.c_str());
+					if ( JS_IsString(f) )
+					{
+						const char* c = JS_ToCString(sc.ctx, f);
+						if ( c )
+						{
+							const std::string seen = SAMLua::lastEventString(kv.first.c_str(), kv.second);
+							if ( seen != c ) { SAMLua::recordEventWriteBackString(kv.first.c_str(), c); }
+							JS_FreeCString(sc.ctx, c);
+						}
+					}
+					JS_FreeValue(sc.ctx, f);
+				}
+			}
+
 			JS_FreeValue(sc.ctx, evObj);
 			if ( JS_IsException(ret) )
 			{

@@ -592,6 +592,18 @@ export const SAM_FUNCTIONS = [
     desc: "Send a mod-defined message to another machine. Barony's packet ids are a fixed table, so before this a co-op mod had no way to tell the other side anything at all. On a client the target is ignored and the packet always goes to the host. The other side receives an \"on_packet\" event with .from, .tag and .payload. One datagram only — use sam_save_data for bulk state." },
 
   // ---- Panels (v1.11.0) --------------------------------------------------------
+  // ---- Your own logic (v2.0) ---------------------------------------------------
+  // The framework used to be a list of things you could do at the moments it chose. These
+  // two are the other thing: they hand you the loop.
+  { name: "sam_register_behavior", category: "Your own logic", hostOnly: true,
+    params: [{ name: "name", type: "string (\"behaviour\", or \"namespace:behaviour\")" }, { name: "fn", type: "function(uid)" }],
+    returns: "true if registered (boolean)",
+    desc: "Give a name to a function that will BE an entity's brain. Barony runs every entity through a function pointer once per frame; this puts yours behind one. Your function is called with the entity's uid, once per frame, for every entity you spawned with that behaviour \u2014 and everything else in this reference is available inside it, so it can look around, move, shoot, damage, or open a window. Nothing about what it does comes from a list. Register at the top of your script rather than inside a handler, so the name exists before you spawn anything with it. Registering the same name twice replaces the function, and entities already in the world follow the new code. Behaviours are dropped when mods reload." },
+  { name: "sam_spawn_entity", category: "Your own logic", hostOnly: true,
+    params: [{ name: "tile_x", type: "number (fractional tiles allowed)" }, { name: "tile_y", type: "number" }, { name: "behaviour", type: "string (a name you registered)" }, { name: "model", type: "string (optional \u2014 a model from your mod's \"models\", or a vanilla model index)" }],
+    returns: "the new entity's uid (int), or nil/null",
+    desc: "Put something in the world that runs your behaviour. This is the other half of sam_register_behavior: that one supplies the code, this gives it a body. The entity starts passable with no collision of its own, because your behaviour decides what it collides with. Leave model empty and it is invisible, which is almost never what you want. Host-only." },
+
   // COORDINATES: every x/y/w/h below is in VIRTUAL screen units, not your monitor's
   // pixels -- 1280x720 on a 16:9 display at the default UI scale, whatever the real
   // resolution is. A panel placed past that edge is not drawn AT ALL (no panel, no
@@ -741,7 +753,7 @@ export const SAM_EVENTS = [
     whenFired: "a thrown gadget lands and something must be built there",
     payload: [{ field: "item_type", type: "int" }, { field: "player", type: "int" }, { field: "x", type: "int" }, { field: "y", type: "int" }, { field: "status", type: "int" }, { field: "beatitude", type: "int" }],
     notes: "Return false after spawning your own thing, to skip the engine's built-in gadget list. This is how a mod makes custom traps and turrets." },
-  { name: "on_before_monster_damage", category: "combat", cancellable: false,
+  { name: "on_before_monster_damage", category: "combat", cancellable: true, writable: ["damage"],
     whenFired: "before a monster's HP is reduced",
     payload: [{ field: "monster_uid", type: "int" }, { field: "monster_type", type: "int" }, { field: "damage", type: "int" }],
     notes: "Rewrite the number with sam_modify_monster_damage(n). Set 0 to negate the hit entirely. Not cancellable by returning false." },
@@ -760,7 +772,7 @@ export const SAM_EVENTS = [
   { name: "player.on_damage_taken", category: "combat", cancellable: false,
     whenFired: "a player takes damage from any source",
     payload: [{ field: "player", type: "int" }, { field: "damage", type: "int" }, { field: "hp", type: "int" }, { field: "maxhp", type: "int" }, { field: "lethal", type: "int" }, { field: "source_uid", type: "uid" }, { field: "source_type", type: "int" }],
-    gotcha: "fires AFTER HP is already gone; cannot cancel — use on_before_damage to reduce/cancel" },
+    gotcha: "read-only, and fires AFTER the HP is already gone — use it to react (a sound, a screen effect, a counter). To CHANGE how much lands, use on_before_damage, which fires ahead of the hit and can also negate it." },
   { name: "player.on_death", category: "combat", cancellable: false,
     whenFired: "a player dies",
     payload: [{ field: "player", type: "int" }, { field: "killer_type", type: "int" }, { field: "killer_uid", type: "uid" }, { field: "killer_monster", type: "int" }, { field: "obituary", type: "string" }],
@@ -927,7 +939,7 @@ export const SAM_EVENTS = [
     whenFired: "every game tick (50/sec), for every script that defines on_tick(event)",
     payload: [{ field: "tick_count", type: "int" }, { field: "delta_ticks", type: "int" }],
     gotcha: "no player. prefix; delivered to the separate on_tick(event) handler, not on_event; host-only and silent" },
-  { name: "on_before_damage", category: "combat", cancellable: false,
+  { name: "on_before_damage", category: "combat", cancellable: true, writable: ["damage"],
     whenFired: "before a player's HP is reduced (bracketed around Entity::modHP)",
     payload: [{ field: "player", type: "int" }, { field: "damage", type: "int" }],
     gotcha: "no player. prefix; the ONLY cancellable event — call sam_modify_damage(player, new) to reduce/cancel the incoming hit" },

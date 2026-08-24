@@ -57,5 +57,11 @@ namespace SAMWorldState
 	// loadGame() has already populated us by then.
 	void clearAll();
 
+	// The set of mods this save was made with, as SAMSync's sorted "ns@version" list.
+	// Content ids are deterministic for a given SET, so the set is exactly what decides
+	// whether a saved id still means what it meant. Written by collect(), read by absorb(),
+	// and compared once the save has finished loading.
+	void warnIfModSetChanged();
+
 	size_t totalBytes();
 }

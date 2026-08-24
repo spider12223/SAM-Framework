@@ -253,6 +253,26 @@ namespace
 // not change dispatchEvent's signature or any of its 78 call sites.
 bool g_lastDispatchCancelled = false;
 
+// What the most recent dispatch's handlers wrote back onto the event table. Keyed by field
+// name; only fields the ENGINE placed on the event are ever collected, so a script cannot
+// smuggle in a name the site did not offer. Cleared at the top of every dispatch, so a site
+// that reads it is always reading its own event and never a stale one from another.
+// ---- script-registered entity behaviours -------------------------------------------------
+// One row per behaviour a mod defined. An entity stores the INDEX into this vector, so the
+// per-frame path never touches a string. Rows are never removed while the game runs (an
+// entity in the world may still point at one); the whole table is dropped on mod reload.
+struct ScriptedBehavior
+{
+	std::string name;          // "namespace:behaviour"
+	std::string ns;            // owning mod, restored around the call for sam_save_data
+	int         luaRef = -2;   // LUA_NOREF; a Lua function, or
+	void*       jsFn   = nullptr; // a JS function (JSValue*), whichever registered it
+};
+std::vector<ScriptedBehavior> g_behaviors;
+
+std::map<std::string, double>      g_lastEventNumbers;
+std::map<std::string, std::string> g_lastEventStrings;
+
 bool protectedCall(int nargs, int nresults, const std::string& what)
 	{
 		// Nesting-aware: only the OUTERMOST call arms/disarms the watchdog, so the
@@ -3495,6 +3515,26 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		// Host/SP local rendering doesn't use that flag anyway (the portal omits it too).
 	}
 
+	// ---- v2.0 script-owned entity behaviour ------------------------------------------------
+	//
+	// Slot layout for an entity whose brain is a script (marker 4, alongside portal=1,
+	// companion=2, projectile=3):
+	//   skill[19] = 4                  S.A.M scripted-behaviour marker
+	//   skill[18] = behaviour index     into g_behaviors
+	//   skill[17] = owning player, or -1
+	// skill[0..15] are left entirely to the script as per-entity scratch, which is why the
+	// marker lives at the top of the range rather than the bottom.
+	constexpr int SAM_SCRIPTED_MARKER = 4;
+
+	void samScriptedBehavior(Entity* my)
+	{
+		// Host-authoritative like every other framework behaviour: a client running its own
+		// copy would disagree with the host about the result and desync.
+		if ( multiplayer == CLIENT ) { return; }
+		if ( !my ) { return; }
+		SAMLua::runBehavior(my->skill[18], (unsigned long long)my->getUID());
+	}
+
 	// ---- v1.11.0 custom projectiles -------------------------------------------------------
 	//
 	// Until now the only thing a script could launch was a fixed vanilla spell. There was no
@@ -3972,6 +4012,90 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 			lua_pushstring(Ls, k.c_str());
 			lua_rawseti(Ls, -2, ++n);
 		}
+		return 1;
+	}
+
+	// ===== v2.0: a mod runs its own loop ====================================================
+
+	// sam_register_behavior("ns:name", fn) -> true
+	//
+	// fn(uid) runs once per frame for every entity carrying this behaviour. That is the
+	// point: the script is not reacting to one of our events, it IS the entity's brain, and
+	// everything the framework exposes is available inside it.
+	//
+	// Registering a name twice replaces the function and keeps the index, so entities already
+	// in the world follow the new code. All behaviours are dropped when mods reload.
+	int lua_sam_register_behavior(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* nameC = luaL_checkstring(Ls, 1);
+		if ( !lua_isfunction(Ls, 2) )
+		{
+			SAM_ERROR("LUA", "sam_register_behavior: second argument must be a function.");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		if ( g_currentNs.empty() )
+		{
+			SAM_WARN("LUA", "sam_register_behavior: no owning mod namespace - ignored.");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		std::string full = nameC ? nameC : "";
+		// Namespace it for the author if they did not, so two mods cannot claim one name.
+		if ( full.find(':') == std::string::npos ) { full = g_currentNs + ":" + full; }
+
+		lua_pushvalue(Ls, 2);                              // copy the function
+		const int ref = luaL_ref(Ls, LUA_REGISTRYINDEX);   // and keep it alive
+		lua_pushboolean(Ls, SAMLua::registerBehavior(full, g_currentNs, ref) >= 0 ? 1 : 0);
+		return 1;
+	}
+
+	// sam_set_entity_facing(uid, radians) -> bool
+	// sam_look_at(uid, target_uid) -> bool        (the one a turret wants)
+	// sam_get_entity_facing(uid) -> radians | nil
+	//
+	// sam_get_facing takes a PLAYER index and reads where that player is looking. These take
+	// an entity UID, which is what a behaviour is handed, and they work on anything that is
+	// not a player.
+	int lua_sam_set_entity_facing(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const double rad = (double)luaL_checknumber(Ls, 2);
+		lua_pushboolean(Ls, SAMLua::setEntityFacing((unsigned long long)uid, rad) ? 1 : 0);
+		return 1;
+	}
+
+	int lua_sam_look_at(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const long long tgt = (long long)luaL_checkinteger(Ls, 2);
+		lua_pushboolean(Ls, SAMLua::lookAt((unsigned long long)uid, (unsigned long long)tgt) ? 1 : 0);
+		return 1;
+	}
+
+	int lua_sam_get_entity_facing(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const double y = SAMLua::entityFacing((unsigned long long)uid);
+		if ( y < 0.0 ) { lua_pushnil(Ls); return 1; }
+		lua_pushnumber(Ls, (lua_Number)y);
+		return 1;
+	}
+
+	// sam_spawn_entity(tile_x, tile_y, "ns:behaviour" [, model]) -> uid | nil
+	int lua_sam_spawn_entity(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const double x = (double)luaL_checknumber(Ls, 1);
+		const double y = (double)luaL_checknumber(Ls, 2);
+		const char* behC = luaL_checkstring(Ls, 3);
+		const char* modelC = lua_isnoneornil(Ls, 4) ? "" : luaL_checkstring(Ls, 4);
+		const unsigned long long uid = SAMLua::spawnScriptedEntity(
+			x, y, behC ? behC : "", modelC ? modelC : "", g_currentNs);
+		if ( uid == 0 ) { lua_pushnil(Ls); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)uid);
 		return 1;
 	}
 
@@ -4831,6 +4955,16 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		lua_setglobal(L, "sam_spawn_portal");
 		lua_pushcfunction(L, lua_sam_remove_entity);
 		lua_setglobal(L, "sam_remove_entity");
+		lua_pushcfunction(L, lua_sam_set_entity_facing);
+		lua_setglobal(L, "sam_set_entity_facing");
+		lua_pushcfunction(L, lua_sam_look_at);
+		lua_setglobal(L, "sam_look_at");
+		lua_pushcfunction(L, lua_sam_get_entity_facing);
+		lua_setglobal(L, "sam_get_entity_facing");
+		lua_pushcfunction(L, lua_sam_register_behavior);
+		lua_setglobal(L, "sam_register_behavior");
+		lua_pushcfunction(L, lua_sam_spawn_entity);
+		lua_setglobal(L, "sam_spawn_entity");
 		lua_pushcfunction(L, lua_sam_set_chest_stash);
 		lua_setglobal(L, "sam_set_chest_stash");
 		lua_pushcfunction(L, lua_sam_travel_to_level);
@@ -4875,14 +5009,22 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		lua_pushstring(L, ev.name.c_str());
 		lua_setfield(L, -2, "name");
 
+		// Values come from the live write-back store, not from `ev` -- so a change made by an
+		// earlier script is what the next script SEES. Two mods that each halve incoming
+		// damage therefore both apply, instead of the second one silently overwriting the
+		// first from the original number. The store is seeded from `ev` at the top of the
+		// dispatch, so the first script still sees exactly what the engine sent.
 		for ( const auto& kv : ev.ints )
 		{
-			lua_pushinteger(L, (lua_Integer)kv.second);
+			auto it = g_lastEventNumbers.find(kv.first);
+			const double v = ( it == g_lastEventNumbers.end() ) ? (double)kv.second : it->second;
+			lua_pushinteger(L, (lua_Integer)v);
 			lua_setfield(L, -2, kv.first.c_str());
 		}
 		for ( const auto& kv : ev.strings )
 		{
-			lua_pushstring(L, kv.second.c_str());
+			auto it = g_lastEventStrings.find(kv.first);
+			lua_pushstring(L, ( it == g_lastEventStrings.end() ) ? kv.second.c_str() : it->second.c_str());
 			lua_setfield(L, -2, kv.first.c_str());
 		}
 	}
@@ -5029,8 +5171,373 @@ namespace SAMLua
 		return true;
 	}
 
+	// Read a handler's changes off the event table and drop our reference to it.
+	//
+	// Only keys the engine supplied are considered. That is deliberate: it keeps a script
+	// from inventing a field name that happens to match something a future site reads, and
+	// it means the cost is bounded by the size of the event rather than by whatever the
+	// handler decided to attach to it.
+	void collectEventWriteBacks(const SAMLua::Event& ev, int evRef)
+	{
+		if ( evRef == LUA_NOREF ) { return; }
+		lua_rawgeti(L, LUA_REGISTRYINDEX, evRef);
+		if ( lua_istable(L, -1) )
+		{
+			// lua_rawget, NOT lua_getfield.
+			//
+			// getfield honours __index, and this runs OUTSIDE any protected call -- so a
+			// script that put a metatable on the event table could raise a Lua error here
+			// with no pcall on the C stack, which means lua_panic and abort(): the game dies
+			// mid-frame with no save. A strict-mode debug idiom is enough to trigger it, so
+			// this needs no malice. Raw access is also what we actually mean: we want what
+			// the handler ASSIGNED, not what a metatable synthesises.
+			for ( const auto& kv : ev.ints )
+			{
+				lua_pushstring(L, kv.first.c_str());
+				lua_rawget(L, -2);
+				// Strict type test, matching the JS side: lua_isnumber accepts a numeric
+				// STRING, so the same assignment would be honoured in Lua and dropped in JS.
+				if ( lua_type(L, -1) == LUA_TNUMBER )
+				{
+					const double d = (double)lua_tonumber(L, -1);
+					// Only a real change is recorded, so a script that merely reads the event
+					// cannot overwrite an earlier script's edit with the value it was handed.
+					auto it = g_lastEventNumbers.find(kv.first);
+					const double seen = ( it == g_lastEventNumbers.end() ) ? (double)kv.second : it->second;
+					if ( d != seen ) { g_lastEventNumbers[kv.first] = d; }
+				}
+				lua_pop(L, 1);
+			}
+			for ( const auto& kv : ev.strings )
+			{
+				lua_pushstring(L, kv.first.c_str());
+				lua_rawget(L, -2);
+				if ( lua_type(L, -1) == LUA_TSTRING )
+				{
+					const char* c = lua_tostring(L, -1);
+					auto it = g_lastEventStrings.find(kv.first);
+					const std::string seen = ( it == g_lastEventStrings.end() ) ? kv.second : it->second;
+					if ( c && seen != c ) { g_lastEventStrings[kv.first] = c; }
+				}
+				lua_pop(L, 1);
+			}
+		}
+		lua_pop(L, 1);
+		luaL_unref(L, LUA_REGISTRYINDEX, evRef);
+	}
+
+	// Free whichever handle a row currently holds. One place, so neither register path nor
+	// the teardown can forget a language.
+	void releaseBehaviorRow(ScriptedBehavior& b)
+	{
+		if ( b.luaRef >= 0 && L ) { luaL_unref(L, LUA_REGISTRYINDEX, b.luaRef); }
+		b.luaRef = -2;
+#ifndef SAM_LUA_NO_JS
+		if ( b.jsFn ) { SAMJs::releaseBehaviorFn(b.jsFn); }
+#endif
+		b.jsFn = nullptr;
+	}
+
+	void clearBehaviorFn(const std::string& fullName)
+	{
+		const int i = behaviorIndexFor(fullName);
+		if ( i >= 0 ) { g_behaviors[i].luaRef = -2; g_behaviors[i].jsFn = nullptr; }
+	}
+
+	int registerBehavior(const std::string& fullName, const std::string& ns, int luaFnRef)
+	{
+		const int existing = behaviorIndexFor(fullName);
+		if ( existing >= 0 )
+		{
+			// Re-registering replaces the function but KEEPS the index, so entities already
+			// alive in the world follow the new code instead of pointing at a dead row.
+			// Release whatever the row held first -- including a value owned by the OTHER
+			// language, which the first version dropped on the floor.
+			releaseBehaviorRow(g_behaviors[existing]);
+			g_behaviors[existing].luaRef = luaFnRef;
+			g_behaviors[existing].jsFn = nullptr;
+			g_behaviors[existing].ns = ns;
+			return existing;
+		}
+		ScriptedBehavior b; b.name = fullName; b.ns = ns; b.luaRef = luaFnRef;
+		g_behaviors.push_back(b);
+		SAM_INFO("LUA", "Registered behaviour '" + fullName + "'.");
+		return (int)g_behaviors.size() - 1;
+	}
+
+	int behaviorIndexFor(const std::string& fullName)
+	{
+		for ( size_t i = 0; i < g_behaviors.size(); ++i )
+		{
+			if ( g_behaviors[i].name == fullName ) { return (int)i; }
+		}
+		return -1;
+	}
+
+	void runBehavior(int index, unsigned long long uid)
+	{
+		if ( index < 0 || index >= (int)g_behaviors.size() ) { return; }
+
+		// COPY everything needed before calling the script. The callback can register a new
+		// behaviour, which push_backs into g_behaviors and reallocates it -- a reference held
+		// across the call would dangle, and the error path below would then read and write
+		// freed memory. Re-look-up by index afterwards instead.
+		const int         luaRef = g_behaviors[index].luaRef;
+		const std::string name   = g_behaviors[index].name;
+		const std::string ns     = g_behaviors[index].ns;
+		void* const       jsFn   = g_behaviors[index].jsFn;
+
+		if ( luaRef >= 0 && L )
+		{
+			lua_rawgeti(L, LUA_REGISTRYINDEX, luaRef);
+			if ( !lua_isfunction(L, -1) ) { lua_pop(L, 1); return; }
+			lua_pushinteger(L, (lua_Integer)uid);
+			const std::string savedNs = g_currentNs;
+			g_currentNs = ns;
+			const bool ok = protectedCall(1, 0, "behaviour '" + name + "'");
+			g_currentNs = savedNs;
+			if ( !ok )
+			{
+				// One bad frame must not spin forever. Drop the function; the entity keeps
+				// existing but stops thinking, which is visible and debuggable, where
+				// per-frame error spam is neither.
+				SAM_WARN("LUA", "Behaviour '" + name + "' errored and was disabled.");
+				luaL_unref(L, LUA_REGISTRYINDEX, luaRef);
+				// Re-resolve: the vector may have moved while the script ran.
+				const int now = behaviorIndexFor(name);
+				if ( now >= 0 ) { g_behaviors[now].luaRef = -2; }
+			}
+			return;
+		}
+#ifndef SAM_LUA_NO_JS
+		if ( jsFn ) { SAMJs::runBehaviorJs(index, jsFn, uid, ns, name); }
+#endif
+	}
+
+	bool setEntityFacing(unsigned long long uid, double radians)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("SAM", "sam_set_entity_facing refused: host only."); return false; }
+		if ( !std::isfinite(radians) )
+		{
+			SAM_WARN("SAM", "sam_set_entity_facing: angle must be a real number.");
+			return false;
+		}
+		Entity* e = uidToEntity((Sint32)uid);
+		if ( !e ) { return false; }
+		if ( e->behavior == &actPlayer )
+		{
+			// A player's facing belongs to whoever is holding the mouse. Turning their head
+			// from a script would fight their input every frame.
+			SAM_WARN("SAM", "sam_set_entity_facing refused: cannot turn a player.");
+			return false;
+		}
+		// Normalise into [0, 2pi) so a script that keeps adding to an angle does not drift
+		// into a huge float, and so the value survives the wire (yaw is sent as yaw*256 in a
+		// Sint16, which overflows outside roughly +/-128 radians).
+		const double twoPi = 2.0 * PI;
+		double y = fmod(radians, twoPi);
+		if ( y < 0.0 ) { y += twoPi; }
+		e->yaw = y;
+		// The entity is already flagged UPDATENEEDED, and ENTU carries yaw, so clients pick
+		// this up on the next entity update without a bespoke packet.
+		e->flags[UPDATENEEDED] = true;
+		return true;
+#else
+		(void)uid; (void)radians; return false;
+#endif
+	}
+
+	bool lookAt(unsigned long long uid, unsigned long long targetUid)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		Entity* e = uidToEntity((Sint32)uid);
+		Entity* t = uidToEntity((Sint32)targetUid);
+		if ( !e || !t ) { return false; }
+		return setEntityFacing(uid, atan2(t->y - e->y, t->x - e->x));
+#else
+		(void)uid; (void)targetUid; return false;
+#endif
+	}
+
+	double entityFacing(unsigned long long uid)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		Entity* e = uidToEntity((Sint32)uid);
+		return e ? (double)e->yaw : -1.0;
+#else
+		(void)uid; return -1.0;
+#endif
+	}
+
+	unsigned long long spawnScriptedEntity(double tileX, double tileY,
+		const std::string& behaviourName, const std::string& modelId, const std::string& ns)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("SAM", "sam_spawn_entity refused: host only."); return 0; }
+		if ( !map.entities ) { return 0; }
+		if ( !std::isfinite(tileX) || !std::isfinite(tileY) )
+		{
+			SAM_WARN("SAM", "sam_spawn_entity: position must be a real number.");
+			return 0;
+		}
+		// Bounds BEFORE the double->int narrowing below, which is undefined for a value the
+		// int cannot hold. Every other SAM spawner checks this; this one did not.
+		if ( tileX < 0.0 || tileX >= (double)map.width || tileY < 0.0 || tileY >= (double)map.height )
+		{
+			SAM_ERROR("SAM", "sam_spawn_entity: tile (" + std::to_string((int)tileX) + ","
+				+ std::to_string((int)tileY) + ") is outside the map.");
+			return 0;
+		}
+
+		// A behaviour runs every frame and can spawn from inside itself, and the engine
+		// appends new entities to the END of the list the host loop is still walking -- so a
+		// one-line mistake becomes an unbounded spawn that never yields back to the frame.
+		// Two bounds: how many can appear in a single tick, and how many can exist at once.
+		{
+			static Uint32 s_budgetTick = 0;
+			static int    s_spawnedThisTick = 0;
+			if ( s_budgetTick != ticks ) { s_budgetTick = ticks; s_spawnedThisTick = 0; }
+			if ( ++s_spawnedThisTick > 64 )
+			{
+				SAM_WARN("SAM", "sam_spawn_entity: more than 64 in one tick - refused. A"
+					" behaviour spawning every frame is almost always a loop that was meant"
+					" to be gated.");
+				return 0;
+			}
+			int live = 0;
+			for ( node_t* n = map.entities->first; n != nullptr; n = n->next )
+			{
+				Entity* e = (Entity*)n->element;
+				if ( e && e->behavior == &samScriptedBehavior && ++live > 2000 )
+				{
+					SAM_WARN("SAM", "sam_spawn_entity: 2000 scripted entities already exist"
+						" - refused.");
+					return 0;
+				}
+			}
+		}
+
+		std::string full = behaviourName;
+		if ( full.find(':') == std::string::npos && !ns.empty() ) { full = ns + ":" + full; }
+		const int idx = behaviorIndexFor(full);
+		if ( idx < 0 )
+		{
+			SAM_ERROR("SAM", "sam_spawn_entity: no behaviour named '" + full + "'. Call"
+				" sam_register_behavior first -- register at the top of your script rather"
+				" than inside the handler that spawns, so the name exists when you use it.");
+			return 0;
+		}
+
+		int sprite = 0;
+		if ( !modelId.empty() )
+		{
+			sprite = SAMModels::modelIndexForId(modelId);
+			if ( sprite < 0 )
+			{
+				char* end = nullptr;
+				const long n = std::strtol(modelId.c_str(), &end, 10);
+				if ( end && *end == '\0' && n > 0 && n < (long)nummodels ) { sprite = (int)n; }
+			}
+			if ( sprite < 0 )
+			{
+				SAM_WARN("SAM", "sam_spawn_entity: model '" + modelId + "' is not registered."
+					" Declare it in mod.json \"models\", or pass a vanilla model index."
+					" Spawning it invisible.");
+				sprite = 0;
+			}
+		}
+
+		Entity* e = newEntity(sprite, 1, map.entities, nullptr);
+		if ( !e ) { return 0; }
+		e->x = tileX * 16.0 + 8.0;
+		e->y = tileY * 16.0 + 8.0;
+		e->z = 0.0;
+		e->sizex = 1;
+		e->sizey = 1;
+		e->behavior = &samScriptedBehavior;
+		e->flags[UPDATENEEDED] = true;
+		e->flags[PASSABLE] = true;   // the script resolves its own collisions
+		e->skill[19] = SAM_SCRIPTED_MARKER;
+		e->skill[18] = idx;
+		e->skill[17] = -1;
+		SAM_INFO("SAM", "Spawned '" + full + "' at (" + std::to_string((int)tileX) + ","
+			+ std::to_string((int)tileY) + ") uid " + std::to_string((unsigned long long)e->getUID()));
+		return (unsigned long long)e->getUID();
+#else
+		(void)tileX; (void)tileY; (void)behaviourName; (void)modelId; (void)ns;
+		return 0;
+#endif
+	}
+
+	int registerBehaviorJs(const std::string& fullName, const std::string& ns, void* jsFn)
+	{
+		const int existing = behaviorIndexFor(fullName);
+		if ( existing >= 0 )
+		{
+			releaseBehaviorRow(g_behaviors[existing]);   // free what it held, either language
+			g_behaviors[existing].jsFn = jsFn;
+			g_behaviors[existing].luaRef = -2;
+			g_behaviors[existing].ns = ns;
+			return existing;
+		}
+		ScriptedBehavior b; b.name = fullName; b.ns = ns; b.jsFn = jsFn;
+		g_behaviors.push_back(b);
+		SAM_INFO("JS", "Registered behaviour '" + fullName + "'.");
+		return (int)g_behaviors.size() - 1;
+	}
+
+	void clearBehaviors()
+	{
+		// Release the functions but KEEP the rows.
+		//
+		// An entity already in the world carries a behaviour INDEX, and it keeps carrying it
+		// across a mod reload (/sam_reload works mid-game). If the vector were emptied, that
+		// index would later be handed to whatever behaviour happened to register into that
+		// slot next -- a turret would silently start running someone else's brain. Keeping
+		// the rows means a stale index either finds its own name re-registered, in which case
+		// the entity correctly follows the new code, or finds a dead row and simply stops
+		// thinking. The table is bounded by (mods x behaviours), so it costs nothing.
+		// Every row is released through the shared helper. The previous version nulled jsFn
+		// and claimed "the JS runtime frees its own values on shutdown" -- it does not; there
+		// is no JS-side registry of these allocations, so every JS behaviour function leaked
+		// for the life of the process.
+		for ( auto& b : g_behaviors ) { releaseBehaviorRow(b); }
+	}
+
 	int dispatchEvent(const Event& ev)
 	{
+		// dispatchEvent RE-ENTERS: a handler may call a host API that fires another event.
+		// The inner dispatch owns the store while it runs, so stash the outer one's and put
+		// it back on the way out. Without this, a site that fired an event whose handler
+		// happened to trigger a second event would read the INNER event's numbers.
+		const std::map<std::string, double>      savedNums = g_lastEventNumbers;
+		const std::map<std::string, std::string> savedStrs = g_lastEventStrings;
+		struct StoreRestore
+		{
+			const std::map<std::string, double>* n; const std::map<std::string, std::string>* s;
+			int depth;
+			~StoreRestore() { if ( depth > 0 ) { g_lastEventNumbers = *n; g_lastEventStrings = *s; } }
+		};
+		// Depth is what tells an inner dispatch to restore and an outer one to leave its
+		// results in place for the engine site to read.
+		static int s_dispatchDepth = 0;
+		StoreRestore restore{ &savedNums, &savedStrs, s_dispatchDepth };
+		++s_dispatchDepth;
+		struct DepthPop { int* d; ~DepthPop() { --(*d); } } depthPop{ &s_dispatchDepth };
+
+		// Seed the write-back store FIRST, ahead of every early return in this function.
+		//
+		// An engine site reads this immediately after dispatching. If a dispatch bailed out
+		// early -- no Lua state yet, called before init -- without reseeding, the site would
+		// read whatever the PREVIOUS event left behind and silently act on another event's
+		// numbers. Seeding with the engine's own values also means an untouched field reads
+		// back exactly as it went in.
+		g_lastEventNumbers.clear();
+		g_lastEventStrings.clear();
+		for ( const auto& kv : ev.ints )    { g_lastEventNumbers[kv.first] = (double)kv.second; }
+		for ( const auto& kv : ev.strings ) { g_lastEventStrings[kv.first] = kv.second; }
+
 		// Reset BEFORE the early-out guard below. Doing it after meant a shutdown or a
 		// pre-init dispatch left a stale `true` latched: every later veto-capable site
 		// (itemPickup, castSpell, useItem) then saw a cancel nobody asked for, in a
@@ -5069,6 +5576,12 @@ namespace SAMLua
 			lua_rawgeti(L, LUA_REGISTRYINDEX, s.callbackRef); // push on_event
 			pushEventTable(ev);                                // push event table arg
 
+			// Hold our own reference to that table so we can see what the handler wrote to
+			// it. protectedCall consumes the argument, so without this the handler's changes
+			// would be collected by the GC before we could read them.
+			lua_pushvalue(L, -1);
+			const int evRef = luaL_ref(L, LUA_REGISTRYINDEX); // pops the duplicate
+
 			g_currentNs = s.ns;
 			// ONE result, not zero. This is what lets a mod DECIDE rather than merely watch:
 			// a handler that returns exactly `false` is saying "I handled this, skip what the
@@ -5087,10 +5600,12 @@ namespace SAMLua
 				// so require a real boolean false.
 				if ( lua_isboolean(L, -1) && !lua_toboolean(L, -1) ) { cancelled = true; }
 				lua_pop(L, 1); // discard the result (protectedCall left exactly one)
+				collectEventWriteBacks(ev, evRef);
 				++delivered;
 			}
 			else
 			{
+				luaL_unref(L, LUA_REGISTRYINDEX, evRef); // the handler failed; drop its table
 				// Error isolation: disable ONLY this script; the rest keep running.
 				s.enabled = false;
 				SAMLogger::noteScriptError();
@@ -5186,6 +5701,45 @@ namespace SAMLua
 	long long hookValueEnd()                  { g_hvActive = false; return g_hvValue; }
 	bool hookValueActive()                    { return g_hvActive; }
 	const char* hookValueName()               { return g_hvName.c_str(); }
+
+	void recordEventWriteBackNumber(const char* field, double v)
+	{
+		if ( field ) { g_lastEventNumbers[field] = v; }
+	}
+
+	void recordEventWriteBackString(const char* field, const std::string& v)
+	{
+		if ( field ) { g_lastEventStrings[field] = v; }
+	}
+
+	long long lastEventInt(const char* field, long long fallback)
+	{
+		auto it = g_lastEventNumbers.find(field ? field : "");
+		if ( it == g_lastEventNumbers.end() ) { return fallback; }
+		// A script can put anything in a number field, including inf and NaN. Narrowing
+		// those to an integer is undefined behaviour, so refuse them here rather than let
+		// each adopting site remember to. Same for a value no integer can hold.
+		const double d = it->second;
+		if ( !std::isfinite(d) || d > 9.2e18 || d < -9.2e18 )
+		{
+			SAM_WARN("SAM", std::string("event field '") + (field ? field : "?")
+				+ "' was set to a value that is not a usable number; keeping the original.");
+			return fallback;
+		}
+		return (long long)d;
+	}
+
+	double lastEventNumber(const char* field, double fallback)
+	{
+		auto it = g_lastEventNumbers.find(field ? field : "");
+		return ( it == g_lastEventNumbers.end() ) ? fallback : it->second;
+	}
+
+	std::string lastEventString(const char* field, const std::string& fallback)
+	{
+		auto it = g_lastEventStrings.find(field ? field : "");
+		return ( it == g_lastEventStrings.end() ) ? fallback : it->second;
+	}
 
 	// Did any handler of the last dispatchEvent return false? See the header.
 	bool lastDispatchCancelled()                           { return g_lastDispatchCancelled; }
@@ -5641,6 +6195,11 @@ namespace SAMLua
 			}
 		}
 		g_scripts.clear();
+		// Behaviours die with the scripts that registered them. Leaving them would point
+		// entities in the world at a Lua ref belonging to a closed state -- the same class of
+		// "teardown hooked to nothing" that let panels outlive a run. clearBehaviors runs
+		// BEFORE lua_close so the refs are released against a live state.
+		clearBehaviors();
 
 		const std::size_t peak = g_alloc.peak;
 		lua_close(L);
