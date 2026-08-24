@@ -1,10 +1,76 @@
 [h1]S.A.M Framework (Support All Mods)[/h1]
 
-Mod Barony with plain files. No C++, no compiler, no engine knowledge. Write a small .json, drop it in your mods folder, and the game loads it as a real class, item, monster, spell or status effect. Add a short script next to it if you want it to actually do something.
+Barony was never built to be modded. S.A.M is the layer that makes it modded anyway: a patched game that reads plain JSON files and runs Lua, JavaScript or TypeScript, so a mod can be made in an afternoon by someone who has never opened a C++ file.
 
 [b]S.A.M is a dependency, not a playable mod.[/b] On its own it adds nothing to play. It is the thing other mods are built on. Install it once and every S.A.M mod works.
 
-[b]READ THIS: subscribing here does NOT install it.[/b] S.A.M is a modified barony.exe, and Steam cannot replace a game's .exe by itself. You have to run the installer one time. Steps are right below and it takes about a minute.
+[hr][/hr]
+
+[h1]READ THIS FIRST[/h1]
+
+[b]Subscribing here does NOT install it.[/b] S.A.M is a modified barony.exe, and Steam cannot replace a game's program file by itself. You have to run the installer one time. It takes about a minute and the steps are further down this page.
+
+[hr][/hr]
+
+[h1]NEW IN 2.0: YOUR MOD CAN THINK[/h1]
+
+Every version until now added things a mod could do. This one changes what a mod is.
+
+Before 2.0, a mod was a guest that could react. It could be told a player was hit; it could not stop it. It could give a creature different numbers; it could not give it a different mind.
+
+[b]Your creatures can think for themselves.[/b] Barony runs every thing in the world through a function once per frame, and until now that function was always ours. Now your script can BE it. A turret that tracks and leads a moving target. A boss that changes the rules at half health. A companion that actually follows you properly. None of it picked from a list somebody else wrote.
+
+[b]Mods can change what happens, not just hear about it.[/b] Sixty one of sixty five events used to be announcements after the fact. Now a mod can halve incoming damage, rewrite what a chest holds, or refuse a hit outright. And two mods that both reduce damage BOTH apply, because each one sees what the last one left. That is the difference between mods that stack and mods that fight.
+
+[b]Your saves stopped drifting.[/b] Custom items used to be numbered in the order your mods loaded, and only the number was written down. Reorder your mod list and a saved custom sword quietly became a different mod's potion. That is fixed, and saves now record which mods made them.
+
+[b]If you play multiplayer, install this anyway.[/b] 2.0 closes eleven memory safety holes inherited from the base game that were reachable with no mods at all.
+
+[hr][/hr]
+
+[h1]WHAT YOU CAN MAKE[/h1]
+[list]
+[*][b]Creatures with their own logic.[/b] Not a reskin. Your script runs once per frame for a thing you put in the world, and decides what it does.
+[*][b]Rules that actually change.[/b] Armour that really reduces a hit. A curse that rewrites a chest as it opens. A class that cannot be poisoned.
+[*][b]Your own windows.[/b] Real panels with buttons, pictures, scrolling lists and text boxes, so a mod can have a shop, a quest log, a bestiary or a settings screen.
+[*][b]A home you can go back to.[/b] Send the party to any floor, including back UP, which the game itself never does. Give them a chest whose contents follow them down every floor and survive saving and loading.
+[*][b]Classes.[/b] Attributes, skills, starting gear including your own items, starting spells, level up growth, gold, and a character select portrait with real stat bars and difficulty stars.
+[*][b]Items and weapons.[/b] Real entries in Barony's item table, with category, equip slot, weight, value, ATK and AC, your own model and icon.
+[*][b]Monsters.[/b] Variants of any creature with your own stats, gear, name, followers and spawn floors, plus your own model that animates as it moves and attacks.
+[*][b]Spells.[/b] Custom spells that really cast, through the game's own projectile pipeline.
+[*][b]Custom projectiles.[/b] Fire something with its own speed, model, damage and range, for ranged enemies, boss volleys, traps, and weapons that shoot more than arrows.
+[*][b]Status effects.[/b] Your own named buffs and afflictions, with duration, strength, AC and damage changes.
+[*][b]Playable races.[/b] Play as a monster body.
+[*][b]Progress that belongs to one character.[/b] Save values inside a character's savegame, so a new character never inherits the last one's unlocks.
+[*][b]Sounds and models.[/b] Ship your own .ogg files and your own voxel models.
+[*][b]Tinkering recipes.[/b] Add, remove or re-cost what the tinkering kit can build.
+[*][b]Read the game itself.[/b] List every item, monster and spell the game knows about, including anything mods added, so a shop or an index is built from real data.
+[*][b]Vanilla patches.[/b] Edit the game's data in layers, so two mods stack instead of overwriting each other.
+[/list]
+
+[hr][/hr]
+
+[h1]MAKE A MOD IN YOUR BROWSER[/h1]
+
+The easiest way, nothing to download:
+
+[b][url=https://spider12223.github.io/SAM-Framework/]S.A.M Mod Builder[/url][/b]
+
+Build a class, item, monster, spell or effect with dropdowns and sliders, watch the JSON update live, then export a ready to use .zip. It checks your work against the same rules the game uses, so if it exports, it loads. You can import an existing mod to edit it too.
+
+[hr][/hr]
+
+[h1]SCRIPTING (Lua, JavaScript, TypeScript)[/h1]
+
+JSON says what your content [i]is[/i]. A script says what it [i]does[/i]. Drop a .lua, .js or .ts file next to any class or item JSON and it loads automatically. TypeScript is compiled for you.
+
+[b]65 events[/b] to react to, and now to change. Combat, level up, death, floor change, items (equip, use, pick up, identify, break), shops, chests, traps, monsters, key presses, a per tick handler, world things (doors, levers, fountains, teleporters, projectile hits), and bound actions that follow whatever the player rebound them to.
+
+[b]168 functions[/b] to act with. Grant items and gold at any quality, read and set stats, level a player up for real, apply and read status effects, cast spells, deal or change damage, move speed, teleport, spawn monsters and items, run your own per frame logic on anything you spawn, open windows, timers, saved data that survives between runs, screen effects, and live patching that reverts when your mod unloads.
+
+Only two functions ever get called: [b]on_event(event)[/b] and [b]on_tick(event)[/b]. Everything else arrives as [b]event.name[/b] inside on_event.
+
+[b]Safe by design.[/b] Scripts run sandboxed with a memory cap and an instruction limit. A broken script switches itself off and writes why to the log. It cannot crash your game.
 
 [hr][/hr]
 
@@ -13,7 +79,7 @@ Mod Barony with plain files. No C++, no compiler, no engine knowledge. Write a s
 [b]Step 1.[/b] Own Barony on Steam and launch it once so its files exist. Then close the game.
 
 [b]Step 2.[/b] Open the download page:
-[url=https://github.com/spider12223/SAM-Framework/releases/latest]https://github.com/spider12223/SAM-Framework/releases/latest[/url]
+[b][url=https://github.com/spider12223/SAM-Framework/releases/latest]github.com/spider12223/SAM-Framework/releases/latest[/url][/b]
 
 [b]Step 3.[/b] Scroll down to the [b]Assets[/b] list and click [b]SAM_Framework_Installer.exe[/b]. It saves to your Downloads folder.
 
@@ -23,29 +89,19 @@ Mod Barony with plain files. No C++, no compiler, no engine knowledge. Write a s
 
 [b]Step 6.[/b] It finds your Barony folder on its own. Check the path looks right, then click [b]Install[/b].
 
-[b]Step 7.[/b] Let it finish. It saves your original game as [b]barony_vanilla.exe[/b] (your backup), then puts the S.A.M version in place. Close the installer.
+[b]Step 7.[/b] Let it finish. It saves your original game as [b]barony_vanilla.exe[/b], which is your backup, then puts the S.A.M version in place. Close the installer.
 
 [b]Step 8.[/b] Launch Barony from Steam as normal.
 
 [b]Step 9.[/b] Look at the bottom of the main menu. A shield icon and the words [b]S.A.M Framework[/b] mean you are done. If it is not there, repeat steps 3 to 7.
 
-[b]You only do this once.[/b] To update later, run the installer again. It always grabs the newest version.
-
-[hr][/hr]
-
-[h1]PLEASE READ BEFORE INSTALLING[/h1]
-
-S.A.M replaces the game's program file, and we build it without a few services that need the developer's own private credentials. [b]While S.A.M is installed you lose three things: crossplay with Epic Games Store players, online leaderboard scores, and video playback (the intro and animated signs).[/b] Everything else, including Steam multiplayer, works normally.
-
-These are not bugs we can fix. They need private Epic and PlayFab credentials that only the game's developer has. Switching back takes ten seconds, see below.
+[b]You only do this once.[/b] To update later, run the same installer again. It always fetches the newest version, so you never need a new one.
 
 [hr][/hr]
 
 [h1]HOW TO GO BACK TO NORMAL BARONY[/h1]
 
-Delete barony.exe, then rename [b]barony_vanilla.exe[/b] back to [b]barony.exe[/b]. Or right click Barony in Steam, pick Properties, then Installed Files, then Verify integrity of game files.
-
-Nothing else is ever changed. S.A.M does not edit any of the game's own files, and it backs up your saves while mods are active.
+Your original game was never deleted. Open your Barony folder, delete [b]barony.exe[/b], and rename [b]barony_vanilla.exe[/b] back to [b]barony.exe[/b]. Or just use Steam's [b]Verify integrity of game files[/b]. Either way you are back to vanilla, and your saves are untouched.
 
 [hr][/hr]
 
@@ -61,53 +117,6 @@ Nothing else is ever changed. S.A.M does not edit any of the game's own files, a
 [b]Step 4.[/b] Click [b]Start Modded Game[/b] at the bottom.
 
 [b]Workshop mod instead?[/b] Subscribe, then let Steam finish downloading before you launch. If [b]Load Mod[/b] does nothing, Steam has not finished. Close Steam fully, reopen, wait, then launch.
-
-[hr][/hr]
-
-[h1]WHAT YOU CAN MAKE[/h1]
-[list]
-[*][b]Classes.[/b] Attributes, skills, starting gear (including your own items), starting spells, level up growth, gold, and a character select portrait with real stat bars and difficulty stars.
-[*][b]Items and weapons.[/b] Real entries in Barony's item table, with category, equip slot, weight, value, ATK and AC, your own model and icon.
-[*][b]Monsters.[/b] Variants of any creature with your own stats, gear, name, followers and spawn floors, plus your own model that animates as it moves and attacks.
-[*][b]Spells.[/b] Custom spells that really cast, through the game's own projectile pipeline.
-[*][b]Status effects.[/b] Your own named buffs and afflictions, with duration, strength, AC and damage changes.
-[*][b]Playable races.[/b] Play as a monster body.
-[*][b]Sounds.[/b] Ship your own .ogg files and play them from a script.
-[*][b]Custom .vox models.[/b] Your own voxel models, loaded at startup.
-[*][b]Tinkering recipes.[/b] Add, remove or re-cost what the tinkering kit can build.
-[*][b]Vanilla patches.[/b] Edit the game's data in layers, so two mods stack instead of overwriting each other.
-[*][b]Your own creatures, with your own logic.[/b] Not a reskin. Barony runs every thing in the world through a function once per frame, and your script can BE that function -- a turret that tracks and leads its target, a boss with real phases, a companion that thinks. Nothing about what it does comes from a list we wrote.
-[*][b]Change what happens, not just watch it.[/b] Mods used to be told about things after the fact. Now a mod can halve incoming damage, rewrite what a chest contains, or refuse a hit outright -- and two mods that both reduce damage both apply, instead of one quietly overwriting the other.
-[*][b]Your own windows.[/b] Real panels with buttons, pictures, scrolling lists and text boxes, so a mod can have a shop, a quest log, a bestiary or a settings screen instead of just printing to the screen.
-[*][b]A home you can go back to.[/b] Send the party to any floor, including back UP, which the game itself never does, and give them a chest whose contents follow them down every floor and survive saving and loading.
-[*][b]Progress that belongs to one character.[/b] Save your own values inside a character's savegame, so a new character never inherits the last one's unlocks.
-[*][b]Custom projectiles.[/b] Fire something with its own speed, model, damage and range, for ranged enemies, boss volleys, traps and weapons that shoot more than arrows.
-[*][b]Read the game itself.[/b] List every item, monster and spell the game knows about, including anything mods added, so you can build an index or a shop from real data.
-[/list]
-
-[hr][/hr]
-
-[h1]SCRIPTING (Lua, JavaScript, TypeScript)[/h1]
-
-JSON says what your content [i]is[/i]. A script says what it [i]does[/i]. Drop a .lua, .js or .ts file next to any class or item JSON and it loads automatically. TypeScript is compiled for you.
-
-[b]65 events[/b] to react to. Combat, level up, death, floor change, items (equip, use, pick up, identify, break), shops, chests, traps, monsters, key presses, a per tick handler, world things (doors, levers, fountains, teleporters, projectile hits), and bound actions that follow whatever the player rebound them to.
-
-[b]168 functions[/b] to act with. Grant items and gold at any quality, read and set stats, level a player up for real, apply and read status effects, cast spells, deal or change damage, move speed, teleport, spawn monsters and items, full monster control by id, timers, saved data that survives between runs, screen effects, and live patching that reverts when your mod unloads.
-
-Only two functions ever get called: [b]on_event(event)[/b] and [b]on_tick(event)[/b]. Everything else arrives as [b]event.name[/b] inside on_event.
-
-[b]Safe by design.[/b] Scripts run sandboxed with a memory cap and an instruction limit. A broken script switches itself off and writes why to the log. It cannot crash your game.
-
-[hr][/hr]
-
-[h1]MAKE A MOD IN YOUR BROWSER[/h1]
-
-The easiest way, nothing to download:
-
-[b][url=https://spider12223.github.io/SAM-Framework/]S.A.M Mod Builder[/url][/b]
-
-Build a class, item, monster, spell or effect with dropdowns and sliders, watch the JSON update live, then export a ready to use .zip. It checks your work against the same rules the game uses, so if it exports, it loads. You can import an existing mod to edit it too.
 
 [hr][/hr]
 
