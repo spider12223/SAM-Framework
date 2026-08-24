@@ -24,6 +24,11 @@ export const EFFECTS = ["ASLEEP", "POISONED", "STUNNED", "CONFUSED", "DRUNK", "I
 // and won't do anything sensible if you apply them by hand — read/remove is always safe.
 export const EQUIP_SLOTS = ["WEAPON", "SHIELD", "HELMET", "ARMOR", "BREASTPLATE", "GLOVES", "BOOTS", "SHOES", "RING", "AMULET", "CLOAK", "MASK"];
 
+// Every creature the engine knows, by the exact name the framework accepts (monstertypename[]
+// in monster.hpp). The NOTHING sentinel and the reserved padding slots are left out — they are
+// array padding, not creatures. Used by the race editor's allegiance pickers.
+export const MONSTERS = ["human", "rat", "goblin", "slime", "troll", "bat", "spider", "ghoul", "skeleton", "scorpion", "imp", "crab", "gnome", "demon", "succubus", "mimic", "lich", "minotaur", "devil", "shopkeeper", "kobold", "scarab", "crystalgolem", "incubus", "vampire", "shadow", "cockatrice", "insectoid", "goatman", "automaton", "lichice", "lichfire", "sentrybot", "spellbot", "gyrobot", "dummybot", "bugbear", "dryad", "myconid", "salamander", "gremlin", "revenant_skull", "minimimic", "monster_adorcised_weapon", "flame_elemental", "hologram", "moth", "earth_elemental", "duck_small"];
+
 /**
  * Spells a PLAYER can actually cast — the engine's spell_t globals.
  * Barony's items.json lists ~227 spell_* names, but most are monster-only and would

@@ -8,8 +8,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { validate } from '@/lib/validate.js';
 import { useMod } from '@/state/ModContext.jsx';
-import { Panel, Field, TextInput, NumberInput, Select, GoldButton, ErrorList, SavedNote } from '@/components/ui.jsx';
+import { Panel, Field, TextInput, NumberInput, Select, SearchSelect, GoldButton, ErrorList, SavedNote } from '@/components/ui.jsx';
 import ScriptEditor from '@/components/ScriptEditor.jsx';
+import { MONSTERS, SPELLS } from '@/data/samApi.js';
+import { CLASS_SPELL_REF_PATTERN } from '@/data/schemas.js';
 
 const ATTRS = ['STR', 'DEX', 'CON', 'INT', 'PER', 'CHR'];
 const ATTR_ICONS = { STR: '💪', DEX: '🪶', CON: '❤️', INT: '📖', PER: '👁️', CHR: '🎭' };
@@ -21,13 +23,35 @@ const HOST_BODIES = [
   'myconid', 'salamander', 'troll', 'spider', 'imp', 'rat',
 ];
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const prettyMonster = (m) => m.split('_').map(cap).join(' ');
+
+// A removable chip list. Same shape the class editor uses for starting spells, so the two
+// editors read the same way.
+function Chips({ items, icon, label = (x) => x, onRemove, empty }) {
+  if (!items.length) {
+    return <div className="text-xs mb-3 min-h-8" style={{ color: '#6b5a35' }}>{empty}</div>;
+  }
+  return (
+    <div className="flex flex-wrap gap-2 mb-3 min-h-8">
+      {items.map((x) => (
+        <span key={x} className="sam-well px-2 py-1 text-sm inline-flex items-center gap-2"
+          style={{ color: 'var(--color-parchment)' }}>
+          {icon} {label(x)}
+          <button type="button" className="sam-step sam-remove"
+            style={{ width: 18, height: 18, fontSize: '0.7rem' }}
+            onClick={() => onRemove(x)} aria-label={`remove ${x}`}>✕</button>
+        </span>
+      ))}
+    </div>
+  );
+}
 
 function slugify(name) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'unnamed';
 }
 
 export default function RaceEditor() {
-  const { meta, races, scripts, editing, dispatch } = useMod();
+  const { meta, races, spells: modSpells, scripts, editing, dispatch } = useMod();
   const editDef = editing?.kind === 'race' ? races.find((r) => r.id === editing.id) : null;
   const existingScript = editDef ? scripts[editDef.id] : null;
 
@@ -36,6 +60,13 @@ export default function RaceEditor() {
   const [hostBody, setHostBody] = useState(editDef?.host_body ?? 'skeleton');
   const [mods, setMods] = useState(() =>
     Object.fromEntries([...ATTRS, 'HP', 'MP'].map((a) => [a, editDef?.stat_modifiers?.[a] ?? 0])));
+  const [bloodDiet, setBloodDiet] = useState(editDef?.blood_diet ?? false);
+  const [startingSpells, setStartingSpells] = useState(editDef?.starting_spells ?? []);
+  // Declared allegiance. Empty is not "no allies" — it means "inherit the host body's
+  // relations", which is why neither list is written to the JSON when it is empty.
+  const [allies, setAllies] = useState(editDef?.allies ?? []);
+  const [enemies, setEnemies] = useState(editDef?.enemies ?? []);
+  const [spellError, setSpellError] = useState('');
   const [scriptLang, setScriptLang] = useState(existingScript?.lang ?? 'lua');
   const [scriptCode, setScriptCode] = useState(existingScript?.code ?? '');
   // Visual block-builder rules, so reopening restores the bricks. Editor-only (not exported).
@@ -58,7 +89,27 @@ export default function RaceEditor() {
     const sm = {};
     for (const a of [...ATTRS, 'HP', 'MP']) { const v = num(mods[a]); if (v != null && v !== 0) sm[a] = v; }
     if (Object.keys(sm).length) def.stat_modifiers = sm;
+    if (bloodDiet) def.blood_diet = true;
+    if (startingSpells.length) def.starting_spells = startingSpells;
+    if (allies.length) def.allies = allies;
+    if (enemies.length) def.enemies = enemies;
     return def;
+  };
+
+  // A type in both lists is an enemy in game (the engine says so in the log). Say it here
+  // instead, while it is still one click to fix.
+  const conflicts = allies.filter((m) => enemies.includes(m));
+
+  const addSpell = (raw) => {
+    const input = String(raw ?? '').trim();
+    if (!input) return;
+    const sp = input.includes(':') ? input.toLowerCase() : input.toUpperCase();
+    if (!CLASS_SPELL_REF_PATTERN.test(sp)) {
+      setSpellError('Use a SPELL_X constant or a custom "namespace:spell" id.');
+      return;
+    }
+    setSpellError('');
+    setStartingSpells((prev) => (prev.includes(sp) ? prev : [...prev, sp]));
   };
 
   const save = () => {
@@ -74,7 +125,7 @@ export default function RaceEditor() {
 
   const def = useMemo(buildDef,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [name, description, hostBody, mods, namespace]);
+    [name, description, hostBody, mods, bloodDiet, startingSpells, allies, enemies, namespace]);
   const preview = useMemo(() => JSON.stringify(def, null, 2), [def]);
   const setMod = (a, v) => setMods((prev) => ({ ...prev, [a]: v }));
 
@@ -98,6 +149,10 @@ export default function RaceEditor() {
           <Field label="Description" hint="Shown in the picker's info panel.">
             <textarea className="sam-input" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="A nimble undead wanderer…" />
           </Field>
+          <label className="flex items-center gap-2 mt-3 cursor-pointer text-sm" style={{ color: 'var(--color-parchment)' }}>
+            <input type="checkbox" className="sam-check" checked={bloodDiet} onChange={(e) => setBloodDiet(e.target.checked)} />
+            Blood diet (sustains on blood instead of food, like a vampire)
+          </label>
         </Panel>
 
         <Panel title="Attribute bonuses">
@@ -118,6 +173,70 @@ export default function RaceEditor() {
               <NumberInput value={mods.MP} onChange={(v) => setMod('MP', v)} />
             </Field>
           </div>
+        </Panel>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+        <Panel title="Allegiance">
+          <div className="text-xs mb-3" style={{ color: '#8a7749' }}>
+            Your race already inherits its host body's relations: a Goatman-bodied race is
+            left alone by goatmen without doing anything here, and hated by humans and
+            shopkeepers for the same reason. These two lists are for relations the host body
+            does <b>not</b> have. Leave them empty to inherit its relations unchanged.
+          </div>
+
+          <div className="sam-label mb-1" style={{ color: '#8a6d2e' }}>Won't attack you</div>
+          <Chips items={allies} icon="🤝" label={prettyMonster}
+            onRemove={(m) => setAllies((p) => p.filter((x) => x !== m))}
+            empty="Nothing added — the host body decides." />
+          <SearchSelect
+            options={MONSTERS.filter((m) => !allies.includes(m))}
+            onPick={(m) => setAllies((p) => (p.includes(m) ? p : [...p, m]))}
+            placeholder="Search creatures… e.g. gnome" />
+
+          <div className="sam-label mb-1 mt-4" style={{ color: '#8a6d2e' }}>Always hostile</div>
+          <Chips items={enemies} icon="⚔️" label={prettyMonster}
+            onRemove={(m) => setEnemies((p) => p.filter((x) => x !== m))}
+            empty="Nothing added — the host body decides." />
+          <SearchSelect
+            options={MONSTERS.filter((m) => !enemies.includes(m))}
+            onPick={(m) => setEnemies((p) => (p.includes(m) ? p : [...p, m]))}
+            placeholder="Search creatures… e.g. shopkeeper" />
+
+          {conflicts.length > 0 && (
+            <div className="sam-error text-sm mt-3">
+              {conflicts.map(prettyMonster).join(', ')} {conflicts.length === 1 ? 'is' : 'are'} in
+              both lists. In game that means hostile — remove it from one side to be sure.
+            </div>
+          )}
+        </Panel>
+
+        <Panel title="Innate Spells">
+          <div className="text-xs mb-3" style={{ color: '#8a7749' }}>
+            Known from character creation, whatever class you pick — the racial half of a
+            spellbook. Vanilla races use this for things like a vampire's Bleed.
+          </div>
+          <Chips items={startingSpells} icon="✨"
+            onRemove={(sp) => setStartingSpells((p) => p.filter((x) => x !== sp))}
+            empty="No innate spells." />
+          <SearchSelect
+            options={SPELLS.filter((sp) => !startingSpells.includes(sp))}
+            onPick={addSpell}
+            placeholder="Search spells… (or type mymod:spell)"
+            allowCustom />
+          {spellError && <div className="sam-error text-sm mt-1">{spellError}</div>}
+          {modSpells.length > 0 && (
+            <div className="mt-3">
+              <div className="sam-label mb-1" style={{ color: '#8a6d2e' }}>Your custom spells</div>
+              <div className="flex flex-wrap gap-1">
+                {modSpells.map((sp) => (
+                  <button key={sp.id} type="button" className="sam-btn"
+                    style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
+                    onClick={() => addSpell(sp.id)} title={`add ${sp.id}`}>✨ {sp.name}</button>
+                ))}
+              </div>
+            </div>
+          )}
         </Panel>
       </div>
 

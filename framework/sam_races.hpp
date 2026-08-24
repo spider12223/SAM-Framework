@@ -57,6 +57,17 @@ struct SAMRaceDef
 	// Optional "starting_spells": innate spells this race knows from creation (vanilla
 	// "SPELL_X" names or custom "namespace:spell"). Granted by SAMRaces::applySpells.
 	std::vector<std::string> startingSpells;
+
+	// Optional "allies" / "enemies": monster types (Monster enum values) this race is at
+	// peace with, or always hostile to, REGARDLESS of what its host body says.
+	//
+	// A race already inherits its host body's relations for free -- a goatman-bodied race
+	// is ignored by goatmen because the engine sees stats->type == GOATMAN. These two
+	// lists are the part that could not be expressed before: a difference from the host.
+	// Both are empty by default, and an empty list is not "no allies", it is "no opinion"
+	// -- the host body's own relations stand untouched.
+	std::vector<int> allies;
+	std::vector<int> enemies;
 };
 
 class SAMRaces
@@ -110,4 +121,15 @@ public:
 	// initClassStats, before the unconditional HP/MP clamp. No-op for a non-SAM
 	// race id or an unregistered id.
 	static void applyStats(int raceId, Stat* myStats);
+
+	// What this race has DECLARED about a monster type, as a tri-state:
+	//
+	//    1  ally     -- will not attack it, and it will not attack back
+	//    0  enemy    -- hostile on sight, whatever the host body thinks
+	//   -1  silent   -- no declaration; the host body's own relations stand
+	//
+	// -1 is the answer for every vanilla race, every unregistered id, and every race
+	// that declared nothing, which is what keeps the engine sites a true no-op. Callers
+	// must treat -1 as "leave the verdict alone", never as a boolean.
+	static int declaredAllegiance(int raceId, int monsterType);
 };

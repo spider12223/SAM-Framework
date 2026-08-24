@@ -457,6 +457,10 @@ function raceSub(def, scripts) {
   for (const k of ['STR', 'DEX', 'CON', 'INT', 'PER', 'CHR', 'HP', 'MP']) {
     if (sm[k]) bits.push(`${sm[k] > 0 ? '+' : ''}${sm[k]} ${k}`);
   }
+  if (def.blood_diet) bits.push('blood diet');
+  if (def.starting_spells?.length) bits.push(`${def.starting_spells.length} innate spell${def.starting_spells.length === 1 ? '' : 's'}`);
+  if (def.allies?.length) bits.push(`allied: ${def.allies.join('/')}`);
+  if (def.enemies?.length) bits.push(`hostile: ${def.enemies.join('/')}`);
   if (scripts && scripts[def.id]) bits.push(`${scripts[def.id].lang} script`);
   return `${def.id} · ${bits.join(', ')}`;
 }

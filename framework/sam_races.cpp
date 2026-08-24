@@ -23,6 +23,7 @@
 #include "magic/magic.hpp" // addSpell
 #include "sam_spells.hpp"  // grant custom "ns:spell" innate race spells
 
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 #include <map>
@@ -168,6 +169,45 @@ void SAMRaces::loadFromManifest(const SAMModManifest& manifest)
 			rd("HP", def.hp); rd("MP", def.mp);
 		}
 		def.bloodDiet = getBool("blood_diet", false);
+
+		// allies / enemies: monster-type names, resolved to Monster enum values now so the
+		// hot path (checkEnemy, once per entity pair) never touches a string. An unknown
+		// name is reported and dropped rather than silently ignored -- a typo'd "goatmen"
+		// would otherwise look exactly like a race whose allegiance quietly does nothing.
+		auto readMonsterList = [&](const char* key, std::vector<int>& out) {
+			auto arr = j.find(key);
+			if ( arr == j.end() || !arr->is_array() ) { return; }
+			for ( const json& e : *arr )
+			{
+				if ( !e.is_string() ) { continue; }
+				const std::string nm = e.get<std::string>();
+				const int m = monsterFromName(nm);
+				if ( m <= 0 )   // 0 is "nothing", which is not a creature
+				{
+					SAMErrors::reportSemantic(MOD, fileLabel, std::string("/") + key, nm,
+						"not a monster type",
+						"a monster name such as \"goatman\", \"gnome\" or \"shopkeeper\"",
+						"check the spelling against the monster list in the docs",
+						"that entry ignored; the rest of the race loaded.", true);
+					continue;
+				}
+				out.push_back(m);
+			}
+		};
+		readMonsterList("allies", def.allies);
+		readMonsterList("enemies", def.enemies);
+
+		// Declaring both is a contradiction the author needs to resolve, not something to
+		// resolve silently. enemies wins (hostility is the more consequential reading of
+		// an ambiguous file), and we say so.
+		for ( int m : def.enemies )
+		{
+			if ( std::find(def.allies.begin(), def.allies.end(), m) != def.allies.end() )
+			{
+				SAM_WARN(MOD, "Race '" + def.id + "' lists '" + std::string(monstertypename[m])
+					+ "' as BOTH an ally and an enemy — treating it as an enemy.");
+			}
+		}
 		if ( j.contains("starting_spells") && j["starting_spells"].is_array() )
 		{
 			for ( const json& e : j["starting_spells"] )
@@ -185,7 +225,41 @@ void SAMRaces::loadFromManifest(const SAMModManifest& manifest)
 			+ " CON " + std::to_string(def.con) + " INT " + std::to_string(def.intel)
 			+ " PER " + std::to_string(def.per) + " CHR " + std::to_string(def.chr)
 			+ " HP " + std::to_string(def.hp) + " MP " + std::to_string(def.mp) + ")");
+		if ( !def.allies.empty() || !def.enemies.empty() )
+		{
+			std::string line = "  " + def.name + " allegiance:";
+			if ( !def.allies.empty() )
+			{
+				line += " allied with";
+				for ( int m : def.allies ) { line += " " + std::string(monstertypename[m]); }
+			}
+			if ( !def.enemies.empty() )
+			{
+				line += " hostile to";
+				for ( int m : def.enemies ) { line += " " + std::string(monstertypename[m]); }
+			}
+			SAM_INFO(MOD, line);
+		}
 	}
+}
+
+int SAMRaces::declaredAllegiance(int raceId, int monsterType)
+{
+	// Ordered cheapest-first. For a vanilla race raceId is 0, so this returns on the
+	// first comparison without touching the map -- which is every call in a game with
+	// no race mod loaded, and every call about a vanilla-race player in one that has.
+	if ( raceId < SAM_RACE_ID_BASE ) { return -1; }
+	if ( s_byId.empty() ) { return -1; }
+	if ( monsterType <= 0 || monsterType >= NUMMONSTERS ) { return -1; }
+
+	auto it = s_byId.find(raceId);
+	if ( it == s_byId.end() ) { return -1; }
+	const SAMRaceDef& def = it->second;
+
+	// enemies first: a type in both lists is hostile, matching the load-time warning.
+	for ( int m : def.enemies ) { if ( m == monsterType ) { return 0; } }
+	for ( int m : def.allies )  { if ( m == monsterType ) { return 1; } }
+	return -1;
 }
 
 void SAMRaces::clear()
