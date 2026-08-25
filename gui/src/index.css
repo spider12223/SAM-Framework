@@ -34,6 +34,16 @@
      Durations are deliberately short. This is a tool someone keeps open for an
      hour, not a landing page: every value here is under the 300ms ceiling, and
      the ones tied to a click are near the floor. */
+  /* ------------------------------------------------------------ typography
+     Tracking is a function of size, so it is a token per size, not one value.
+     The direction is the standard one -- looser as text gets smaller, tighter
+     as it grows -- applied within the small-caps idiom rather than against it. */
+  --track-display: 0.065em;  /* 2rem+ : the word has to hold together */
+  --track-title: 0.11em;     /* panel headers */
+  --track-label: 0.15em;     /* 0.8rem and under, where air aids legibility */
+  --leading-display: 1.08;   /* tight, because large text needs less */
+  --leading-body: 1.55;
+
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   --dur-press: 120ms;    /* the click itself */
@@ -47,6 +57,13 @@
 
 html, body, #root {
   height: 100%;
+}
+
+/* Body copy sat at 1.5. These panels are dense and the measure is wide, so the extra
+   leading is what keeps a paragraph of explanation from reading as a block of text. */
+body {
+  line-height: var(--leading-body);
+  text-rendering: optimizeLegibility;
 }
 
 body {
@@ -75,7 +92,11 @@ body::before {
 /* ------------------------------------------------------------------ text */
 .sam-title {
   font-variant: small-caps;
-  letter-spacing: 0.1em;
+  /* Was 0.1em at every size this class is used at. At 2.25rem that is enough air
+     to break the word into letters; at 1.5rem it is right. Size-specific now. */
+  letter-spacing: var(--track-display);
+  line-height: var(--leading-display);
+  font-optical-sizing: auto;
   color: var(--color-gold); /* fallback where background-clip:text is unsupported */
   background: linear-gradient(180deg, var(--color-gold-bright) 0%, var(--color-gold) 55%, #b78a34 100%);
   -webkit-background-clip: text;
@@ -144,8 +165,9 @@ body::before {
     linear-gradient(180deg, #2b2010, #1f1609);
   box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.5);
   font-variant: small-caps;
-  letter-spacing: 0.16em;
+  letter-spacing: var(--track-title);
   font-size: 1.04rem;
+  font-weight: 600;
   color: var(--color-gold-bright);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9), 0 0 14px rgba(212, 168, 75, 0.12);
   border-radius: 5px 5px 0 0;
@@ -799,4 +821,62 @@ select.sam-input { appearance: none; cursor: var(--sam-cursor); }
   @starting-style {
     .sam-ok { transform: none; }
   }
+}
+
+/* ===================================================================== materials
+   Material weight encodes hierarchy. Everything in this tool was the same opaque wood
+   slab at three shadow depths, so a panel, the page header and an inset well read as
+   the same kind of object at different brightnesses rather than as different layers.
+
+   Three tiers now, and the rule is that a bigger surface reads as a THICKER one:
+
+     .sam-banner   the page header. The largest chrome, so the strongest blur and the
+                   deepest shadow. Translucent, so the ambient radial gradient behind
+                   the page shows through it and it reads as glass over the room rather
+                   than a slab bolted on top.
+     .sam-panel    structural, opaque, medium shadow. Unchanged: content sits ON it, and
+                   a translucent surface under body copy is where legibility goes.
+     .sam-well     inset. Unchanged.
+
+   Never a light translucent surface on another translucent one -- that is the one
+   stacking rule that collapses legibility, and it is why only the banner is glass. */
+.sam-banner {
+  background:
+    linear-gradient(180deg, rgba(255, 235, 180, 0.05) 0%, transparent 30%),
+    rgba(43, 32, 16, 0.62);
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  /* A bright top edge is the light catching the near face of the material. Without it a
+     translucent surface reads as a hole in the page instead of something lying on it. */
+  border-top: 1px solid rgba(243, 212, 136, 0.16);
+  box-shadow:
+    inset 0 0 0 1px rgba(0, 0, 0, 0.4),
+    0 10px 34px rgba(0, 0, 0, 0.62);
+}
+/* Vibrancy: text over a translucent, moving background needs more contrast and a touch
+   more weight than the same text over an opaque one, or it dissolves into whatever
+   happens to be behind it. */
+.sam-banner .sam-subtitle { color: #b39456; letter-spacing: 0.34em; }
+
+/* -------------------------------------------------------------- reduced transparency
+   A named user setting, and one this stylesheet did not answer. Frostier, not blurrier:
+   raise the background to opaque and drop the blur entirely, keeping the same edges so
+   the layout does not shift. */
+@media (prefers-reduced-transparency: reduce) {
+  .sam-banner {
+    background: linear-gradient(180deg, rgba(255, 235, 180, 0.05) 0%, transparent 30%), var(--color-wood);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+/* ------------------------------------------------------------------ more contrast
+   Near-solid backgrounds with a defined, contrasting border. The palette leans on
+   mid-golds against mid-browns, which is the first thing to fail for anyone who has
+   asked the OS for more contrast. */
+@media (prefers-contrast: more) {
+  .sam-banner { background: var(--color-wood); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .sam-panel, .sam-well, .sam-input { border-color: var(--color-gold-dim); }
+  .sam-nav-item { color: var(--color-parchment); }
+  .sam-label, .sam-subtitle { color: var(--color-gold); }
 }

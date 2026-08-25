@@ -53,7 +53,7 @@ const NAV_GROUPS = [
 function Banner() {
   return (
     <header
-      className="sam-panel mx-3 mt-3 mb-2 py-3 text-center"
+      className="sam-panel sam-banner mx-3 mt-3 mb-2 py-3 text-center"
       style={{ borderRadius: 6 }}
     >
       <h1 className="sam-title text-4xl m-0" style={{ fontWeight: 600 }}>
