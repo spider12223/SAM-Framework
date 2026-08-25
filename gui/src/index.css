@@ -23,6 +23,22 @@
   --color-line-bright: #6a4e22;  /* hovered/raised edge */
   --color-line-dark: #0c0803;    /* deep inner edge     */
   --font-medieval: "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
+
+  /* ---------------------------------------------------------------- motion
+     The built-in CSS easings are too weak to read as intentional; these are the
+     stronger variants. ease-out for anything entering or responding to a press,
+     because it moves immediately -- which is the instant the eye is on it.
+     ease-in is deliberately absent: it holds still at exactly the wrong moment
+     and makes the whole tool feel slower at the same duration.
+
+     Durations are deliberately short. This is a tool someone keeps open for an
+     hour, not a landing page: every value here is under the 300ms ceiling, and
+     the ones tied to a click are near the floor. */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --dur-press: 120ms;    /* the click itself */
+  --dur-hover: 130ms;    /* pointer arriving and leaving */
+  --dur-enter: 200ms;    /* something appearing that was not there */
 }
 
 :root {
@@ -300,16 +316,27 @@ select.sam-input { appearance: none; cursor: var(--sam-cursor); }
   cursor: var(--sam-cursor);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
   box-shadow: 0 3px 8px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(243, 212, 136, 0.14);
-  transition: filter 130ms ease, transform 90ms ease, box-shadow 130ms ease, border-color 130ms ease;
+  transition:
+    filter var(--dur-hover) var(--ease-out),
+    transform var(--dur-press) var(--ease-out),
+    box-shadow var(--dur-hover) var(--ease-out),
+    border-color var(--dur-hover) var(--ease-out);
   user-select: none;
 }
-.sam-btn:hover {
-  filter: brightness(1.14);
-  transform: translateY(-1px);
-  border-color: var(--color-gold-dim);
-  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(243, 212, 136, 0.2), 0 0 12px rgba(212, 168, 75, 0.12);
+/* Hover is gated: a touch device fires :hover on tap, so an ungated lift makes every
+   tap look like it half-worked before the press state lands. */
+@media (hover: hover) and (pointer: fine) {
+  .sam-btn:hover {
+    filter: brightness(1.14);
+    transform: translateY(-1px);
+    border-color: var(--color-gold-dim);
+    box-shadow: 0 6px 14px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(243, 212, 136, 0.2), 0 0 12px rgba(212, 168, 75, 0.12);
+  }
 }
-.sam-btn:active { transform: translateY(0); filter: brightness(1.05); box-shadow: 0 2px 5px rgba(0, 0, 0, 0.6); }
+/* Scale, not just un-lift. translateY(0) alone reads as "the hover stopped"; a real
+   press has to move toward the finger. Kept subtle -- scale() takes the label and icon
+   with it, so anything deeper than 0.97 starts to look like a rendering glitch. */
+.sam-btn:active { transform: translateY(0) scale(0.97); filter: brightness(1.05); box-shadow: 0 2px 5px rgba(0, 0, 0, 0.6); }
 .sam-btn:disabled { opacity: 0.4; cursor: not-allowed; filter: none; transform: none; box-shadow: none; }
 
 .sam-btn-red { background: linear-gradient(180deg, #67201a, #3f110d); border-color: #b23c30; color: #f2c3ba; }
@@ -332,9 +359,19 @@ select.sam-input { appearance: none; cursor: var(--sam-cursor); }
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.6);
   user-select: none;
 }
-.sam-step { transition: filter 120ms ease, border-color 120ms ease, box-shadow 120ms ease; }
-.sam-step:hover { filter: brightness(1.22); border-color: var(--color-gold-dim); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6), 0 0 8px rgba(212, 168, 75, 0.14); }
-.sam-step:active { transform: translateY(1px); }
+/* transform was missing from the transition list, so the press snapped while every other
+   property eased -- two different speeds inside one button. */
+.sam-step {
+  transition:
+    filter var(--dur-press) var(--ease-out),
+    border-color var(--dur-press) var(--ease-out),
+    box-shadow var(--dur-press) var(--ease-out),
+    transform var(--dur-press) var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .sam-step:hover { filter: brightness(1.22); border-color: var(--color-gold-dim); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6), 0 0 8px rgba(212, 168, 75, 0.14); }
+}
+.sam-step:active { transform: scale(0.94); }
 
 .sam-remove {
   color: #d46a5a;
@@ -343,6 +380,21 @@ select.sam-input { appearance: none; cursor: var(--sam-cursor); }
 .sam-remove:hover { border-color: var(--color-blood); }
 
 /* --------------------------------------------------------------- nav (left) */
+/* Group headings. Deliberately quiet: they are signposts you read once while learning
+   the shape of the tool, not competition for the destinations underneath. Small-caps and
+   dim gold puts them below every nav row in the visual hierarchy while still breaking
+   the list up. */
+.sam-nav-group + .sam-nav-group { margin-top: 0.85rem; }
+.sam-nav-group-label {
+  font-variant: small-caps;
+  letter-spacing: 0.18em;
+  font-size: 0.72rem;
+  color: #7a6330;
+  padding: 0 0 0.25rem 1.05rem;
+  user-select: none;
+}
+.sam-nav-item + .sam-nav-item { margin-top: 0.15rem; }
+
 .sam-nav-item {
   position: relative;
   display: flex;
@@ -357,24 +409,35 @@ select.sam-input { appearance: none; cursor: var(--sam-cursor); }
   border-radius: 4px;
   cursor: var(--sam-cursor);
   text-decoration: none;
-  transition: color 130ms ease, background 130ms ease, border-color 130ms ease, padding-left 130ms ease;
+  /* No transform on the nav item itself and no page transition anywhere in this app:
+     the sidebar is used dozens of times an hour, and motion on a repeated action is
+     felt as latency long before it is noticed as polish. Colour only. */
+  transition:
+    color var(--dur-hover) var(--ease-out),
+    background var(--dur-hover) var(--ease-out),
+    border-color var(--dur-hover) var(--ease-out);
 }
 .sam-nav-item::before {
   content: "";
   position: absolute;
   left: 0; top: 50%;
-  height: 0; width: 3px;
-  transform: translateY(-50%);
+  height: 40%; width: 3px;
+  /* Held at full height and scaled down instead of grown from height: 0. Animating
+     height re-lays-out the row on every frame; scaleY only composites, and scaling from
+     the middle keeps the marker centred without a second translate. */
+  transform: translateY(-50%) scaleY(0);
+  transform-origin: center;
   border-radius: 0 2px 2px 0;
   background: linear-gradient(180deg, var(--color-gold-bright), var(--color-gold-fill));
-  transition: height 150ms ease;
+  transition: transform var(--dur-hover) var(--ease-out);
 }
-.sam-nav-item:hover {
-  color: var(--color-gold-bright);
-  background: rgba(212, 168, 75, 0.07);
-  padding-left: 1.15rem;
+@media (hover: hover) and (pointer: fine) {
+  .sam-nav-item:hover {
+    color: var(--color-gold-bright);
+    background: rgba(212, 168, 75, 0.07);
+  }
+  .sam-nav-item:hover::before { transform: translateY(-50%) scaleY(1); }
 }
-.sam-nav-item:hover::before { height: 40%; }
 .sam-nav-item.active {
   color: var(--color-gold-bright);
   background: linear-gradient(90deg, rgba(112, 30, 24, 0.85), rgba(58, 15, 12, 0.7));
@@ -424,10 +487,16 @@ select.sam-input { appearance: none; cursor: var(--sam-cursor); }
   font-size: 1.9rem;
   cursor: var(--sam-cursor);
   user-select: none;
-  transition: border-color 110ms ease, filter 110ms ease, box-shadow 110ms ease;
+  transition:
+    border-color var(--dur-press) var(--ease-out),
+    filter var(--dur-press) var(--ease-out),
+    box-shadow var(--dur-press) var(--ease-out),
+    transform var(--dur-press) var(--ease-out);
 }
-.sam-slot:hover { border-color: var(--color-gold-bright); filter: brightness(1.12); }
-.sam-slot:active { transform: translateY(1px); }
+@media (hover: hover) and (pointer: fine) {
+  .sam-slot:hover { border-color: var(--color-gold-bright); filter: brightness(1.12); }
+}
+.sam-slot:active { transform: scale(0.96); }
 .sam-slot-empty {
   border-color: var(--color-gold-dim);
   border-style: dashed;
@@ -691,4 +760,43 @@ select.sam-input { appearance: none; cursor: var(--sam-cursor); }
   color: #e0a060;
   border: 1px solid #6b3a1a;
   vertical-align: middle;
+}
+
+/* ------------------------------------------------------------------- feedback
+   Everything above is a response to something the user did to an element that was
+   already on screen. This is the one element that ARRIVES, and it arrives because a
+   save succeeded -- rare, and worth confirming. Without a transition it simply blinks
+   into place, which reads as a glitch rather than as an answer.
+
+   scale(0.96), not scale(0): nothing in the world appears from literally nothing, and
+   an element that grows from a point looks like it came from somewhere else. */
+.sam-ok {
+  transition:
+    opacity var(--dur-enter) var(--ease-out),
+    transform var(--dur-enter) var(--ease-out);
+}
+@starting-style {
+  .sam-ok {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.96);
+  }
+}
+
+/* ---------------------------------------------------------------- reduced motion
+   Reduced motion means gentler, not none. The colour and opacity changes carry
+   meaning -- which button is hovered, that a save landed -- so they stay. What goes is
+   everything that MOVES: the lift, the press scale, the marker growing. A user who asks
+   for less motion still needs to be able to tell that the interface heard them. */
+@media (prefers-reduced-motion: reduce) {
+  .sam-btn:hover,
+  .sam-btn:active,
+  .sam-step:active,
+  .sam-slot:active { transform: none; }
+
+  .sam-nav-item::before { transition: none; }
+
+  .sam-ok { transform: none; }
+  @starting-style {
+    .sam-ok { transform: none; }
+  }
 }

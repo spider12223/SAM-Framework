@@ -16,22 +16,38 @@ import ModBuilder from '@/pages/ModBuilder.jsx';
 import Validator from '@/pages/Validator.jsx';
 import ApiReference from '@/pages/ApiReference.jsx';
 
-const NAV = [
-  { to: '/start', icon: '🧭', label: 'Start Here' },
-  { to: '/dashboard', icon: '🏰', label: 'Dashboard' },
-  { to: '/class-editor', icon: '🛡', label: 'Class Editor' },
-  { to: '/item-editor', icon: '⚔', label: 'Item Editor' },
-  { to: '/monster-editor', icon: '👹', label: 'Monster Editor' },
-  { to: '/spell-editor', icon: '✨', label: 'Spell Editor' },
-  { to: '/effect-editor', icon: '🌀', label: 'Effect Editor' },
-  { to: '/race-editor', icon: '🧬', label: 'Race Editor' },
-  { to: '/sound-editor', icon: '🔊', label: 'Sound Editor' },
-  { to: '/model-editor', icon: '🧊', label: 'Model Editor' },
-  { to: '/recipe-editor', icon: '🔧', label: 'Recipe Editor' },
-  { to: '/patch-editor', icon: '🧩', label: 'Patch Editor' },
-  { to: '/mod-builder', icon: '📦', label: 'Mod Builder' },
-  { to: '/validator', icon: '📜', label: 'Validator' },
-  { to: '/api-reference', icon: '📖', label: 'API Reference' },
+// Fifteen destinations in one flat list is a scanning problem, not a styling one: every
+// row looks equally likely, so finding the Race Editor means reading all fifteen labels.
+// Grouped by what you are DOING, the list is read as six short lists, and the heading
+// usually settles it before you read a single row.
+const NAV_GROUPS = [
+  ['Start', [
+    { to: '/start', icon: '🧭', label: 'Start Here' },
+    { to: '/dashboard', icon: '🏰', label: 'Dashboard' },
+  ]],
+  ['Content', [
+    { to: '/class-editor', icon: '🛡', label: 'Class Editor' },
+    { to: '/item-editor', icon: '⚔', label: 'Item Editor' },
+    { to: '/monster-editor', icon: '👹', label: 'Monster Editor' },
+    { to: '/race-editor', icon: '🧬', label: 'Race Editor' },
+  ]],
+  ['Magic', [
+    { to: '/spell-editor', icon: '✨', label: 'Spell Editor' },
+    { to: '/effect-editor', icon: '🌀', label: 'Effect Editor' },
+  ]],
+  ['Assets', [
+    { to: '/sound-editor', icon: '🔊', label: 'Sound Editor' },
+    { to: '/model-editor', icon: '🧊', label: 'Model Editor' },
+  ]],
+  ['Tweaks', [
+    { to: '/recipe-editor', icon: '🔧', label: 'Recipe Editor' },
+    { to: '/patch-editor', icon: '🧩', label: 'Patch Editor' },
+  ]],
+  ['Ship', [
+    { to: '/mod-builder', icon: '📦', label: 'Mod Builder' },
+    { to: '/validator', icon: '📜', label: 'Validator' },
+    { to: '/api-reference', icon: '📖', label: 'API Reference' },
+  ]],
 ];
 
 function Banner() {
@@ -50,16 +66,21 @@ function Banner() {
 
 function Sidebar() {
   return (
-    <nav className="w-52 shrink-0 px-3 py-4 space-y-1">
-      {NAV.map((n) => (
-        <NavLink
-          key={n.to}
-          to={n.to}
-          className={({ isActive }) => `sam-nav-item ${isActive ? 'active' : ''}`}
-        >
-          <span aria-hidden>{n.icon}</span>
-          <span>{n.label}</span>
-        </NavLink>
+    <nav className="w-52 shrink-0 px-3 py-4">
+      {NAV_GROUPS.map(([group, items]) => (
+        <div key={group} className="sam-nav-group">
+          <div className="sam-nav-group-label">{group}</div>
+          {items.map((n) => (
+            <NavLink
+              key={n.to}
+              to={n.to}
+              className={({ isActive }) => `sam-nav-item ${isActive ? 'active' : ''}`}
+            >
+              <span aria-hidden>{n.icon}</span>
+              <span>{n.label}</span>
+            </NavLink>
+          ))}
+        </div>
       ))}
     </nav>
   );
