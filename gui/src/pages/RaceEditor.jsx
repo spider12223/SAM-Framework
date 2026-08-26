@@ -199,10 +199,14 @@ export default function RaceEditor() {
           own. The host body still decides the skeleton: the animation, the limb positions,
           and which slots exist — these only change what is drawn in each slot.
           <br />
-          Each takes a model you declared in <span className="sam-mono">mod.json</span>{' '}
-          (<span className="sam-mono">{namespace}:name</span>), a path to your own .vox, or a
-          raw vanilla model index. Remember <span className="sam-mono">models.txt</span> line
-          N is index N-1.
+          The simplest thing that works is the model's own filename:{' '}
+          <span className="sam-mono">gharbad_head.vox</span>. If several creatures ship a file
+          with that name you will be told, and can give the folder too{' '}
+          (<span className="sam-mono">models/creatures/goatman/goatman_named/gharbad_head.vox</span>).
+          Your own models work as an id you declared in{' '}
+          <span className="sam-mono">mod.json</span> (<span className="sam-mono">{namespace}:name</span>)
+          or a path to the .vox. A raw index still works, but nothing in the file will say what
+          it was.
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {LIMB_SLOTS.map(([key, label, hint]) => (

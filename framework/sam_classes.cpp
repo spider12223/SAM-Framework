@@ -1019,11 +1019,24 @@ void SAMClasses::resolveAppearance()
 		def.appearanceHeadIdx.clear();
 		for ( const auto& hv : def.appearanceHeads )
 		{
-			// A custom .vox registered by SAMModels wins; otherwise fall back to a plain
-			// numeric index so a modder can name a vanilla head directly.
+			// A custom .vox registered by SAMModels wins; then a VANILLA model named by
+			// its models.txt path, which is the readable form; then a raw index, kept so
+			// every class written before this keeps working.
 			int idx = SAMModels::modelIndexForId(hv.second);
 			bool headExplained = false;   // a precise message was already emitted below
 			if ( idx < 0 )
+			{
+				bool ambiguous = false;
+				idx = SAMModels::vanillaModelIndexForPath(hv.second, &ambiguous);
+				if ( ambiguous )
+				{
+					SAM_ERROR(MOD, "Class [" + def.id + "] head for " + hv.first + " '"
+						+ hv.second + "' matches more than one model — several creatures ship"
+						" a file with that name. Give the folder too.");
+					headExplained = true;
+				}
+			}
+			if ( idx < 0 && !headExplained )
 			{
 				char* end = nullptr;
 				const long n = std::strtol(hv.second.c_str(), &end, 10);

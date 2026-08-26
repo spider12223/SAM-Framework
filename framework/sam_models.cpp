@@ -6,6 +6,7 @@
 #include "sam_logger.hpp"
 
 #include <map>
+#include <vector>
 #include <string>
 #include <cstdlib>
 #include <cstring>
@@ -39,6 +40,39 @@ namespace
 		bool baseGame = false;
 	};
 	std::map<std::string, Registration> s_index;
+
+	// Vanilla models by path, built once at boot from models.txt. Two maps because a bare
+	// filename is not unique in general ("head.vox" appears under several creatures), so
+	// it needs a count before it can be trusted as an answer.
+	std::map<std::string, int> s_vanillaByPath;   // normalised full path -> index
+	std::map<std::string, std::vector<int>> s_vanillaByFile;  // bare filename -> indices
+
+	// Lower case, forward slashes, no leading slash, no leading "models/". Everything
+	// that varies between two ways of writing the same path, removed.
+	std::string normalisePath(const std::string& in)
+	{
+		std::string out;
+		out.reserve(in.size());
+		for ( char c : in )
+		{
+			if ( c == '\\' ) { c = '/'; }
+			if ( c >= 'A' && c <= 'Z' ) { c = (char)(c - 'A' + 'a'); }
+			if ( c == '\r' || c == '\n' || c == '\t' ) { continue; }
+			out += c;
+		}
+		while ( !out.empty() && (out.back() == ' ') ) { out.pop_back(); }
+		size_t b = out.find_first_not_of(" /");
+		if ( b == std::string::npos ) { return std::string(); }
+		out = out.substr(b);
+		if ( out.compare(0, 7, "models/") == 0 ) { out = out.substr(7); }
+		return out;
+	}
+
+	std::string fileNameOf(const std::string& normalised)
+	{
+		const size_t slash = normalised.find_last_of('/');
+		return ( slash == std::string::npos ) ? normalised : normalised.substr(slash + 1);
+	}
 }
 
 namespace
@@ -305,6 +339,40 @@ int SAMModels::appendModels(const std::vector<Request>& requests)
 		+ std::to_string(oldCount) + " -> " + std::to_string(newCount) + ".");
 	return addCount;
 #endif
+}
+
+void SAMModels::noteVanillaModelPath(int index, const std::string& path)
+{
+	const std::string norm = normalisePath(path);
+	if ( norm.empty() ) { return; }
+	// First writer wins: if models.txt lists the same file twice, the earlier index is
+	// the one every existing mod's number already refers to.
+	if ( s_vanillaByPath.find(norm) == s_vanillaByPath.end() ) { s_vanillaByPath[norm] = index; }
+	s_vanillaByFile[fileNameOf(norm)].push_back(index);
+}
+
+int SAMModels::vanillaModelIndexForPath(const std::string& path, bool* ambiguous)
+{
+	if ( ambiguous ) { *ambiguous = false; }
+	const std::string norm = normalisePath(path);
+	if ( norm.empty() || s_vanillaByPath.empty() ) { return -1; }
+
+	auto exact = s_vanillaByPath.find(norm);
+	if ( exact != s_vanillaByPath.end() ) { return exact->second; }
+
+	// Only try the bare-filename form when the author actually gave a bare filename.
+	// Falling back to it for a full path that simply did not match would answer a
+	// question they did not ask, using a model from some other creature's folder.
+	if ( norm.find('/') != std::string::npos ) { return -1; }
+
+	auto byFile = s_vanillaByFile.find(norm);
+	if ( byFile == s_vanillaByFile.end() || byFile->second.empty() ) { return -1; }
+	if ( byFile->second.size() > 1 )
+	{
+		if ( ambiguous ) { *ambiguous = true; }
+		return -1;
+	}
+	return byFile->second.front();
 }
 
 int SAMModels::modelIndexForId(const std::string& id)

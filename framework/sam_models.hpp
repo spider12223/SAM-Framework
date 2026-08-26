@@ -68,6 +68,24 @@ namespace SAMModels
 	// This is what makes an item's `model` field resolvable.
 	int modelIndexForId(const std::string& id);
 
+	// ---- naming a VANILLA model by path instead of by index --------------------------
+	//
+	// Called once per line while init.cpp loads models.txt, before anything else in the
+	// framework runs. Keeps the path the engine was about to discard so a mod can say
+	// what it means instead of a number.
+	void noteVanillaModelPath(int index, const std::string& path);
+
+	// Resolve a vanilla model path to its engine index, or -1.
+	//
+	// Accepts the full models.txt path, the same path without its leading "models/", or
+	// a bare filename when that filename appears exactly once in the table. Case and
+	// slash direction are normalised, because a path copied off Windows arrives with
+	// backslashes and a path typed from memory arrives in the wrong case.
+	//
+	// `ambiguous` is set when a bare filename matched more than one model -- the caller
+	// needs that to tell the author to be more specific rather than silently picking one.
+	int vanillaModelIndexForPath(const std::string& path, bool* ambiguous = nullptr);
+
 	// The file a registered id was loaded from, or "" if that id is unknown.
 	std::string pathForId(const std::string& id);
 

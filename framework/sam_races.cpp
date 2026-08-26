@@ -325,9 +325,27 @@ namespace
 	// afternoon of wondering why their arm vanished.
 	int resolveModelRef(const std::string& ref, const std::string& raceId, const std::string& slot)
 	{
+		// 1. a model this mod declared, or a mod-relative .vox path (registration turned
+		//    that path into an id already).
 		int idx = SAMModels::modelIndexForId(ref);
 		if ( idx >= 0 ) { return idx; }
 
+		// 2. a VANILLA model named by its path. Tried before the numeric form because it
+		//    is the readable one: "gharbad_head.vox" says what it is, where 1025 says
+		//    nothing and is one subtraction away from being a different model entirely.
+		bool ambiguous = false;
+		idx = SAMModels::vanillaModelIndexForPath(ref, &ambiguous);
+		if ( idx >= 0 ) { return idx; }
+		if ( ambiguous )
+		{
+			SAM_ERROR(MOD, "Race [" + raceId + "] limb_models." + slot + " '" + ref
+				+ "' matches more than one model — several creatures ship a file with that"
+				" name. Give the folder too, e.g."
+				" \"models/creatures/goatman/goatman_named/" + ref + "\".");
+			return -1;
+		}
+
+		// 3. a raw index, still accepted so every mod written before this keeps working.
 		char* end = nullptr;
 		const long n = std::strtol(ref.c_str(), &end, 10);
 		if ( end && *end == '\0' )
@@ -345,8 +363,10 @@ namespace
 		}
 
 		SAM_WARN(MOD, "Race [" + raceId + "] limb_models." + slot + " '" + ref
-			+ "' is not a registered model — ignoring it (that limb keeps the host body's"
-			" own model). Declare it in mod.json \"models\", or use a raw vanilla index.");
+			+ "' is not a model this game knows — ignoring it (that limb keeps the host"
+			" body's own model). Use a path from models.txt (\"gharbad_head.vox\" or the"
+			" full \"models/creatures/...\" form), an id you declared in mod.json"
+			" \"models\", or a raw index.");
 		return -1;
 	}
 }

@@ -219,27 +219,27 @@
       "properties": {
         "head": {
           "type": "string",
-          "description": "The head. This is the one limb no armour ever replaces, so it always shows. Three forms are accepted: an id you declared in mod.json \"models\" (\"<ns>:name\"), a mod-relative path to your own .vox (\"models/<ns>/foo.vox\"), or a raw vanilla model index (1..nummodels-1; remember models.txt line N is index N-1)."
+          "description": "The head. This is the one limb no armour ever replaces, so it always shows. Four forms are accepted, in the order they are tried: a path to a model the game already has (\"gharbad_head.vox\", or the full \"models/creatures/...\" form if that filename is used by more than one creature); an id you declared in mod.json \"models\" (\"<ns>:name\"); a mod-relative path to your own .vox; or a raw model index. Prefer a path: an index says nothing about what it is, and models.txt line N is index N-1, which is easy to get wrong by one."
         },
         "torso": {
           "type": "string",
-          "description": "The chest. Shown bare; a breastplate covers it, exactly as it does for any other race. Three forms are accepted: an id you declared in mod.json \"models\" (\"<ns>:name\"), a mod-relative path to your own .vox (\"models/<ns>/foo.vox\"), or a raw vanilla model index (1..nummodels-1; remember models.txt line N is index N-1)."
+          "description": "The chest. Shown bare; a breastplate covers it, exactly as it does for any other race. Four forms are accepted, in the order they are tried: a path to a model the game already has (\"gharbad_head.vox\", or the full \"models/creatures/...\" form if that filename is used by more than one creature); an id you declared in mod.json \"models\" (\"<ns>:name\"); a mod-relative path to your own .vox; or a raw model index. Prefer a path: an index says nothing about what it is, and models.txt line N is index N-1, which is easy to get wrong by one."
         },
         "arm_right": {
           "type": "string",
-          "description": "The right arm. Shown bare; sleeves and gloves cover it. Three forms are accepted: an id you declared in mod.json \"models\" (\"<ns>:name\"), a mod-relative path to your own .vox (\"models/<ns>/foo.vox\"), or a raw vanilla model index (1..nummodels-1; remember models.txt line N is index N-1)."
+          "description": "The right arm. Shown bare; sleeves and gloves cover it. Four forms are accepted, in the order they are tried: a path to a model the game already has (\"gharbad_head.vox\", or the full \"models/creatures/...\" form if that filename is used by more than one creature); an id you declared in mod.json \"models\" (\"<ns>:name\"); a mod-relative path to your own .vox; or a raw model index. Prefer a path: an index says nothing about what it is, and models.txt line N is index N-1, which is easy to get wrong by one."
         },
         "arm_left": {
           "type": "string",
-          "description": "The left arm. Shown bare; sleeves and gloves cover it. Three forms are accepted: an id you declared in mod.json \"models\" (\"<ns>:name\"), a mod-relative path to your own .vox (\"models/<ns>/foo.vox\"), or a raw vanilla model index (1..nummodels-1; remember models.txt line N is index N-1)."
+          "description": "The left arm. Shown bare; sleeves and gloves cover it. Four forms are accepted, in the order they are tried: a path to a model the game already has (\"gharbad_head.vox\", or the full \"models/creatures/...\" form if that filename is used by more than one creature); an id you declared in mod.json \"models\" (\"<ns>:name\"); a mod-relative path to your own .vox; or a raw model index. Prefer a path: an index says nothing about what it is, and models.txt line N is index N-1, which is easy to get wrong by one."
         },
         "leg_right": {
           "type": "string",
-          "description": "The right leg. Shown bare; boots and greaves cover it. Three forms are accepted: an id you declared in mod.json \"models\" (\"<ns>:name\"), a mod-relative path to your own .vox (\"models/<ns>/foo.vox\"), or a raw vanilla model index (1..nummodels-1; remember models.txt line N is index N-1)."
+          "description": "The right leg. Shown bare; boots and greaves cover it. Four forms are accepted, in the order they are tried: a path to a model the game already has (\"gharbad_head.vox\", or the full \"models/creatures/...\" form if that filename is used by more than one creature); an id you declared in mod.json \"models\" (\"<ns>:name\"); a mod-relative path to your own .vox; or a raw model index. Prefer a path: an index says nothing about what it is, and models.txt line N is index N-1, which is easy to get wrong by one."
         },
         "leg_left": {
           "type": "string",
-          "description": "The left leg. Shown bare; boots and greaves cover it. Three forms are accepted: an id you declared in mod.json \"models\" (\"<ns>:name\"), a mod-relative path to your own .vox (\"models/<ns>/foo.vox\"), or a raw vanilla model index (1..nummodels-1; remember models.txt line N is index N-1)."
+          "description": "The left leg. Shown bare; boots and greaves cover it. Four forms are accepted, in the order they are tried: a path to a model the game already has (\"gharbad_head.vox\", or the full \"models/creatures/...\" form if that filename is used by more than one creature); an id you declared in mod.json \"models\" (\"<ns>:name\"); a mod-relative path to your own .vox; or a raw model index. Prefer a path: an index says nothing about what it is, and models.txt line N is index N-1, which is easy to get wrong by one."
         }
       }
     }

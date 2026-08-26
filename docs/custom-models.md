@@ -122,11 +122,17 @@ A race can also bring its OWN models for each limb, with `limb_models`:
 ```json
 "host_body": "goatman",
 "limb_models": {
-  "head": "1025", "torso": "1028",
-  "arm_right": "1023", "arm_left": "1021",
-  "leg_right": "1027", "leg_left": "1026"
+  "head": "gharbad_head.vox",      "torso": "gharbad_torso.vox",
+  "arm_right": "gharbad_armright.vox", "arm_left": "gharbad_armleft.vox",
+  "leg_right": "gharbad_legright.vox", "leg_left": "gharbad_legleft.vox"
 }
 ```
+
+Name the model, not its number. A bare filename resolves when it is unique, and most are; when
+it is not you are told, and you add the folder (`models/creatures/goatman/goatman_named/...`).
+Raw indices still work for every mod already written with them, but `1025` says nothing about
+what it is, and the line-N-is-index-N-1 subtraction below is one of the easiest things here to
+get wrong by one.
 
 `host_body` still decides the skeleton -- the animation, the limb positions, which slots
 exist -- and `limb_models` decides what is drawn in each slot. Omit a limb and it keeps the
