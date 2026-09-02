@@ -31,6 +31,13 @@ namespace SAMErrors
 	// A short, modder-readable file label: "namespace/relative/path.json".
 	std::string displayFile(const std::string& nsOrLabel, const std::string& relPath);
 
+	// Write `data` to `path` through a sibling ".tmp" file and one rename, so a crash or
+	// power cut mid-write leaves the PREVIOUS file intact rather than a truncated one.
+	// Creates the parent directory. Every framework file that a mod or player relies on
+	// coming back later (sam_save_data, the patch overlay, the script cache) goes through
+	// this; the log file does not (it is append-only and nothing reads it back).
+	bool writeFileAtomic(const std::string& path, const std::string& data);
+
 	// True if a mod-supplied RELATIVE path tries to escape its mod folder — it is
 	// absolute (leading '/' or '\\', or an "X:" drive prefix) or contains a ".."
 	// path segment. Loaders must reject such a path BEFORE joining it onto the mod

@@ -78,7 +78,16 @@ static std::string hashString(const std::string& fp)
 	return std::string(buf);
 }
 
-// Parse "ns@version;ns@version;..." into a ns -> version map.
+// Split a "version+digest" token. digest is empty when the token carries none (a mod
+// with no declared files, or a fingerprint from a build before digests existed).
+static void splitVersionToken(const std::string& token, std::string& version, std::string& digest)
+{
+	const size_t plus = token.find('+');
+	version = token.substr(0, plus);
+	digest = ( plus == std::string::npos ) ? std::string() : token.substr(plus + 1);
+}
+
+// Parse "ns@version+digest;..." into a ns -> "version+digest" map.
 static std::map<std::string, std::string> parseFingerprint(const std::string& fp)
 {
 	std::map<std::string, std::string> mods;
@@ -124,22 +133,37 @@ static void compareFingerprints()
 	std::vector<std::string> issues;
 	for ( const auto& kv : hostMods )
 	{
+		std::string hostVer, hostDigest;
+		splitVersionToken(kv.second, hostVer, hostDigest);
 		auto it = localMods.find(kv.first);
 		if ( it == localMods.end() )
 		{
-			issues.push_back("missing [" + kv.first + " v" + kv.second + "]");
+			issues.push_back("missing [" + kv.first + " v" + hostVer + "]");
+			continue;
 		}
-		else if ( it->second != kv.second )
+		std::string localVer, localDigest;
+		splitVersionToken(it->second, localVer, localDigest);
+		if ( localVer != hostVer )
 		{
-			issues.push_back("version [" + kv.first + ": host v" + kv.second
-				+ ", you v" + it->second + "]");
+			issues.push_back("version [" + kv.first + ": host v" + hostVer
+				+ ", you v" + localVer + "]");
+		}
+		else if ( localDigest != hostDigest )
+		{
+			// Same mod, same version, different bytes: an edited item, a room one side
+			// does not have, a stale download. Before digests this was invisible and
+			// surfaced as a desync mid-run.
+			issues.push_back("files [" + kv.first + " v" + hostVer
+				+ ": your copy's files differ from the host's]");
 		}
 	}
 	for ( const auto& kv : localMods )
 	{
 		if ( hostMods.find(kv.first) == hostMods.end() )
 		{
-			issues.push_back("extra [" + kv.first + " v" + kv.second + "]");
+			std::string ver, digest;
+			splitVersionToken(kv.second, ver, digest);
+			issues.push_back("extra [" + kv.first + " v" + ver + "]");
 		}
 	}
 
@@ -175,7 +199,9 @@ std::string SAMSync::generateFingerprint()
 	std::vector<std::string> entries;
 	for ( const SAMModManifest& m : SAMWorkshop::manifests() )
 	{
-		entries.push_back(m.ns + "@" + m.version);
+		// "+digest" only when the mod declares files; see SAMModManifest::contentDigest.
+		entries.push_back(m.ns + "@" + m.version
+			+ (m.contentDigest.empty() ? std::string() : "+" + m.contentDigest));
 	}
 	std::sort(entries.begin(), entries.end());
 
@@ -189,6 +215,24 @@ std::string SAMSync::generateFingerprint()
 		fp += entries[i];
 	}
 	return fp;
+}
+
+std::string SAMSync::stripDigests(const std::string& fingerprint)
+{
+	std::string out;
+	size_t start = 0;
+	while ( start < fingerprint.size() )
+	{
+		size_t end = fingerprint.find(';', start);
+		if ( end == std::string::npos ) { end = fingerprint.size(); }
+		std::string entry = fingerprint.substr(start, end - start);
+		const size_t plus = entry.find('+');
+		if ( plus != std::string::npos ) { entry.erase(plus); }
+		if ( !out.empty() ) { out += ";"; }
+		out += entry;
+		start = end + 1;
+	}
+	return out;
 }
 
 void SAMSync::sendFingerprint(int player)

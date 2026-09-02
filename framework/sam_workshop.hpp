@@ -67,6 +67,12 @@ struct SAMModManifest
 
 	std::string modPath;      // absolute directory this mod was loaded from
 	std::string displayName;  // Workshop/local display name (from mountedFilepaths)
+
+	// 16 hex chars: FNV-1a 64 over every file the manifest DECLARES (sorted relative
+	// path + bytes, '\r' dropped so a CRLF checkout digests like an LF one). Rides in the
+	// multiplayer fingerprint next to the version so two players on the same mod version
+	// with different files are told so. Empty when the manifest declares no files.
+	std::string contentDigest;
 };
 
 class SAMWorkshop

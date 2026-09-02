@@ -11,6 +11,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>       // std::remove / std::rename (fallback path)
+#include <filesystem>
+#include <fstream>
 
 namespace
 {
@@ -116,6 +119,47 @@ void reportSyntax(const char* module, const std::string& file, const std::string
 	if ( !parseError.empty() ) { SAMLogger::error(module, "  detail:   " + parseError); }
 	SAMLogger::error(module, "  fix:      check for a missing comma, quote, bracket or trailing comma near there.");
 	if ( !consequence.empty() ) { SAMLogger::error(module, "  -> " + consequence); }
+}
+
+bool writeFileAtomic(const std::string& path, const std::string& data)
+{
+	namespace fs = std::filesystem;
+	std::error_code ec;
+	const fs::path target(path);
+	if ( target.has_parent_path() ) { fs::create_directories(target.parent_path(), ec); }
+
+	const std::string tmp = path + ".tmp";
+	{
+		std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+		if ( !f.is_open() ) { return false; }
+		f.write(data.data(), static_cast<std::streamsize>(data.size()));
+		f.flush();
+		if ( !f )
+		{
+			f.close();
+			std::remove(tmp.c_str());
+			return false;
+		}
+	}
+
+	// std::filesystem::rename replaces an existing target on both POSIX (rename(2)) and
+	// MSVC (MoveFileExW + MOVEFILE_REPLACE_EXISTING), so a reader ever sees the old file
+	// or the new one, never a half-written one.
+	ec.clear();
+	fs::rename(fs::path(tmp), target, ec);
+	if ( ec )
+	{
+		// A filesystem that refuses to replace in one step: fall back to remove-then-rename.
+		// The instant between the two calls is the only moment the file is absent, which
+		// still beats the truncate-then-write it replaces.
+		std::remove(path.c_str());
+		if ( std::rename(tmp.c_str(), path.c_str()) != 0 )
+		{
+			std::remove(tmp.c_str());
+			return false;
+		}
+	}
+	return true;
 }
 
 } // namespace SAMErrors

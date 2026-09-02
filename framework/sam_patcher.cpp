@@ -26,6 +26,7 @@
 #include "sam_patcher.hpp"
 #include "sam_workshop.hpp"   // SAMModManifest
 #include "sam_logger.hpp"
+#include "sam_errors.hpp"   // writeFileAtomic
 #include "nlohmann/json.hpp"
 
 #include "main.hpp"           // physfs.h + core
@@ -478,16 +479,13 @@ void SAMPatcher::applyAll(const std::vector<SAMModManifest>& mods)
 			continue;
 		}
 		const std::string outPath = joinPath(overlayRealDir(), target);
-		std::error_code ec;
-		fs::create_directories(fs::path(outPath).parent_path(), ec);
-		std::ofstream out(outPath, std::ios::binary | std::ios::trunc);
-		if ( !out.is_open() )
+		// Temp file + rename: the overlay is mounted ahead of the base file, so a
+		// half-written one would replace a good vanilla JSON with a broken one.
+		if ( !SAMErrors::writeFileAtomic(outPath, merged) )
 		{
 			SAM_ERROR(MOD, "Could not write overlay for '" + target + "' at " + outPath + " — patches for this file skipped.");
 			continue;
 		}
-		out << merged;
-		out.close();
 
 		++s_filesPatched;
 		s_opsApplied += appliedHere;

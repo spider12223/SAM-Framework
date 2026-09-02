@@ -284,7 +284,9 @@ my_mod/
 3. **Test locally**: unzip into `…/steamapps/common/Barony/mods/<your_mod>/` and enable it from Barony's Mods menu.
 4. **Publish to the Steam Workshop** as a Barony mod, and **list S.A.M as a required dependency** in your Workshop description so subscribers know they need the S.A.M build. Since S.A.M mods are JSON-only, they carry no compiled code — S.A.M does all the work at runtime.
 
-Multiplayer: S.A.M sends a mod fingerprint from host to client on join and **warns** (never hard-blocks) when the two don't match, so mismatches are obvious before a run.
+Multiplayer: S.A.M sends a mod fingerprint from host to client on join and **warns** (never hard-blocks) when the two don't match, so mismatches are obvious before a run. The fingerprint carries each mod's version and a digest of its declared files, so "same version, different files" is reported as its own kind of mismatch instead of surfacing as a desync mid-run.
+
+Saves: every save records what each custom item id meant (`ns:item`). When a save is read, custom items are re-matched by name, so adding, removing or renaming mods no longer turns a saved item into a different mod's item. An item whose mod is not loaded is dropped with a line in the log, and it stays in the file until you save again.
 
 New to this? Follow **[Getting Started →](docs/getting-started.md)** to build a class + item in ~5 minutes.
 

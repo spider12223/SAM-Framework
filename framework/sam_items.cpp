@@ -1047,6 +1047,47 @@ int SAMItems::itemIdForIdString(const std::string& idString)
 	return -1;
 }
 
+std::string SAMItems::saveIdTable()
+{
+	std::string out;
+	for ( const auto& kv : s_registry )
+	{
+		if ( kv.second.id.empty() ) { continue; }
+		if ( !out.empty() ) { out += ';'; }
+		out += std::to_string(kv.first) + "=" + kv.second.id;
+	}
+	return out;
+}
+
+bool SAMItems::remapSavedItemIds(const std::string& savedTable,
+	std::map<int, int>& oldToNew, std::map<int, std::string>& unresolved)
+{
+	oldToNew.clear();
+	unresolved.clear();
+	if ( savedTable.empty() ) { return false; }
+	size_t start = 0;
+	while ( start < savedTable.size() )
+	{
+		size_t end = savedTable.find(';', start);
+		if ( end == std::string::npos ) { end = savedTable.size(); }
+		const std::string entry = savedTable.substr(start, end - start);
+		const size_t eq = entry.find('=');
+		if ( eq != std::string::npos && eq > 0 )
+		{
+			const int savedId = std::atoi(entry.substr(0, eq).c_str());
+			const std::string name = entry.substr(eq + 1);
+			if ( savedId >= SAM_ITEM_ID_BASE && !name.empty() )
+			{
+				const int now = itemIdForIdString(name);
+				if ( now >= 0 ) { oldToNew[savedId] = now; }
+				else { unresolved[savedId] = name; }
+			}
+		}
+		start = end + 1;
+	}
+	return true;
+}
+
 std::string SAMItems::getIconPath(int itemId)
 {
 	auto cached = s_iconPathCache.find(itemId);

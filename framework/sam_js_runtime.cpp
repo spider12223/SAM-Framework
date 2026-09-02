@@ -30,6 +30,7 @@
 #include "sam_js_runtime.hpp"
 #include "sam_lua_runtime.hpp" // Part 2: sam_fire_hook cross-dispatches to Lua scripts too
 #include "sam_logger.hpp"
+#include "sam_errors.hpp"   // writeFileAtomic
 
 extern "C" {
 #include "quickjs.h"
@@ -151,15 +152,8 @@ namespace
 	}
 	bool writeFileAtomic(const std::string& path, const std::string& data)
 	{
-		const std::string tmp = path + ".tmp";
-		{
-			std::ofstream f(tmp, std::ios::binary);
-			if ( !f ) { return false; }
-			f.write(data.data(), (std::streamsize)data.size());
-			if ( !f ) { return false; }
-		}
-		std::remove(path.c_str());
-		return std::rename(tmp.c_str(), path.c_str()) == 0;
+		// One implementation for every file the framework writes and reads back.
+		return SAMErrors::writeFileAtomic(path, data);
 	}
 	std::string hashKey(const std::string& src)
 	{
@@ -981,11 +975,9 @@ namespace
 		const std::string path = samModDataFile(g_currentNs, key);
 		try
 		{
-			std::error_code ec;
-			std::filesystem::create_directories(std::filesystem::path(path).parent_path(), ec);
-			std::ofstream f(path, std::ios::binary | std::ios::trunc);
-			if ( !f.is_open() ) { SAM_ERROR("JS", "sam_save_data: cannot write " + path); return JS_NewBool(ctx, 0); }
-			f << json;
+			// Temp file + rename: a crash mid-write keeps the previous value on disk
+			// instead of leaving a truncated file that will not parse next launch.
+			if ( !SAMErrors::writeFileAtomic(path, json) ) { SAM_ERROR("JS", "sam_save_data: cannot write " + path); return JS_NewBool(ctx, 0); }
 		}
 		catch ( ... ) { SAM_ERROR("JS", "sam_save_data: failed writing key '" + key + "'."); return JS_NewBool(ctx, 0); }
 		SAM_INFO("SAM", "Saved data key '" + key + "' for [" + g_currentNs + "]");

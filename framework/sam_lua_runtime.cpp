@@ -30,6 +30,7 @@
 #include "sam_lua_runtime.hpp"
 #include "sam_js_runtime.hpp"  // Part 2: sam_fire_hook cross-dispatches to JS scripts too
 #include "sam_logger.hpp"
+#include "sam_errors.hpp"   // writeFileAtomic
 
 extern "C" {
 #include "lua.h"
@@ -2689,14 +2690,13 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		const std::string path = samModDataFile(g_currentNs, key);
 		try
 		{
-			std::error_code ec;
-			std::filesystem::create_directories(std::filesystem::path(path).parent_path(), ec);
-			std::ofstream f(path, std::ios::binary | std::ios::trunc);
-			if ( !f.is_open() ) { SAM_ERROR("LUA", "sam_save_data: cannot write " + path); lua_pushboolean(Ls, 0); return 1; }
 			// 'replace' handler: non-UTF-8 Lua-string bytes -> U+FFFD instead of a
 			// thrown type_error (the try/catch already prevents a crash, but this
 			// persists the data instead of dropping the whole save).
-			f << j.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+			const std::string text = j.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+			// Temp file + rename: a crash mid-write keeps the previous value on disk
+			// instead of leaving a truncated file that will not parse next launch.
+			if ( !SAMErrors::writeFileAtomic(path, text) ) { SAM_ERROR("LUA", "sam_save_data: cannot write " + path); lua_pushboolean(Ls, 0); return 1; }
 		}
 		catch ( ... ) { SAM_ERROR("LUA", "sam_save_data: failed writing key '" + key + "'."); lua_pushboolean(Ls, 0); return 1; }
 		SAM_INFO("SAM", "Saved data key '" + key + "' for [" + g_currentNs + "]");

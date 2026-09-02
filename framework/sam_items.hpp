@@ -135,6 +135,18 @@ public:
 	// Reverse lookup: runtime slot id for a "namespace:item" id string, or -1.
 	static int itemIdForIdString(const std::string& idString);
 
+	// Save-file identity. Numeric ids are handed out per mod SET (sorted by namespace,
+	// then declaration order), so a save has to remember what each id MEANT.
+	//   saveIdTable()       -> "5000=ns:a;5001=ns:b;..." for every registered custom item
+	//                          (written into the save's additional_data as "sam_itemids").
+	//   remapSavedItemIds() -> for that table, savedId -> the id the same NAME has now
+	//                          (oldToNew), and savedId -> name for the ones whose mod is
+	//                          not loaded (unresolved). Returns false when the table is
+	//                          empty (a save from before this existed): touch nothing.
+	static std::string saveIdTable();
+	static bool remapSavedItemIds(const std::string& savedTable,
+		std::map<int, int>& oldToNew, std::map<int, std::string>& unresolved);
+
 	// Custom item ids eligible for RANDOM GENERATION in `category` at a dungeon depth
 	// between minLevel and maxLevel, appended to `out`. This is how modded items reach
 	// chests, shops, floor drops and monster inventories.

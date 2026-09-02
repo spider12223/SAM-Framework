@@ -1,6 +1,7 @@
 #include "sam_world_state.hpp"
 #include "sam_logger.hpp"
 #include "sam_sync.hpp"   // the mod-set fingerprint this save was made with
+#include "sam_items.hpp"  // saveIdTable: what every custom item id MEANT when this save was written
 
 #include <cstring>
 #include <map>
@@ -16,6 +17,9 @@ namespace SAMWorldState
 		// Deliberately NOT under the "sam:<ns>:" prefix, so absorb() never mistakes it for a
 		// mod's own key and no mod can write to it.
 		constexpr const char* kModSetKey = "sam_modset";
+		// "5000=ns:a;5001=ns:b;..." -- read back by the engine (scores.cpp getSaveGameInfo)
+		// the moment the save file is parsed, before any item is created from it.
+		constexpr const char* kItemIdsKey = "sam_itemids";
 		std::string s_savedModSet;   // what the save being loaded was made with
 		bool        s_haveSavedModSet = false;
 
@@ -130,6 +134,10 @@ namespace SAMWorldState
 		// the world store. Costs one short string, and nothing at all with no mods loaded.
 		const std::string fp = SAMSync::generateFingerprint();
 		if ( !fp.empty() ) { out.push_back(std::make_pair(std::string(kModSetKey), fp)); }
+		// And what each custom item id MEANT, so the ids can move (a mod added, removed or
+		// renamed) and the items in this save still come back as themselves.
+		const std::string ids = SAMItems::saveIdTable();
+		if ( !ids.empty() ) { out.push_back(std::make_pair(std::string(kItemIdsKey), ids)); }
 
 		for ( const auto& nsEntry : s_data )
 		{
@@ -159,6 +167,7 @@ namespace SAMWorldState
 			s_haveSavedModSet = true;
 			return true;
 		}
+		if ( key == kItemIdsKey ) { return true; } // consumed earlier, at file-read time
 		const size_t plen = strlen(kPrefix);
 		if ( key.compare(0, plen, kPrefix) != 0 ) { return false; }
 		const size_t sep = key.find(':', plen);
@@ -188,14 +197,26 @@ namespace SAMWorldState
 		}
 		if ( s_savedModSet == now ) { return; }
 
-		// Same set means same ids, so a difference is the one thing that can silently change
-		// what a saved custom item IS. Name both sides: the player can usually fix it by
-		// re-enabling something.
+		// Same mods at the same versions, only the FILES differ (or the save predates
+		// digests altogether, in which case there is nothing to compare). That is not a
+		// different mod set, so do not call it one.
+		if ( SAMSync::stripDigests(s_savedModSet) == SAMSync::stripDigests(now) )
+		{
+			if ( s_savedModSet.find('+') == std::string::npos ) { return; }
+			SAM_WARN("WORLD", "Same mods as this save, but some of their files have changed since"
+				" it was written. Usually harmless; if a custom class, race, spell or effect"
+				" looks different, that is why.");
+			return;
+		}
+
+		// A different set means different ids for classes, races, spells and effects (custom
+		// ITEMS are re-matched by name on load, see the item lines above this one). Name both
+		// sides: the player can usually fix it by re-enabling something.
 		SAM_WARN("WORLD", "This save was made with a different set of mods.");
-		SAM_WARN("WORLD", "  saved with: " + (s_savedModSet.empty() ? std::string("(none)") : s_savedModSet));
-		SAM_WARN("WORLD", "  loaded now: " + (now.empty() ? std::string("(none)") : now));
-		SAM_WARN("WORLD", "  Custom items, classes, races, spells and effects in this save may"
-			" not be the ones they were. Re-enable the missing mods to restore them.");
+		SAM_WARN("WORLD", "  saved with: " + (s_savedModSet.empty() ? std::string("(none)") : SAMSync::stripDigests(s_savedModSet)));
+		SAM_WARN("WORLD", "  loaded now: " + (now.empty() ? std::string("(none)") : SAMSync::stripDigests(now)));
+		SAM_WARN("WORLD", "  Custom classes, races, spells and effects in this save may not be"
+			" the ones they were. Re-enable the missing mods to restore them.");
 	}
 
 	void clearAll()

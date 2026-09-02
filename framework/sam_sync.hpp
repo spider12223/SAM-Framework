@@ -39,8 +39,15 @@ class SAMSync
 {
 public:
 	// Canonical fingerprint of the currently loaded S.A.M mod list:
-	// "ns@version;ns@version;..." sorted ascending. Empty string = no mods.
+	// "ns@version+digest;ns@version+digest;..." sorted ascending, where digest is the
+	// mod's contentDigest (absent, with its '+', when a mod declares no files).
+	// Empty string = no mods.
 	static std::string generateFingerprint();
+
+	// The same fingerprint with every "+digest" removed: "ns@version;...". Two
+	// fingerprints that agree here name the same mods at the same versions, and any
+	// remaining difference is in the FILES. Saves use this to tell the two apart.
+	static std::string stripDigests(const std::string& fingerprint);
 
 	// Host only (multiplayer == SERVER): send our fingerprint to the given
 	// connected player slot (1..MAXPLAYERS-1) as chunked "SAMF" safe packets.

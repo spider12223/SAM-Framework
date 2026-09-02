@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <cstdlib>  // strtol
 #include <fstream>
+#include <iterator>   // istreambuf_iterator (contentDigestFor)
 #include <sstream>
 #include <set>
 
@@ -189,6 +190,58 @@ static bool checkVersions(const SAMModManifest& m, const std::string& baronyVers
 		}
 	}
 	return true;
+}
+
+// Content digest: FNV-1a 64 over every file the manifest DECLARES, each as its relative
+// path followed by its bytes, in sorted order so mount order cannot change the result.
+// '\r' bytes are dropped so a Windows (CRLF) checkout of the same mod digests like a Linux
+// one. Only declared files are walked: a .vox or .ogg that a JSON merely refers to is not
+// (the JSON naming it is). A declared file that is missing digests as "<missing>", so the
+// U13 case -- a room one side does not have -- shows up as a digest difference.
+static std::string contentDigestFor(const SAMModManifest& m)
+{
+	std::vector<std::string> rels;
+	auto addAll = [&](const std::vector<std::string>& v) { rels.insert(rels.end(), v.begin(), v.end()); };
+	addAll(m.classes); addAll(m.items); addAll(m.patches); addAll(m.monsters); addAll(m.spells);
+	addAll(m.effects); addAll(m.races); addAll(m.sounds); addAll(m.recipes);
+	for ( const auto& kv : m.models ) { rels.push_back(kv.second); }
+	for ( const auto& kv : m.images ) { rels.push_back(kv.second); }
+	for ( const auto& set : m.rooms ) { addAll(set.second); }
+	if ( rels.empty() ) { return std::string(); }
+	std::sort(rels.begin(), rels.end());
+	rels.erase(std::unique(rels.begin(), rels.end()), rels.end());
+
+	unsigned long long h = 14695981039346656037ULL;
+	auto mix = [&h](const char* data, size_t n)
+	{
+		for ( size_t i = 0; i < n; ++i )
+		{
+			const unsigned char c = static_cast<unsigned char>(data[i]);
+			if ( c == '\r' ) { continue; }
+			h ^= c;
+			h *= 1099511628211ULL;
+		}
+		h ^= 0xFFu; // field separator so "ab"+"c" and "a"+"bc" differ
+		h *= 1099511628211ULL;
+	};
+	for ( const auto& rel : rels )
+	{
+		mix(rel.data(), rel.size());
+		std::ifstream f(joinPath(m.modPath, rel), std::ios::binary);
+		if ( f.is_open() )
+		{
+			std::string bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+			mix(bytes.data(), bytes.size());
+		}
+		else
+		{
+			static const char kMissing[] = "<missing>";
+			mix(kMissing, sizeof(kMissing) - 1);
+		}
+	}
+	char buf[24];
+	snprintf(buf, sizeof(buf), "%016llx", h);
+	return std::string(buf);
 }
 
 // Parse one mod.json document into a manifest. Returns false (and logs) if the
@@ -524,6 +577,8 @@ std::vector<SAMModManifest> SAMWorkshop::scan(
 		{
 			continue;
 		}
+
+		manifest.contentDigest = contentDigestFor(manifest);
 
 		// Two mods sharing a namespace break the one thing the namespace sort exists to
 		// guarantee: their sort key is equal, so their relative order -- and every content id
