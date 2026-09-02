@@ -177,9 +177,24 @@ int SAMBodies::modelForEntity(const Entity* entity)
 	return ( resolved.base < 0 ) ? -1 : samPickFrame(resolved, entity);
 }
 
+bool SAMBodies::hiddenByEffect(const Entity* entity)
+{
+	if ( !entity ) { return false; }
+	Stat* st = const_cast<Entity*>(entity)->getStats();
+	return st && st->getEffectActive(EFF_INVISIBLE) != 0;
+}
+
 double SAMBodies::yawOffsetForEntity(const Entity* entity)
 {
-	if ( s_bodies.empty() || !entity ) { return 0.0; }
+	if ( !entity ) { return 0.0; }
+	// A death gib carries the yaw correction its parent had, because gibs all share uid -3
+	// and cannot be found in s_bodies. Without this a body authored with yaw_offset visibly
+	// snaps at the instant it dies -- the one frame the player is looking straight at it.
+	if ( entity->skill[57] > 0 && entity->skill[59] != 0 )
+	{
+		return (double)(entity->skill[59] - 3600) / 10.0;
+	}
+	if ( s_bodies.empty() ) { return 0.0; }
 	auto it = s_bodies.find(entity->getUID());
 	return ( it != s_bodies.end() && it->second.base >= 0 ) ? it->second.yawOffsetDeg : 0.0;
 }

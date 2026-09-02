@@ -1274,6 +1274,16 @@ void SAMItems::registerModModels()
 		{
 			if ( SAMErrors::relPathEscapes(md.second) ) { continue; } // belt-and-braces (parse already guards)
 			if ( seen.insert("id:" + md.first).second ) { reqs.push_back({ md.first, md.second }); }
+			else
+			{
+				// Two mods claiming one model id. This dedupe runs BEFORE appendModels, so its
+				// own collision warning never fires and the loser silently renders the winner's
+				// art -- impossible to diagnose from in-game. mod.json ids are taken verbatim
+				// and are not forced to carry the namespace, so "sword" is a global name.
+				SAM_WARN(MOD, "Model id [" + md.first + "] is already claimed by another mod; "
+					"[" + m.ns + "]'s copy is ignored and its model will render as the other "
+					"mod's. Namespace your model ids so two mods cannot collide.");
+			}
 		}
 	}
 	if ( reqs.empty() ) { return; }

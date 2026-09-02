@@ -156,6 +156,13 @@ public:
 	// leave the host body's own model alone. -1 for every vanilla race.
 	static int limbModelFor(int raceId, int limbType);
 
+	// True when this race supplies its own model for that limb. The engine adds +2 to an arm
+	// sprite to reach the bent / weapon-holding variant, which only works because vanilla
+	// authors those variants at consecutive indices. A mod's limb is a single appended index
+	// with nothing reserved after it, so the caller must skip that arithmetic. See the
+	// guarded += 2 sites in actplayer.cpp.
+	static bool usesLimbOverride(int raceId, int limbType);
+
 	// The model this race draws as its head, or -1. Kept apart from limbModelFor
 	// because the engine sets the head on the player entity itself rather than through
 	// the limb path, and never gates it behind an equipment check.

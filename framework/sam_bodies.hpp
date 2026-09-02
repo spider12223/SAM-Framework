@@ -50,6 +50,13 @@ public:
 	// Extra rotation (DEGREES about the vertical axis) for this entity's custom body, or 0.
 	// A .vox authored facing a different way than Barony expects would otherwise render
 	// sideways, and re-exporting every frame is a worse fix than one number in the JSON.
+	// True when this entity is invisible because of an EFFECT (a potion or a spell) rather
+	// than because its species structurally hides its main entity. The draw pass un-skips a
+	// custom body so the six "AI bodypart" monsters stay visible; without this it also
+	// un-skipped a monster that had drunk invisibility, leaving it fully visible AND
+	// clickable. Answers false for everything in vanilla.
+	static bool hiddenByEffect(const Entity* entity);
+
 	static double yawOffsetForEntity(const Entity* entity);
 
 	// Model offset for this entity's custom body, in the model's OWN facing (voxels).

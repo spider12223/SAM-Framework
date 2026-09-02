@@ -385,6 +385,27 @@ void SAMRaces::resolveLimbModels()
 		def.headModelIdx = -1;
 		if ( def.limbModels.empty() ) { continue; }
 
+		// A player on a RAT or SPIDER host body is not animated as a humanoid: actplayer sets
+		// isHumanoid = false for those two, and the whole bodypart loop that calls
+		// setDefaultPlayerModel sits inside `if ( isHumanoid )`. The four body limbs are
+		// therefore never assigned and the mod's models are silently ignored -- only the head
+		// works, because it is set earlier and outside that branch. Both bodies are otherwise
+		// legal in the schema, so say this out loud rather than let it look like a bad path.
+		{
+			bool declaredBodyLimb = false;
+			for ( const LimbSlot& slot : kLimbSlots )
+			{
+				if ( def.limbModels.find(slot.key) != def.limbModels.end() ) { declaredBodyLimb = true; break; }
+			}
+			if ( declaredBodyLimb && (def.hostMonster == RAT || def.hostMonster == SPIDER) )
+			{
+				SAM_WARN(MOD, "Race [" + def.id + "] declares body limb_models, but its host_body "
+					"never reaches the limb path: a rat/spider player is animated as a creature, not "
+					"a humanoid, so torso/arm/leg models are ignored. Only 'head' applies on this "
+					"host body. Use a humanoid host_body if you need the limbs.");
+			}
+		}
+
 		for ( const LimbSlot& slot : kLimbSlots )
 		{
 			auto it = def.limbModels.find(slot.key);
@@ -422,6 +443,11 @@ int SAMRaces::limbModelFor(int raceId, int limbType)
 	if ( it == s_byId.end() ) { return -1; }
 	auto lit = it->second.limbModelIdx.find(limbType);
 	return ( lit == it->second.limbModelIdx.end() ) ? -1 : lit->second;
+}
+
+bool SAMRaces::usesLimbOverride(int raceId, int limbType)
+{
+	return limbModelFor(raceId, limbType) >= 0;
 }
 
 int SAMRaces::headModelFor(int raceId)

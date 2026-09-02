@@ -10,7 +10,7 @@ import { useMod } from '@/state/ModContext.jsx';
 import { Panel, GoldButton } from '@/components/ui.jsx';
 
 /** The framework's own version (mods declare their own framework_min_version). */
-const SAM_FRAMEWORK_VERSION = '2.4.0';
+const SAM_FRAMEWORK_VERSION = '2.4.1';
 
 /** Where players get S.A.M itself (the framework is a dependency, not a mod). */
 const WORKSHOP_URL = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472';
@@ -28,16 +28,14 @@ const TRAVELS = [
  * thing a returning modder sees, and the point is 'here is what you can do now that you
  * could not before', not a changelog. */
 const WHATS_NEW = [
-  ["Summon your own monsters",
-   "sam_spawn_monster now takes your mod's own id, not just a vanilla species: sam_spawn_monster(x, y, \"mymod:bone_tyrant\"). It runs the same routine the dungeon generator uses, so the variant's stats, equipment, traits, body model and followers all arrive with it. Scripted bosses, summons, ambushes and quest NPCs no longer have to fake a vanilla creature and patch it afterwards."],
-  ["Name a monster, and dress it",
-   "sam_set_monster_name renames a living creature, and sam_monster_equip puts a real item into any of its ten equipment slots, worn and used and dropped on death. The monster that just killed you can be given a name and your sword to carry."],
-  ["Steer a monster without replacing its brain",
-   "sam_attach_behavior runs your function every tick for one living monster, alongside its own AI instead of instead of it. The creature keeps its behaviour, its death handling and its drops; you just get a say each frame."],
-  ["Five new events, including the ghost",
-   "The dead player was a whole game state with nothing attached to it. player.on_became_ghost fires when a ghost appears, and sam_is_ghost answers for any player. Also: player.on_callout (every ping, with the type Barony already worked out), player.on_before_revive and world.on_before_chest_open (both refusable), and player.on_game_over."],
-  ["Rolls that agree across a party",
-   "sam_random(stream, lo, hi) draws from a stream seeded by the run and your namespace, so every machine gets the same answer without sending anything, and the engine's own dice are never disturbed. sam_get_seed reads the run seed and sam_get_flag reads any lobby setting."],
+  ["Custom race arms are no longer heads",
+   "If your race declared arm models, the left arm rendered as the race's HEAD whenever the shield slot was occupied, which in Barony means whenever the player carries a torch or lantern. The engine steps an arm sprite forward by two to reach its bent pose, and limbs append in alphabetical order, so arm_left landed exactly on head. Nothing a modder wrote caused it and nothing they could write avoided it. Fixed for both arms."],
+  ["Invisible monsters are invisible again",
+   "A monster with a custom body that drank invisibility stayed fully drawn, and because the same pass handles entity picking, it could still be clicked. The draw path now tells invisibility-by-potion apart from the six creatures that hide their main entity by design."],
+  ["A stale model cache can no longer show the wrong model",
+   "Once a mod adds models, the engine's model cache no longer matches the table. In the worst case a previous session's cache bound the wrong geometry to a custom model. The cache is now bypassed when custom models are present, which also stops mod geometry being written into the shared cache."],
+  ["Two silent failures now speak",
+   "Two mods claiming the same model id used to drop one of them with no message, and it would quietly render the other mod's art. And limb_models on a rat or spider host body does nothing, because those players are animated as creatures rather than humanoids. Both are now reported at load, naming the mod."],
 ];
 
 /** sam-well stat box: big gold number over a small-caps label. */
