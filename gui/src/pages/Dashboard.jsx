@@ -10,7 +10,7 @@ import { useMod } from '@/state/ModContext.jsx';
 import { Panel, GoldButton } from '@/components/ui.jsx';
 
 /** The framework's own version (mods declare their own framework_min_version). */
-const SAM_FRAMEWORK_VERSION = '2.1.0';
+const SAM_FRAMEWORK_VERSION = '2.2.0';
 
 /** Where players get S.A.M itself (the framework is a dependency, not a mod). */
 const WORKSHOP_URL = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472';
@@ -28,14 +28,14 @@ const TRAVELS = [
  * thing a returning modder sees, and the point is 'here is what you can do now that you
  * could not before', not a changelog. */
 const WHATS_NEW = [
-  ["Your race can bring its own body",
-   "host_body already gave a race a real creature to wear: its limbs, its animation, its armour behaviour. What it could not do was DIFFER from that creature. limb_models gives you a model per limb (head, torso, both arms, both legs) drawn on the host body's frame. Omit a limb and it keeps the host's, so this covers a new head and a whole new body with one field. Armour still covers what armour covers, because it hooks the same place the game already decides that."],
-  ["Your race can decide who it gets along with",
-   "A race already inherited its host body's relations: a goatman-bodied race is ignored by goatmen without asking for it. allies and enemies are for the relations the host body does NOT have. List a gnome as an ally and gnomes leave you alone, on top of whatever the body already gave you. Shopkeepers stay under the game's own wanted level, so declaring shops friendly does not make robbing them free."],
-  ["The race editor can reach the whole schema",
-   "It gained the body panel and the two allegiance pickers, plus blood_diet and starting_spells. Those last two have been in the schema since 1.3.0 with no way to set them short of editing JSON by hand."],
-  ["A fix worth knowing about if you write classes",
-   "A class could always force a per-race head, and it has been landing on the wrong race since it shipped: the lookup compared two different kinds of number, so a human read as a skeleton and a goatman matched nothing at all. If you wrote one of those and quietly gave up on it, try it again."],
+  ["Name a model by its file, not its number",
+   "limb_models and class heads take the model's own filename now: \"gharbad_head.vox\", or the full models/creatures/... path if several creatures ship a file with that name. Your own .vox files work by their mod-relative path as well. Raw indices still work, so nothing already written breaks, but nothing in a mod file ever needs to say 1025 again."],
+  ["The framework was audited end to end",
+   "Sixteen readers over every module, two independent skeptics on every claim, and one fix pass. Thirty-odd defects closed, several of them the kind you only meet once: a strict-mode metatable that could abort the game at mod load, a memory cap that turned into a process abort, a damage veto silently lost when a JavaScript handler fired a nested event. The full report and the mechanism dossier are in the repo."],
+  ["Two modder-reported bugs, both ours",
+   "A custom race head made the engine forget what body the player had, so the held weapon drew at the head. And a limb model given by path was never registered, so the path never worked. Both fixed; both were found by the audit rather than by guessing."],
+  ["Silent failures now speak",
+   "A misspelled mod.json key, a wrong-typed value, two spellings of one patch target, a monster name too long for the engine, a spell range written in tiles when the engine reads ticks: each of these used to load fine and do nothing, or worse. Each is now reported with the file and the field."],
 ];
 
 /** sam-well stat box: big gold number over a small-caps label. */
@@ -85,12 +85,12 @@ export default function Dashboard() {
       {/* --------------------------------------------------- what is new */}
       <Panel title={`New in ${SAM_FRAMEWORK_VERSION}`}>
         <p className="m-0" style={{ color: 'var(--color-parchment)' }}>
-          This one is about who you are.{' '}
+          This one is about trust.{' '}
           <strong style={{ color: 'var(--color-gold)' }}>
-            A custom race is a body now, not a costume.
+            The whole framework was read, doubted, and fixed.
           </strong>{' '}
-          It can wear its own models, limb by limb, and it can decide for itself which
-          creatures leave it alone.
+          Models are named by file instead of by number, and a long list of things that
+          used to fail quietly now say what went wrong.
         </p>
         <ul className="mt-3 mb-0 space-y-2" style={{ listStyle: 'none', padding: 0 }}>
           {WHATS_NEW.map(([title, blurb]) => (
