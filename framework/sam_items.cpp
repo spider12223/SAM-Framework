@@ -1065,6 +1065,16 @@ bool SAMItems::remapSavedItemIds(const std::string& savedTable,
 	oldToNew.clear();
 	unresolved.clear();
 	if ( savedTable.empty() ) { return false; }
+
+	// The registry is only populated while a mod set is MOUNTED. getSaveGameInfo also runs
+	// from the main menu's save-slot list, and S.A.M unloads (clearing every registry) on the
+	// way back to that menu -- so a save read there would find every "ns:item" unresolvable
+	// and condemn the lot. Observed in testing: quitting to the menu announced a still-loaded
+	// mod's sword as dropped, seconds before the real load restored it correctly.
+	// No mods mounted means "not ready to judge", NOT "every mod was removed". Touch nothing.
+	// A player who really did remove every mod is still told by warnIfModSetChanged, and
+	// their items keep the ids they had, exactly as before this feature existed.
+	if ( SAMWorkshop::manifests().empty() ) { return false; }
 	size_t start = 0;
 	while ( start < savedTable.size() )
 	{
