@@ -58,6 +58,8 @@ namespace
 	std::map<std::string, unsigned long long> s_monsterTraits;
 	// variant display name -> mod-declared body model id ("ns:model"). Empty in vanilla.
 	std::map<std::string, SAMMonsters::BodyDef> s_monsterBodies;
+	// "ns:slug" -> what it takes to summon it. Keyed by ID, unlike the two maps above.
+	std::map<std::string, SAMMonsters::VariantRef> s_variantsById;
 	bool s_anyBodyDeclared = false;
 
 	unsigned long long samMonsterTraitBit(const std::string& name)
@@ -743,6 +745,7 @@ static void mergeSpawn(json& curve, const std::string& variantFile, const std::s
 void SAMMonsters::clear()
 {
 	s_monsterBodies.clear();
+	s_variantsById.clear();
 	s_anyBodyDeclared = false;
 	s_monsterTraits.clear();
 	if ( s_mounted )
@@ -755,6 +758,12 @@ void SAMMonsters::clear()
 	s_filesWritten = 0;
 	s_declared = 0;
 	s_curveLevels = 0;
+}
+
+const SAMMonsters::VariantRef* SAMMonsters::variantForId(const std::string& nsColonSlug)
+{
+	auto it = s_variantsById.find(nsColonSlug);
+	return ( it != s_variantsById.end() ) ? &it->second : nullptr;
 }
 
 unsigned long long SAMMonsters::traitsForName(const char* variantName)
@@ -885,6 +894,16 @@ void SAMMonsters::applyAll(const std::vector<SAMModManifest>& mods)
 
 			++s_filesWritten;
 			writtenVariants.insert(tr.variantFile);
+			// Record it by ID as well, so sam_spawn_monster("ns:slug") can find it. Done
+			// here rather than at parse time so an id only ever resolves to a file that
+			// actually reached disk.
+			{
+				SAMMonsters::VariantRef ref;
+				ref.variantFile = tr.variantFile;
+				ref.baseType    = tr.baseType;
+				ref.displayName = tr.name;
+				s_variantsById[m.ns + ":" + tr.slug] = ref;
+			}
 			SAM_INFO(MOD, "Registered monster: " + tr.name + " [" + m.ns + ":" + tr.slug + "] — variant of "
 				+ tr.baseType + " -> data/custom-monsters/" + tr.variantFile + ".json");
 

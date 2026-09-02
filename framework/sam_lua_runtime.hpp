@@ -102,6 +102,17 @@ namespace SAMLua
 	int  behaviorIndexFor(const std::string& fullName);
 	// Invoked by the trampoline every frame for one entity. Runs ONLY the owning script.
 	void runBehavior(int index, unsigned long long uid);
+
+	// ---- additive per-monster behaviours (sam_attach_behavior) ---------------------
+	// A LIVING monster keeps its own actMonster; the script runs after it. The engine
+	// calls anyMonsterBehaviours() once per monster per tick, so it must stay trivial.
+	extern bool g_anyMonsterBehaviors;
+	inline bool anyMonsterBehaviors() { return g_anyMonsterBehaviors; }
+	// -1 when nothing is attached to this uid.
+	int  monsterBehaviorIndexFor(unsigned long long uid);
+	void attachMonsterBehavior(unsigned long long uid, int index);
+	void detachMonsterBehavior(unsigned long long uid);
+	void clearMonsterBehaviors();
 	// Dropped when mods reload, so a behaviour cannot outlive the script that defined it.
 	void clearBehaviors();
 	// Detach a behaviour's function by name without touching the row's identity. Used by the
@@ -202,6 +213,16 @@ namespace SAMLua
 	// Fire on_action_pressed/on_action_released for a player. Called by pollActions on
 	// the host, and by the 'SAMA' packet handler for a remote client's edges.
 	void dispatchAction(int player, int actionIndex, bool pressed);
+
+	// ---- v2.4 toolkit: shared between the two runtimes -----------------------------
+	// These live here rather than being duplicated per runtime so Lua and JS cannot drift.
+	// randomDraw in particular MUST be shared: two runtimes with their own counters would
+	// return different numbers for the same stream name, which is the exact desync the
+	// deterministic stream exists to prevent.
+	long long randomDraw(const std::string& ns, const std::string& stream, long long lo, long long hi);
+	int lobbyFlag(const std::string& name, bool& ok);   // ok=false for an unknown name
+	const char* lobbyFlagNames();
+	std::string modDataDir(const std::string& ns);      // dir holding this ns's save_data
 
 	// ---- mod-defined networking ("SAMP") ------------------------------------------
 	// One generic envelope so a mod can send its own data between host and clients.

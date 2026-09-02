@@ -65,6 +65,18 @@ public:
 	// has no id of its own -- the name is the only thing that identifies it at the moment
 	// the engine stamps a variant onto a live Stat. Returns 0 for anything unknown, which
 	// is every vanilla monster, so the engine's trait check is a no-op without a mod.
+	// A declared variant, addressable by its "namespace:slug" id. Traits and bodies are
+	// keyed by DISPLAY NAME (which is not unique); this is keyed by the id, which is, and
+	// it is what lets a script summon a mod's own monster instead of only a vanilla one.
+	struct VariantRef
+	{
+		std::string variantFile;  // on-disk stem under data/custom-monsters/ (no .json)
+		std::string baseType;     // validated base species name
+		std::string displayName;  // what the variant calls itself
+	};
+	// nullptr when the id was never declared, or when no mod is loaded.
+	static const VariantRef* variantForId(const std::string& nsColonSlug);
+
 	static unsigned long long traitsForName(const char* variantName);
 
 	// A mod-declared custom BODY for a monster variant. Model IDS, not engine indices:

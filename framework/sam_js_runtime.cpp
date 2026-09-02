@@ -600,6 +600,89 @@ namespace
 		return JS_NewInt32(ctx, currentlevel);
 	}
 
+	// sam_get_seed() -> the run seed (uniqueGameKey). Int64, NOT Int32: uniqueGameKey is a
+	// Uint32, and JS_NewInt32 would hand JavaScript a negative number for the same run that
+	// Lua reports as positive — a parity bug that only shows on half the seeds.
+	JSValue js_sam_get_seed(JSContext* ctx, JSValueConst /*this_val*/, int /*argc*/, JSValueConst* /*argv*/)
+	{
+		SAMLogger::noteApiCall();
+		return JS_NewInt64(ctx, (int64_t)(uint64_t)uniqueGameKey);
+	}
+
+	// sam_get_flag("minotaurs") -> boolean, or null for an unknown name.
+	JSValue js_sam_get_flag(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( !samHasArg(argc, argv, 0) ) { return JS_NULL; }
+		const char* nameC = JS_ToCString(ctx, argv[0]);
+		const std::string name = nameC ? nameC : "";
+		if ( nameC ) { JS_FreeCString(ctx, nameC); }
+		bool ok = false;
+		const int v = SAMLua::lobbyFlag(name, ok);
+		if ( !ok )
+		{
+			SAM_WARN("JS", "sam_get_flag: unknown flag '" + name + "'. Valid: " + SAMLua::lobbyFlagNames());
+			return JS_NULL;
+		}
+		return JS_NewBool(ctx, v ? 1 : 0);
+	}
+
+	// sam_is_ghost(player) -> boolean. True while the player is a ghost that can act.
+	JSValue js_sam_is_ghost(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] ) { return JS_NewBool(ctx, 0); }
+		return JS_NewBool(ctx, players[player]->ghost.isActive() ? 1 : 0);
+	}
+
+	// sam_is_spirit_ghost(player) -> boolean. Project Spirit (player still alive) vs death.
+	JSValue js_sam_is_spirit_ghost(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] ) { return JS_NewBool(ctx, 0); }
+		return JS_NewBool(ctx, players[player]->ghost.isSpiritGhost() ? 1 : 0);
+	}
+
+	// sam_random("stream", lo, hi) -> integer in [lo, hi], deterministic per run.
+	// Routed through SAMLua::randomDraw so Lua and JS share ONE counter per stream.
+	JSValue js_sam_random(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 3 ) { return JS_NewInt32(ctx, 0); }
+		const char* streamC = JS_ToCString(ctx, argv[0]);
+		const std::string stream = streamC ? streamC : "";
+		if ( streamC ) { JS_FreeCString(ctx, streamC); }
+		int64_t lo = 0, hi = 0;
+		JS_ToInt64(ctx, &lo, argv[1]);
+		JS_ToInt64(ctx, &hi, argv[2]);
+		return JS_NewInt64(ctx, (int64_t)SAMLua::randomDraw(g_currentNs, stream, (long long)lo, (long long)hi));
+	}
+
+	// sam_list_data_keys() -> array of this mod's saved key names.
+	JSValue js_sam_list_data_keys(JSContext* ctx, JSValueConst /*this_val*/, int /*argc*/, JSValueConst* /*argv*/)
+	{
+		SAMLogger::noteApiCall();
+		JSValue arr = JS_NewArray(ctx);
+		const std::string dir = SAMLua::modDataDir(g_currentNs);
+		uint32_t idx = 0;
+		std::error_code ec;
+		if ( !std::filesystem::exists(dir, ec) || ec ) { return arr; }
+		std::filesystem::directory_iterator it(dir, ec);
+		if ( ec ) { return arr; }
+		for ( const auto& entry : it )
+		{
+			std::error_code ec2;
+			if ( !entry.is_regular_file(ec2) || ec2 ) { continue; }
+			std::string fn = entry.path().filename().string();
+			if ( fn.size() <= 5 || fn.substr(fn.size() - 5) != ".json" ) { continue; }
+			fn.erase(fn.size() - 5);
+			JS_SetPropertyUint32(ctx, arr, idx++, JS_NewString(ctx, fn.c_str()));
+		}
+		return arr;
+	}
+
 	JSValue js_sam_spawn_item(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
@@ -1505,6 +1588,27 @@ namespace
 	}
 
 	// sam_spawn_monster(tileX, tileY, "name" [, shopType]) -> uid | null. Host only.
+	// Summon a mod-declared monster variant by its "ns:slug" id; nullptr if never declared.
+	// Hands off to createMonsterFromFile -- the SAME routine level generation uses
+	// (maps.cpp:8003) -- so stats, equipment, traits, body model and followers are applied
+	// exactly as on a generated one. Before this a script could only summon a vanilla
+	// species and then hand-patch it, which never reproduced the body or the followers.
+	Entity* samSummonCustomVariantJs(const std::string& id, int tx, int ty)
+	{
+		const SAMMonsters::VariantRef* ref = SAMMonsters::variantForId(id);
+		if ( !ref ) { return nullptr; }
+		const int base = samMonsterNameToId(ref->baseType.c_str());
+		if ( base <= 0 ) { return nullptr; }
+		Entity* e = summonMonster(static_cast<Monster>(base), tx * 16 + 8, ty * 16 + 8);
+		if ( !e ) { return nullptr; }
+		if ( Stat* st = e->getStats() )
+		{
+			Monster outType = static_cast<Monster>(base);
+			monsterCurveCustomManager.createMonsterFromFile(e, st, ref->variantFile, outType);
+		}
+		return e;
+	}
+
 	JSValue js_sam_spawn_monster(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
@@ -1513,11 +1617,28 @@ namespace
 		if ( samHasArg(argc, argv, 1) ) { JS_ToInt32(ctx, &ty, argv[1]); }
 		if ( samHasArg(argc, argv, 2) ) { const char* s = JS_ToCString(ctx, argv[2]); if ( s ) { monName = s; JS_FreeCString(ctx, s); } }
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_spawn_monster refused: host only."); return JS_NULL; }
-		const int creature = samMonsterNameToId(monName.c_str());
-		if ( creature <= 0 ) { SAM_ERROR("JS", "sam_spawn_monster: unknown monster '" + monName + "'."); return JS_NULL; }
 		if ( tx < 0 || tx >= (int)map.width || ty < 0 || ty >= (int)map.height )
 		{ SAM_ERROR("JS", "sam_spawn_monster: tile out of bounds."); return JS_NULL; }
-		Entity* e = summonMonster(static_cast<Monster>(creature), tx * 16 + 8, ty * 16 + 8);
+
+		// A name containing ':' is a mod's OWN monster; anything else is a vanilla species.
+		Entity* e = nullptr;
+		int creature = 0;
+		if ( monName.find(':') != std::string::npos )
+		{
+			e = samSummonCustomVariantJs(monName, tx, ty);
+			if ( !e )
+			{
+				SAM_ERROR("JS", "sam_spawn_monster: no monster declared as '" + monName
+					+ "' (check the id against the mod's monster JSON, and that the mod loaded).");
+				return JS_NULL;
+			}
+		}
+		else
+		{
+			creature = samMonsterNameToId(monName.c_str());
+			if ( creature <= 0 ) { SAM_ERROR("JS", "sam_spawn_monster: unknown monster '" + monName + "'."); return JS_NULL; }
+			e = summonMonster(static_cast<Monster>(creature), tx * 16 + 8, ty * 16 + 8);
+		}
 		if ( !e ) { SAM_ERROR("JS", "sam_spawn_monster: spawn failed (blocked tile?)."); return JS_NULL; }
 		if ( samHasArg(argc, argv, 3) && creature == SHOPKEEPER )
 		{
@@ -2979,6 +3100,175 @@ namespace
 #endif
 	}
 
+	// sam_monster_equip(uid, "slot", "item" [, beatitude [, status [, count]]]) -> boolean.
+	// See the Lua twin for why no dirty flag is needed.
+	// Own copy of the slot table: the Lua one is internal to its translation unit.
+	// Kept in the same order and with the same aliases so the two cannot drift.
+	Item** samMonsterSlotJs(Stat* st, const std::string& slotIn)
+	{
+		if ( !st ) { return nullptr; }
+		std::string s = slotIn;
+		for ( char& c : s ) { c = (char)std::tolower((unsigned char)c); }
+		if ( s == "helmet" || s == "helm" )        { return &st->helmet; }
+		if ( s == "breastplate" || s == "armor" )  { return &st->breastplate; }
+		if ( s == "gloves" )                       { return &st->gloves; }
+		if ( s == "shoes" || s == "boots" )        { return &st->shoes; }
+		if ( s == "shield" )                       { return &st->shield; }
+		if ( s == "weapon" )                       { return &st->weapon; }
+		if ( s == "cloak" )                        { return &st->cloak; }
+		if ( s == "amulet" )                       { return &st->amulet; }
+		if ( s == "ring" )                         { return &st->ring; }
+		if ( s == "mask" )                         { return &st->mask; }
+		return nullptr;
+	}
+	const char* samMonsterSlotNamesJs()
+	{
+		return "helmet, breastplate, gloves, shoes, shield, weapon, cloak, amulet, ring, mask";
+	}
+
+	// sam_set_monster_name(uid, "name") -> boolean. See the Lua twin for the host-only note
+	// and the generic-name trap.
+	JSValue js_sam_set_monster_name(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_FALSE; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+		const char* nameC = JS_ToCString(ctx, argv[1]);
+		const std::string newName = nameC ? nameC : "";
+		if ( nameC ) { JS_FreeCString(ctx, nameC); }
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_set_monster_name refused: host only."); return JS_FALSE; }
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { SAM_WARN("JS", "sam_set_monster_name: no monster uid " + std::to_string((long long)uid)); return JS_FALSE; }
+		Stat* st = e->getStats();
+		if ( !st ) { return JS_FALSE; }
+		stringCopy(st->name, newName.c_str(), sizeof(st->name), newName.size());
+		return JS_TRUE;
+#else
+		(void)uid; return JS_FALSE;
+#endif
+	}
+
+	JSValue js_sam_monster_equip(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 3 ) { return JS_FALSE; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+		const char* slotC = JS_ToCString(ctx, argv[1]);
+		const char* itemC = JS_ToCString(ctx, argv[2]);
+		const std::string slotName = slotC ? slotC : "";
+		const std::string itemName = itemC ? itemC : "";
+		if ( slotC ) { JS_FreeCString(ctx, slotC); }
+		if ( itemC ) { JS_FreeCString(ctx, itemC); }
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_monster_equip refused: host only."); return JS_FALSE; }
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { SAM_WARN("JS", "sam_monster_equip: no monster uid " + std::to_string((long long)uid)); return JS_FALSE; }
+		Stat* st = e->getStats();
+		Item** slot = samMonsterSlotJs(st, slotName);
+		if ( !slot )
+		{
+			SAM_ERROR("JS", "sam_monster_equip: unknown slot '" + slotName + "'. Valid: " + samMonsterSlotNamesJs());
+			return JS_FALSE;
+		}
+		int resolvedType = -1;
+		if ( itemName.find(':') != std::string::npos ) { resolvedType = SAMItems::itemIdForIdString(itemName); }
+		if ( resolvedType < 0 )
+		{
+			std::string lower = itemName;
+			for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
+			auto it = ItemTooltips.itemNameStringToItemID.find(lower);
+			if ( it != ItemTooltips.itemNameStringToItemID.end() ) { resolvedType = it->second; }
+		}
+		if ( resolvedType < 0 )
+		{
+			SAM_ERROR("JS", "sam_monster_equip: unknown item '" + itemName
+				+ "' (expected a vanilla name like \"IRON_DAGGER\" or a custom \"namespace:item\").");
+			return JS_FALSE;
+		}
+		int32_t beatitude = 0; if ( samHasArg(argc, argv, 3) ) { JS_ToInt32(ctx, &beatitude, argv[3]); }
+		int32_t statusArg = (int32_t)EXCELLENT; if ( samHasArg(argc, argv, 4) ) { JS_ToInt32(ctx, &statusArg, argv[4]); }
+		statusArg = samClampInt(statusArg, (int)BROKEN, (int)EXCELLENT);
+		int32_t count = 1; if ( samHasArg(argc, argv, 5) ) { JS_ToInt32(ctx, &count, argv[5]); }
+		if ( count < 1 ) { count = 1; }
+		Item* item = newItem(static_cast<ItemType>(resolvedType), static_cast<Status>(statusArg),
+			(Sint16)beatitude, count, 0, true, nullptr);
+		if ( !item ) { return JS_FALSE; }
+		e->monsterEquipItem(*item, slot);
+		SAM_INFO("SAM", "sam_monster_equip: " + itemName + " -> " + slotName + " on uid " + std::to_string((long long)uid));
+		return JS_TRUE;
+#else
+		(void)uid; return JS_FALSE;
+#endif
+	}
+
+	// sam_monster_unequip(uid, "slot") -> boolean.
+	JSValue js_sam_monster_unequip(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_FALSE; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+		const char* slotC = JS_ToCString(ctx, argv[1]);
+		const std::string slotName = slotC ? slotC : "";
+		if ( slotC ) { JS_FreeCString(ctx, slotC); }
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_monster_unequip refused: host only."); return JS_FALSE; }
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { return JS_FALSE; }
+		Stat* st = e->getStats();
+		Item** slot = samMonsterSlotJs(st, slotName);
+		if ( !slot )
+		{
+			SAM_ERROR("JS", "sam_monster_unequip: unknown slot '" + slotName + "'. Valid: " + samMonsterSlotNamesJs());
+			return JS_FALSE;
+		}
+		if ( !*slot ) { return JS_FALSE; }
+		dropItemMonster(*slot, e, st);
+		*slot = nullptr;
+		return JS_TRUE;
+#else
+		(void)uid; return JS_FALSE;
+#endif
+	}
+
+	// sam_attach_behavior(uid, "name") -> boolean. See the Lua twin.
+	JSValue js_sam_attach_behavior(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_FALSE; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+		const char* nameC = JS_ToCString(ctx, argv[1]);
+		const std::string name = nameC ? nameC : "";
+		if ( nameC ) { JS_FreeCString(ctx, nameC); }
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_attach_behavior refused: host only."); return JS_FALSE; }
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { SAM_WARN("JS", "sam_attach_behavior: no monster uid " + std::to_string((long long)uid)); return JS_FALSE; }
+		const std::string full = g_currentNs + ":" + name;
+		const int idx = SAMLua::behaviorIndexFor(full);
+		if ( idx < 0 )
+		{
+			SAM_ERROR("JS", "sam_attach_behavior: no behavior named '" + full
+				+ "' — register it with sam_register_behavior first.");
+			return JS_FALSE;
+		}
+		SAMLua::attachMonsterBehavior((unsigned long long)uid, idx);
+		return JS_TRUE;
+#else
+		(void)uid; return JS_FALSE;
+#endif
+	}
+
+	// sam_detach_behavior(uid) -> boolean.
+	JSValue js_sam_detach_behavior(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_FALSE; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+		SAMLua::detachMonsterBehavior((unsigned long long)uid);
+		return JS_TRUE;
+	}
+
 	JSValue js_sam_set_monster_stat(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
@@ -3936,6 +4226,9 @@ namespace
 		JS_SetPropertyStr(ctx, g, "sam_monster_has_trait", JS_NewCFunction(ctx, js_sam_monster_has_trait, "sam_monster_has_trait", 2));
 		JS_SetPropertyStr(ctx, g, "sam_get_item_category", JS_NewCFunction(ctx, js_sam_get_item_category, "sam_get_item_category", 1));
 		JS_SetPropertyStr(ctx, g, "sam_set_monster_stat", JS_NewCFunction(ctx, js_sam_set_monster_stat, "sam_set_monster_stat", 3));
+		JS_SetPropertyStr(ctx, g, "sam_set_monster_name", JS_NewCFunction(ctx, js_sam_set_monster_name, "sam_set_monster_name", 2));
+		JS_SetPropertyStr(ctx, g, "sam_monster_equip", JS_NewCFunction(ctx, js_sam_monster_equip, "sam_monster_equip", 6));
+		JS_SetPropertyStr(ctx, g, "sam_monster_unequip", JS_NewCFunction(ctx, js_sam_monster_unequip, "sam_monster_unequip", 2));
 		JS_SetPropertyStr(ctx, g, "sam_apply_monster_effect", JS_NewCFunction(ctx, js_sam_apply_monster_effect, "sam_apply_monster_effect", 3));
 		JS_SetPropertyStr(ctx, g, "sam_kill_monster", JS_NewCFunction(ctx, js_sam_kill_monster, "sam_kill_monster", 1));
 		JS_SetPropertyStr(ctx, g, "sam_spawn_monsters", JS_NewCFunction(ctx, js_sam_spawn_monsters, "sam_spawn_monsters", 3));
@@ -3979,6 +4272,12 @@ namespace
 		JS_SetPropertyStr(ctx, g, "sam_get_move_speed", JS_NewCFunction(ctx, js_sam_get_move_speed, "sam_get_move_speed", 1));
 		JS_SetPropertyStr(ctx, g, "sam_level_up", JS_NewCFunction(ctx, js_sam_level_up, "sam_level_up", 2));
 		JS_SetPropertyStr(ctx, g, "sam_get_floor", JS_NewCFunction(ctx, js_sam_get_floor, "sam_get_floor", 0));
+		JS_SetPropertyStr(ctx, g, "sam_get_seed", JS_NewCFunction(ctx, js_sam_get_seed, "sam_get_seed", 0));
+		JS_SetPropertyStr(ctx, g, "sam_get_flag", JS_NewCFunction(ctx, js_sam_get_flag, "sam_get_flag", 1));
+		JS_SetPropertyStr(ctx, g, "sam_is_ghost", JS_NewCFunction(ctx, js_sam_is_ghost, "sam_is_ghost", 1));
+		JS_SetPropertyStr(ctx, g, "sam_is_spirit_ghost", JS_NewCFunction(ctx, js_sam_is_spirit_ghost, "sam_is_spirit_ghost", 1));
+		JS_SetPropertyStr(ctx, g, "sam_random", JS_NewCFunction(ctx, js_sam_random, "sam_random", 3));
+		JS_SetPropertyStr(ctx, g, "sam_list_data_keys", JS_NewCFunction(ctx, js_sam_list_data_keys, "sam_list_data_keys", 0));
 		JS_SetPropertyStr(ctx, g, "sam_spawn_item", JS_NewCFunction(ctx, js_sam_spawn_item, "sam_spawn_item", 6));
 		JS_SetPropertyStr(ctx, g, "sam_item_id", JS_NewCFunction(ctx, js_sam_item_id, "sam_item_id", 1));
 		JS_SetPropertyStr(ctx, g, "sam_message", JS_NewCFunction(ctx, js_sam_message, "sam_message", 2));
@@ -4006,6 +4305,8 @@ namespace
 		JS_SetPropertyStr(ctx, g, "sam_look_at", JS_NewCFunction(ctx, js_sam_look_at, "sam_look_at", 2));
 		JS_SetPropertyStr(ctx, g, "sam_get_entity_facing", JS_NewCFunction(ctx, js_sam_get_entity_facing, "sam_get_entity_facing", 1));
 		JS_SetPropertyStr(ctx, g, "sam_register_behavior", JS_NewCFunction(ctx, js_sam_register_behavior, "sam_register_behavior", 2));
+		JS_SetPropertyStr(ctx, g, "sam_attach_behavior", JS_NewCFunction(ctx, js_sam_attach_behavior, "sam_attach_behavior", 2));
+		JS_SetPropertyStr(ctx, g, "sam_detach_behavior", JS_NewCFunction(ctx, js_sam_detach_behavior, "sam_detach_behavior", 1));
 		JS_SetPropertyStr(ctx, g, "sam_spawn_entity", JS_NewCFunction(ctx, js_sam_spawn_entity, "sam_spawn_entity", 4));
 		JS_SetPropertyStr(ctx, g, "sam_set_chest_stash", JS_NewCFunction(ctx, js_sam_set_chest_stash, "sam_set_chest_stash", 2));
 		JS_SetPropertyStr(ctx, g, "sam_travel_to_level", JS_NewCFunction(ctx, js_sam_travel_to_level, "sam_travel_to_level", 2));

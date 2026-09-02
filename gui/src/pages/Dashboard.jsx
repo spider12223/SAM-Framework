@@ -10,7 +10,7 @@ import { useMod } from '@/state/ModContext.jsx';
 import { Panel, GoldButton } from '@/components/ui.jsx';
 
 /** The framework's own version (mods declare their own framework_min_version). */
-const SAM_FRAMEWORK_VERSION = '2.3.1';
+const SAM_FRAMEWORK_VERSION = '2.4.0';
 
 /** Where players get S.A.M itself (the framework is a dependency, not a mod). */
 const WORKSHOP_URL = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472';
@@ -28,14 +28,16 @@ const TRAVELS = [
  * thing a returning modder sees, and the point is 'here is what you can do now that you
  * could not before', not a changelog. */
 const WHATS_NEW = [
-  ["Your items survive a changed mod list",
-   "Custom items used to be saved as a number, and the numbers were handed out in mod order. Install one more mod and yesterday's save came back holding a different mod's items. Every save now records what each number meant, and items are matched by name when the save is read. Add, remove or reorder mods freely. An item whose mod is gone is set aside with a line in the log rather than turning into something else, and it stays in the file until you save again."],
-  ["Multiplayer notices edited files, not just versions",
-   "The mod check between host and player now covers the contents of each mod, not only its version number. Same mod, same version, one edited file used to pass the check and then desync mid-run. It is now reported before the run starts, naming the mod."],
-  ["Saved data survives a crash",
-   "sam_save_data, the patch overlay and the script cache are written to a temporary file and swapped into place. A crash or a power cut in the middle of a write leaves the previous file intact instead of a half-written one that will not load."],
-  ["See what a save will record",
-   "/sam_saveids prints the mod fingerprint and the item id table your next save will carry, so a mismatch can be read directly instead of guessed at."],
+  ["Summon your own monsters",
+   "sam_spawn_monster now takes your mod's own id, not just a vanilla species: sam_spawn_monster(x, y, \"mymod:bone_tyrant\"). It runs the same routine the dungeon generator uses, so the variant's stats, equipment, traits, body model and followers all arrive with it. Scripted bosses, summons, ambushes and quest NPCs no longer have to fake a vanilla creature and patch it afterwards."],
+  ["Name a monster, and dress it",
+   "sam_set_monster_name renames a living creature, and sam_monster_equip puts a real item into any of its ten equipment slots, worn and used and dropped on death. The monster that just killed you can be given a name and your sword to carry."],
+  ["Steer a monster without replacing its brain",
+   "sam_attach_behavior runs your function every tick for one living monster, alongside its own AI instead of instead of it. The creature keeps its behaviour, its death handling and its drops; you just get a say each frame."],
+  ["Five new events, including the ghost",
+   "The dead player was a whole game state with nothing attached to it. player.on_became_ghost fires when a ghost appears, and sam_is_ghost answers for any player. Also: player.on_callout (every ping, with the type Barony already worked out), player.on_before_revive and world.on_before_chest_open (both refusable), and player.on_game_over."],
+  ["Rolls that agree across a party",
+   "sam_random(stream, lo, hi) draws from a stream seeded by the run and your namespace, so every machine gets the same answer without sending anything, and the engine's own dice are never disturbed. sam_get_seed reads the run seed and sam_get_flag reads any lobby setting."],
 ];
 
 /** sam-well stat box: big gold number over a small-caps label. */

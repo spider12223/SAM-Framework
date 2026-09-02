@@ -50,6 +50,78 @@ Everything else is a notification. Returning `false` from one does nothing.
 
 ---
 
+## New in 2.4: the creature toolkit
+
+### Monsters
+
+`sam_spawn_monster(x, y, "ns:monster")` — the third argument now takes **your mod's own
+monster id** as well as a vanilla species name. It summons the variant's base creature and
+then runs the same routine the dungeon generator uses, so the stats, equipment, traits,
+body model and followers you declared all arrive with it. Returns the uid, or nil if that
+id was never declared.
+
+`sam_set_monster_name(uid, "Grimt the Proof")` — renames a living creature. **Host-side
+only**: clients hold no Stat for an ordinary monster, which is also why
+`sam_get_monster_name` already returns nil on a client. So this shows in singleplayer and
+on the host, and carrying names to clients needs its own packet, which is not in this
+release. Also note Barony treats a name containing `lesser`, `young`, `enslaved`,
+`damaged`, `corrupted`, `cultist` or `encased` as generic and falls back to the species
+name — vanilla behaviour, but surprising if your epithet table contains those words.
+
+`sam_monster_equip(uid, slot, item [, beatitude [, status [, count]]])` — puts a real item
+into one of the ten slots: `helmet breastplate gloves shoes shield weapon cloak amulet ring
+mask`. It is worn, used in combat, and dropped when the creature dies. Anything already in
+the slot is dropped on the floor rather than lost. Takes a vanilla name or a custom
+`ns:item`. `sam_monster_unequip(uid, slot)` drops what is there.
+
+`sam_attach_behavior(uid, "name")` / `sam_detach_behavior(uid)` — runs a registered
+behaviour every tick for one **living** monster, **after** its own AI rather than in place
+of it. This is the difference from `sam_register_behavior`, which replaces `behavior`
+outright: correct for an entity you created, fatal for a monster, because it would delete
+its AI, its death handling and its drops. Register the function with
+`sam_register_behavior` first.
+
+### Reading the run
+
+`sam_get_seed()` — the run seed. Stable for the whole run, identical on host and clients,
+0 on the main menu.
+
+`sam_random(stream, lo, hi)` — an integer in `[lo, hi]` from a stream seeded by the run
+seed, your namespace and the stream name. Two machines draw the same number without
+sending anything, so a roll is safe to act on in co-op. It never touches the engine's own
+dice: drawing from those would shift every later engine roll and change the dungeon.
+`math.random` gives a different answer per machine and must not decide anything the world
+can see.
+
+`sam_get_flag(name)` — a lobby setting: `cheats friendlyfire minotaurs hunger traps
+hardcore classic keep_inventory lifesaving assist_items`. Returns a boolean, or nil for an
+unknown name. Valid on clients.
+
+`sam_is_ghost(player)` / `sam_is_spirit_ghost(player)` — whether a player is a ghost that
+can act, and whether that ghost is Project Spirit (the player is still alive) rather than
+death. Use the second to avoid paying out a death reward to a living caster.
+
+`sam_list_data_keys()` — the key names this mod has written with `sam_save_data`.
+
+### Events
+
+| Event | Cancellable | Fields |
+|---|---|---|
+| `player.on_became_ghost` | no | player, uid, x, y, spirit |
+| `player.on_callout` | **yes** | player, cmd, type, target_uid, x, y, help_flags |
+| `player.on_before_revive` | **yes** | player, floor, keep_gear |
+| `world.on_before_chest_open` | **yes** | player, chest, x, y |
+| `player.on_game_over` | no | player, tutorial, survived, placement, made_top |
+
+`player.on_callout` carries the callout type Barony already computes for every ping (33 of
+them, from TRAP and CHEST through SECRET_EXIT and NPC_ENEMY). Refusing it stops the ping
+before it is sent.
+
+`player.on_before_revive` fires at the one place Barony's co-op death rule actually
+happens: the block that frees all ten equipment slots, purges the inventory and stands the
+player up on the next floor. Refuse it and that rebuild is skipped.
+
+
 ## Hooks you can change the number of
 
 Some hooks hand you a value the engine is about to use. Rewrite it and the game uses yours.

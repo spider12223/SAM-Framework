@@ -890,6 +890,141 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		return 1;
 	}
 
+	// ---- v2.4 toolkit: run seed, lobby flags, ghost state, deterministic RNG ----------
+
+	// The ten SV_FLAG_* bits (net.hpp:82-91) by name. "keep_inventory" is deliberately
+	// answered from the DERIVED global keepInventoryGlobal (net.hpp:94) rather than the raw
+	// bit, because that is what the engine itself branches on (maps.cpp:7144,
+	// actplayer.cpp:11211) and tutorial mode makes the two disagree.
+	int samLobbyFlag(const std::string& nameIn, bool& ok)
+	{
+		ok = true;
+		std::string n = nameIn;
+		for ( char& c : n ) { c = (char)std::tolower((unsigned char)c); }
+		if ( n == "cheats" )        { return (svFlags & SV_FLAG_CHEATS) != 0; }
+		if ( n == "friendlyfire" || n == "friendly_fire" ) { return (svFlags & SV_FLAG_FRIENDLYFIRE) != 0; }
+		if ( n == "minotaurs" )     { return (svFlags & SV_FLAG_MINOTAURS) != 0; }
+		if ( n == "hunger" )        { return (svFlags & SV_FLAG_HUNGER) != 0; }
+		if ( n == "traps" )         { return (svFlags & SV_FLAG_TRAPS) != 0; }
+		if ( n == "hardcore" )      { return (svFlags & SV_FLAG_HARDCORE) != 0; }
+		if ( n == "classic" )       { return (svFlags & SV_FLAG_CLASSIC) != 0; }
+		if ( n == "keepinventory" || n == "keep_inventory" ) { return keepInventoryGlobal ? 1 : 0; }
+		if ( n == "lifesaving" )    { return (svFlags & SV_FLAG_LIFESAVING) != 0; }
+		if ( n == "assist_items" || n == "assistitems" ) { return (svFlags & SV_FLAG_ASSIST_ITEMS) != 0; }
+		ok = false;
+		return 0;
+	}
+	const char* samLobbyFlagNames()
+	{
+		return "cheats, friendlyfire, minotaurs, hunger, traps, hardcore, classic, "
+			"keep_inventory, lifesaving, assist_items";
+	}
+
+	// Deterministic per-mod RNG, used by sam_random below.
+	//
+	// A script rolling with math.random gets a DIFFERENT answer on every machine, so any
+	// roll that changes the world desyncs co-op. And a script must never draw from the
+	// engine's own local_rng/map_rng: those streams are consumed in lockstep by the game
+	// itself, so taking a number out of one shifts every later engine roll and changes the
+	// dungeon that seed was supposed to produce. This is a self-contained splitmix64 seeded
+	// from (run seed, namespace, stream name) with its own per-stream counter, so it touches
+	// neither. Same run + same namespace + same stream + same call index = same number
+	// everywhere, which is what makes a roll safe to act on without sending it.
+	unsigned long long samFnv1a64(const std::string& str)
+	{
+		unsigned long long h = 14695981039346656037ULL;
+		for ( size_t i = 0; i < str.size(); ++i ) { h ^= (unsigned char)str[i]; h *= 1099511628211ULL; }
+		return h;
+	}
+	unsigned long long samSplitMix64(unsigned long long x)
+	{
+		x += 0x9E3779B97F4A7C15ULL;
+		unsigned long long z = x;
+		z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+		z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+		return z ^ (z >> 31);
+	}
+	std::map<std::string, unsigned long long> g_rngCounters;
+
+	// Shared by both runtimes so Lua and JS cannot drift apart on the same stream.
+	long long samRandomDraw(const std::string& ns, const std::string& stream, long long lo, long long hi)
+	{
+		if ( hi < lo ) { const long long t = lo; lo = hi; hi = t; }
+		const std::string key = ns + "\x1f" + stream;
+		unsigned long long& counter = g_rngCounters[key];
+		const unsigned long long state = samFnv1a64(key)
+			^ ((unsigned long long)uniqueGameKey * 0x9E3779B97F4A7C15ULL)
+			^ (counter * 0xD1B54A32D192ED03ULL);
+		++counter;
+		const unsigned long long r = samSplitMix64(state);
+		const unsigned long long span = (unsigned long long)(hi - lo) + 1ULL;
+		return lo + (long long)(r % span);
+	}
+
+	// sam_get_seed() -> the run seed (uniqueGameKey, game.hpp:90). Stable for a whole run,
+	// identical on host and clients, 0 on the main menu before a run starts. This is the
+	// number to derive anything that must agree across a party from. mapseed is NOT it: the
+	// engine re-rolls that every floor.
+	int lua_sam_get_seed(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		lua_pushinteger(Ls, (lua_Integer)(unsigned long long)uniqueGameKey);
+		return 1;
+	}
+
+	// sam_get_flag("minotaurs") -> boolean, or nil for an unknown name. Reads a lobby
+	// setting. Valid on clients too: a client's svFlags is the host's copy.
+	int lua_sam_get_flag(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* nameC = luaL_checkstring(Ls, 1);
+		bool ok = false;
+		const int v = samLobbyFlag(nameC ? nameC : "", ok);
+		if ( !ok )
+		{
+			SAM_WARN("LUA", std::string("sam_get_flag: unknown flag '") + (nameC ? nameC : "")
+				+ "'. Valid: " + samLobbyFlagNames());
+			lua_pushnil(Ls);
+			return 1;
+		}
+		lua_pushboolean(Ls, v ? 1 : 0);
+		return 1;
+	}
+
+	// sam_is_ghost(player) -> boolean. True while the player is a ghost that can act.
+	// Every machine runs its own Ghost_t, so this is correct for remote players too.
+	int lua_sam_is_ghost(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] ) { lua_pushboolean(Ls, 0); return 1; }
+		lua_pushboolean(Ls, players[player]->ghost.isActive() ? 1 : 0);
+		return 1;
+	}
+
+	// sam_is_spirit_ghost(player) -> boolean. Distinguishes the Project Spirit ghost (the
+	// player is still ALIVE) from the death ghost. Without this, sam_is_ghost alone
+	// conflates the two and a mod that pays out on death fires for a living caster.
+	int lua_sam_is_spirit_ghost(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] ) { lua_pushboolean(Ls, 0); return 1; }
+		lua_pushboolean(Ls, players[player]->ghost.isSpiritGhost() ? 1 : 0);
+		return 1;
+	}
+
+	// sam_random("stream", lo, hi) -> integer in [lo, hi]. Deterministic; see samRandomDraw.
+	int lua_sam_random(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* streamC = luaL_checkstring(Ls, 1);
+		const long long lo = (long long)luaL_checkinteger(Ls, 2);
+		const long long hi = (long long)luaL_checkinteger(Ls, 3);
+		lua_pushinteger(Ls, (lua_Integer)samRandomDraw(g_currentNs, streamC ? streamC : "", lo, hi));
+		return 1;
+	}
+
 	// sam_spawn_item(x, y, "ITEM_NAME") — spawn a ground item at map tile (x,y).
 	int lua_sam_spawn_item(lua_State* Ls)
 	{
@@ -2566,6 +2701,17 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		return o.empty() ? std::string("_") : o;
 	}
 
+	// Directory half of samModDataFile, so sam_list_data_keys can enumerate it.
+	std::string samModDataDir(const std::string& ns)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		const std::string base = std::string(outputdir) + "/savegames/sam_mod_data";
+#else
+		const std::string base = "./sam_mod_data";
+#endif
+		return base + "/" + samSanitize(ns);
+	}
+
 	std::string samModDataFile(const std::string& ns, const std::string& key)
 	{
 #ifdef SAM_LUA_HAVE_BARONY
@@ -2680,6 +2826,31 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 	}
 
 	// sam_save_data(key, value) — persist a value for the calling mod.
+	// sam_list_data_keys() -> array of this mod's saved key names. Lets a mod enumerate
+	// what it has stored instead of having to remember every key it ever wrote.
+	int lua_sam_list_data_keys(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		lua_newtable(Ls);
+		const std::string dir = samModDataDir(g_currentNs);
+		int idx = 1;
+		std::error_code ec;
+		if ( !std::filesystem::exists(dir, ec) || ec ) { return 1; }
+		std::filesystem::directory_iterator it(dir, ec);
+		if ( ec ) { return 1; }
+		for ( const auto& entry : it )
+		{
+			std::error_code ec2;
+			if ( !entry.is_regular_file(ec2) || ec2 ) { continue; }
+			std::string fn = entry.path().filename().string();
+			if ( fn.size() <= 5 || fn.substr(fn.size() - 5) != ".json" ) { continue; }
+			fn.erase(fn.size() - 5);
+			lua_pushstring(Ls, fn.c_str());
+			lua_rawseti(Ls, -2, idx++);
+		}
+		return 1;
+	}
+
 	int lua_sam_save_data(lua_State* Ls)
 	{
 		SAMLogger::noteApiCall();
@@ -3008,6 +3179,27 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 	// to "shopkeeper" and picks the store kind. Host only; net replication is done by
 	// summonMonster itself (the SUMM packet). Returns the new monster's uid so scripts
 	// can move / query it afterwards.
+	// Summon a mod-declared monster variant by its "ns:slug" id; nullptr if never declared.
+	// Hands off to createMonsterFromFile -- the SAME routine level generation uses
+	// (maps.cpp:8003) -- so stats, equipment, traits, body model and followers are applied
+	// exactly as on a generated one. Before this a script could only summon a vanilla
+	// species and then hand-patch it, which never reproduced the body or the followers.
+	Entity* samSummonCustomVariant(const std::string& id, int tx, int ty)
+	{
+		const SAMMonsters::VariantRef* ref = SAMMonsters::variantForId(id);
+		if ( !ref ) { return nullptr; }
+		const int base = samMonsterNameToId(ref->baseType.c_str());
+		if ( base <= 0 ) { return nullptr; }
+		Entity* e = summonMonster(static_cast<Monster>(base), tx * 16 + 8, ty * 16 + 8);
+		if ( !e ) { return nullptr; }
+		if ( Stat* st = e->getStats() )
+		{
+			Monster outType = static_cast<Monster>(base);
+			monsterCurveCustomManager.createMonsterFromFile(e, st, ref->variantFile, outType);
+		}
+		return e;
+	}
+
 	int lua_sam_spawn_monster(lua_State* Ls)
 	{
 		SAMLogger::noteApiCall();
@@ -3016,11 +3208,28 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		const char* nameC = luaL_checkstring(Ls, 3);
 		const std::string monName = nameC ? nameC : "";
 		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_spawn_monster refused: host only."); lua_pushnil(Ls); return 1; }
-		const int creature = samMonsterNameToId(nameC);
-		if ( creature <= 0 ) { SAM_ERROR("LUA", "sam_spawn_monster: unknown monster '" + monName + "'."); lua_pushnil(Ls); return 1; }
 		if ( tx < 0 || tx >= (int)map.width || ty < 0 || ty >= (int)map.height )
 		{ SAM_ERROR("LUA", "sam_spawn_monster: tile (" + std::to_string(tx) + "," + std::to_string(ty) + ") out of bounds."); lua_pushnil(Ls); return 1; }
-		Entity* e = summonMonster(static_cast<Monster>(creature), tx * 16 + 8, ty * 16 + 8); // pixel coords
+
+		// A name containing ':' is a mod's OWN monster; anything else is a vanilla species.
+		Entity* e = nullptr;
+		int creature = 0;
+		if ( monName.find(':') != std::string::npos )
+		{
+			e = samSummonCustomVariant(monName, tx, ty);
+			if ( !e )
+			{
+				SAM_ERROR("LUA", "sam_spawn_monster: no monster declared as '" + monName
+					+ "' (check the id against the mod's monster JSON, and that the mod loaded).");
+				lua_pushnil(Ls); return 1;
+			}
+		}
+		else
+		{
+			creature = samMonsterNameToId(nameC);
+			if ( creature <= 0 ) { SAM_ERROR("LUA", "sam_spawn_monster: unknown monster '" + monName + "'."); lua_pushnil(Ls); return 1; }
+			e = summonMonster(static_cast<Monster>(creature), tx * 16 + 8, ty * 16 + 8); // pixel coords
+		}
 		if ( !e ) { SAM_ERROR("LUA", "sam_spawn_monster: spawn failed (blocked tile?)."); lua_pushnil(Ls); return 1; }
 		if ( !lua_isnoneornil(Ls, 4) && creature == SHOPKEEPER )
 		{
@@ -3318,6 +3527,140 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 #else
 		(void)uid; (void)nameC; lua_pushboolean(Ls, 0); return 1;
 #endif
+	}
+
+	// The ten monster equipment slots (stat.hpp:456-465). Same vocabulary the monster
+	// schema's equipped_items uses, so an author does not learn a second set of names.
+	Item** samMonsterSlot(Stat* st, const std::string& slotIn)
+	{
+		if ( !st ) { return nullptr; }
+		std::string s = slotIn;
+		for ( char& c : s ) { c = (char)std::tolower((unsigned char)c); }
+		if ( s == "helmet" || s == "helm" )        { return &st->helmet; }
+		if ( s == "breastplate" || s == "armor" )  { return &st->breastplate; }
+		if ( s == "gloves" )                       { return &st->gloves; }
+		if ( s == "shoes" || s == "boots" )        { return &st->shoes; }
+		if ( s == "shield" )                       { return &st->shield; }
+		if ( s == "weapon" )                       { return &st->weapon; }
+		if ( s == "cloak" )                        { return &st->cloak; }
+		if ( s == "amulet" )                       { return &st->amulet; }
+		if ( s == "ring" )                         { return &st->ring; }
+		if ( s == "mask" )                         { return &st->mask; }
+		return nullptr;
+	}
+	const char* samMonsterSlotNames()
+	{
+		return "helmet, breastplate, gloves, shoes, shield, weapon, cloak, amulet, ring, mask";
+	}
+
+	// sam_monster_equip(uid, "slot", "item" [, beatitude [, status [, count]]]) -> boolean.
+	// Puts a real Item into a live monster's equipment slot: it is worn, it is used in
+	// combat, and it drops when the monster dies. Whatever was in the slot is dropped on
+	// the floor by monsterEquipItem rather than leaked.
+	// sam_set_monster_name(uid, "Snivelwick the Twice-Fed") -> boolean.
+	//
+	// Stat::name is a fixed char[128] (stat.hpp:339), so this bound-copies; it never strcpy's
+	// a script string into it. Two things worth knowing before you use it:
+	//
+	//  * HOST-SIDE ONLY, deliberately. Clients hold no Stat for an ordinary monster at all
+	//    (Entity::getStats returns clientStats, which is null for them), which is also why
+	//    sam_get_monster_name already returns nil on a client. Renaming therefore shows on
+	//    the host and in singleplayer; carrying names to clients needs its own packet and is
+	//    not in this release. Do not build a co-op mod whose whole point is the name until
+	//    it is.
+	//  * Barony treats some names as GENERIC (entity.cpp:29221): a name containing "lesser",
+	//    "young", "enslaved", "damaged", "corrupted", "cultist" or "encased" makes the engine
+	//    fall back to the species name. That is vanilla behaviour, not a bug here, but it
+	//    will look like one if your epithet table happens to contain those words.
+	int lua_sam_set_monster_name(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const char* nameC = luaL_checkstring(Ls, 2);
+		const std::string newName = nameC ? nameC : "";
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_set_monster_name refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { SAM_WARN("LUA", "sam_set_monster_name: no monster uid " + std::to_string(uid)); lua_pushboolean(Ls, 0); return 1; }
+		Stat* st = e->getStats();
+		if ( !st ) { lua_pushboolean(Ls, 0); return 1; }
+		stringCopy(st->name, newName.c_str(), sizeof(st->name), newName.size());
+		lua_pushboolean(Ls, 1);
+		return 1;
+	}
+
+	int lua_sam_monster_equip(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const char* slotC = luaL_checkstring(Ls, 2);
+		const char* itemC = luaL_checkstring(Ls, 3);
+		const std::string itemName = itemC ? itemC : "";
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_monster_equip refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { SAM_WARN("LUA", "sam_monster_equip: no monster uid " + std::to_string(uid)); lua_pushboolean(Ls, 0); return 1; }
+		Stat* st = e->getStats();
+		Item** slot = samMonsterSlot(st, slotC ? slotC : "");
+		if ( !slot )
+		{
+			SAM_ERROR("LUA", std::string("sam_monster_equip: unknown slot '") + (slotC ? slotC : "")
+				+ "'. Valid: " + samMonsterSlotNames());
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		// Same two-step resolution as sam_grant_item: a custom "ns:item" first, then a
+		// vanilla name, so modded gear works exactly like vanilla gear.
+		int resolvedType = -1;
+		if ( itemName.find(':') != std::string::npos ) { resolvedType = SAMItems::itemIdForIdString(itemName); }
+		if ( resolvedType < 0 )
+		{
+			std::string lower = itemName;
+			for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
+			auto it = ItemTooltips.itemNameStringToItemID.find(lower);
+			if ( it != ItemTooltips.itemNameStringToItemID.end() ) { resolvedType = it->second; }
+		}
+		if ( resolvedType < 0 )
+		{
+			SAM_ERROR("LUA", "sam_monster_equip: unknown item '" + itemName
+				+ "' (expected a vanilla name like \"IRON_DAGGER\" or a custom \"namespace:item\").");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		const Sint16 beatitude = (Sint16)luaL_optinteger(Ls, 4, 0);
+		int statusArg = (int)luaL_optinteger(Ls, 5, (int)EXCELLENT);
+		statusArg = samClampInt(statusArg, (int)BROKEN, (int)EXCELLENT);
+		int count = (int)luaL_optinteger(Ls, 6, 1);
+		if ( count < 1 ) { count = 1; }
+		Item* item = newItem(static_cast<ItemType>(resolvedType), static_cast<Status>(statusArg),
+			beatitude, count, 0, true, nullptr);
+		if ( !item ) { lua_pushboolean(Ls, 0); return 1; }
+		e->monsterEquipItem(*item, slot);
+		SAM_INFO("SAM", "sam_monster_equip: " + itemName + " -> " + std::string(slotC ? slotC : "")
+			+ " on uid " + std::to_string(uid));
+		lua_pushboolean(Ls, 1);
+		return 1;
+	}
+
+	// sam_monster_unequip(uid, "slot") -> boolean. Drops what is in the slot on the floor,
+	// the same way equipping over it would.
+	int lua_sam_monster_unequip(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const char* slotC = luaL_checkstring(Ls, 2);
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_monster_unequip refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { lua_pushboolean(Ls, 0); return 1; }
+		Stat* st = e->getStats();
+		Item** slot = samMonsterSlot(st, slotC ? slotC : "");
+		if ( !slot )
+		{
+			SAM_ERROR("LUA", std::string("sam_monster_unequip: unknown slot '") + (slotC ? slotC : "")
+				+ "'. Valid: " + samMonsterSlotNames());
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		if ( !*slot ) { lua_pushboolean(Ls, 0); return 1; }
+		dropItemMonster(*slot, e, st);
+		*slot = nullptr;
+		lua_pushboolean(Ls, 1);
+		return 1;
 	}
 
 	int lua_sam_set_monster_stat(lua_State* Ls)
@@ -4059,6 +4402,40 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 	//
 	// Registering a name twice replaces the function and keeps the index, so entities already
 	// in the world follow the new code. All behaviours are dropped when mods reload.
+	// sam_attach_behavior(uid, "name") -> boolean. Runs `name` every tick for a LIVING
+	// monster, AFTER its own AI. Unlike sam_register_behavior this does not replace
+	// actMonster, so the creature keeps its AI, its death handling and its drops.
+	int lua_sam_attach_behavior(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const char* nameC = luaL_checkstring(Ls, 2);
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_attach_behavior refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { SAM_WARN("LUA", "sam_attach_behavior: no monster uid " + std::to_string(uid)); lua_pushboolean(Ls, 0); return 1; }
+		const std::string full = g_currentNs + ":" + (nameC ? nameC : "");
+		const int idx = SAMLua::behaviorIndexFor(full);
+		if ( idx < 0 )
+		{
+			SAM_ERROR("LUA", "sam_attach_behavior: no behavior named '" + full
+				+ "' — register it with sam_register_behavior first.");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		SAMLua::attachMonsterBehavior((unsigned long long)uid, idx);
+		lua_pushboolean(Ls, 1);
+		return 1;
+	}
+
+	// sam_detach_behavior(uid) -> boolean.
+	int lua_sam_detach_behavior(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		SAMLua::detachMonsterBehavior((unsigned long long)uid);
+		lua_pushboolean(Ls, 1);
+		return 1;
+	}
+
 	int lua_sam_register_behavior(lua_State* Ls)
 	{
 		SAMLogger::noteApiCall();
@@ -4818,6 +5195,9 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		lua_pushcfunction(L, lua_sam_monster_has_trait);   lua_setglobal(L, "sam_monster_has_trait");
 		lua_pushcfunction(L, lua_sam_get_item_category);   lua_setglobal(L, "sam_get_item_category");
 		lua_pushcfunction(L, lua_sam_set_monster_stat);    lua_setglobal(L, "sam_set_monster_stat");
+		lua_pushcfunction(L, lua_sam_set_monster_name);    lua_setglobal(L, "sam_set_monster_name");
+		lua_pushcfunction(L, lua_sam_monster_equip);       lua_setglobal(L, "sam_monster_equip");
+		lua_pushcfunction(L, lua_sam_monster_unequip);     lua_setglobal(L, "sam_monster_unequip");
 		lua_pushcfunction(L, lua_sam_apply_monster_effect); lua_setglobal(L, "sam_apply_monster_effect");
 		lua_pushcfunction(L, lua_sam_kill_monster);        lua_setglobal(L, "sam_kill_monster");
 		lua_pushcfunction(L, lua_sam_spawn_monsters);      lua_setglobal(L, "sam_spawn_monsters");
@@ -4881,6 +5261,12 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		lua_setglobal(L, "sam_level_up");
 		lua_pushcfunction(L, lua_sam_get_floor);
 		lua_setglobal(L, "sam_get_floor");
+		lua_pushcfunction(L, lua_sam_get_seed);          lua_setglobal(L, "sam_get_seed");
+		lua_pushcfunction(L, lua_sam_get_flag);          lua_setglobal(L, "sam_get_flag");
+		lua_pushcfunction(L, lua_sam_is_ghost);          lua_setglobal(L, "sam_is_ghost");
+		lua_pushcfunction(L, lua_sam_is_spirit_ghost);   lua_setglobal(L, "sam_is_spirit_ghost");
+		lua_pushcfunction(L, lua_sam_random);            lua_setglobal(L, "sam_random");
+		lua_pushcfunction(L, lua_sam_list_data_keys);    lua_setglobal(L, "sam_list_data_keys");
 		lua_pushcfunction(L, lua_sam_spawn_item);
 		lua_setglobal(L, "sam_spawn_item");
 		lua_pushcfunction(L, lua_sam_item_id);
@@ -4997,6 +5383,8 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		lua_setglobal(L, "sam_get_entity_facing");
 		lua_pushcfunction(L, lua_sam_register_behavior);
 		lua_setglobal(L, "sam_register_behavior");
+		lua_pushcfunction(L, lua_sam_attach_behavior);   lua_setglobal(L, "sam_attach_behavior");
+		lua_pushcfunction(L, lua_sam_detach_behavior);   lua_setglobal(L, "sam_detach_behavior");
 		lua_pushcfunction(L, lua_sam_spawn_entity);
 		lua_setglobal(L, "sam_spawn_entity");
 		lua_pushcfunction(L, lua_sam_set_chest_stash);
@@ -5336,6 +5724,31 @@ namespace SAMLua
 		return -1;
 	}
 
+	bool g_anyMonsterBehaviors = false;
+	std::map<unsigned long long, int> g_monsterBehaviors;
+
+	int monsterBehaviorIndexFor(unsigned long long uid)
+	{
+		if ( g_monsterBehaviors.empty() ) { return -1; }
+		auto it = g_monsterBehaviors.find(uid);
+		return ( it != g_monsterBehaviors.end() ) ? it->second : -1;
+	}
+	void attachMonsterBehavior(unsigned long long uid, int index)
+	{
+		g_monsterBehaviors[uid] = index;
+		g_anyMonsterBehaviors = true;
+	}
+	void detachMonsterBehavior(unsigned long long uid)
+	{
+		g_monsterBehaviors.erase(uid);
+		g_anyMonsterBehaviors = !g_monsterBehaviors.empty();
+	}
+	void clearMonsterBehaviors()
+	{
+		g_monsterBehaviors.clear();
+		g_anyMonsterBehaviors = false;
+	}
+
 	void runBehavior(int index, unsigned long long uid)
 	{
 		if ( index < 0 || index >= (int)g_behaviors.size() ) { return; }
@@ -5563,6 +5976,7 @@ namespace SAMLua
 
 	void clearBehaviors()
 	{
+		clearMonsterBehaviors();   // uids from the old run mean nothing to the new one
 		// Release the functions but KEEP the rows.
 		//
 		// An entity already in the world carries a behaviour INDEX, and it keeps carrying it
@@ -5950,6 +6364,34 @@ namespace SAMLua
 #else
 		(void)player; (void)action; return "";
 #endif
+	}
+
+	long long randomDraw(const std::string& ns, const std::string& stream, long long lo, long long hi)
+	{
+		return samRandomDraw(ns, stream, lo, hi);
+	}
+
+	int lobbyFlag(const std::string& name, bool& ok)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		return samLobbyFlag(name, ok);
+#else
+		(void)name; ok = false; return 0;
+#endif
+	}
+
+	const char* lobbyFlagNames()
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		return samLobbyFlagNames();
+#else
+		return "";
+#endif
+	}
+
+	std::string modDataDir(const std::string& ns)
+	{
+		return samModDataDir(ns);
 	}
 
 	bool sendModPacket(int target, const std::string& tag, const std::string& payload)
