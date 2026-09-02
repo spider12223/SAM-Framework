@@ -206,6 +206,14 @@ void SAMSpells::loadFromManifest(const SAMModManifest& manifest)
 		def.damageMin     = getInt("damage_min", 0);
 		def.damageMax     = getInt("damage_max", 0);
 		def.range         = getInt("range", 0);
+		// `range` is the bolt's lifetime in game TICKS (50 per second; the engine default is
+		// 75). A modder reading it as tiles and writing 6 gets a spell that dies on the
+		// caster's fingertips, so say so at load rather than let it look like a dud spell.
+		if ( def.range > 0 && def.range < 15 )
+		{
+			SAM_WARN(MOD, "Spell [" + def.id + "] range " + std::to_string(def.range)
+				+ " is a lifetime in game ticks (50/sec, default 75): the bolt will vanish almost at once.");
+		}
 		def.speed         = getInt("speed", 0);
 		def.onHitEffect   = getStr("on_hit_effect");
 		def.onHitDuration = getInt("on_hit_duration", 0);

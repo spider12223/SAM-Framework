@@ -218,6 +218,40 @@ namespace
 		return np;
 	}
 
+	// ---- headroom guard for framework-driven Lua work -------------------------
+	//
+	// luaAlloc denies any allocation past the cap and Lua turns that into LUA_ERRMEM.
+	// Inside a lua_pcall that is a contained failure: the script is disabled and the game
+	// goes on. But dispatchEvent, dispatchTick, tickTimers and runBehavior all build the
+	// event table and take registry refs BEFORE they enter the pcall -- with no handler on
+	// the C stack, an ERRMEM there reaches lua_panic and abort()s the process. The
+	// sequence that gets there is mundane: a script fills a global until the cap trips,
+	// is disabled, and leaves the data reachable, pinning usage at the limit; the very
+	// next engine event dies in pushEventTable.
+	//
+	// So before driving Lua the framework checks for headroom, tries one full collection
+	// if there is none, and if that does not buy room it REFUSES to run scripts rather
+	// than gamble. Scripts stop until memory is freed; the game keeps running. Logged,
+	// throttled, and never reached while any mod behaves.
+	constexpr std::size_t kDispatchHeadroomBytes = 256u * 1024u;
+	bool luaHasHeadroom(const char* what)
+	{
+		if ( !L || g_alloc.limit == 0 ) { return true; }
+		if ( g_alloc.used + kDispatchHeadroomBytes <= g_alloc.limit ) { return true; }
+		// A full collection is safe here: it only frees, and in 5.4 an erroring __gc is
+		// delivered as a warning rather than raised.
+		lua_gc(L, LUA_GCCOLLECT, 0);
+		if ( g_alloc.used + kDispatchHeadroomBytes <= g_alloc.limit ) { return true; }
+		static unsigned s_suppressed = 0;
+		if ( (s_suppressed++ % 600u) == 0u )
+		{
+			SAM_ERROR("LUA", "Memory cap: " + std::to_string(g_alloc.used / 1024) + " KB in use of "
+				+ std::to_string(g_alloc.limit / 1024) + " KB; refusing to run " + what
+				+ " until scripts free memory (running them now would abort the game).");
+		}
+		return false;
+	}
+
 	// ---- instruction-budget watchdog ------------------------------------------
 
 	void instructionHook(lua_State* Ls, lua_Debug* /*ar*/)
@@ -5100,19 +5134,38 @@ namespace SAMLua
 
 		// Capture its on_event and/or on_tick handlers (a script may define either
 		// or both). on_tick (v0.7.0) fires every game tick.
-		lua_getglobal(L, "on_event");
+		//
+		// RAW access to _G -- lua_rawget/lua_rawset on the globals table, never
+		// lua_getglobal/lua_setglobal. Those honour __index/__newindex, and this runs
+		// OUTSIDE any protected call: the chunk that just executed is free to
+		// setmetatable(_G, ...) (setmetatable ships in the base lib the sandbox opens), and
+		// a strict-globals guard whose __index raises would longjmp into lua_panic -- which
+		// abort()s the process -- the instant we asked for a handler the script did not
+		// define. Same hazard, same fix, as collectEventWriteBacks below; it had been applied
+		// to the event table and not to _G. lua_panic's own comment ("every entry point here
+		// is protected by lua_pcall") was wrong here.
+		if ( !lua_checkstack(L, 4) )
+		{
+			SAM_ERROR("LUA", "Script '" + path + "' disabled (no Lua stack headroom after load).");
+			return false;
+		}
+		lua_pushglobaltable(L);                                   // _G
+		lua_pushstring(L, "on_event"); lua_rawget(L, -2);
 		int eventRef = LUA_NOREF;
 		if ( lua_isfunction(L, -1) ) { eventRef = luaL_ref(L, LUA_REGISTRYINDEX); } // pops it
 		else { lua_pop(L, 1); }
 
-		lua_getglobal(L, "on_tick");
+		lua_pushstring(L, "on_tick"); lua_rawget(L, -2);
 		int tickRef = LUA_NOREF;
 		if ( lua_isfunction(L, -1) ) { tickRef = luaL_ref(L, LUA_REGISTRYINDEX); }
 		else { lua_pop(L, 1); }
 
-		// Clear the globals so the next script can't inherit this one's handlers.
-		lua_pushnil(L); lua_setglobal(L, "on_event");
-		lua_pushnil(L); lua_setglobal(L, "on_tick");
+		// Clear both so the next script can't inherit this one's handlers -- raw, for the
+		// same reason (__newindex fires on an absent key, and the key IS absent whenever the
+		// script defined only one of the two).
+		lua_pushstring(L, "on_event"); lua_pushnil(L); lua_rawset(L, -3);
+		lua_pushstring(L, "on_tick");  lua_pushnil(L); lua_rawset(L, -3);
+		lua_pop(L, 1);                                            // _G
 
 		Script s; s.path = path; s.ns = modNamespace;
 		s.callbackRef = eventRef; s.tickRef = tickRef;
@@ -5238,10 +5291,19 @@ namespace SAMLua
 		b.jsFn = nullptr;
 	}
 
-	void clearBehaviorFn(const std::string& fullName)
+	bool clearBehaviorFnIf(const std::string& fullName, void* jsFn)
 	{
+		// Only clear the row if it still holds THIS handle. The JS callback that errored may
+		// have re-registered its own name (in either language) before failing; then the
+		// row belongs to the replacement, registerBehavior already released the old value,
+		// and wiping the row here would strand the new function -- a Lua ref pinned
+		// forever, or a JS function the caller then frees a second time. The old version
+		// also zeroed luaRef unconditionally, which is how a re-registered Lua behaviour
+		// got silently disabled by an unrelated JS error.
 		const int i = behaviorIndexFor(fullName);
-		if ( i >= 0 ) { g_behaviors[i].luaRef = -2; g_behaviors[i].jsFn = nullptr; }
+		if ( i < 0 || g_behaviors[i].jsFn != jsFn ) { return false; }
+		g_behaviors[i].jsFn = nullptr;
+		return true;
 	}
 
 	int registerBehavior(const std::string& fullName, const std::string& ns, int luaFnRef)
@@ -5289,6 +5351,7 @@ namespace SAMLua
 
 		if ( luaRef >= 0 && L )
 		{
+			if ( !luaHasHeadroom("a behaviour") ) { return; }
 			lua_rawgeti(L, LUA_REGISTRYINDEX, luaRef);
 			if ( !lua_isfunction(L, -1) ) { lua_pop(L, 1); return; }
 			lua_pushinteger(L, (lua_Integer)uid);
@@ -5302,10 +5365,21 @@ namespace SAMLua
 				// existing but stops thinking, which is visible and debuggable, where
 				// per-frame error spam is neither.
 				SAM_WARN("LUA", "Behaviour '" + name + "' errored and was disabled.");
-				luaL_unref(L, LUA_REGISTRYINDEX, luaRef);
-				// Re-resolve: the vector may have moved while the script ran.
+				// Re-resolve FIRST: the vector may have moved while the script ran, and the
+				// row may have changed hands -- the callback can sam_register_behavior its
+				// own name before erroring, in which case registerBehavior already unref'd
+				// our copy and installed a replacement. Unreffing the stale copy then frees
+				// a registry slot that may since have been handed to another callback (a
+				// timer, another behaviour), and the next two luaL_refs share one slot.
+				// Only release what the row STILL holds.
 				const int now = behaviorIndexFor(name);
-				if ( now >= 0 ) { g_behaviors[now].luaRef = -2; }
+				if ( now >= 0 && g_behaviors[now].luaRef == luaRef )
+				{
+					luaL_unref(L, LUA_REGISTRYINDEX, luaRef);
+					g_behaviors[now].luaRef = -2;
+				}
+				// else: re-registered during the call (the replacement stays live), or the
+				// registry was torn down meanwhile (clearBehaviors already released it).
 			}
 			return;
 		}
@@ -5557,6 +5631,9 @@ namespace SAMLua
 			}
 			return 0;
 		}
+		// Store seeded and latch reset above, so an engine site that reads after this early
+		// return sees its own numbers, exactly as it does for the pre-init return.
+		if ( !luaHasHeadroom("on_event handlers") ) { return 0; }
 
 		int delivered = 0;
 		g_lastDispatchCancelled = false;
@@ -5639,6 +5716,7 @@ namespace SAMLua
 	void dispatchTick(long long tickCount)
 	{
 		if ( !L ) { return; }
+		if ( !luaHasHeadroom("on_tick handlers") ) { return; }
 		const std::string savedNs = g_currentNs;
 		for ( auto& s : g_scripts )
 		{
@@ -6123,6 +6201,7 @@ namespace SAMLua
 	void tickTimers()
 	{
 		if ( !L || g_timers.empty() ) { return; }
+		if ( !luaHasHeadroom("timer callbacks") ) { return; }
 		struct Due { std::string ns; int ref; bool oneShot; };
 		std::vector<Due> due;
 		for ( size_t i = 0; i < g_timers.size(); )

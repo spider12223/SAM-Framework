@@ -21,6 +21,7 @@
 #include "sam_logger.hpp"
 #include "sam_errors.hpp"
 #include "sam_models.hpp" // custom .vox registration (appendModels / modelIndexForId)
+#include "sam_races.hpp"     // limbModelPaths: race limb .vox files join the same model batch
 #include "sam_monsters.hpp" // body-model resolution report
 #include "sam_spells.hpp" // resolve "ns:spell" / vanilla spell-name payloads to ids
 #include "sam_classes.hpp" // class appearance model paths (whole-body + heads) to append
@@ -1196,6 +1197,19 @@ void SAMItems::registerModModels()
 		if ( SAMErrors::relPathEscapes(p) )
 		{
 			SAM_WARN(MOD, "Class appearance model path '" + p + "' escapes the mod folder — ignoring it.");
+			continue;
+		}
+		if ( seen.insert(p).second ) { reqs.push_back({ p, p }); }
+	}
+	// Race limb models named by a mod-relative .vox path ("limb_models": { "head":
+	// "models/x.vox" }). Same batch, same escape guard, path-as-id like items and class
+	// heads. Before this, such a path resolved nowhere and the modder was told to declare
+	// an id or use a number -- the resolver's own comment claimed registration happened.
+	for ( const std::string& p : SAMRaces::limbModelPaths() )
+	{
+		if ( SAMErrors::relPathEscapes(p) )
+		{
+			SAM_WARN(MOD, "Race limb model path '" + p + "' escapes the mod folder — ignoring it.");
 			continue;
 		}
 		if ( seen.insert(p).second ) { reqs.push_back({ p, p }); }

@@ -373,6 +373,15 @@ static Translated translateMonster(const json& in, const std::string& modNs, con
 		return tr;
 	}
 	tr.name = in["name"].get<std::string>();
+	// Stat::name is char[128] and the engine copies into it with strcpy, twice (the
+	// StatEntry, then the live Stat). Clamp here, with a word, rather than let a long
+	// display name overrun two engine buffers at spawn time.
+	if ( tr.name.size() > 127 )
+	{
+		SAM_WARN(MOD, "Monster '" + id + "' name is " + std::to_string(tr.name.size())
+			+ " characters; the engine holds 127. Truncated.");
+		tr.name.resize(127);
+	}
 
 	// S.A.M: mod-declared engine traits for this monster. Recorded by NAME, because a custom
 	// monster is a variant of a vanilla Monster type and shares that type -- the name is what
@@ -586,6 +595,14 @@ static Translated translateMonster(const json& in, const std::string& modNs, con
 			if ( F.contains("num_followers") && F["num_followers"].is_number_integer() )
 			{
 				numFollowers = F["num_followers"].get<int>();
+				// The engine runs one spawn per follower per leader at map generation, each
+				// re-reading the variant file from disk. No clamp existed anywhere.
+				if ( numFollowers < 0 || numFollowers > 8 )
+				{
+					SAM_WARN(MOD, "Monster '" + tr.name + "' num_followers " + std::to_string(numFollowers)
+						+ " is outside 0..8 — clamped.");
+					numFollowers = ( numFollowers < 0 ) ? 0 : 8;
+				}
 			}
 			if ( F.contains("follower_variants") && F["follower_variants"].is_object() )
 			{

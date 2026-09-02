@@ -173,7 +173,20 @@ bool SAMWorld::lineOfSight(double x1, double y1, double x2, double y2,
 	// mid-engine-logic, so save and restore it. Three lines to make the hazard impossible
 	// instead of auditing forty call sites and hoping.
 	const hit_t savedHit = hit;
-	const real_t got = lineTrace(nullptr, px1, py1, angle, want, 0, blockedByEntities);
+	// The last parameter of lineTrace is `ground` (stop at floorless tiles), not an entity
+	// switch -- and its entity search bails out on a null `my` regardless. So entity blocking
+	// is not something a pure-geometry trace can offer; say so once rather than quietly
+	// change what the trace stops on, which is what passing the flag there did.
+	if ( blockedByEntities )
+	{
+		static bool s_warned = false;
+		if ( !s_warned )
+		{
+			s_warned = true;
+			SAM_WARN("SAM", "sam_line_of_sight: blocked_by_entities is not supported; the trace considers walls only.");
+		}
+	}
+	const real_t got = lineTrace(nullptr, px1, py1, angle, want, 0, false);
 	const bool clear = ( got >= want - 0.5 );
 	if ( !clear )
 	{

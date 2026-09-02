@@ -166,6 +166,13 @@ int SAMBodies::modelForEntity(const Entity* entity)
 			}
 		}
 	}
+	// Do not negative-cache an entity that has no name YET. On a client the Stat arrives as a
+	// placeholder and the name follows later; caching "no body" on the first frame would pin
+	// the base creature model for the entity's whole life.
+	if ( resolved.base < 0 )
+	{
+		if ( Stat* st2 = const_cast<Entity*>(entity)->getStats() ) { if ( st2->name[0] == '\0' ) { return -1; } }
+	}
 	s_bodies[entity->getUID()] = resolved;   // negative-cached too: never re-resolve this entity
 	return ( resolved.base < 0 ) ? -1 : samPickFrame(resolved, entity);
 }

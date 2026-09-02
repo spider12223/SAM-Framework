@@ -229,7 +229,13 @@ static bool parseManifest(const std::string& jsonText, const std::string& modPat
 		{
 			for ( const auto& element : *it )
 			{
-				if ( !element.is_string() ) { continue; }
+				if ( !element.is_string() )
+				{
+					SAMErrors::reportSemantic(MOD, fileLabel, std::string("/") + key, element.dump().substr(0, 40),
+						"not a string", "a quoted path, e.g. \"classes/knight.json\"", "put quotes around it",
+						"that entry ignored.", true);
+					continue;
+				}
 				const std::string s = element.get<std::string>();
 				// Path-traversal guard: these array entries are RELATIVE file paths
 				// that the loaders join onto the mod folder and then open/execute.
@@ -252,12 +258,47 @@ static bool parseManifest(const std::string& jsonText, const std::string& modPat
 	out.name = getString("name");
 	out.author = getString("author");
 	out.version = getString("version");
-	out.frameworkMinVersion = getString("framework_min_version");
-	out.frameworkMaxVersion = getString("framework_max_version");
-	out.baronyMinVersion = getString("barony_min_version");
-	out.baronyMaxVersion = getString("barony_max_version");
-	out.incompatibleWithBaronyVersion = getString("incompatible_with_barony_version");
+	out.frameworkMinVersion = stripVersionPrefix(getString("framework_min_version"));
+	out.frameworkMaxVersion = stripVersionPrefix(getString("framework_max_version"));
+	out.baronyMinVersion = stripVersionPrefix(getString("barony_min_version"));
+	out.baronyMaxVersion = stripVersionPrefix(getString("barony_max_version"));
+	out.incompatibleWithBaronyVersion = stripVersionPrefix(getString("incompatible_with_barony_version"));
 	out.description = getString("description");
+
+	// Report what the schema would have caught. A mod.json is usually hand-written, and a
+	// misspelled or wrong-typed key used to load without a word and register nothing --
+	// "my classes don't show up" with an empty log. The builder validates against the
+	// schema; the loader is the last line for everyone else.
+	{
+		static const char* const kKnown[] = { "$schema", "namespace", "name", "author", "version",
+			"framework_min_version", "framework_max_version", "barony_min_version", "barony_max_version",
+			"incompatible_with_barony_version", "dependencies", "classes", "items", "patches", "monsters",
+			"spells", "effects", "races", "sounds", "recipes", "plugins", "models", "images", "rooms",
+			"description", nullptr };
+		static const char* const kArrays[] = { "dependencies", "classes", "items", "patches", "monsters",
+			"spells", "effects", "races", "sounds", "recipes", "plugins", "models", "images", nullptr };
+		for ( auto it = j.begin(); it != j.end(); ++it )
+		{
+			bool known = false;
+			for ( const char* const* k = kKnown; *k; ++k ) { if ( it.key() == *k ) { known = true; break; } }
+			if ( !known )
+			{
+				SAMErrors::reportSemantic(MOD, fileLabel, "/" + it.key(), "", "not a mod.json key",
+					"one of the keys in mod.schema.json (check the spelling and the case)",
+					"fix or remove it", "that key ignored.", true);
+			}
+		}
+		for ( const char* const* k = kArrays; *k; ++k )
+		{
+			auto it = j.find(*k);
+			if ( it != j.end() && !it->is_array() )
+			{
+				SAMErrors::reportSemantic(MOD, fileLabel, std::string("/") + *k, it->dump().substr(0, 40),
+					"not an array", "a JSON array: [ ... ]", "wrap the value in [ ]",
+					"nothing under that key loaded.", true);
+			}
+		}
+	}
 	// "rooms": { "<levelset>": ["rooms/foo.lmp", ...] } -- prefab rooms added to an
 	// existing levelset's pool. Parsed here; ordering/validation happens in SAMRooms.
 	{
@@ -484,6 +525,24 @@ std::vector<SAMModManifest> SAMWorkshop::scan(
 			continue;
 		}
 
+		// Two mods sharing a namespace break the one thing the namespace sort exists to
+		// guarantee: their sort key is equal, so their relative order -- and every content id
+		// after them -- is whatever the mount order happened to be, and the multiplayer
+		// fingerprint cannot see it because both machines produce the same sorted NAME list.
+		// Keep the first, refuse the rest, loudly.
+		bool dupNs = false;
+		for ( const auto& prior : found )
+		{
+			if ( prior.ns == manifest.ns )
+			{
+				SAM_ERROR(MOD, "Mod at '" + manifest.modPath + "' uses namespace [" + manifest.ns
+					+ "], already taken by the mod at '" + prior.modPath
+					+ "' -- NOT loaded. Every mod needs a namespace of its own.");
+				dupNs = true;
+				break;
+			}
+		}
+		if ( dupNs ) { continue; }
 		found.push_back(manifest);
 	}
 

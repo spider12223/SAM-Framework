@@ -89,7 +89,7 @@
     "range": {
       "type": "integer",
       "minimum": 0,
-      "description": "Effective range / projectile travel distance. (Parsed now; applied in a later update.)"
+      "description": "How long the bolt lives, in game ticks (50 per second). The engine default is 75, roughly a corridor's length. This is a lifetime, not a distance in tiles: 6 here is a bolt that vanishes at the caster's fingertips. Omit it to keep the default."
     },
     "speed": {
       "type": "integer",

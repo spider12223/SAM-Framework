@@ -42,6 +42,7 @@
 #include "magic/magic.hpp"   // addSpell
 #include "sam_spells.hpp"    // SAMSpells::getSpellByName (custom starting spells)
 #include "monster.hpp"       // Monster enum (samRaceKey maps the drawn body to a race key)
+#include "sam_races.hpp"     // noteClassHeadSprite: a class head has to tell the engine which body it belongs to
 #include <cctype>
 #include <cstdlib>           // free
 #include <system_error>
@@ -1008,11 +1009,26 @@ namespace
 			default:           return "";
 		}
 	}
+
+	// The inverse: which host body an appearance.races key names. "default" names none.
+	int monsterForRaceKey(const std::string& key)
+	{
+		static const struct { const char* k; int m; } kMap[] = {
+			{ "HUMAN", HUMAN }, { "SKELETON", SKELETON }, { "VAMPIRE", VAMPIRE }, { "SUCCUBUS", SUCCUBUS },
+			{ "GOATMAN", GOATMAN }, { "AUTOMATON", AUTOMATON }, { "INCUBUS", INCUBUS }, { "GOBLIN", GOBLIN },
+			{ "INSECTOID", INSECTOID }, { "RAT", RAT }, { "TROLL", TROLL }, { "SPIDER", SPIDER },
+			{ "IMP", CREATURE_IMP }, { "GNOME", GNOME }, { "GREMLIN", GREMLIN }, { "DRYAD", DRYAD },
+			{ "MYCONID", MYCONID }, { "SALAMANDER", SALAMANDER },
+		};
+		for ( const auto& e : kMap ) { if ( key == e.k ) { return e.m; } }
+		return 0;
+	}
 }
 
 void SAMClasses::resolveAppearance()
 {
 	s_customHeadSprites.clear();
+	SAMRaces::clearClassHeadNotes();
 	for ( auto& kv : s_registry )
 	{
 		SAMClassDef& def = kv.second;
@@ -1077,6 +1093,11 @@ void SAMClasses::resolveAppearance()
 			// limbs (Gharbad's head, say), which are not in it. Leaving those unwidened
 			// broke the client's player-entity binding in multiplayer.
 			s_customHeadSprites.insert(idx);
+			// And tell the engine which BODY this head belongs to, or getMonsterTypeFromSprite
+			// answers NOTHING for a player wearing it and every limb that derives its focal
+			// point from the race lands on limbs[0]. "default" names no single body; a head
+			// under it keeps whatever the vanilla lookup says.
+			if ( const int host = monsterForRaceKey(hv.first) ) { SAMRaces::noteClassHeadSprite(idx, host); }
 			SAM_DEBUG(MOD, "  [" + def.id + "] head for " + hv.first + " -> model " + std::to_string(idx));
 		}
 

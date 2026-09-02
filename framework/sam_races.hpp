@@ -26,6 +26,7 @@
 
 struct SAMModManifest;  // from sam_workshop.hpp (full type only needed in the .cpp)
 class Stat;             // Barony stat.hpp — forward declared so this header stays light
+class Entity;           // Barony entity.hpp — same reason
 
 // Custom race ids occupy [200, 255]. Barony networks playerRace as one byte and
 // never range-checks it, so values in this window round-trip save + net intact,
@@ -165,6 +166,30 @@ public:
 	// not in it (Gharbad's head is a monster limb, not a player head), and answering
 	// false there breaks the client's player-entity binding in multiplayer.
 	static bool isRaceHeadSprite(int sprite);
+
+	// The host body a head sprite belongs to (a Monster enum value), or 0 for a sprite no
+	// race or class uses as a head. Entity::getMonsterTypeFromSprite consults this so the
+	// engine can still tell WHAT a player wearing a custom head is: weapon focal points,
+	// camera height and a dozen other things derive the body from the head model, and a
+	// head that is in no monsterSprites[] row used to answer NOTHING -- limbs[0], all zeros.
+	static int hostMonsterForHeadSprite(int sprite);
+
+	// A class head override has the same problem; classes register theirs here, keyed by
+	// the race they were authored for. Cleared at the start of every resolveAppearance.
+	static void noteClassHeadSprite(int sprite, int hostMonster);
+	static void clearClassHeadNotes();
+
+	// True when a MONSTER (not a player) is wearing a sprite some race or class uses as a
+	// head -- Gharbad the boss wears gharbad_head.vox, and so does a race built on him.
+	// Client-side code that read isPlayerHeadSprite as "this is a player" needs this to
+	// keep treating the monster as a monster.
+	static bool isRaceHeadOnMonster(const Entity* e);
+
+	// Mod-relative .vox paths named in limb_models, for SAMItems::registerModModels to append
+	// to the model table in the same batch as item and class models. Without this a path in
+	// limb_models resolved nowhere: the resolver's comment promised a registration that
+	// nothing performed.
+	static std::vector<std::string> limbModelPaths();
 
 	// Does this player SEE that monster type as hostile?
 	//

@@ -405,12 +405,22 @@ namespace
 			return false;
 		}
 		bool replaced = false;
+		bool kindChanged = false;
 		for ( UiWidget& existing : p->widgets )
 		{
-			if ( existing.id == v.id ) { existing = v; replaced = true; break; }
+			if ( existing.id == v.id )
+			{
+				kindChanged = ( existing.kind != v.kind );
+				existing = v; replaced = true; break;
+			}
 		}
 		if ( !replaced ) { p->widgets.push_back(v); }
 
+		// A widget id reused with a different KIND has to rebuild the panel: paintWidget
+		// finds engine widgets by name, so a label turned into a text box found the old
+		// non-editable Field and kept it -- a box nobody could type into -- and the reverse
+		// left a 'label' that still ate the keyboard. A full repaint recreates by kind.
+		if ( kindChanged ) { s_dirty.insert(keyOf(ns, panelId)); return true; }
 		if ( deferRepaint(ns, panelId) ) { return true; }   // repainted next frame
 		Frame* r = root(true);
 		if ( !r ) { return true; }   // recorded; ensure() paints it when the UI exists
@@ -622,6 +632,11 @@ bool SAMUi::listAdd(const std::string& ns, const std::string& panel, const std::
 			if ( existing.id == rowId ) { existing = r; replaced = true; break; }
 		}
 		if ( !replaced ) { v.rows.push_back(r); }
+		// Same rule as setWidget: while a script handler is running, the engine is part-way
+		// through its own widget processing and still holds a pointer into the very entry
+		// that was clicked. Rebuilding the list here freed it under the engine's feet -- a
+		// ui.on_select handler that refills its own list is the ordinary case. Defer.
+		if ( deferRepaint(ns, panel) ) { return true; }
 		if ( Frame* rt = root(false) )
 		{
 			if ( Frame* pf = rt->findFrame(panelFrameName(ns, panel).c_str()) )
@@ -648,6 +663,11 @@ bool SAMUi::listClear(const std::string& ns, const std::string& panel, const std
 	{
 		if ( v.id != id || v.kind != UiWidget::LIST ) { continue; }
 		v.rows.clear();
+		// Same rule as setWidget: while a script handler is running, the engine is part-way
+		// through its own widget processing and still holds a pointer into the very entry
+		// that was clicked. Rebuilding the list here freed it under the engine's feet -- a
+		// ui.on_select handler that refills its own list is the ordinary case. Defer.
+		if ( deferRepaint(ns, panel) ) { return true; }
 		if ( Frame* rt = root(false) )
 		{
 			if ( Frame* pf = rt->findFrame(panelFrameName(ns, panel).c_str()) )
@@ -877,11 +897,36 @@ void SAMUi::ensure()
 				auto it = s_panels.find(k);
 				if ( it == s_panels.end() ) { continue; }   // closed since
 				const Panel& dp = it->second;
+				// The rebuild below destroys every widget on the panel, including a text box
+				// the player is halfway through typing into. Carry the live text and the
+				// keyboard focus across, or a script that updates one label wipes the
+				// player's input and hands their keystrokes back to the game's bindings.
+				struct LiveInput { std::string name; std::string text; bool active; };
+				std::vector<LiveInput> live;
 				if ( Frame* f = r->findFrame(panelFrameName(dp.ns, dp.id).c_str()) )
 				{
+					for ( const UiWidget& w : dp.widgets )
+					{
+						if ( w.kind != UiWidget::INPUT ) { continue; }
+						const std::string wn = widgetName(dp.ns, dp.id, w.id);
+						if ( Field* fld = f->findField(wn.c_str()) )
+						{
+							live.push_back({ wn, fld->getText() ? fld->getText() : "", fld->isActivated() });
+						}
+					}
 					f->removeSelf();
 				}
-				paintPanel(r, dp);
+				if ( Frame* nf = paintPanel(r, dp) )
+				{
+					for ( const LiveInput& li : live )
+					{
+						if ( Field* fld = nf->findField(li.name.c_str()) )
+						{
+							fld->setText(li.text.c_str());
+							if ( li.active ) { fld->activate(); }
+						}
+					}
+				}
 			}
 		}
 		s_dirty.clear();

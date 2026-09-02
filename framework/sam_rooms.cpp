@@ -76,8 +76,10 @@ void SAMRooms::applyAll(const std::vector<SAMModManifest>& mods)
 				const std::string abs = joinPath(m.modPath, rel);
 				if ( !fileExists(abs) )
 				{
-					SAM_WARN(MOD, "Mod [" + m.ns + "] declares room '" + rel + "' for levelset '"
-						+ levelset + "', but the file is not there (looked for " + abs + ").");
+					SAM_ERROR(MOD, "Mod [" + m.ns + "] declares room '" + rel + "' for levelset '"
+						+ levelset + "', but the file is not there (looked for " + abs + "). In multiplayer"
+						" this shrinks the level pool on THIS machine only and desyncs map generation from"
+						" the host -- ship the file or remove the entry.");
 					continue;
 				}
 				Room r;

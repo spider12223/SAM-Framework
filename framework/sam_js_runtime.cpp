@@ -36,6 +36,7 @@ extern "C" {
 }
 
 #include <string>
+#include <cctype>
 #include <vector>
 #include <chrono>
 #include <fstream>
@@ -705,7 +706,9 @@ namespace
 			if ( soundId < 0 ) { SAM_ERROR("JS", "sam_play_sound: unknown sound name."); return JS_NewBool(ctx, 0); }
 		}
 		else if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &soundId, argv[0]); }
-		if ( argc >= 2 && !JS_IsUndefined(argv[1]) ) { JS_ToInt32(ctx, &vol, argv[1]); }
+		// samHasArg, not a bare undefined test: an explicit null used to overwrite the 128
+		// default with 0 and the sound played inaudibly, where the Lua call played normally.
+		if ( samHasArg(argc, argv, 1) ) { JS_ToInt32(ctx, &vol, argv[1]); }
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_play_sound refused: host only."); return JS_NewBool(ctx, 0); }
 		if ( soundId < 0 || (Uint32)soundId >= numsounds )
 		{ SAM_ERROR("JS", "sam_play_sound: sound id " + std::to_string(soundId) + " out of range (0.." + std::to_string(numsounds) + ")."); return JS_NewBool(ctx, 0); }
@@ -936,6 +939,34 @@ namespace
 		return base + "/" + samSanitize(ns) + "/" + samSanitize(key) + ".json";
 	}
 
+	// JSON.stringify for the four "store this value" bindings. A value that cannot be
+	// stringified -- a cycle, a BigInt, a throwing toJSON -- used to be stored as the literal
+	// "null" while the call reported success, destroying whatever the mod had saved under
+	// that key; and the exception QuickJS raised was left pending on the context to surface
+	// somewhere unrelated. Consume it, say what happened, refuse the write.
+	bool samJsStringifyForStore(JSContext* ctx, JSValueConst v, const char* what, std::string& out)
+	{
+		JSValue jstr = JS_JSONStringify(ctx, v, JS_UNDEFINED, JS_UNDEFINED);
+		if ( JS_IsException(jstr) )
+		{
+			SAM_ERROR("JS", std::string(what) + ": value cannot be converted to JSON ("
+				+ exceptionToString(ctx) + ") - nothing written.");
+			return false;
+		}
+		if ( JS_IsUndefined(jstr) )
+		{
+			// JSON.stringify(undefined) and stringify(function) yield undefined, not "null".
+			JS_FreeValue(ctx, jstr);
+			SAM_WARN("JS", std::string(what) + ": value has no JSON form (undefined or a function) - nothing written.");
+			return false;
+		}
+		const char* c = JS_ToCString(ctx, jstr);
+		out = c ? c : "null";
+		if ( c ) { JS_FreeCString(ctx, c); }
+		JS_FreeValue(ctx, jstr);
+		return true;
+	}
+
 	JSValue js_sam_save_data(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
@@ -945,14 +976,8 @@ namespace
 		if ( keyC ) { JS_FreeCString(ctx, keyC); }
 		if ( g_currentNs.empty() ) { SAM_WARN("JS", "sam_save_data: no owning mod namespace — ignored."); return JS_NewBool(ctx, 0); }
 		JSValueConst v = ( samHasArg(argc, argv, 1) ) ? argv[1] : JS_NULL;
-		JSValue jstr = JS_JSONStringify(ctx, v, JS_UNDEFINED, JS_UNDEFINED);
-		std::string json = "null";
-		if ( !JS_IsException(jstr) && !JS_IsUndefined(jstr) )
-		{
-			const char* s = JS_ToCString(ctx, jstr);
-			if ( s ) { json = s; JS_FreeCString(ctx, s); }
-		}
-		JS_FreeValue(ctx, jstr);
+		std::string json;
+		if ( !samJsStringifyForStore(ctx, v, "sam_save_data", json) ) { return JS_NewBool(ctx, 0); }
 		const std::string path = samModDataFile(g_currentNs, key);
 		try
 		{
@@ -1121,8 +1146,14 @@ namespace
 	JSValue js_sam_travel_to_level(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		if ( argc < 1 ) { return JS_FALSE; }
-		int32_t target = 0; JS_ToInt32(ctx, &target, argv[0]);
+		// An undefined floor used to convert to 0 and silently send the party to floor 0;
+		// the Lua binding raises. Refuse, and say so.
+		int32_t target = 0;
+		if ( !samHasArg(argc, argv, 0) || JS_ToInt32(ctx, &target, argv[0]) < 0 )
+		{
+			SAM_ERROR("JS", "sam_travel_to_level: needs a floor number.");
+			return JS_FALSE;
+		}
 		bool secret = false;
 		if ( samHasArg(argc, argv, 1) && JS_IsObject(argv[1]) )
 		{
@@ -1143,14 +1174,8 @@ namespace
 		if ( keyC ) { JS_FreeCString(ctx, keyC); }
 		if ( g_currentNs.empty() ) { SAM_WARN("JS", "sam_world_save: no owning mod namespace - ignored."); return JS_NewBool(ctx, 0); }
 		JSValueConst v = ( samHasArg(argc, argv, 1) ) ? argv[1] : JS_NULL;
-		JSValue jstr = JS_JSONStringify(ctx, v, JS_UNDEFINED, JS_UNDEFINED);
-		std::string json = "null";
-		if ( !JS_IsException(jstr) && !JS_IsUndefined(jstr) )
-		{
-			const char* c = JS_ToCString(ctx, jstr);
-			if ( c ) { json = c; JS_FreeCString(ctx, c); }
-		}
-		JS_FreeValue(ctx, jstr);
+		std::string json;
+		if ( !samJsStringifyForStore(ctx, v, "sam_world_save", json) ) { return JS_NewBool(ctx, 0); }
 		return JS_NewBool(ctx, SAMWorldState::set(g_currentNs, key, json) ? 1 : 0);
 	}
 
@@ -1318,7 +1343,15 @@ namespace
 
 		++g_fireDepth;
 		const std::string savedNs = g_currentNs;
-		const int n = SAMJs::dispatchEvent(jsev) + SAMLua::dispatchEvent(ev);
+		// Lua FIRST, then JS -- the order every engine site and SamEvent::fire use, and it
+		// matters twice over: SAMLua::dispatchEvent is what clears and re-seeds the shared
+		// write-back store from THIS hook's payload, and the JS pass reads the live store so
+		// edits chain. Written the other way round (as it was), JS listeners ran against
+		// whatever the ENCLOSING event had left in the store -- a "player" or "damage" from a
+		// different hook -- and everything they wrote back was wiped a line later. `+` has no
+		// sequencing guarantee either; two statements do.
+		int n = SAMLua::dispatchEvent(ev);
+		n += SAMJs::dispatchEvent(jsev);
 		g_currentNs = savedNs; // the nested dispatch cleared g_currentNs; restore the firer's
 		--g_fireDepth;
 		SAM_INFO("SAM", "Fired custom hook: " + name + " to " + std::to_string(n) + " script(s)");
@@ -1494,7 +1527,7 @@ namespace
 		{ SAM_ERROR("JS", "sam_spawn_monster: tile out of bounds."); return JS_NULL; }
 		Entity* e = summonMonster(static_cast<Monster>(creature), tx * 16 + 8, ty * 16 + 8);
 		if ( !e ) { SAM_ERROR("JS", "sam_spawn_monster: spawn failed (blocked tile?)."); return JS_NULL; }
-		if ( argc >= 4 && creature == SHOPKEEPER )
+		if ( samHasArg(argc, argv, 3) && creature == SHOPKEEPER )
 		{
 			int32_t shopType = 0; JS_ToInt32(ctx, &shopType, argv[3]);
 			if ( shopType < 0 ) { shopType = 0; }
@@ -2037,7 +2070,10 @@ namespace
 	JSValue js_sam_hide_image(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		if ( argc < 1 )
+		// "no player given" includes an explicit undefined/null, as it does in Lua; on argc
+		// alone, sam_hide_image(x) with x undefined cleared player 0's overlay and left the
+		// other three on screen.
+		if ( !samHasArg(argc, argv, 0) )
 		{
 			bool any = false;
 			for ( int c = 0; c < MAXPLAYERS; ++c ) { if ( SAMImages::hide(c) ) { any = true; } }
@@ -3199,14 +3235,8 @@ namespace
 		const char* keyC = JS_ToCString(ctx, argv[1]);
 		const std::string key = keyC ? keyC : "";
 		if ( keyC ) { JS_FreeCString(ctx, keyC); }
-		JSValue jstr = JS_JSONStringify(ctx, argv[2], JS_UNDEFINED, JS_UNDEFINED);
-		std::string json = "null";
-		if ( !JS_IsException(jstr) && !JS_IsUndefined(jstr) )
-		{
-			const char* s = JS_ToCString(ctx, jstr);
-			if ( s ) { json = s; JS_FreeCString(ctx, s); }
-		}
-		JS_FreeValue(ctx, jstr);
+		std::string json;
+		if ( !samJsStringifyForStore(ctx, argv[2], "sam_set_monster_data", json) ) { return JS_FALSE; }
 		SAMLua::monsterDataSet((unsigned)(Sint32)uid, key, json);
 		return JS_TRUE;
 	}
@@ -3238,14 +3268,8 @@ namespace
 		const std::string key = keyC ? keyC : "";
 		if ( keyC ) { JS_FreeCString(ctx, keyC); }
 		if ( player < 0 || player >= MAXPLAYERS ) { return JS_FALSE; }
-		JSValue jstr = JS_JSONStringify(ctx, argv[2], JS_UNDEFINED, JS_UNDEFINED);
-		std::string json = "null";
-		if ( !JS_IsException(jstr) && !JS_IsUndefined(jstr) )
-		{
-			const char* s = JS_ToCString(ctx, jstr);
-			if ( s ) { json = s; JS_FreeCString(ctx, s); }
-		}
-		JS_FreeValue(ctx, jstr);
+		std::string json;
+		if ( !samJsStringifyForStore(ctx, argv[2], "sam_set_player_data", json) ) { return JS_FALSE; }
 		SAMLua::playerDataSet(player, key, json);
 		return JS_TRUE;
 	}
@@ -3347,9 +3371,41 @@ namespace
 		}
 		return -1;
 	}
-	bool samJsGetIntProp(JSContext* ctx, JSValueConst obj, const char* key, int& out)
+	bool samJsKeyEq(const char* a, const char* b)
+	{
+		for ( ; *a && *b; ++a, ++b ) { if ( std::tolower((unsigned char)*a) != std::tolower((unsigned char)*b) ) { return false; } }
+		return *a == '\0' && *b == '\0';
+	}
+	// Exact key first; then a case-insensitive walk of the object's own keys, so that
+	// { Weight: 3 } and { WEIGHT: 3 } work the way they already do in the Lua bindings,
+	// which upper-case every key before comparing. Before this the JS side silently
+	// ignored any key that was not exactly lower-case and the call still reported success.
+	JSValue samJsGetPropCI(JSContext* ctx, JSValueConst obj, const char* key)
 	{
 		JSValue v = JS_GetPropertyStr(ctx, obj, key);
+		if ( !JS_IsUndefined(v) ) { return v; }
+		JS_FreeValue(ctx, v);
+		JSValue found = JS_UNDEFINED;
+		JSPropertyEnum* tab = nullptr; uint32_t plen = 0;
+		if ( JS_GetOwnPropertyNames(ctx, &tab, &plen, obj, JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) == 0 )
+		{
+			for ( uint32_t i = 0; i < plen; ++i )
+			{
+				if ( JS_IsUndefined(found) )
+				{
+					const char* kc = JS_AtomToCString(ctx, tab[i].atom);
+					if ( kc && samJsKeyEq(kc, key) ) { found = JS_GetProperty(ctx, obj, tab[i].atom); }
+					if ( kc ) { JS_FreeCString(ctx, kc); }
+				}
+				JS_FreeAtom(ctx, tab[i].atom);
+			}
+			js_free(ctx, tab);
+		}
+		return found;
+	}
+	bool samJsGetIntProp(JSContext* ctx, JSValueConst obj, const char* key, int& out)
+	{
+		JSValue v = samJsGetPropCI(ctx, obj, key);
 		bool ok = false;
 		if ( JS_IsNumber(v) ) { int32_t n = 0; JS_ToInt32(ctx, &n, v); out = n; ok = true; }
 		JS_FreeValue(ctx, v);
@@ -3357,7 +3413,7 @@ namespace
 	}
 	bool samJsGetStrProp(JSContext* ctx, JSValueConst obj, const char* key, std::string& out)
 	{
-		JSValue v = JS_GetPropertyStr(ctx, obj, key);
+		JSValue v = samJsGetPropCI(ctx, obj, key);
 		bool ok = false;
 		if ( JS_IsString(v) ) { const char* s = JS_ToCString(ctx, v); if ( s ) { out = s; JS_FreeCString(ctx, s); ok = true; } }
 		JS_FreeValue(ctx, v);
@@ -4245,11 +4301,13 @@ bool g_lastDispatchCancelled = false;
 			SAM_ERROR("JS", "behaviour '" + name + "' errored: " + exceptionToString(ctx));
 			SAM_WARN("JS", "behaviour '" + name + "' disabled.");
 			SAMLogger::noteScriptError();
-			// Clear the registry's pointer FIRST, then free. Freeing first left a window in
-			// which the row still pointed at a dead JSValue -- and if two entities running
-			// this behaviour errored in the same frame, the second would free it again.
-			SAMLua::clearBehaviorFn(name);
-			releaseBehaviorFn(jsFn);
+			// Clear the registry's pointer FIRST, then free -- and only if the row still holds
+			// THIS function. Freeing first left a window in which the row pointed at a dead
+			// JSValue; and the callback may have re-registered its own name before erroring,
+			// in which case registerBehavior already released our pointer and installed a
+			// replacement -- freeing here again would be a double free, and the old helper
+			// would also have wiped the replacement out of the row.
+			if ( SAMLua::clearBehaviorFnIf(name, jsFn) ) { releaseBehaviorFn(jsFn); }
 		}
 		JS_FreeValue(ctx, ret);
 	}

@@ -106,7 +106,10 @@ namespace SAMLua
 	void clearBehaviors();
 	// Detach a behaviour's function by name without touching the row's identity. Used by the
 	// JS runtime when a behaviour errors, so the pointer is cleared before the value is freed.
-	void clearBehaviorFn(const std::string& fullName);
+	// Clear a row's JS handle -- but only if the row still holds exactly `jsFn`. Returns
+	// whether it did, which is the caller's licence to free that handle: a row that has
+	// changed hands since the call started already had its old value released.
+	bool clearBehaviorFnIf(const std::string& fullName, void* jsFn);
 	// Turn an entity. Shared by both runtimes. `radians` is the same convention
 	// sam_get_facing returns and sam_spawn_projectile takes. Returns false for an unknown
 	// uid, a player (their facing is theirs), or a non-finite angle.

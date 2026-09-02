@@ -18,6 +18,7 @@
 #include "stat.hpp"     // Stat members (STR..CHR, HP/MP, playerRace)
 #include "monster.hpp"  // Monster enum, monstertypename[], NUMMONSTERS
 #include "player.hpp"   // players[], MAXPLAYERS (applySpells)
+#include "entity.hpp"  // Entity::behavior (isRaceHeadOnMonster)
 #include "net.hpp"      // multiplayer, CLIENT, intro
 #include "mod_tools.hpp" // ItemTooltips.spellItems (vanilla spell-name resolve)
 #include "magic/magic.hpp" // addSpell
@@ -100,9 +101,12 @@ namespace
 		return false;
 	}
 
-	// Every model index any registered race uses as a head. Rebuilt by resolveLimbModels
-	// and consulted by isRaceHeadSprite; empty in vanilla.
-	std::set<int> s_raceHeadSprites;
+	// Every model index a registered race uses as a head, and the host body that head was
+	// authored for. Rebuilt by resolveLimbModels; consulted by isRaceHeadSprite and by
+	// Entity::getMonsterTypeFromSprite; empty in vanilla. Class head overrides keep a
+	// separate map with its own lifetime (resolveAppearance owns it).
+	std::map<int, int> s_headHost;        // head sprite -> host Monster (races)
+	std::map<int, int> s_classHeadHost;   // head sprite -> host Monster (classes)
 
 	// Registry — EMPTY in vanilla (the whole no-op guarantee).
 	std::map<int, SAMRaceDef> s_byId;            // runtime id 200..255 -> def
@@ -373,7 +377,7 @@ namespace
 
 void SAMRaces::resolveLimbModels()
 {
-	s_raceHeadSprites.clear();
+	s_headHost.clear();
 	for ( auto& kv : s_byId )
 	{
 		SAMRaceDef& def = kv.second;
@@ -398,7 +402,7 @@ void SAMRaces::resolveLimbModels()
 				def.headModelIdx = idx;
 				// Whatever the head resolved to -- our .vox or a vanilla monster limb --
 				// the engine has to agree it is a player head, or multiplayer breaks.
-				s_raceHeadSprites.insert(idx);
+				s_headHost[idx] = def.hostMonster;
 			}
 		}
 
@@ -442,7 +446,58 @@ bool SAMRaces::clientEnemyView(int player, int monsterType, bool vanilla)
 
 bool SAMRaces::isRaceHeadSprite(int sprite)
 {
-	return !s_raceHeadSprites.empty() && s_raceHeadSprites.count(sprite) > 0;
+	return hostMonsterForHeadSprite(sprite) != 0;
+}
+
+int SAMRaces::hostMonsterForHeadSprite(int sprite)
+{
+	if ( !s_headHost.empty() )
+	{
+		auto it = s_headHost.find(sprite);
+		if ( it != s_headHost.end() ) { return it->second; }
+	}
+	if ( !s_classHeadHost.empty() )
+	{
+		auto it = s_classHeadHost.find(sprite);
+		if ( it != s_classHeadHost.end() ) { return it->second; }
+	}
+	return 0;
+}
+
+void SAMRaces::noteClassHeadSprite(int sprite, int hostMonster)
+{
+	if ( sprite > 0 && hostMonster > 0 ) { s_classHeadHost[sprite] = hostMonster; }
+}
+
+void SAMRaces::clearClassHeadNotes() { s_classHeadHost.clear(); }
+
+bool SAMRaces::isRaceHeadOnMonster(const Entity* e)
+{
+	if ( !e || (s_headHost.empty() && s_classHeadHost.empty()) ) { return false; }
+	return e->behavior == &actMonster && hostMonsterForHeadSprite(e->sprite) != 0;
+}
+
+std::vector<std::string> SAMRaces::limbModelPaths()
+{
+	// A limb reference is a path when it has a directory part and a .vox suffix; a bare
+	// "ns:name" id and a raw index have neither. A path that is already a vanilla model
+	// (models/creatures/...) must NOT be appended -- that would register a second copy of
+	// a stock file -- so those resolve through vanillaModelIndexForPath instead.
+	std::vector<std::string> out;
+	for ( const auto& kv : s_byId )
+	{
+		for ( const auto& lm : kv.second.limbModels )
+		{
+			const std::string& ref = lm.second;
+			if ( ref.size() < 5 || ref.find('/') == std::string::npos ) { continue; }
+			std::string tail = ref.substr(ref.size() - 4);
+			for ( char& c : tail ) { c = (char)std::tolower((unsigned char)c); }
+			if ( tail != ".vox" ) { continue; }
+			if ( SAMModels::vanillaModelIndexForPath(ref) >= 0 ) { continue; }
+			if ( std::find(out.begin(), out.end(), ref) == out.end() ) { out.push_back(ref); }
+		}
+	}
+	return out;
 }
 
 int SAMRaces::declaredAllegiance(int raceId, int monsterType)
@@ -468,7 +523,8 @@ void SAMRaces::clear()
 {
 	// The head set outlives the defs otherwise, and a stale entry makes
 	// isPlayerHeadSprite answer true for a model no race uses any more.
-	s_raceHeadSprites.clear();
+	s_headHost.clear();
+	s_classHeadHost.clear();
 	s_byId.clear();
 	s_byIdString.clear();
 	s_nextId = SAM_RACE_ID_BASE;
@@ -494,6 +550,7 @@ void SAMRaces::applySpells(int player)
 	if ( player < 0 || player >= MAXPLAYERS || !players[player] || !stats[player] ) { return; }
 	const SAMRaceDef* def = get(stats[player]->playerRace);
 	if ( !def ) { return; }
+	if ( stats[player]->stat_appearance != 0 ) { return; }   // abilities disabled: no innate spells
 	const bool isLocalPlayer = players[player]->isLocalPlayer();
 	if ( !isLocalPlayer && multiplayer == CLIENT && intro == false ) { return; }
 
@@ -568,6 +625,10 @@ void SAMRaces::applyStats(int raceId, Stat* myStats)
 	auto it = s_byId.find(raceId);
 	if ( it == s_byId.end() ) { return; }
 	const SAMRaceDef& d = it->second;
+	// "Disable monster abilities" (stat_appearance != 0) keeps the look and drops the
+	// abilities, exactly as it does for a vanilla goatman or vampire. The deltas are an
+	// ability; the body is not.
+	if ( myStats->stat_appearance != 0 ) { return; }
 	myStats->STR += d.str;
 	myStats->DEX += d.dex;
 	myStats->CON += d.con;
