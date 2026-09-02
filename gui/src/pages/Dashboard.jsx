@@ -10,7 +10,7 @@ import { useMod } from '@/state/ModContext.jsx';
 import { Panel, GoldButton } from '@/components/ui.jsx';
 
 /** The framework's own version (mods declare their own framework_min_version). */
-const SAM_FRAMEWORK_VERSION = '2.2.0';
+const SAM_FRAMEWORK_VERSION = '2.3.0';
 
 /** Where players get S.A.M itself (the framework is a dependency, not a mod). */
 const WORKSHOP_URL = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472';
@@ -28,14 +28,14 @@ const TRAVELS = [
  * thing a returning modder sees, and the point is 'here is what you can do now that you
  * could not before', not a changelog. */
 const WHATS_NEW = [
-  ["Name a model by its file, not its number",
-   "limb_models and class heads take the model's own filename now: \"gharbad_head.vox\", or the full models/creatures/... path if several creatures ship a file with that name. Your own .vox files work by their mod-relative path as well. Raw indices still work, so nothing already written breaks, but nothing in a mod file ever needs to say 1025 again."],
-  ["The framework was audited end to end",
-   "Sixteen readers over every module, two independent skeptics on every claim, and one fix pass. Thirty-odd defects closed, several of them the kind you only meet once: a strict-mode metatable that could abort the game at mod load, a memory cap that turned into a process abort, a damage veto silently lost when a JavaScript handler fired a nested event. The full report and the mechanism dossier are in the repo."],
-  ["Two modder-reported bugs, both ours",
-   "A custom race head made the engine forget what body the player had, so the held weapon drew at the head. And a limb model given by path was never registered, so the path never worked. Both fixed; both were found by the audit rather than by guessing."],
-  ["Silent failures now speak",
-   "A misspelled mod.json key, a wrong-typed value, two spellings of one patch target, a monster name too long for the engine, a spell range written in tiles when the engine reads ticks: each of these used to load fine and do nothing, or worse. Each is now reported with the file and the field."],
+  ["Your items survive a changed mod list",
+   "Custom items used to be saved as a number, and the numbers were handed out in mod order. Install one more mod and yesterday's save came back holding a different mod's items. Every save now records what each number meant, and items are matched by name when the save is read. Add, remove or reorder mods freely. An item whose mod is gone is set aside with a line in the log rather than turning into something else, and it stays in the file until you save again."],
+  ["Multiplayer notices edited files, not just versions",
+   "The mod check between host and player now covers the contents of each mod, not only its version number. Same mod, same version, one edited file used to pass the check and then desync mid-run. It is now reported before the run starts, naming the mod."],
+  ["Saved data survives a crash",
+   "sam_save_data, the patch overlay and the script cache are written to a temporary file and swapped into place. A crash or a power cut in the middle of a write leaves the previous file intact instead of a half-written one that will not load."],
+  ["See what a save will record",
+   "/sam_saveids prints the mod fingerprint and the item id table your next save will carry, so a mismatch can be read directly instead of guessed at."],
 ];
 
 /** sam-well stat box: big gold number over a small-caps label. */
