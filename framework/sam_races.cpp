@@ -251,23 +251,161 @@ void SAMRaces::loadFromManifest(const SAMModManifest& manifest)
 						"check the spelling", "that entry ignored; the rest of the race loaded.", true);
 					continue;
 				}
-				if ( !it.value().is_string() )
+				// A slot value may be a bare path (the original form) or an object carrying a
+				// transform next to the model: { "model": "...", "scale": 1.2, "offset": {...} }.
+				// A race hosted on a body of different proportions would otherwise have to
+				// re-author its .vox to fit somebody else's skeleton.
+				bool samHaveObjForm = false;
+				if ( it.value().is_object() )
 				{
-					// A bare 1025 rather than "1025" is the easy mistake, and the schema
-					// only catches it for people using the builder.
-					SAMErrors::reportSemantic(MOD, fileLabel, "/limb_models/" + it.key(),
-						it.value().dump(), "not a string",
-						"a quoted model reference, e.g. \"1025\" or \"" + manifest.ns + ":body\"",
-						"put quotes around it",
-						"that limb keeps the host body's model.", true);
-					continue;
+					const auto& o = it.value();
+					if ( !o.contains("model") || !o["model"].is_string() )
+					{
+						SAMErrors::reportSemantic(MOD, fileLabel, "/limb_models/" + it.key(),
+							it.value().dump(), "an object with no \"model\"",
+							"an object like { \"model\": \"models/torso.vox\", \"scale\": 1.2 }",
+							"add the model", "that limb keeps the host body's model.", true);
+						continue;
+					}
+					samHaveObjForm = true;
+					const std::string samLimbPath = o["model"].get<std::string>();
+					if ( samLimbPath.empty() ) { continue; }
+					def.limbModels[it.key()] = samLimbPath;
+
+					SAMRaceDef::LimbXform xf;
+					auto num = [&](const char* k, double d) -> double {
+						return ( o.contains(k) && o[k].is_number() ) ? o[k].get<double>() : d;
+					};
+					xf.scale = num("scale", 1.0);
+					if ( xf.scale <= 0.0 ) { xf.scale = 1.0; }
+					xf.pitch = num("pitch", 0.0);
+					xf.roll  = num("roll", 0.0);
+					if ( o.contains("offset") && o["offset"].is_object() )
+					{
+						const auto& off = o["offset"];
+						if ( off.contains("x") && off["x"].is_number() ) { xf.offX = off["x"].get<double>(); }
+						if ( off.contains("y") && off["y"].is_number() ) { xf.offY = off["y"].get<double>(); }
+						if ( off.contains("z") && off["z"].is_number() ) { xf.offZ = off["z"].get<double>(); }
+					}
+					xf.any = ( xf.scale != 1.0 || xf.pitch != 0.0 || xf.roll != 0.0
+						|| xf.offX != 0.0 || xf.offY != 0.0 || xf.offZ != 0.0 );
+					if ( xf.any )
+					{
+						// "head" is not in kLimbSlots: the engine sets the head outside the limb
+						// path entirely, so there is nowhere to apply a transform to it. Say so
+						// rather than accept the keys and silently drop them.
+						if ( it.key() == "head" )
+						{
+							SAMErrors::reportSemantic(MOD, fileLabel, "/limb_models/head", "",
+								"a transform on the head",
+								"a transform on torso, arm_right, arm_left, leg_right or leg_left",
+								"remove the scale/offset/pitch/roll from head",
+								"the head model still applies; its transform is ignored.", true);
+						}
+						for ( const LimbSlot& sl : kLimbSlots )
+						{
+							if ( it.key() == sl.key ) { def.limbXform[sl.limbType] = xf; break; }
+						}
+					}
 				}
-				if ( it.value().get<std::string>().empty() ) { continue; }
-				def.limbModels[it.key()] = it.value().get<std::string>();
+
+				if ( !samHaveObjForm )
+				{
+					if ( !it.value().is_string() )
+					{
+						// A bare 1025 rather than "1025" is the easy mistake, and the schema
+						// only catches it for people using the builder.
+						SAMErrors::reportSemantic(MOD, fileLabel, "/limb_models/" + it.key(),
+							it.value().dump(), "not a string or an object",
+							"a quoted model reference, e.g. \"1025\" or \"" + manifest.ns + ":body\"",
+							"put quotes around it",
+							"that limb keeps the host body's model.", true);
+						continue;
+					}
+					if ( it.value().get<std::string>().empty() ) { continue; }
+					def.limbModels[it.key()] = it.value().get<std::string>();
+				}
 			}
 		}
 
-		readMonsterList("allies", def.allies);
+		// "extra_limbs": [ { "slot": "tail", "model": "...", "attach": "body", ... } ]
+	if ( j.contains("extra_limbs") )
+	{
+		if ( !j["extra_limbs"].is_array() )
+		{
+			SAMErrors::reportSemantic(MOD, fileLabel, "/extra_limbs", "", "not an array",
+				"an array of limb objects", "fix or remove it",
+				"extra limbs ignored for this race.", true);
+		}
+		else
+		{
+			for ( const auto& el : j["extra_limbs"] )
+			{
+				if ( !el.is_object() || !el.contains("model") || !el["model"].is_string() ) { continue; }
+				if ( def.extraLimbs.size() >= 13 )
+				{
+					SAM_WARN(MOD, "Race [" + def.id + "] declares more than 13 extra limbs. Barony leaves"
+						" exactly 13 limb slots unused, so the rest are ignored.");
+					break;
+				}
+				SAMRaceDef::SAMExtraLimb lim;
+				lim.model = el["model"].get<std::string>();
+				if ( el.contains("attach") && el["attach"].is_string() )
+				{
+					const std::string a = el["attach"].get<std::string>();
+					if ( a == "body" || a == "head" || a == "torso" ) { lim.attach = a; }
+					else
+					{
+						SAM_WARN(MOD, "Race [" + def.id + "] extra limb attach '" + a
+							+ "' is not one of body, head, torso -- using body.");
+					}
+				}
+				auto rd = [&](const char* k, double dflt) -> double {
+					return ( el.contains(k) && el[k].is_number() ) ? el[k].get<double>() : dflt;
+				};
+				if ( el.contains("offset") && el["offset"].is_object() )
+				{
+					const auto& o = el["offset"];
+					if ( o.contains("forward") && o["forward"].is_number() ) { lim.offFwd = o["forward"].get<double>(); }
+					if ( o.contains("side") && o["side"].is_number() )       { lim.offSide = o["side"].get<double>(); }
+					if ( o.contains("up") && o["up"].is_number() )           { lim.offUp = o["up"].get<double>(); }
+				}
+				if ( el.contains("focal") && el["focal"].is_object() )
+				{
+					const auto& o = el["focal"];
+					if ( o.contains("x") && o["x"].is_number() ) { lim.focalX = o["x"].get<double>(); }
+					if ( o.contains("y") && o["y"].is_number() ) { lim.focalY = o["y"].get<double>(); }
+					if ( o.contains("z") && o["z"].is_number() ) { lim.focalZ = o["z"].get<double>(); }
+				}
+				lim.pitch = rd("pitch", 0.0);
+				lim.roll = rd("roll", 0.0);
+				lim.yawOffsetDeg = rd("yaw_offset", 0.0);
+				lim.scale = rd("scale", 1.0);
+				if ( lim.scale <= 0.0 ) { lim.scale = 1.0; }
+				if ( el.contains("sway") && el["sway"].is_boolean() ) { lim.sway = el["sway"].get<bool>(); }
+				def.extraLimbs.push_back(lim);
+			}
+		}
+	}
+
+	// "first_person": { "arm": "models/x.vox", "hand_left": "models/y.vox" }
+	if ( j.contains("first_person") )
+	{
+		if ( !j["first_person"].is_object() )
+		{
+			SAMErrors::reportSemantic(MOD, fileLabel, "/first_person", "", "not an object",
+				"an object like { \"arm\": \"models/arm.vox\" }", "fix or remove it",
+				"first-person models ignored for this race.", true);
+		}
+		else
+		{
+			const auto& fp = j["first_person"];
+			if ( fp.contains("arm") && fp["arm"].is_string() ) { def.fpArm = fp["arm"].get<std::string>(); }
+			if ( fp.contains("hand_left") && fp["hand_left"].is_string() ) { def.fpHandLeft = fp["hand_left"].get<std::string>(); }
+		}
+	}
+
+	readMonsterList("allies", def.allies);
 		readMonsterList("enemies", def.enemies);
 
 		// Declaring both is a contradiction the author needs to resolve, not something to
@@ -383,7 +521,14 @@ void SAMRaces::resolveLimbModels()
 		SAMRaceDef& def = kv.second;
 		def.limbModelIdx.clear();
 		def.headModelIdx = -1;
-		if ( def.limbModels.empty() ) { continue; }
+		def.fpArmIdx = -1;
+		def.fpHandLeftIdx = -1;
+		// Only the limb/head resolution below needs limb_models. extra_limbs and the
+		// first-person models are independent, and short-circuiting on an empty limb map meant
+		// a race that declared ONLY a tail or ONLY a first-person arm resolved neither: the
+		// .vox loaded, the index was never looked up, and nothing drew.
+		if ( def.limbModels.empty() && def.extraLimbs.empty()
+			&& def.fpArm.empty() && def.fpHandLeft.empty() ) { continue; }
 
 		// A player on a RAT or SPIDER host body is not animated as a humanoid: actplayer sets
 		// isHumanoid = false for those two, and the whole bodypart loop that calls
@@ -412,6 +557,27 @@ void SAMRaces::resolveLimbModels()
 			if ( it == def.limbModels.end() ) { continue; }
 			const int idx = resolveModelRef(it->second, def.id, slot.key);
 			if ( idx >= 0 ) { def.limbModelIdx[slot.limbType] = idx; }
+		}
+
+		for ( size_t ei = 0; ei < def.extraLimbs.size(); ++ei )
+		{
+			SAMRaceDef::SAMExtraLimb& lim = def.extraLimbs[ei];
+			lim.modelIdx = -1;
+			const int idx = resolveModelRef(lim.model, def.id, "extra_limbs[" + std::to_string(ei) + "]");
+			if ( idx >= 0 ) { lim.modelIdx = idx; }
+		}
+
+		// First-person models resolve exactly like limbs, and for the same reason they cannot
+		// resolve at parse time: the model table does not exist yet during mod load.
+		if ( !def.fpArm.empty() )
+		{
+			const int idx = resolveModelRef(def.fpArm, def.id, "first_person.arm");
+			if ( idx >= 0 ) { def.fpArmIdx = idx; }
+		}
+		if ( !def.fpHandLeft.empty() )
+		{
+			const int idx = resolveModelRef(def.fpHandLeft, def.id, "first_person.hand_left");
+			if ( idx >= 0 ) { def.fpHandLeftIdx = idx; }
 		}
 
 		auto head = def.limbModels.find("head");
@@ -443,6 +609,38 @@ int SAMRaces::limbModelFor(int raceId, int limbType)
 	if ( it == s_byId.end() ) { return -1; }
 	auto lit = it->second.limbModelIdx.find(limbType);
 	return ( lit == it->second.limbModelIdx.end() ) ? -1 : lit->second;
+}
+
+const std::vector<SAMRaceDef::SAMExtraLimb>* SAMRaces::extraLimbsFor(int raceId)
+{
+	if ( raceId < SAM_RACE_ID_BASE || s_byId.empty() ) { return nullptr; }
+	auto it = s_byId.find(raceId);
+	if ( it == s_byId.end() || it->second.extraLimbs.empty() ) { return nullptr; }
+	return &it->second.extraLimbs;
+}
+
+int SAMRaces::fpArmModelFor(int raceId)
+{
+	if ( raceId < SAM_RACE_ID_BASE || s_byId.empty() ) { return -1; }
+	auto it = s_byId.find(raceId);
+	return ( it == s_byId.end() ) ? -1 : it->second.fpArmIdx;
+}
+
+int SAMRaces::fpHandLeftModelFor(int raceId)
+{
+	if ( raceId < SAM_RACE_ID_BASE || s_byId.empty() ) { return -1; }
+	auto it = s_byId.find(raceId);
+	return ( it == s_byId.end() ) ? -1 : it->second.fpHandLeftIdx;
+}
+
+const SAMRaceDef::LimbXform* SAMRaces::limbXformFor(int raceId, int limbType)
+{
+	if ( raceId < SAM_RACE_ID_BASE || s_byId.empty() ) { return nullptr; }
+	auto it = s_byId.find(raceId);
+	if ( it == s_byId.end() || it->second.limbXform.empty() ) { return nullptr; }
+	auto xit = it->second.limbXform.find(limbType);
+	if ( xit == it->second.limbXform.end() || !xit->second.any ) { return nullptr; }
+	return &xit->second;
 }
 
 bool SAMRaces::usesLimbOverride(int raceId, int limbType)
@@ -512,6 +710,27 @@ std::vector<std::string> SAMRaces::limbModelPaths()
 	std::vector<std::string> out;
 	for ( const auto& kv : s_byId )
 	{
+		// The first-person models are ordinary mod-relative paths and need registering the
+		// same as any limb, or they resolve to nothing and silently fall back to the host body.
+		for ( const auto& lim : kv.second.extraLimbs )
+		{
+			const std::string& ref = lim.model;
+			if ( ref.size() < 5 || ref.find('/') == std::string::npos ) { continue; }
+			std::string t = ref.substr(ref.size() - 4);
+			for ( char& c : t ) { c = (char)std::tolower((unsigned char)c); }
+			if ( t != ".vox" ) { continue; }
+			if ( SAMModels::vanillaModelIndexForPath(ref) >= 0 ) { continue; }
+			if ( std::find(out.begin(), out.end(), ref) == out.end() ) { out.push_back(ref); }
+		}
+		for ( const std::string& fpRef : { kv.second.fpArm, kv.second.fpHandLeft } )
+		{
+			if ( fpRef.size() < 5 || fpRef.find('/') == std::string::npos ) { continue; }
+			std::string t = fpRef.substr(fpRef.size() - 4);
+			for ( char& c : t ) { c = (char)std::tolower((unsigned char)c); }
+			if ( t != ".vox" ) { continue; }
+			if ( SAMModels::vanillaModelIndexForPath(fpRef) >= 0 ) { continue; }
+			if ( std::find(out.begin(), out.end(), fpRef) == out.end() ) { out.push_back(fpRef); }
+		}
 		for ( const auto& lm : kv.second.limbModels )
 		{
 			const std::string& ref = lm.second;

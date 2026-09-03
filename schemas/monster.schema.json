@@ -28,7 +28,7 @@
     },
     "base_type": {
       "type": "string",
-      "description": "Which existing Barony creature this variant is built from. Its sprite, model, limbs, and AI come from this base type; you override the stats/gear/name/behaviour. A typo here would silently produce a 'nothing' monster in vanilla Barony — S.A.M rejects an unknown base_type at load with the list of valid names.",
+      "description": "Which existing Barony creature this variant is built from. Its sprite, model, limbs, and AI come from this base type; you override the stats/gear/name/behaviour. A typo here would silently produce a 'nothing' monster in vanilla Barony \u2014 S.A.M rejects an unknown base_type at load with the list of valid names.",
       "enum": [
         "human",
         "rat",
@@ -426,7 +426,7 @@
     },
     "spawn": {
       "type": "array",
-      "description": "Where this monster appears in the world. S.A.M merges these into data/monstercurve.json. NOTE: listing a level makes S.A.M manage that level's random spawn table — the level then spawns the species that loaded mods list (plus a 'default' weight that keeps the vanilla version of each listed species appearing). Levels you don't list keep vanilla spawning untouched. Leave 'spawn' empty to only appear via followers, map-editor placement (entity name ending .json), or the console.",
+      "description": "Where this monster appears in the world. S.A.M merges these into data/monstercurve.json. NOTE: listing a level makes S.A.M manage that level's random spawn table \u2014 the level then spawns the species that loaded mods list (plus a 'default' weight that keeps the vanilla version of each listed species appearing). Levels you don't list keep vanilla spawning untouched. Leave 'spawn' empty to only appear via followers, map-editor placement (entity name ending .json), or the console.",
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -541,6 +541,14 @@
           "maximum": 127,
           "default": 0,
           "description": "How big the creature is to hit and to walk into. 0 keeps the base creature's size. For scale: a bat is 2, and the devil, the largest vanilla monster, is 20. A big model needs a bigger number or you will be swinging at empty air, but this also blocks movement, so a value near the model's full width will wall off a corridor."
+        },
+        "cast": {
+          "type": "string",
+          "description": "Shown while the creature is winding up or releasing a spell. Falls back to attack, then model. Seen by every player: the pose it reads is already networked."
+        },
+        "death": {
+          "type": "string",
+          "description": "Shown on the corpse poof at the moment it dies. Falls back to whatever it was already drawing."
         }
       },
       "required": [

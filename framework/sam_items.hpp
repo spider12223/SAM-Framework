@@ -61,6 +61,13 @@ struct SAMItemDef
 	// registerModModels(); overrides modelFromItem when both are set.
 	std::string model;              // world/held model
 	std::string modelFp;            // optional separate first-person model
+	// v2.5 state models. Keys: broken, cursed, blessed, unidentified. Each optional; an
+	// undeclared state falls through to `model` / `modelFp`. Resolved to engine indices by
+	// registerModModels, like every other model reference.
+	std::map<std::string, std::string> modelStates;
+	std::map<std::string, std::string> modelFpStates;
+	std::map<std::string, int> modelStateIdx;
+	std::map<std::string, int> modelFpStateIdx;
 	std::string modelFromItem;      // vanilla ItemType name (e.g. "SILVER_SHIELD") to clone the 3D model from
 	std::string icon;               // mod-relative PNG path — loaded into the inventory icon
 
@@ -170,6 +177,12 @@ public:
 	// renderer calls this for type >= SAM_ITEM_ID_BASE so a custom slot serves its
 	// own icon directly, independent of the vanilla images[]/appearance indexing.
 	static std::string getIconPath(int itemId);
+
+	// The model a custom item should draw given its state, or -1 to use its ordinary one.
+	// Called from itemModel / itemModelFirstperson, which both hold the Item, so this needs
+	// no new plumbing and nothing new on the wire: status, beatitude and identified are all
+	// already saved and networked.
+	static int stateModelFor(int itemType, int status, int beatitude, bool identified, bool firstPerson);
 
 	// Absolute path to this kit's art for one panel role, or "" when the item declares no
 	// skin, omits that role, or the file is missing. The caller falls back to vanilla art.

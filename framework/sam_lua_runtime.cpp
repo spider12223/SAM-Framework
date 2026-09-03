@@ -82,6 +82,7 @@ extern "C" {
 #	include "sam_classes.hpp" // v0.7.0 F5: SAMClasses::patchClass / addClassPassive
 #	include "sam_monster_patches.hpp" // v0.7.0 F5: SAMMonsterPatch::set
 #	include "sam_monsters.hpp" // SAMMonsters::traitBitForName (sam_monster_has_trait)
+#	include "sam_bodies.hpp"   // runtime model control (sam_set_model)
 #	include "sam_spells.hpp"  // custom-spell registry (sam_grant_spell)
 #	include "sam_models.hpp"  // v1.4.0: SAMModels::modelIndexForId (companion custom .vox)
 #	include "magic/magic.hpp" // addSpell (grant a spell to a player)
@@ -3200,6 +3201,109 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		return e;
 	}
 
+	// ---- v2.5 runtime model control -------------------------------------------------
+	//
+	// Until now nothing could change a model once the game was running: every model was
+	// fixed at spawn by JSON. These carry the model ID over the wire, so a transformation
+	// is seen by every player rather than only the host -- an index would mean whatever
+	// that slot happened to hold on each machine.
+
+	// sam_set_model(uid, "ns:model") -> boolean. Works on any entity, including a limb.
+	int lua_sam_set_model(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const char* idC = luaL_checkstring(Ls, 2);
+		const std::string modelId = idC ? idC : "";
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_set_model refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		if ( !SAMBodies::setBodyById((uint32_t)uid, modelId) )
+		{
+			SAM_ERROR("LUA", "sam_set_model: no model registered as '" + modelId
+				+ "'. Declare it in mod.json \"models\" (or use an item/class/race model path).");
+			lua_pushboolean(Ls, 0);
+			return 1;
+		}
+		lua_pushboolean(Ls, 1);
+		return 1;
+	}
+
+	// sam_clear_model(uid) -> boolean. The entity goes back to whatever it would otherwise
+	// draw: its JSON body, or its own sprite.
+	int lua_sam_clear_model(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_clear_model refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		SAMBodies::clearBodyById((uint32_t)uid);
+		lua_pushboolean(Ls, 1);
+		return 1;
+	}
+
+	// sam_get_model(uid) -> "ns:model" | nil. Answers about what a SCRIPT set, which is the
+	// only thing a script can meaningfully read back -- a JSON body is the mod's own data.
+	int lua_sam_get_model(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const std::string id = SAMBodies::bodyIdFor((uint32_t)uid);
+		if ( id.empty() ) { lua_pushnil(Ls); } else { lua_pushstring(Ls, id.c_str()); }
+		return 1;
+	}
+
+	// sam_set_scale(uid, s) -> boolean. Barony quantises scale on the wire to steps of 1/128
+	// and caps it just under 2, so anything larger would look right to the host and wrong to
+	// everybody else. Clamped here rather than silently truncated there.
+	int lua_sam_set_scale(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		double sc = (double)luaL_checknumber(Ls, 2);
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_set_scale refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		Entity* e = uidToEntity((Uint32)uid);
+		if ( !e ) { lua_pushboolean(Ls, 0); return 1; }
+		if ( !std::isfinite(sc) )
+		{
+			SAM_ERROR("LUA", "sam_set_scale: scale must be a finite number.");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		if ( sc <= 0.0 ) { sc = 1.0; }
+		if ( sc > 1.99 && multiplayer != SINGLE )
+		{
+			SAM_WARN("LUA", "sam_set_scale: " + std::to_string(sc) + " is past the 1.99 the network"
+				" can carry, so other players would not see it. Clamped.");
+			sc = 1.99;
+		}
+		e->scalex = sc; e->scaley = sc; e->scalez = sc;
+		lua_pushboolean(Ls, 1);
+		return 1;
+	}
+
+	// sam_set_visible(uid, bool) -> boolean. Hides the model without touching the entity, so
+	// it still collides, still acts, still exists.
+	int lua_sam_set_visible(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const bool vis = lua_toboolean(Ls, 2) != 0;
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_set_visible refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		Entity* e = uidToEntity((Uint32)uid);
+		if ( !e ) { lua_pushboolean(Ls, 0); return 1; }
+		// A custom-bodied monster is deliberately UN-skipped in the draw pass so the six
+		// species that hide their main entity stay visible, which means clearing INVISIBLE on
+		// one does not actually hide it -- it would stay drawn and clickable while every
+		// client, which has no such override, saw it vanish. Refuse rather than half-work.
+		if ( !vis && SAMBodies::modelForEntity(e) >= 0 )
+		{
+			SAM_WARN("LUA", "sam_set_visible: this entity has a custom body, which the draw pass"
+				" keeps visible on purpose. Use sam_clear_model first, or move it out of sight.");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		e->flags[INVISIBLE] = !vis;
+		if ( multiplayer == SERVER ) { serverUpdateEntityFlag(e, INVISIBLE); }
+		lua_pushboolean(Ls, 1);
+		return 1;
+	}
+
 	int lua_sam_spawn_monster(lua_State* Ls)
 	{
 		SAMLogger::noteApiCall();
@@ -5196,6 +5300,11 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		lua_pushcfunction(L, lua_sam_get_item_category);   lua_setglobal(L, "sam_get_item_category");
 		lua_pushcfunction(L, lua_sam_set_monster_stat);    lua_setglobal(L, "sam_set_monster_stat");
 		lua_pushcfunction(L, lua_sam_set_monster_name);    lua_setglobal(L, "sam_set_monster_name");
+		lua_pushcfunction(L, lua_sam_set_model);           lua_setglobal(L, "sam_set_model");
+		lua_pushcfunction(L, lua_sam_clear_model);         lua_setglobal(L, "sam_clear_model");
+		lua_pushcfunction(L, lua_sam_get_model);           lua_setglobal(L, "sam_get_model");
+		lua_pushcfunction(L, lua_sam_set_scale);           lua_setglobal(L, "sam_set_scale");
+		lua_pushcfunction(L, lua_sam_set_visible);         lua_setglobal(L, "sam_set_visible");
 		lua_pushcfunction(L, lua_sam_monster_equip);       lua_setglobal(L, "sam_monster_equip");
 		lua_pushcfunction(L, lua_sam_monster_unequip);     lua_setglobal(L, "sam_monster_unequip");
 		lua_pushcfunction(L, lua_sam_apply_monster_effect); lua_setglobal(L, "sam_apply_monster_effect");

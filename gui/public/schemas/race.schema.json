@@ -218,28 +218,367 @@
       "description": "This race's own body, one model per limb, instead of the host body's. host_body still decides the skeleton: the limb offsets, the animation, and which slots exist. These decide what is drawn in each slot. Omit a limb and it keeps the host body's model, so you can replace just a head or the whole body. Every limb except the head is only visible when that armour slot is empty, which is how every race in the game already works.",
       "properties": {
         "head": {
-          "type": "string",
-          "description": "The head. This is the one limb no armour ever replaces, so it always shows. Four forms are accepted, in the order they are tried: a path to a model the game already has (\"gharbad_head.vox\", or the full \"models/creatures/...\" form if that filename is used by more than one creature); an id you declared in mod.json \"models\" (\"<ns>:name\"); a mod-relative path to your own .vox; or a raw model index. Prefer a path: an index says nothing about what it is, and models.txt line N is index N-1, which is easy to get wrong by one."
+          "description": "The head. This is the one limb no armour ever replaces, so it always shows. Four forms are accepted, in the order they are tried: a path to a model the game already has (\"gharbad_head.vox\", or the full \"models/creatures/...\" form if that filename is used by more than one creature); an id you declared in mod.json \"models\" (\"<ns>:name\"); a mod-relative path to your own .vox; or a raw model index. Prefer a path: an index says nothing about what it is, and models.txt line N is index N-1, which is easy to get wrong by one. You may also give an object with a \"model\" key, for consistency with the other slots, but the head has no transform: the engine sets it outside the limb path, so scale/offset/pitch/roll on head are reported and ignored.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "model"
+              ],
+              "properties": {
+                "model": {
+                  "type": "string"
+                }
+              }
+            }
+          ]
         },
         "torso": {
-          "type": "string",
-          "description": "The chest. Shown bare; a breastplate covers it, exactly as it does for any other race. Four forms are accepted, in the order they are tried: a path to a model the game already has (\"gharbad_head.vox\", or the full \"models/creatures/...\" form if that filename is used by more than one creature); an id you declared in mod.json \"models\" (\"<ns>:name\"); a mod-relative path to your own .vox; or a raw model index. Prefer a path: an index says nothing about what it is, and models.txt line N is index N-1, which is easy to get wrong by one."
+          "description": "The chest. Shown bare; a breastplate covers it, exactly as it does for any other race. Four forms are accepted, in the order they are tried: a path to a model the game already has (\"gharbad_head.vox\", or the full \"models/creatures/...\" form if that filename is used by more than one creature); an id you declared in mod.json \"models\" (\"<ns>:name\"); a mod-relative path to your own .vox; or a raw model index. Prefer a path: an index says nothing about what it is, and models.txt line N is index N-1, which is easy to get wrong by one. Instead of a bare string you may give an object: { \"model\": \"...\", \"scale\": 1.2, \"offset\": { \"x\": 0, \"y\": 0, \"z\": -1 }, \"pitch\": 0, \"roll\": 0 }. Use that when your race's proportions differ from the host body's and the limb clips or floats; a bare string keeps the host body's proportions.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "model"
+              ],
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "description": "The .vox for this limb. Same four forms a bare string accepts."
+                },
+                "scale": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "description": "Uniform scale for this limb. 1.0 = the model's own size."
+                },
+                "offset": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "description": "Shift the limb in its OWN frame, so it stays correct as the limb swings.",
+                  "properties": {
+                    "x": {
+                      "type": "number"
+                    },
+                    "y": {
+                      "type": "number"
+                    },
+                    "z": {
+                      "type": "number"
+                    }
+                  }
+                },
+                "pitch": {
+                  "type": "number",
+                  "description": "Extra pitch in radians, added to whatever the animation set."
+                },
+                "roll": {
+                  "type": "number",
+                  "description": "Extra roll in radians, added to whatever the animation set."
+                }
+              }
+            }
+          ]
         },
         "arm_right": {
-          "type": "string",
-          "description": "The right arm. Shown bare; sleeves and gloves cover it. Four forms are accepted, in the order they are tried: a path to a model the game already has (\"gharbad_head.vox\", or the full \"models/creatures/...\" form if that filename is used by more than one creature); an id you declared in mod.json \"models\" (\"<ns>:name\"); a mod-relative path to your own .vox; or a raw model index. Prefer a path: an index says nothing about what it is, and models.txt line N is index N-1, which is easy to get wrong by one."
+          "description": "The right arm. Shown bare; sleeves and gloves cover it. Four forms are accepted, in the order they are tried: a path to a model the game already has (\"gharbad_head.vox\", or the full \"models/creatures/...\" form if that filename is used by more than one creature); an id you declared in mod.json \"models\" (\"<ns>:name\"); a mod-relative path to your own .vox; or a raw model index. Prefer a path: an index says nothing about what it is, and models.txt line N is index N-1, which is easy to get wrong by one. Instead of a bare string you may give an object: { \"model\": \"...\", \"scale\": 1.2, \"offset\": { \"x\": 0, \"y\": 0, \"z\": -1 }, \"pitch\": 0, \"roll\": 0 }. Use that when your race's proportions differ from the host body's and the limb clips or floats; a bare string keeps the host body's proportions.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "model"
+              ],
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "description": "The .vox for this limb. Same four forms a bare string accepts."
+                },
+                "scale": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "description": "Uniform scale for this limb. 1.0 = the model's own size."
+                },
+                "offset": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "description": "Shift the limb in its OWN frame, so it stays correct as the limb swings.",
+                  "properties": {
+                    "x": {
+                      "type": "number"
+                    },
+                    "y": {
+                      "type": "number"
+                    },
+                    "z": {
+                      "type": "number"
+                    }
+                  }
+                },
+                "pitch": {
+                  "type": "number",
+                  "description": "Extra pitch in radians, added to whatever the animation set."
+                },
+                "roll": {
+                  "type": "number",
+                  "description": "Extra roll in radians, added to whatever the animation set."
+                }
+              }
+            }
+          ]
         },
         "arm_left": {
-          "type": "string",
-          "description": "The left arm. Shown bare; sleeves and gloves cover it. Four forms are accepted, in the order they are tried: a path to a model the game already has (\"gharbad_head.vox\", or the full \"models/creatures/...\" form if that filename is used by more than one creature); an id you declared in mod.json \"models\" (\"<ns>:name\"); a mod-relative path to your own .vox; or a raw model index. Prefer a path: an index says nothing about what it is, and models.txt line N is index N-1, which is easy to get wrong by one."
+          "description": "The left arm. Shown bare; sleeves and gloves cover it. Four forms are accepted, in the order they are tried: a path to a model the game already has (\"gharbad_head.vox\", or the full \"models/creatures/...\" form if that filename is used by more than one creature); an id you declared in mod.json \"models\" (\"<ns>:name\"); a mod-relative path to your own .vox; or a raw model index. Prefer a path: an index says nothing about what it is, and models.txt line N is index N-1, which is easy to get wrong by one. Instead of a bare string you may give an object: { \"model\": \"...\", \"scale\": 1.2, \"offset\": { \"x\": 0, \"y\": 0, \"z\": -1 }, \"pitch\": 0, \"roll\": 0 }. Use that when your race's proportions differ from the host body's and the limb clips or floats; a bare string keeps the host body's proportions.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "model"
+              ],
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "description": "The .vox for this limb. Same four forms a bare string accepts."
+                },
+                "scale": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "description": "Uniform scale for this limb. 1.0 = the model's own size."
+                },
+                "offset": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "description": "Shift the limb in its OWN frame, so it stays correct as the limb swings.",
+                  "properties": {
+                    "x": {
+                      "type": "number"
+                    },
+                    "y": {
+                      "type": "number"
+                    },
+                    "z": {
+                      "type": "number"
+                    }
+                  }
+                },
+                "pitch": {
+                  "type": "number",
+                  "description": "Extra pitch in radians, added to whatever the animation set."
+                },
+                "roll": {
+                  "type": "number",
+                  "description": "Extra roll in radians, added to whatever the animation set."
+                }
+              }
+            }
+          ]
         },
         "leg_right": {
-          "type": "string",
-          "description": "The right leg. Shown bare; boots and greaves cover it. Four forms are accepted, in the order they are tried: a path to a model the game already has (\"gharbad_head.vox\", or the full \"models/creatures/...\" form if that filename is used by more than one creature); an id you declared in mod.json \"models\" (\"<ns>:name\"); a mod-relative path to your own .vox; or a raw model index. Prefer a path: an index says nothing about what it is, and models.txt line N is index N-1, which is easy to get wrong by one."
+          "description": "The right leg. Shown bare; boots and greaves cover it. Four forms are accepted, in the order they are tried: a path to a model the game already has (\"gharbad_head.vox\", or the full \"models/creatures/...\" form if that filename is used by more than one creature); an id you declared in mod.json \"models\" (\"<ns>:name\"); a mod-relative path to your own .vox; or a raw model index. Prefer a path: an index says nothing about what it is, and models.txt line N is index N-1, which is easy to get wrong by one. Instead of a bare string you may give an object: { \"model\": \"...\", \"scale\": 1.2, \"offset\": { \"x\": 0, \"y\": 0, \"z\": -1 }, \"pitch\": 0, \"roll\": 0 }. Use that when your race's proportions differ from the host body's and the limb clips or floats; a bare string keeps the host body's proportions.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "model"
+              ],
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "description": "The .vox for this limb. Same four forms a bare string accepts."
+                },
+                "scale": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "description": "Uniform scale for this limb. 1.0 = the model's own size."
+                },
+                "offset": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "description": "Shift the limb in its OWN frame, so it stays correct as the limb swings.",
+                  "properties": {
+                    "x": {
+                      "type": "number"
+                    },
+                    "y": {
+                      "type": "number"
+                    },
+                    "z": {
+                      "type": "number"
+                    }
+                  }
+                },
+                "pitch": {
+                  "type": "number",
+                  "description": "Extra pitch in radians, added to whatever the animation set."
+                },
+                "roll": {
+                  "type": "number",
+                  "description": "Extra roll in radians, added to whatever the animation set."
+                }
+              }
+            }
+          ]
         },
         "leg_left": {
+          "description": "The left leg. Shown bare; boots and greaves cover it. Four forms are accepted, in the order they are tried: a path to a model the game already has (\"gharbad_head.vox\", or the full \"models/creatures/...\" form if that filename is used by more than one creature); an id you declared in mod.json \"models\" (\"<ns>:name\"); a mod-relative path to your own .vox; or a raw model index. Prefer a path: an index says nothing about what it is, and models.txt line N is index N-1, which is easy to get wrong by one. Instead of a bare string you may give an object: { \"model\": \"...\", \"scale\": 1.2, \"offset\": { \"x\": 0, \"y\": 0, \"z\": -1 }, \"pitch\": 0, \"roll\": 0 }. Use that when your race's proportions differ from the host body's and the limb clips or floats; a bare string keeps the host body's proportions.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "model"
+              ],
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "description": "The .vox for this limb. Same four forms a bare string accepts."
+                },
+                "scale": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "description": "Uniform scale for this limb. 1.0 = the model's own size."
+                },
+                "offset": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "description": "Shift the limb in its OWN frame, so it stays correct as the limb swings.",
+                  "properties": {
+                    "x": {
+                      "type": "number"
+                    },
+                    "y": {
+                      "type": "number"
+                    },
+                    "z": {
+                      "type": "number"
+                    }
+                  }
+                },
+                "pitch": {
+                  "type": "number",
+                  "description": "Extra pitch in radians, added to whatever the animation set."
+                },
+                "roll": {
+                  "type": "number",
+                  "description": "Extra roll in radians, added to whatever the animation set."
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "first_person": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "What YOU see of your own body. Everyone else sees the limb_models above; without this you would see the host body's arms, which is the first thing a player of a custom race notices. Never networked: these are drawn only on your own machine.",
+      "properties": {
+        "arm": {
           "type": "string",
-          "description": "The left leg. Shown bare; boots and greaves cover it. Four forms are accepted, in the order they are tried: a path to a model the game already has (\"gharbad_head.vox\", or the full \"models/creatures/...\" form if that filename is used by more than one creature); an id you declared in mod.json \"models\" (\"<ns>:name\"); a mod-relative path to your own .vox; or a raw model index. Prefer a path: an index says nothing about what it is, and models.txt line N is index N-1, which is easy to get wrong by one."
+          "description": "The forearm/hand that holds your weapon. Also used for the right casting hand, which vanilla draws with the same model."
+        },
+        "hand_left": {
+          "type": "string",
+          "description": "The left casting hand, a different model from the arm in every vanilla race too."
+        }
+      }
+    },
+    "extra_limbs": {
+      "type": "array",
+      "maxItems": 13,
+      "description": "Limbs the host body does not have: a tail, wings, horns, extra arms. Barony allocates 29 limb slots per player and uses 16, so there are exactly 13 spare. Drawn on every machine, so all players see them.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "model"
+        ],
+        "properties": {
+          "model": {
+            "type": "string",
+            "description": "The .vox for this limb."
+          },
+          "attach": {
+            "type": "string",
+            "enum": [
+              "body",
+              "head",
+              "torso"
+            ],
+            "default": "body",
+            "description": "What it hangs off. body = the player's centre, offset in the direction they face (how the salamander tail works). head = follows the head, like a mask. torso = follows the chest limb."
+          },
+          "offset": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Where to put it, in the direction the player faces.",
+            "properties": {
+              "forward": {
+                "type": "number"
+              },
+              "side": {
+                "type": "number"
+              },
+              "up": {
+                "type": "number"
+              }
+            }
+          },
+          "focal": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "The point the limb rotates around, in its own frame.",
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              },
+              "z": {
+                "type": "number"
+              }
+            }
+          },
+          "pitch": {
+            "type": "number"
+          },
+          "roll": {
+            "type": "number"
+          },
+          "yaw_offset": {
+            "type": "number",
+            "description": "Degrees, if the .vox was authored facing a different way."
+          },
+          "scale": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "sway": {
+            "type": "boolean",
+            "description": "Swing it as the player moves, the way the salamander's tail does. Good for tails, wrong for horns."
+          }
         }
       }
     }

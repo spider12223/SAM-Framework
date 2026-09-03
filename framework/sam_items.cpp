@@ -760,6 +760,35 @@ void SAMItems::loadFromManifest(const SAMModManifest& manifest)
 		def.level = getInt("level", -1);
 		def.model = getStr("model");
 		def.modelFp = getStr("model_fp");
+		// v2.5 state models: a different look when broken / cursed / blessed / unidentified.
+		// Unknown keys are reported rather than ignored, because a typo here is silent -- the
+		// item simply keeps its ordinary model and nothing says why.
+		for ( const char* which : { "model_states", "model_fp_states" } )
+		{
+			if ( !j.contains(which) ) { continue; }
+			if ( !j[which].is_object() )
+			{
+				SAMErrors::reportSemantic(MOD, fileLabel, std::string("/") + which, "", "not an object",
+					"an object like { \"broken\": \"models/x.vox\" }", "fix or remove it",
+					"state models ignored for this item.", true);
+				continue;
+			}
+			for ( auto sit = j[which].begin(); sit != j[which].end(); ++sit )
+			{
+				const std::string k = sit.key();
+				if ( k != "broken" && k != "cursed" && k != "blessed" && k != "unidentified" )
+				{
+					SAMErrors::reportSemantic(MOD, fileLabel, std::string("/") + which + "/" + k, "",
+						"not a state this item can vary by",
+						"one of: broken, cursed, blessed, unidentified", "check the spelling",
+						"that entry ignored; the rest of the item loaded.", true);
+					continue;
+				}
+				if ( !sit.value().is_string() || sit.value().get<std::string>().empty() ) { continue; }
+				if ( !strcmp(which, "model_states") ) { def.modelStates[k] = sit.value().get<std::string>(); }
+				else                                  { def.modelFpStates[k] = sit.value().get<std::string>(); }
+			}
+		}
 		def.modelFromItem = getStr("model_from_item");
 		def.icon = getStr("icon");
 		def.weaponSkill = samLower(getStr("weapon_skill"));
@@ -1098,6 +1127,38 @@ bool SAMItems::remapSavedItemIds(const std::string& savedTable,
 	return true;
 }
 
+int SAMItems::stateModelFor(int itemType, int status, int beatitude, bool identified, bool firstPerson)
+{
+	if ( s_registry.empty() ) { return -1; }
+	auto it = s_registry.find(itemType);
+	if ( it == s_registry.end() ) { return -1; }
+	// When an item declares a world state but no first-person twin, fall back to the world
+	// table for the first-person view. Otherwise the two disagree, and the HUD decides the
+	// first-person SCALE by testing itemModelFirstperson(item) == itemModel(item) -- so a
+	// broken sword would have rendered at the wrong size in the hand.
+	const std::map<std::string, int>& tbl =
+		( firstPerson && !it->second.modelFpStateIdx.empty() ) ? it->second.modelFpStateIdx
+		: ( firstPerson ? it->second.modelStateIdx : it->second.modelStateIdx );
+	if ( tbl.empty() ) { return -1; }
+
+	// Most specific first. Broken outranks a blessing because a ruined item reads as ruined
+	// whatever else is true of it.
+	auto pick = [&](const char* key) -> int {
+		auto k = tbl.find(key);
+		return ( k == tbl.end() ) ? -1 : k->second;
+	};
+	// Broken first: a ruined item reads as ruined whatever else is true of it.
+	if ( status == 0 )   { const int i = pick("broken");       if ( i >= 0 ) { return i; } }
+	// Unidentified BEFORE beatitude, and this ordering is the point: a player who has not
+	// identified an item is not supposed to know whether it is blessed or cursed. Testing
+	// beatitude first both made `unidentified` unreachable for any enchanted item AND leaked
+	// the blessing through the model.
+	if ( !identified )   { const int i = pick("unidentified"); if ( i >= 0 ) { return i; } }
+	if ( beatitude < 0 ) { const int i = pick("cursed");       if ( i >= 0 ) { return i; } }
+	if ( beatitude > 0 ) { const int i = pick("blessed");      if ( i >= 0 ) { return i; } }
+	return -1;
+}
+
 std::string SAMItems::getIconPath(int itemId)
 {
 	auto cached = s_iconPathCache.find(itemId);
@@ -1239,6 +1300,12 @@ void SAMItems::registerModModels()
 	{
 		want(kv.second, kv.second.model, "model");
 		want(kv.second, kv.second.modelFp, "model_fp");
+		// State models are ordinary model references and go in the same batch, or they would
+		// resolve to nothing and the state would silently never show.
+		// Non-const: `want` takes the path by mutable reference (a map's VALUES are mutable
+		// even though its keys are not), and it normalises the path in place.
+		for ( auto& ms : kv.second.modelStates )   { want(kv.second, ms.second, "model_states"); }
+		for ( auto& ms : kv.second.modelFpStates ) { want(kv.second, ms.second, "model_fp_states"); }
 	}
 	// Class appearance models (whole-body overrides like a jet, and custom heads) share the
 	// one model table, so register them in the SAME batch. resolveAppearance() (which runs
@@ -1322,6 +1389,30 @@ void SAMItems::registerModModels()
 				items[id].fpindex = idx;
 				SAM_INFO(MOD, "Item [" + def.id + "] model_fp '" + def.modelFp
 					+ "' -> model index " + std::to_string(idx));
+			}
+		}
+		// State models. A state whose model fails to resolve is dropped rather than left as a
+		// dangling index, so it falls back to the ordinary model instead of drawing nothing.
+		def.modelStateIdx.clear();
+		def.modelFpStateIdx.clear();
+		for ( const auto& ms : def.modelStates )
+		{
+			const int idx = SAMModels::modelIndexForId(ms.second);
+			if ( idx >= 0 ) { def.modelStateIdx[ms.first] = idx; }
+			else
+			{
+				SAM_WARN(MOD, "Item [" + def.id + "] model_states." + ms.first + " '" + ms.second
+					+ "' did not resolve to a model; that state keeps the item's ordinary model.");
+			}
+		}
+		for ( const auto& ms : def.modelFpStates )
+		{
+			const int idx = SAMModels::modelIndexForId(ms.second);
+			if ( idx >= 0 ) { def.modelFpStateIdx[ms.first] = idx; }
+			else
+			{
+				SAM_WARN(MOD, "Item [" + def.id + "] model_fp_states." + ms.first + " '" + ms.second
+					+ "' did not resolve to a model; that state keeps the item's ordinary model.");
 			}
 		}
 	}

@@ -429,6 +429,8 @@ static Translated translateMonster(const json& in, const std::string& modNs, con
 		SAMMonsters::BodyDef bd;
 		if ( b.contains("model") && b["model"].is_string() ) { bd.model = b["model"].get<std::string>(); }
 		if ( b.contains("attack") && b["attack"].is_string() ) { bd.attack = b["attack"].get<std::string>(); }
+		if ( b.contains("cast") && b["cast"].is_string() )     { bd.cast = b["cast"].get<std::string>(); }
+		if ( b.contains("death") && b["death"].is_string() )   { bd.death = b["death"].get<std::string>(); }
 		if ( b.contains("hitbox") && b["hitbox"].is_number_integer() )
 		{
 			// Hard ceiling of 127, because sizex/sizey go out in the entity packet as a Sint8

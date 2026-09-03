@@ -161,7 +161,7 @@
     },
     "models": {
       "type": "array",
-      "description": "Register a custom .vox under a friendly \"namespace:id\" so the rest of the mod can refer to it. Use the id for a class appearance.body_model or head, for a monster body.model, or from a script with sam_spawn_companion. (An item's model field is different: it takes a path, and the path is its own id.) Barony SLAB .vox format only. Barony SLAB .vox format only (MagicaVoxel exports are rejected). v1.4.0+.",
+      "description": "Register a custom .vox under a friendly \"namespace:id\" so the rest of the mod can refer to it. Use the id for a class appearance.body_model or head, for a monster body.model, or from a script with sam_spawn_companion. (An item's model field is different: it takes a path, and the path is its own id.) Both Barony's slab .vox AND a MagicaVoxel .vox are accepted: a MagicaVoxel export is converted in memory when the mod loads, so there is nothing to convert by hand and the file on disk is left alone. Two caveats: a file holding several models uses only the first, and a model saved on MagicaVoxel's untouched default palette carries no palette chunk, so recolour any voxel before saving. v1.4.0+.",
       "items": {
         "type": "object",
         "required": [

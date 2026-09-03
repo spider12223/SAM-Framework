@@ -10,7 +10,7 @@ import { useMod } from '@/state/ModContext.jsx';
 import { Panel, GoldButton } from '@/components/ui.jsx';
 
 /** The framework's own version (mods declare their own framework_min_version). */
-const SAM_FRAMEWORK_VERSION = '2.4.1';
+const SAM_FRAMEWORK_VERSION = '2.5.0';
 
 /** Where players get S.A.M itself (the framework is a dependency, not a mod). */
 const WORKSHOP_URL = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472';
@@ -28,14 +28,18 @@ const TRAVELS = [
  * thing a returning modder sees, and the point is 'here is what you can do now that you
  * could not before', not a changelog. */
 const WHATS_NEW = [
-  ["Custom race arms are no longer heads",
-   "If your race declared arm models, the left arm rendered as the race's HEAD whenever the shield slot was occupied, which in Barony means whenever the player carries a torch or lantern. The engine steps an arm sprite forward by two to reach its bent pose, and limbs append in alphabetical order, so arm_left landed exactly on head. Nothing a modder wrote caused it and nothing they could write avoided it. Fixed for both arms."],
-  ["Invisible monsters are invisible again",
-   "A monster with a custom body that drank invisibility stayed fully drawn, and because the same pass handles entity picking, it could still be clicked. The draw path now tells invisibility-by-potion apart from the six creatures that hide their main entity by design."],
-  ["A stale model cache can no longer show the wrong model",
-   "Once a mod adds models, the engine's model cache no longer matches the table. In the worst case a previous session's cache bound the wrong geometry to a custom model. The cache is now bypassed when custom models are present, which also stops mod geometry being written into the shared cache."],
-  ["Two silent failures now speak",
-   "Two mods claiming the same model id used to drop one of them with no message, and it would quietly render the other mod's art. And limb_models on a rat or spider host body does nothing, because those players are animated as creatures rather than humanoids. Both are now reported at load, naming the mod."],
+  ["MagicaVoxel files just work now",
+   "Barony reads its own slab .vox and nothing else, so an export from MagicaVoxel, the tool nearly everyone models in, was rejected outright. It is now converted when your mod loads. Your file is not touched, and the orientation is handled: MagicaVoxel builds upward and a Barony model is stored downward, so the converter turns it the right way up for you."],
+  ["Change a model while the game is running",
+   "sam_set_model, sam_clear_model, sam_get_model, sam_set_scale and sam_set_visible. Nothing could change a model after it spawned before, which ruled out transformations, boss phases, damage states and armour that visibly upgrades. What travels between players is the model's name, not its number, so everyone sees the same thing even with different mod lists."],
+  ["Custom monsters look right to everyone",
+   "A custom creature body used to be visible only to the host: everyone else saw a plain rat. The host now tells each player what the creature is, by name, and their game looks it up. Run /sam_bodies on both machines to see it working."],
+  ["Tails, wings, and a body that fits",
+   "A race can declare extra_limbs for parts the host body does not have, and each limb in limb_models can now carry its own scale, offset and angle so your proportions do not have to match somebody else's skeleton. Barony had thirteen unused limb slots sitting there the whole time."],
+  ["See your own hands",
+   "A race can declare first_person models. Until now everyone else saw your custom arms and you saw the host body's."],
+  ["Models that change with state",
+   "A monster body can declare cast and death models; an item can look different when it is broken, cursed, blessed or unidentified. Unidentified deliberately wins over the others, so a model never tells you about an enchantment you have not identified."],
 ];
 
 /** sam-well stat box: big gold number over a small-caps label. */

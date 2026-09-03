@@ -69,6 +69,7 @@ extern "C" {
 #	include "sam_classes.hpp" // v0.7.0 F5: SAMClasses::patchClass / addClassPassive
 #	include "sam_monster_patches.hpp" // v0.7.0 F5: SAMMonsterPatch::set
 #	include "sam_monsters.hpp" // SAMMonsters::traitBitForName (sam_monster_has_trait)
+#	include "sam_bodies.hpp"   // runtime model control (sam_set_model)
 #	include "sam_spells.hpp"  // custom-spell registry (sam_grant_spell)
 #	include "sam_sounds.hpp"  // custom sounds (resolve "ns:sound" ids in sam_play_sound)
 #	include "sam_races.hpp"   // custom races (sam_get_race id lookup)
@@ -3128,6 +3129,112 @@ namespace
 
 	// sam_set_monster_name(uid, "name") -> boolean. See the Lua twin for the host-only note
 	// and the generic-name trap.
+	// ---- v2.5 runtime model control (twins of the Lua bindings) ----------------------
+	JSValue js_sam_set_model(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_FALSE; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+		const char* idC = JS_ToCString(ctx, argv[1]);
+		const std::string modelId = idC ? idC : "";
+		if ( idC ) { JS_FreeCString(ctx, idC); }
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_set_model refused: host only."); return JS_FALSE; }
+		if ( !SAMBodies::setBodyById((uint32_t)uid, modelId) )
+		{
+			SAM_ERROR("JS", "sam_set_model: no model registered as '" + modelId + "'.");
+			return JS_FALSE;
+		}
+		return JS_TRUE;
+#else
+		(void)uid; return JS_FALSE;
+#endif
+	}
+
+	JSValue js_sam_clear_model(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_FALSE; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_clear_model refused: host only."); return JS_FALSE; }
+		SAMBodies::clearBodyById((uint32_t)uid);
+		return JS_TRUE;
+#else
+		(void)uid; return JS_FALSE;
+#endif
+	}
+
+	JSValue js_sam_get_model(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 1 ) { return JS_NULL; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+#ifdef SAM_JS_HAVE_BARONY
+		const std::string id = SAMBodies::bodyIdFor((uint32_t)uid);
+		if ( id.empty() ) { return JS_NULL; }
+		return JS_NewString(ctx, id.c_str());
+#else
+		(void)uid; return JS_NULL;
+#endif
+	}
+
+	JSValue js_sam_set_scale(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		if ( argc < 2 ) { return JS_FALSE; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+		double sc = 1.0;
+		if ( JS_ToFloat64(ctx, &sc, argv[1]) < 0 || !std::isfinite(sc) )
+		{
+			SAM_ERROR("JS", "sam_set_scale: scale must be a finite number.");
+			return JS_FALSE;
+		}
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_set_scale refused: host only."); return JS_FALSE; }
+		Entity* e = uidToEntity((Uint32)uid);
+		if ( !e ) { return JS_FALSE; }
+		if ( sc <= 0.0 ) { sc = 1.0; }
+		if ( sc > 1.99 && multiplayer != SINGLE )
+		{
+			SAM_WARN("JS", "sam_set_scale: past the 1.99 the network can carry; clamped.");
+			sc = 1.99;
+		}
+		e->scalex = sc; e->scaley = sc; e->scalez = sc;
+		return JS_TRUE;
+#else
+		(void)uid; return JS_FALSE;
+#endif
+	}
+
+	JSValue js_sam_set_visible(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		// Lua's lua_toboolean treats a missing second argument as false, so JS must too, or
+		// sam_set_visible(uid) hides in one runtime and is refused in the other.
+		if ( argc < 1 ) { return JS_FALSE; }
+		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
+		const bool vis = ( argc >= 2 ) ? (JS_ToBool(ctx, argv[1]) != 0) : false;
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_set_visible refused: host only."); return JS_FALSE; }
+		Entity* e = uidToEntity((Uint32)uid);
+		if ( !e ) { return JS_FALSE; }
+		// See the Lua twin: a custom body is deliberately un-skipped in the draw pass, so
+		// hiding it this way would work on nobody's screen consistently.
+		if ( !vis && SAMBodies::modelForEntity(e) >= 0 )
+		{
+			SAM_WARN("JS", "sam_set_visible: this entity has a custom body, which the draw pass"
+				" keeps visible on purpose. Use sam_clear_model first, or move it out of sight.");
+			return JS_FALSE;
+		}
+		e->flags[INVISIBLE] = !vis;
+		if ( multiplayer == SERVER ) { serverUpdateEntityFlag(e, INVISIBLE); }
+		return JS_TRUE;
+#else
+		(void)uid; return JS_FALSE;
+#endif
+	}
+
 	JSValue js_sam_set_monster_name(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
@@ -4227,6 +4334,11 @@ namespace
 		JS_SetPropertyStr(ctx, g, "sam_get_item_category", JS_NewCFunction(ctx, js_sam_get_item_category, "sam_get_item_category", 1));
 		JS_SetPropertyStr(ctx, g, "sam_set_monster_stat", JS_NewCFunction(ctx, js_sam_set_monster_stat, "sam_set_monster_stat", 3));
 		JS_SetPropertyStr(ctx, g, "sam_set_monster_name", JS_NewCFunction(ctx, js_sam_set_monster_name, "sam_set_monster_name", 2));
+		JS_SetPropertyStr(ctx, g, "sam_set_model", JS_NewCFunction(ctx, js_sam_set_model, "sam_set_model", 2));
+		JS_SetPropertyStr(ctx, g, "sam_clear_model", JS_NewCFunction(ctx, js_sam_clear_model, "sam_clear_model", 1));
+		JS_SetPropertyStr(ctx, g, "sam_get_model", JS_NewCFunction(ctx, js_sam_get_model, "sam_get_model", 1));
+		JS_SetPropertyStr(ctx, g, "sam_set_scale", JS_NewCFunction(ctx, js_sam_set_scale, "sam_set_scale", 2));
+		JS_SetPropertyStr(ctx, g, "sam_set_visible", JS_NewCFunction(ctx, js_sam_set_visible, "sam_set_visible", 2));
 		JS_SetPropertyStr(ctx, g, "sam_monster_equip", JS_NewCFunction(ctx, js_sam_monster_equip, "sam_monster_equip", 6));
 		JS_SetPropertyStr(ctx, g, "sam_monster_unequip", JS_NewCFunction(ctx, js_sam_monster_unequip, "sam_monster_unequip", 2));
 		JS_SetPropertyStr(ctx, g, "sam_apply_monster_effect", JS_NewCFunction(ctx, js_sam_apply_monster_effect, "sam_apply_monster_effect", 3));

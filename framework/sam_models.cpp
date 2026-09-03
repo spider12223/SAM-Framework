@@ -101,6 +101,195 @@ namespace
 	//
 	// Returns true when the file is a slab we can safely hand over. On false, `why` explains
 	// it in terms the modder can act on.
+
+	// ---- MagicaVoxel -> Barony slab -------------------------------------------------
+	//
+	// Barony's loader reads only the SLAB format and asserts on anything else, so a
+	// MagicaVoxel export used to be refused with an explanation and nothing more. This
+	// converts it in memory at load time instead. Nothing is written to disk and every
+	// machine converts the same bytes to the same voxels, so it changes nothing about model
+	// indices or multiplayer.
+	//
+	// MagicaVoxel is a RIFF-ish chunk format:
+	//   "VOX " int32 version
+	//   then chunks: char[4] id, int32 contentBytes, int32 childBytes, content, children
+	// The chunks that matter are SIZE (three int32) and XYZI (int32 count, then count
+	// records of x,y,z,colourIndex as bytes), plus an optional RGBA of 256 x (r,g,b,a).
+	//
+	// ORIENTATION, and this is the part that is easy to get wrong: MagicaVoxel is Z-UP, and
+	// Barony's slab is Z-DOWN -- array index z=0 is the TOP of the model. Verified against a
+	// shipped asset: models/decorations/Chair.vox is 10x8x20 with its seat plane at z=13, its
+	// backrest at z=0..12 and its legs at z=14..19. So Z has to be flipped.
+	//
+	// Flipping Z ALONE would be a reflection and would mirror every model (a left boot would
+	// arrive as a right one). Flipping a second axis makes the pair a 180-degree rotation
+	// about X, which preserves handedness. The model ends up facing the opposite way in the
+	// horizontal plane, which yaw_offset already exists to correct.
+	bool samReadWholeFile(const std::string& physfsPath, std::vector<unsigned char>& out)
+	{
+		PHYSFS_File* fh = PHYSFS_openRead(physfsPath.c_str());
+		if ( !fh ) { return false; }
+		const PHYSFS_sint64 len = PHYSFS_fileLength(fh);
+		if ( len <= 0 || len > (PHYSFS_sint64)(64 * 1024 * 1024) ) { PHYSFS_close(fh); return false; }
+		out.resize((size_t)len);
+		const PHYSFS_sint64 got = PHYSFS_readBytes(fh, out.data(), (PHYSFS_uint64)len);
+		PHYSFS_close(fh);
+		return got == len;
+	}
+
+	bool samIsMagicaVoxel(const std::string& physfsPath)
+	{
+		PHYSFS_File* fh = PHYSFS_openRead(physfsPath.c_str());
+		if ( !fh ) { return false; }
+		unsigned char magic[4] = { 0 };
+		const PHYSFS_sint64 got = PHYSFS_readBytes(fh, magic, 4);
+		PHYSFS_close(fh);
+		return got == 4 && magic[0] == 'V' && magic[1] == 'O' && magic[2] == 'X' && magic[3] == ' ';
+	}
+
+	Sint32 samRd32(const std::vector<unsigned char>& b, size_t off)
+	{
+		return (Sint32)((Uint32)b[off] | ((Uint32)b[off + 1] << 8)
+			| ((Uint32)b[off + 2] << 16) | ((Uint32)b[off + 3] << 24));
+	}
+
+	// Returns a fresh voxel_t on success (caller owns it), or nullptr with `why` filled.
+	voxel_t* samConvertMagicaVoxel(const std::string& physfsPath, std::string& why)
+	{
+		why.clear();
+		std::vector<unsigned char> b;
+		if ( !samReadWholeFile(physfsPath, b) || b.size() < 8 )
+		{
+			why = "The file could not be read, or is too small to be a MagicaVoxel model.";
+			return nullptr;
+		}
+
+		Sint32 sx = 0, sy = 0, sz = 0;
+		bool haveSize = false, haveVoxels = false, haveRgba = false;
+		std::vector<unsigned char> xyzi;      // raw voxel records, 4 bytes each
+		unsigned char rgba[256][4];
+		memset(rgba, 0, sizeof(rgba));
+		int modelsSeen = 0;
+
+		// Walk the chunk tree flatly: every chunk header is the same shape, and the ones we
+		// care about are all direct children of MAIN.
+		size_t p = 8;   // past "VOX " + version
+		while ( p + 12 <= b.size() )
+		{
+			const char id[5] = { (char)b[p], (char)b[p + 1], (char)b[p + 2], (char)b[p + 3], 0 };
+			const Sint32 contentBytes = samRd32(b, p + 4);
+			const Sint32 childBytes   = samRd32(b, p + 8);
+			if ( contentBytes < 0 || childBytes < 0 ) { break; }
+			const size_t content = p + 12;
+			if ( content + (size_t)contentBytes > b.size() ) { break; }
+
+			if ( !strcmp(id, "SIZE") && contentBytes >= 12 )
+			{
+				++modelsSeen;
+				if ( !haveSize )
+				{
+					sx = samRd32(b, content);
+					sy = samRd32(b, content + 4);
+					sz = samRd32(b, content + 8);
+					haveSize = true;
+				}
+			}
+			else if ( !strcmp(id, "XYZI") && contentBytes >= 4 )
+			{
+				// Only the FIRST model's voxels, and only once its SIZE has been seen. Without
+				// the modelsSeen test a first XYZI with a zero or lying count would be skipped
+				// and the SECOND model's voxels would be pasted into the first model's
+				// dimensions -- a garbled model rather than an honest failure.
+				if ( !haveVoxels && haveSize && modelsSeen == 1 )
+				{
+					const Sint32 n = samRd32(b, content);
+					if ( n > 0 && (size_t)contentBytes >= 4 + (size_t)n * 4 )
+					{
+						xyzi.assign(b.begin() + (content + 4), b.begin() + (content + 4 + (size_t)n * 4));
+						haveVoxels = true;
+					}
+				}
+			}
+			else if ( !strcmp(id, "RGBA") && contentBytes >= 256 * 4 )
+			{
+				memcpy(rgba, &b[content], 256 * 4);
+				haveRgba = true;
+			}
+
+			// MAIN has no content of its own and everything else lives in its children, so
+			// descend into children rather than skipping them.
+			if ( !strcmp(id, "MAIN") ) { p = content; }
+			else { p = content + (size_t)contentBytes; }
+		}
+
+		if ( !haveSize || !haveVoxels )
+		{
+			why = "This MagicaVoxel file has no model in it (no SIZE/XYZI chunk).";
+			return nullptr;
+		}
+		// MagicaVoxel's own hard limit is 256 per axis, so anything larger is a corrupt or
+		// hostile header rather than a real model -- and 512^3 would have committed a 128MB
+		// allocation off one lying int.
+		if ( sx <= 0 || sy <= 0 || sz <= 0 || sx > 256 || sy > 256 || sz > 256 )
+		{
+			why = "The model is " + std::to_string(sx) + "x" + std::to_string(sy) + "x"
+				+ std::to_string(sz) + ", which is not a size Barony can use.";
+			return nullptr;
+		}
+		if ( modelsSeen > 1 )
+		{
+			SAM_WARN(MOD, "'" + physfsPath + "' contains " + std::to_string(modelsSeen)
+				+ " models; Barony has one model per file, so only the first was converted.");
+		}
+		if ( !haveRgba )
+		{
+			// MagicaVoxel omits RGBA when the model uses its built-in default palette. We do
+			// not carry a copy of that table, and inventing colours would be worse than
+			// saying so.
+			why = "This MagicaVoxel file carries no palette (no RGBA chunk), which happens when"
+				" the model uses the default palette untouched. Recolour any voxel in"
+				" MagicaVoxel and save again so the palette is written out.";
+			return nullptr;
+		}
+
+		voxel_t* model = (voxel_t*)malloc(sizeof(voxel_t));
+		if ( !model ) { why = "Out of memory."; return nullptr; }
+		model->sizex = sx; model->sizey = sy; model->sizez = sz;
+		const size_t cells = (size_t)sx * (size_t)sy * (size_t)sz;
+		model->data = (Uint8*)malloc(cells);
+		if ( !model->data ) { free(model); why = "Out of memory."; return nullptr; }
+		memset(model->data, 255, cells);   // 255 is AIR in Barony's slab
+
+		// MagicaVoxel colour index i (1..255) is palette entry i-1; Barony keeps 255 for air
+		// and uses 0..254, so the index maps straight down by one.
+		for ( size_t i = 0; i + 3 < xyzi.size(); i += 4 )
+		{
+			const int vx = xyzi[i], vy = xyzi[i + 1], vz = xyzi[i + 2];
+			const int ci = xyzi[i + 3];
+			if ( ci <= 0 ) { continue; }
+			if ( vx >= sx || vy >= sy || vz >= sz ) { continue; }
+			// Same ordering files.cpp walks: index = z + y*sizez + x*sizey*sizez, with Z and Y
+			// flipped for the orientation reason above.
+			const size_t fz = (size_t)(sz - 1 - vz);
+			const size_t fy = (size_t)(sy - 1 - vy);
+			const size_t idx = fz + fy * (size_t)sz + (size_t)vx * (size_t)sy * (size_t)sz;
+			model->data[idx] = (Uint8)(ci - 1);
+		}
+
+		// A slab file stores 6-bit channels and loadVoxel expands them with << 2 after
+		// reading. We are building the voxel_t ourselves and never go through loadVoxel, so
+		// store MagicaVoxel's 8-bit values as they are -- shifting down and back up here
+		// would only throw away the low two bits of every colour. Alpha is dropped: the
+		// slab format has none.
+		for ( int c = 0; c < 256; ++c )
+		{
+			model->palette[c][0] = rgba[c][0];
+			model->palette[c][1] = rgba[c][1];
+			model->palette[c][2] = rgba[c][2];
+		}
+		return model;
+	}
+
 	bool samValidateSlab(const std::string& physfsPath, std::string& why)
 	{
 		why.clear();
@@ -235,10 +424,29 @@ int SAMModels::appendModels(const std::vector<Request>& requests)
 			continue;
 		}
 
+		// A MagicaVoxel export is converted in memory rather than refused. It is the format
+		// every voxel tool produces and Barony reads none of it, so this used to be exactly
+		// where a modder's first model died.
+		voxel_t* samConverted = nullptr;
+		if ( samIsMagicaVoxel(r.physfsPath) )
+		{
+			std::string convWhy;
+			samConverted = samConvertMagicaVoxel(r.physfsPath, convWhy);
+			if ( !samConverted )
+			{
+				SAM_ERROR(MOD, "Model '" + r.physfsPath + "' for " + who
+					+ " is a MagicaVoxel file that could not be converted. " + convWhy);
+				continue;
+			}
+			SAM_INFO(MOD, "Converted MagicaVoxel model '" + r.physfsPath + "' ("
+				+ std::to_string(samConverted->sizex) + "x" + std::to_string(samConverted->sizey)
+				+ "x" + std::to_string(samConverted->sizez) + ") for " + who + ".");
+		}
+
 		// Refuse a file we cannot prove is a slab, BEFORE loadVoxel gets a chance to
 		// segfault on it. See samValidateSlab.
 		std::string why;
-		if ( !samValidateSlab(r.physfsPath, why) )
+		if ( !samConverted && !samValidateSlab(r.physfsPath, why) )
 		{
 			SAM_ERROR(MOD, "Model '" + r.physfsPath + "' for " + who + " was not loaded. "
 				+ why + " Skipping it; the rest still load.");
@@ -264,7 +472,8 @@ int SAMModels::appendModels(const std::vector<Request>& requests)
 		// works with no path juggling on our side. It takes char* (not const).
 		std::vector<char> path(r.physfsPath.begin(), r.physfsPath.end());
 		path.push_back('\0');
-		voxel_t* vox = loadVoxel(path.data());
+		// A converted MagicaVoxel model is already in hand; only a slab goes through loadVoxel.
+		voxel_t* vox = samConverted ? samConverted : loadVoxel(path.data());
 		if ( !vox )
 		{
 			// Validation passed, so this is something else -- out of memory, or a format

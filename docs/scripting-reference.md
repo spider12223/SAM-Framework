@@ -50,6 +50,54 @@ Everything else is a notification. Returning `false` from one does nothing.
 
 ---
 
+## New in 2.5: models at runtime, and richer bodies
+
+### Changing a model while the game runs
+
+Nothing could change a model after spawn before this, which ruled out transformations, boss
+phases, damage states and armour that visibly upgrades.
+
+`sam_set_model(uid, "ns:model")` gives any entity a model by id. `sam_clear_model(uid)` puts it
+back to whatever it would otherwise draw. `sam_get_model(uid)` returns the id a script set, or
+nil. What crosses the wire is the **id**, never a model index, so machines with different mod
+orders agree; every player sees the change.
+
+`sam_set_scale(uid, s)` scales an entity. In multiplayer it is clamped to 1.99 with a warning,
+because Barony quantises scale on the wire in steps of 1/128 with a cap just under 2 — anything
+larger would look right to you and be wrong for everyone else.
+
+`sam_set_visible(uid, shown)` hides a model without touching the entity, so it still collides
+and still acts. It **refuses** on an entity that has a custom body: the draw pass deliberately
+keeps those visible (six vanilla species hide their main entity and rely on it), so hiding one
+this way would not work consistently. Clear the model first, or move it out of sight.
+
+### Custom monster bodies now reach every player
+
+A custom body used to be visible only to the host, because a client holds no stats for an
+ordinary monster and so could not tell what it was. The host now announces the body by **name**
+and each machine resolves it against its own registry. A client that does not have the mod
+falls back to the base creature, which is the correct outcome rather than a desync.
+
+`/sam_bodies` reports what this machine resolved, announced and received — run it on the host
+and on a client to tell "the host never sent it" apart from "the client could not resolve it".
+
+### New JSON
+
+| Where | Field | What it does |
+|---|---|---|
+| race | `first_person` | `{ arm, hand_left }` — what YOU see of your own body. Local only. |
+| race | `extra_limbs` | Up to 13 extra limbs: a tail, wings, horns. Seen by every player. |
+| race | `limb_models.<slot>` | May now be an object: `{ model, scale, offset, pitch, roll }`. |
+| monster | `body.cast` | Shown while casting. Seen by every player. |
+| monster | `body.death` | Shown on the corpse poof. Host-side only for now. |
+| item | `model_states` | `broken` / `cursed` / `blessed` / `unidentified` world models. |
+| item | `model_fp_states` | The same for the first-person view. |
+
+Item states are checked most specific first: **broken, then unidentified, then cursed, then
+blessed**. Unidentified deliberately outranks the two beatitude states, because a player who has
+not identified an item is not supposed to learn from its model whether it is blessed or cursed.
+
+
 ## New in 2.4: the creature toolkit
 
 ### Monsters

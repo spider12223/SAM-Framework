@@ -9,24 +9,39 @@ marks anything that came out of the base game rather than your mod.
 
 ---
 
-## The format: slab, not MagicaVoxel
+## The format: slab, and MagicaVoxel
 
 Barony reads a format usually called **slab** `.vox`. MagicaVoxel's own `.vox` export is a
-completely different format that happens to use the same extension.
+completely different format that happens to use the same extension, and the engine's own
+loader cannot read it.
 
-Build the model in whatever you like. Just make sure what you ship is slab. If it is not, the
-load is refused and `sam_log.txt` says so by name:
+**Since 2.5 you can ship either.** A MagicaVoxel file is converted in memory when the mod
+loads. Nothing is written to disk, your file is left exactly as you saved it, and every
+machine converts the same bytes to the same voxels, so it changes nothing about multiplayer.
+The log says which happened:
 
 ```
-[MODELS ] Model 'models/mymod/wyvern.vox' for [mymod:wyvern] was not loaded. This is a
-          MagicaVoxel .vox, which Barony cannot read. The two formats share an extension and
-          nothing else -- convert it to Barony slab format.
+[MODELS ] Converted MagicaVoxel model 'models/mymod/wyvern.vox' (32x28x40) for [mymod:wyvern].
 ```
+
+Two things to know about MagicaVoxel files:
+
+- **One model per file.** MagicaVoxel can hold several; Barony has one model per file, so only
+  the first is used and the log says so.
+- **Save with a palette.** If you never recolour anything, MagicaVoxel writes no palette chunk
+  because the model is on its untouched default palette. There is no way to guess what you saw,
+  so the load is refused with an explanation. Recolour any single voxel and save again.
+
+Orientation is handled for you. MagicaVoxel is Z-up; a Barony slab has Z pointing **down**
+(array index 0 is the top of the model, which is why a vanilla chair has its legs at the high
+end). The converter rotates the model so it arrives the right way up. It rotates rather than
+mirrors, so a left boot stays a left boot; the model may end up facing the other way in the
+horizontal plane, which `yaw_offset` exists to correct.
 
 A slab file is exactly `12 + width*height*depth + 768` bytes: three little-endian `int32`
-dimensions, one palette-index byte per voxel, then a 768-byte RGB palette. The framework
-checks that before it hands the file to the engine, because the engine's loader trusts those
-dimensions and will crash on a file that is neither slab nor MagicaVoxel.
+dimensions, one palette-index byte per voxel (255 means empty), then a 768-byte RGB palette
+whose channels are 6-bit. The framework checks that before it hands a slab to the engine,
+because the engine's loader trusts those dimensions and will crash on a file that is neither.
 
 ---
 

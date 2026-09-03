@@ -29,6 +29,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 class Entity;
 
@@ -47,9 +48,6 @@ public:
 	// immediately when nothing is registered, which is the vanilla no-op path.
 	static int modelForEntity(const Entity* entity);
 
-	// Extra rotation (DEGREES about the vertical axis) for this entity's custom body, or 0.
-	// A .vox authored facing a different way than Barony expects would otherwise render
-	// sideways, and re-exporting every frame is a worse fix than one number in the JSON.
 	// True when this entity is invisible because of an EFFECT (a potion or a spell) rather
 	// than because its species structurally hides its main entity. The draw pass un-skips a
 	// custom body so the six "AI bodypart" monsters stay visible; without this it also
@@ -57,6 +55,9 @@ public:
 	// clickable. Answers false for everything in vanilla.
 	static bool hiddenByEffect(const Entity* entity);
 
+	// Extra rotation (DEGREES about the vertical axis) for this entity's custom body, or 0.
+	// A .vox authored facing a different way than Barony expects would otherwise render
+	// sideways, and re-exporting every frame is a worse fix than one number in the JSON.
 	static double yawOffsetForEntity(const Entity* entity);
 
 	// Model offset for this entity's custom body, in the model's OWN facing (voxels).
@@ -64,6 +65,51 @@ public:
 	// Lets a long creature put its HEAD on the entity origin, which is where the engine
 	// spawns attacks from -- otherwise a dragon appears to bite you with its belly.
 	static bool offsetForEntity(const Entity* entity, double& fwd, double& side, double& up);
+
+	// ---- multiplayer: carrying a body to the clients ("SAMB") ----------------------
+	//
+	// A client cannot work out a monster's body for itself: it holds no Stat for an ordinary
+	// monster, so the variant name the body is keyed on is simply not there. The host tells
+	// it. What crosses the wire is the NAME, never a model index -- a name re-resolves
+	// against each machine's own registry, so two players whose mod lists sort differently
+	// still see the same creature, which an index could never guarantee.
+	// 127 covers Stat::name (char[128]) in full. 9 + 127 is still far inside NET_PACKET_SIZE,
+	// and truncating a name would have made the client resolve nothing and negative-cache the
+	// creature permanently -- a silent, unrecoverable wrong model.
+	static const size_t SAM_BODY_MAX_NAME = 127;
+
+	// Host: announce this monster's body to every connected client, once. Cheap to call
+	// every tick for every monster -- it is one hash-set lookup once a monster is known, and
+	// it returns immediately when no mod declares a body or the game is not a server.
+	static void hostAnnounce(const Entity* entity);
+
+	// Host: forget who has been told what, so everything is announced again. Called when a
+	// player joins, because a late joiner has heard none of the earlier announcements.
+	static void reannounceAll();
+
+	// Client: record the body name the host sent for this uid.
+	static void applyRemote(uint32_t uid, const std::string& bodyName);
+
+	// ---- runtime model control (sam_set_model) -------------------------------------
+	// Give this entity a model by ID at runtime and tell every client. Returns false when
+	// the id is not registered. Pass an empty id to clear it and let the entity go back to
+	// whatever it would otherwise draw.
+	static bool setBodyById(uint32_t uid, const std::string& modelId);
+	static void clearBodyById(uint32_t uid);
+	// The id a script set on this entity, or "" if none. Not the JSON body: only what a
+	// script put there, because that is the only thing a script can meaningfully read back.
+	static std::string bodyIdFor(uint32_t uid);
+
+	// The model a death gib should carry: the body's `death` state if declared, else whatever
+	// it was already drawing. Called by spawnGib, because a monster is gone the tick it dies.
+	static int deathModelForEntity(const Entity* entity);
+
+	// Diagnosis for /sam_bodies: how many bodies this machine has resolved, how many the
+	// host has announced, and how many names a client has been told. A co-op body problem
+	// is otherwise invisible -- you cannot tell "the host never sent it" from "the client
+	// could not resolve it" by looking at the screen.
+	static int announcedCount();
+	static int remoteCount();
 
 	// Drop every registration (mod unload / new game).
 	static void clear();
