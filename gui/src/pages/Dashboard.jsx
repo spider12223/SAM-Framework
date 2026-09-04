@@ -10,7 +10,7 @@ import { useMod } from '@/state/ModContext.jsx';
 import { Panel, GoldButton } from '@/components/ui.jsx';
 
 /** The framework's own version (mods declare their own framework_min_version). */
-const SAM_FRAMEWORK_VERSION = '2.5.0';
+const SAM_FRAMEWORK_VERSION = '2.5.1';
 
 /** Where players get S.A.M itself (the framework is a dependency, not a mod). */
 const WORKSHOP_URL = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472';
@@ -28,18 +28,14 @@ const TRAVELS = [
  * thing a returning modder sees, and the point is 'here is what you can do now that you
  * could not before', not a changelog. */
 const WHATS_NEW = [
-  ["MagicaVoxel files just work now",
-   "Barony reads its own slab .vox and nothing else, so an export from MagicaVoxel, the tool nearly everyone models in, was rejected outright. It is now converted when your mod loads. Your file is not touched, and the orientation is handled: MagicaVoxel builds upward and a Barony model is stored downward, so the converter turns it the right way up for you."],
-  ["Change a model while the game is running",
-   "sam_set_model, sam_clear_model, sam_get_model, sam_set_scale and sam_set_visible. Nothing could change a model after it spawned before, which ruled out transformations, boss phases, damage states and armour that visibly upgrades. What travels between players is the model's name, not its number, so everyone sees the same thing even with different mod lists."],
-  ["Custom monsters look right to everyone",
-   "A custom creature body used to be visible only to the host: everyone else saw a plain rat. The host now tells each player what the creature is, by name, and their game looks it up. Run /sam_bodies on both machines to see it working."],
-  ["Tails, wings, and a body that fits",
-   "A race can declare extra_limbs for parts the host body does not have, and each limb in limb_models can now carry its own scale, offset and angle so your proportions do not have to match somebody else's skeleton. Barony had thirteen unused limb slots sitting there the whole time."],
-  ["See your own hands",
-   "A race can declare first_person models. Until now everyone else saw your custom arms and you saw the host body's."],
-  ["Models that change with state",
-   "A monster body can declare cast and death models; an item can look different when it is broken, cursed, blessed or unidentified. Unidentified deliberately wins over the others, so a model never tells you about an enchantment you have not identified."],
+  ["Every function is finally written down",
+   "The framework shipped 184 script functions and the reference described 48 of them. The other 136 worked perfectly and appeared in no documentation anywhere, which meant nobody could use them. There is now a complete function reference, generated from the API definition itself, so it cannot fall behind the code again."],
+  ["The Mod Builder can see the newest features",
+   "Sixteen functions were missing from the block builder, and they were almost exactly the v2.4 and v2.5 batch: runtime models, script behaviours, the seeded RNG. If you build mods visually, sam_set_model, sam_attach_behavior, sam_random and thirteen others are now there. Eight events were missing too, including the cancellable world.on_before_chest_open."],
+  ["TypeScript mods get autocomplete",
+   "The framework has always run .ts mods and never shipped type definitions for them, so you were typing every call from memory. sam.d.ts now ships with the framework: 184 functions with their arguments, return types and descriptions, plus every event name. Reference it from your mod and your editor does the rest."],
+  ["A gate so the docs cannot drift again",
+   "The drift happened because nothing checked. The ship process now refuses to publish if a function exists in one runtime and not the other, if anything shipped is missing from the API definition, if the definition claims a function the runtime does not have, or if the type definitions do not compile under the TypeScript version the framework ships."],
 ];
 
 /** sam-well stat box: big gold number over a small-caps label. */

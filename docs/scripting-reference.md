@@ -2,6 +2,11 @@
 
 What your script can be told, what it can decide, and what it can change.
 
+> **Looking for a specific function?** This page is a guide, organised by what you are trying
+> to do. For the complete list of every function and event, with arguments and return values,
+> see **[function-reference.md](function-reference.md)** (184 functions, 72 events). That page
+> is generated from the API definition, so it is never out of date.
+
 A script is a `.lua`, `.js` or `.ts` file. Put it next to a class or item JSON with the same
 name, or call it `main.lua` at your mod's root and it loads on its own.
 

@@ -2,6 +2,11 @@
 
 You'll make a tiny mod that adds one class and one item — all JSON, no C++.
 
+> Once you want scripting: **[scripting-reference.md](scripting-reference.md)** is the guide,
+> and **[function-reference.md](function-reference.md)** is the complete list of every
+> function and event. Writing your mod in TypeScript? `sam.d.ts` ships with the framework and
+> gives you autocomplete and type checking for the whole API.
+
 ## 1. Folder layout
 
 ```
