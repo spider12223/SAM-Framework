@@ -109,6 +109,18 @@ export default function Dashboard() {
           <a href="https://github.com/spider12223/SAM-Framework/blob/main/docs/scripting-reference.md"
              target="_blank" rel="noreferrer" style={{ color: 'var(--color-gold)' }}>scripting reference</a>.
         </div>
+        <div style={{ marginTop: 10 }}>
+          Looking for a specific call? The{' '}
+          <a href="https://github.com/spider12223/SAM-Framework/blob/main/docs/function-reference.md"
+             target="_blank" rel="noreferrer" style={{ color: 'var(--color-gold)' }}>
+            complete function reference
+          </a>{' '}
+          lists all 184 functions and 72 events with their arguments and return values. Writing
+          your mod in TypeScript?{' '}
+          <a href="https://github.com/spider12223/SAM-Framework/releases/latest/download/sam.d.ts"
+             target="_blank" rel="noreferrer" style={{ color: 'var(--color-gold)' }}>sam.d.ts</a>{' '}
+          gives your editor autocomplete and type checking for the whole API.
+        </div>
       </Panel>
 
       {/* ------------------------------------------------------- welcome */}
