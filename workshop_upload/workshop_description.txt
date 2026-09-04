@@ -8,11 +8,24 @@ Barony was never built to be modded. S.A.M is the layer that makes it modded any
 
 [hr][/hr]
 
-[h1]NEW IN 2.0: YOUR MOD CAN THINK[/h1]
+[h1]NEW IN 2.5: EVERY FUNCTION IS WRITTEN DOWN[/h1]
 
-Every version until now added things a mod could do. This one changes what a mod is.
+S.A.M gives your script [b]184 functions[/b] and [b]72 events[/b]. For a long time the documentation described 48 of them, and the other 136 worked perfectly while appearing nowhere anyone could find. That is fixed.
 
-Before 2.0, a mod was a guest that could react. It could be told a player was hit; it could not stop it. It could give a creature different numbers; it could not give it a different mind.
+[b]The complete reference:[/b] every function and event, with its arguments, types and return values, and which calls only run on the host.
+https://github.com/spider12223/SAM-Framework/blob/main/docs/function-reference.md
+
+It is generated from the framework's own API definition rather than written by hand, so it cannot fall behind the code. If a function is missing there, it is missing from the framework.
+
+[b]Writing your mod in TypeScript?[/b] [b]sam.d.ts[/b] now ships in this folder and with every release. Point your editor at it and you get autocomplete, argument names and type checking across the whole API.
+
+[b]Custom models got real in 2.5 too.[/b] MagicaVoxel files are accepted directly and turned the right way up for you, models can be swapped while the game runs, custom creatures finally look right to every player instead of only the host, and a race can use the thirteen limb slots Barony allocates and never used.
+
+[hr][/hr]
+
+[h1]YOUR MOD CAN THINK[/h1]
+
+A mod here is not a guest that can only react. It can be told a player was hit and stop it. It can give a creature different numbers, or a different mind.
 
 [b]Creatures that think for themselves.[/b] Barony runs everything in the world through a function once per frame, and until now that function was always ours. Now your script can BE it. A turret that tracks and leads a moving target. A boss that changes the rules at half health. None of it picked from a list somebody else wrote.
 
@@ -87,6 +100,9 @@ Put the mod folder in [b]...\steamapps\common\Barony\mods\[/b], launch the game,
 [hr][/hr]
 
 [h1]SOURCE AND DOCS[/h1]
+
+[b]Function reference[/b] (all 184 functions and 72 events):
+https://github.com/spider12223/SAM-Framework/blob/main/docs/function-reference.md
 
 S.A.M is open source. Framework, Mod Builder, schemas, docs, and a guide to publishing your own mod:
 

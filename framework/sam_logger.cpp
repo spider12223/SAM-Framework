@@ -388,6 +388,19 @@ void SAMLogger::writeSessionHeader()
 	samEmitPlain(logFile, samBoxLine("Session #" + std::to_string(sessionNumber) + " - " + getDateTimeStamp()));
 	samEmitPlain(logFile, samBoxLine(std::string("Barony v") + SAM_BARONY_TARGET + " - PID " + std::to_string(samProcessId())));
 	samEmitPlain(logFile, std::string(GX_BL) + samRepeat(GX_H, SAM_BOX_INNER) + GX_BR);
+	// Outside the box on purpose: the box is SAM_BOX_INNER (54) columns and samBoxLine
+	// TRUNCATES anything longer, which would silently cut a URL in half.
+	//
+	// This line exists because most of the API was invisible for a long time: the framework
+	// shipped 184 functions while the public guide described 48, and a function nobody can
+	// find is not a feature. This is the only channel that reaches a modder who never opens
+	// GitHub or the Workshop page, since sam_log.txt is what they read when something breaks.
+	//
+	// No function COUNT here on purpose: a number compiled into the exe is precisely the
+	// drift v2.5.1 was written to stop, and it would be wrong the next time a binding lands.
+	samEmitPlain(logFile, "  Every function and event, with arguments and return values:");
+	samEmitPlain(logFile, "  https://github.com/spider12223/SAM-Framework/blob/main/docs/function-reference.md");
+	samEmitPlain(logFile, "");
 }
 
 /*-------------------------------------------------------------------------------

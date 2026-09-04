@@ -10,7 +10,7 @@ import { useMod } from '@/state/ModContext.jsx';
 import { Panel, GoldButton } from '@/components/ui.jsx';
 
 /** The framework's own version (mods declare their own framework_min_version). */
-const SAM_FRAMEWORK_VERSION = '2.5.1';
+const SAM_FRAMEWORK_VERSION = '2.5.2';
 
 /** Where players get S.A.M itself (the framework is a dependency, not a mod). */
 const WORKSHOP_URL = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472';
@@ -28,14 +28,12 @@ const TRAVELS = [
  * thing a returning modder sees, and the point is 'here is what you can do now that you
  * could not before', not a changelog. */
 const WHATS_NEW = [
-  ["Every function is finally written down",
-   "The framework shipped 184 script functions and the reference described 48 of them. The other 136 worked perfectly and appeared in no documentation anywhere, which meant nobody could use them. There is now a complete function reference, generated from the API definition itself, so it cannot fall behind the code again."],
-  ["The Mod Builder can see the newest features",
-   "Sixteen functions were missing from the block builder, and they were almost exactly the v2.4 and v2.5 batch: runtime models, script behaviours, the seeded RNG. If you build mods visually, sam_set_model, sam_attach_behavior, sam_random and thirteen others are now there. Eight events were missing too, including the cancellable world.on_before_chest_open."],
-  ["TypeScript mods get autocomplete",
-   "The framework has always run .ts mods and never shipped type definitions for them, so you were typing every call from memory. sam.d.ts now ships with the framework: 184 functions with their arguments, return types and descriptions, plus every event name. Reference it from your mod and your editor does the rest."],
-  ["A gate so the docs cannot drift again",
-   "The drift happened because nothing checked. The ship process now refuses to publish if a function exists in one runtime and not the other, if anything shipped is missing from the API definition, if the definition claims a function the runtime does not have, or if the type definitions do not compile under the TypeScript version the framework ships."],
+  ["The function list now finds you",
+   "2.5.1 wrote down all 184 functions; this release makes sure people actually see them. Every session header in sam_log.txt now carries a link to the complete reference, which reaches modders who never open GitHub or the Workshop page, because the log is the file they read when something breaks."],
+  ["The Workshop page leads with the reference",
+   "It had been headlined 'NEW IN 2.0' for five releases and never said where the function list lived. It now opens with the reference, the TypeScript definitions, and what 2.5 did for custom models."],
+  ["Everything the docs release added",
+   "A complete function reference generated from the API definition, sixteen functions and eight events restored to this builder, sam.d.ts for TypeScript mods, and a ship gate that refuses to publish if the runtimes, the block definitions and the docs ever disagree again."],
 ];
 
 /** sam-well stat box: big gold number over a small-caps label. */
