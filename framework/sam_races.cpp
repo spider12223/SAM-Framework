@@ -37,6 +37,22 @@ static const char* MOD = "RACES";
 
 namespace
 {
+	// FNV-1a 32 over the race's "namespace:race" id. The same function the rest of the
+	// framework uses for its compact hashes (sam_sync.cpp, sam_backup.cpp); repeated here
+	// rather than shared because those two are file-local and this one has to be stable
+	// FOREVER -- it is on the wire, so changing it would desynchronise two builds.
+	uint32_t samRaceKeyFromIdString(const std::string& s)
+	{
+		uint32_t h = 2166136261u;
+		for ( unsigned char c : s )
+		{
+			h ^= (uint32_t)c;
+			h *= 16777619u;
+		}
+		// 0 is reserved to mean "no custom race", so nudge the one input that could produce it.
+		return ( h == 0u ) ? 1u : h;
+	}
+
 	std::string joinPath(const std::string& dir, const std::string& file)
 	{
 		if ( dir.empty() ) { return file; }
@@ -110,6 +126,7 @@ namespace
 
 	// Registry — EMPTY in vanilla (the whole no-op guarantee).
 	std::map<int, SAMRaceDef> s_byId;            // runtime id 200..255 -> def
+	std::map<uint32_t, int> s_byKey;             // stable cross-machine key -> local runtime id
 	std::map<std::string, int> s_byIdString;      // "ns:race" -> id
 	int s_nextId = SAM_RACE_ID_BASE;
 }
@@ -430,6 +447,26 @@ void SAMRaces::loadFromManifest(const SAMModManifest& manifest)
 		def.numericId = s_nextId++;
 		s_byId[def.numericId] = def;
 		s_byIdString[def.id] = def.numericId;
+
+		// The cross-machine key. FNV-1a over the id string the mod author wrote, which is the
+		// one name for this race that every machine agrees on. A collision would silently swap
+		// two races between players, so it is checked rather than assumed: with a handful of
+		// races the odds are negligible, but "negligible" is not a thing to find out about
+		// from a bug report.
+		{
+			const uint32_t key = samRaceKeyFromIdString(def.id);
+			auto clash = s_byKey.find(key);
+			if ( clash != s_byKey.end() )
+			{
+				SAM_ERROR(MOD, "Race id [" + def.id + "] hashes to the same cross-machine key as ["
+					+ s_byId[clash->second].id + "]. One of the two must be renamed or they will"
+					" swap places between players in multiplayer. Keeping the first.");
+			}
+			else
+			{
+				s_byKey[key] = def.numericId;
+			}
+		}
 		SAM_INFO(MOD, "Registered race: " + def.name + " [" + def.id + "] -> id "
 			+ std::to_string(def.numericId) + " on body " + def.hostBodyName
 			+ " (STR " + std::to_string(def.str) + " DEX " + std::to_string(def.dex)
@@ -773,6 +810,7 @@ void SAMRaces::clear()
 	s_byId.clear();
 	s_byIdString.clear();
 	s_nextId = SAM_RACE_ID_BASE;
+	s_byKey.clear();
 }
 
 bool SAMRaces::any() { return !s_byId.empty(); }
@@ -838,6 +876,21 @@ int SAMRaces::raceIdAtIndex(int index)
 	auto it = s_byId.begin();
 	std::advance(it, index);
 	return it->first;
+}
+
+uint32_t SAMRaces::raceKeyFor(int raceId)
+{
+	if ( raceId < SAM_RACE_ID_BASE || s_byId.empty() ) { return 0; }
+	auto it = s_byId.find(raceId);
+	if ( it == s_byId.end() ) { return 0; }
+	return samRaceKeyFromIdString(it->second.id);
+}
+
+int SAMRaces::raceIdForKey(uint32_t key)
+{
+	if ( key == 0 || s_byKey.empty() ) { return -1; }
+	auto it = s_byKey.find(key);
+	return ( it != s_byKey.end() ) ? it->second : -1;
 }
 
 int SAMRaces::raceIdForIdString(const std::string& idString)

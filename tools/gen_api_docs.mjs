@@ -16,9 +16,9 @@
 //   node tools/gen_api_docs.mjs          write the outputs
 //   node tools/gen_api_docs.mjs --check  verify only, non-zero exit on drift (for the ship gate)
 
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { dirname, join } from 'node:path'
+import { dirname, join, sep } from 'node:path'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(HERE, '..')
@@ -28,6 +28,24 @@ const LUA_SRC = join(ROOT, 'framework', 'sam_lua_runtime.cpp')
 const JS_SRC = join(ROOT, 'framework', 'sam_js_runtime.cpp')
 const OUT_MD = join(ROOT, 'docs', 'function-reference.md')
 const OUT_DTS = join(ROOT, 'gui', 'public', 'sam.d.ts')
+
+// Every copy of these two files that ships, not just the two canonical ones.
+//
+// This tool wrote OUT_MD and OUT_DTS and stopped, and there are four copies in the tree.
+// The one sync_workshop.sh reads as its SOURCE (../workshop_upload) was not written, so the
+// Workshop payload went out advertising 184 functions while samApi.js declared 245: exactly
+// the drift this tool exists to prevent, reintroduced one directory over. gui/dist is a
+// build output, but it is the copy GitHub Pages actually serves, so a stale one is a stale
+// public download until someone remembers to rebuild.
+//
+// Each entry is skipped when its directory is absent, so a checkout of SAM-Framework on its
+// own still works.
+const REPO = join(ROOT, '..')
+const EXTRA = [
+  [join(REPO, 'workshop_upload', 'function-reference.md'), 'md', 'sync source read by sync_workshop.sh'],
+  [join(REPO, 'workshop_upload', 'sam.d.ts'), 'dts', 'sync source read by sync_workshop.sh'],
+  [join(ROOT, 'gui', 'dist', 'sam.d.ts'), 'dts', 'the copy Pages serves'],
+]
 
 const api = await import('file://' + join(ROOT, 'gui', 'src', 'data', 'samApi.js').replace(/\\/g, '/'))
 const FUNCS = api.SAM_FUNCTIONS
@@ -80,7 +98,9 @@ if (problems.length) {
   process.exit(1)
 }
 console.log(`ok  ${lua.size} functions and ${EVENTS.length} events agree across both runtimes and samApi.js`)
-if (CHECK_ONLY) process.exit(0)
+// NOT an early exit any more. --check used to stop here, which meant the ship gate never
+// reached the TypeScript parse or the parameter-type check below: the only two checks that
+// look at what mod authors actually receive. It now runs everything and skips the writes.
 
 // ---------------------------------------------------------------- the reference
 // samApi.js grew case-drifted category names over many releases ("combat" and "Combat",
@@ -149,18 +169,50 @@ for (const e of [...EVENTS].sort((a, b) => a.name.localeCompare(b.name))) {
 }
 
 // ---------------------------------------------------------------- the .d.ts
+// Every spelling a `params` type may start with, and what it becomes in TypeScript.
+//
+// This used to end in `return 'string'`, so anything unrecognised became a string parameter
+// without a word: "uid" on five functions (sam_cast_spell_at among them), "colour (optional)"
+// on four UI functions whose documented value is the number 0xRRGGBBAA, "any" on fifteen, and
+// "function(uid)" on sam_register_behavior. A TypeScript mod written from the documentation
+// would not compile against a single one of them.
+const TS_TYPES = [
+  [/^(int|number|float|uid|colour|color)/, 'number'],
+  [/^bool/, 'boolean'],
+  [/^(table|object|array|any)/, 'any'],
+  [/^function/, '(...args: any[]) => any'],
+  [/^string/, 'string'],
+]
+// A spelling nobody anticipated now stops the tool instead of quietly becoming a string.
+const tsUnknown = new Set()
 const tsType = t => {
   const s = String(t || '').toLowerCase()
-  if (s.startsWith('int') || s.startsWith('number')) return 'number'
-  if (s.startsWith('bool')) return 'boolean'
-  if (s.startsWith('table') || s.startsWith('object') || s.startsWith('array')) return 'any'
-  return 'string'
+  for (const [re, out] of TS_TYPES) { if (re.test(s)) return out }
+  tsUnknown.add(s)
+  return 'any'
 }
-const tsRet = r => {
+// An entry may state its TypeScript return type outright with `ts:`, and that always
+// wins. Without it this guesses from the English prose, which is fine for a plain number
+// or boolean and wrong for anything shaped: five functions that return arrays or objects
+// were typed `number` and `boolean`, so correct TypeScript failed to compile and incorrect
+// TypeScript compiled silently. Prose is not a type system; `ts:` is the escape hatch.
+// "or nil" / "or null" in a `returns` string is not prose: the binding really pushes nil
+// there, and a definition that promises `number` lets `sam_get_item_value(uid) + 1` compile
+// against a value that is null at runtime. Nullability is appended to whatever the base type
+// works out to, except void (nothing to widen) and any (already includes it).
+const tsRet = (r, explicit) => {
+  if (explicit) return explicit
+  const base = tsRetBase(r)
+  const s = (r || '').toLowerCase()
+  return (base !== 'void' && base !== 'any' && /\b(nil|null)\b/.test(s)) ? base + ' | null' : base
+}
+const tsRetBase = (r) => {
   const s = String(r || '').toLowerCase()
   if (!s || s === 'nothing') return 'void'
+  // Shaped returns are tested BEFORE boolean: "a table/object with ... (booleans)" is an
+  // object, and the old order matched the word "boolean" inside it first.
+  if (s.includes('array') || s.includes('table') || s.includes('object')) return 'any'
   if (s.includes('boolean')) return 'boolean'
-  if (s.includes('array') || s.includes('table')) return 'any[]'
   if (s.includes('number') || s.includes('int')) return 'number'
   if (s.includes('string')) return 'string'
   return 'any'
@@ -194,7 +246,7 @@ declare global {
 for (const f of FUNCS.slice().sort((a, b) => a.name.localeCompare(b.name))) {
   const doc = (f.desc || '').replace(/\*\//g, '*\\/')
   dts += `  /**\n   * ${doc}${f.hostOnly ? '\n   *\n   * Host-only: refused on a multiplayer client.' : ''}\n   */\n`
-  dts += `  function ${f.name}(${(f.params || []).map(p => `${safeParam(p.name)}${/optional/i.test(p.type) ? '?' : ''}: ${tsType(p.type)}`).join(', ')}): ${tsRet(f.returns)};\n\n`
+  dts += `  function ${f.name}(${(f.params || []).map(p => `${safeParam(p.name)}${/optional/i.test(p.type) ? '?' : ''}: ${tsType(p.type)}`).join(', ')}): ${tsRet(f.returns, f.ts)};\n\n`
 }
 dts += `  /** Every event name the engine fires. */\n  type SamEventName =\n${EVENTS.map(e => `    | ${JSON.stringify(e.name)}`).sort().join('\n')};\n\n`
 dts += `  interface SamEvent {\n    name: SamEventName;\n    [field: string]: any;\n  }\n`
@@ -220,7 +272,23 @@ try {
   console.warn('note: typescript.js not found beside the repo, skipped .d.ts validation')
 }
 
+if (tsUnknown.size) {
+  console.error(`samApi.js uses ${tsUnknown.size} parameter type spelling(s) this tool does not`
+    + ' recognise, so it cannot choose a TypeScript type and would have silently used `any`:')
+  for (const t of [...tsUnknown].sort()) console.error(`  "${t}"`)
+  console.error('Add the spelling to TS_TYPES in this file, or use one that is already there.')
+  process.exit(1)
+}
+console.log('ok  every parameter type maps to a real TypeScript type')
+
+if (CHECK_ONLY) process.exit(0)
+
 writeFileSync(OUT_MD, md, 'utf8')
 writeFileSync(OUT_DTS, dts, 'utf8')
+for (const [p, kind, why] of EXTRA) {
+  if (!existsSync(dirname(p))) continue
+  writeFileSync(p, kind === 'md' ? md : dts, 'utf8')
+  console.log(`  also wrote ${p.replace(REPO + sep, '')}  (${why})`)
+}
 console.log(`wrote docs/function-reference.md (${md.split('\n').length} lines)`)
 console.log(`wrote gui/public/sam.d.ts (${dts.split('\n').length} lines)`)

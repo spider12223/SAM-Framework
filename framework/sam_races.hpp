@@ -21,6 +21,7 @@
 #pragma once
 
 #include <string>
+#include <cstdint>   // uint32_t: the cross-machine race key
 #include <vector>
 #include <map>
 
@@ -152,6 +153,23 @@ public:
 
 	// Reverse lookup: runtime race id for a "namespace:race" id string, or -1.
 	static int raceIdForIdString(const std::string& idString);
+
+	// ---- cross-machine race identity ------------------------------------------------
+	//
+	// A race's numeric id is assigned in registration order and is therefore MACHINE-LOCAL:
+	// id 200 is "whichever race mod this machine happened to walk first". Sending that number
+	// to another player is how a modded body arrives as the wrong creature. These two turn the
+	// race's "namespace:race" id -- which every machine agrees on, because the mod author
+	// wrote it -- into a stable 32-bit key that can travel instead.
+	//
+	// raceKeyFor returns 0 for a vanilla race, an unregistered id, or an empty registry, and 0
+	// is never a valid key: it is the value that means "no custom race here", so a packet that
+	// carries a zero key is indistinguishable from one sent by a machine with no race mods.
+	static uint32_t raceKeyFor(int raceId);
+
+	// The LOCAL id for a key, or -1 when this machine does not have that race. -1 is the
+	// signal to leave whatever the caller already had alone rather than guess.
+	static int raceIdForKey(uint32_t key);
 
 	// --- application into the running game (defined only in the game build) ---
 	// The Monster body a race renders as. For a registered SAM race -> its host

@@ -10,7 +10,7 @@ Barony was never built to be modded. S.A.M is the layer that makes it modded any
 
 [h1]NEW IN 2.5: EVERY FUNCTION IS WRITTEN DOWN[/h1]
 
-S.A.M gives your script [b]184 functions[/b] and [b]72 events[/b]. For a long time the documentation described 48 of them, and the other 136 worked perfectly while appearing nowhere anyone could find. That is fixed.
+S.A.M gives your script [b]245 functions[/b] and [b]72 events[/b]. For a long time the documentation described 48 of them, and the other 136 worked perfectly while appearing nowhere anyone could find. That is fixed.
 
 [b]The complete reference:[/b] every function and event, with its arguments, types and return values, and which calls only run on the host.
 https://github.com/spider12223/SAM-Framework/blob/main/docs/function-reference.md
@@ -65,7 +65,7 @@ Build a class, item, monster, spell or effect with dropdowns and sliders, watch 
 
 JSON says what your content [i]is[/i]. A script says what it [i]does[/i]. Drop a .lua, .js or .ts file next to any JSON and it loads automatically. TypeScript is compiled for you.
 
-[b]72 events[/b] to react to, and now to change. [b]184 functions[/b] to act with: grant items and gold, read and set stats, apply effects, cast spells, deal or change damage, teleport, spawn monsters, run your own per frame logic on anything you spawn, open windows, timers, saved data, screen effects, and live patching that reverts when your mod unloads.
+[b]72 events[/b] to react to, and now to change. [b]245 functions[/b] to act with: grant items and gold, read and set stats, apply effects, cast spells, deal or change damage, teleport, spawn monsters, run your own per frame logic on anything you spawn, open windows, timers, saved data, screen effects, and live patching that reverts when your mod unloads.
 
 Only two functions ever get called: [b]on_event(event)[/b] and [b]on_tick(event)[/b].
 
@@ -101,7 +101,7 @@ Put the mod folder in [b]...\steamapps\common\Barony\mods\[/b], launch the game,
 
 [h1]SOURCE AND DOCS[/h1]
 
-[b]Function reference[/b] (all 184 functions and 72 events):
+[b]Function reference[/b] (all 245 functions and 72 events):
 https://github.com/spider12223/SAM-Framework/blob/main/docs/function-reference.md
 
 S.A.M is open source. Framework, Mod Builder, schemas, docs, and a guide to publishing your own mod:

@@ -64,6 +64,11 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 #ifndef EDITOR   // these subsystems are GAME_SOURCES only; the editor links neither
 	SAMEffects::clear(); // drop custom status effects -> vanilla
 	SAMRaces::clear(); // drop custom playable races -> vanilla
+	// SAMBodies caches RESOLVED engine model indices per entity uid. The model range is freed
+	// and rebuilt later in this same load, so anything cached from the previous one points at
+	// a slot that may now hold a different model. It was cleared only on unload, which never
+	// runs on a mods-on -> mods-on reload.
+	SAMBodies::clear();
 	SAMSounds::clear(); // drop staged custom sounds (engine table reset on next append)
 	SAMRecipes::clear(); // drop tinkering recipes -> vanilla craftable grid
 	SAMWorkbench::clear(); // and the built-in bench, so it re-installs this cycle
@@ -338,11 +343,12 @@ void SAMLoader::unload()
 	// background, which skips the Frame::guiDestroy branch -- so without this the mod's
 	// widgets keep drawing over a main menu that now claims to be vanilla.
 	SAMHud::clearAll();   // drop the script HUD container and every widget under it
-	// NOTE: do NOT call SAMModels::clear() here. The id->index map IS the append-time
-	// duplicate guard: appendModels skips an id already in it. Dropping the map on unload
-	// makes the next load re-append every .vox the engine still holds, growing the model
-	// table and its VBOs without bound across mods-off/mods-on cycles. The stale-index
-	// concern it was meant to address is handled by ids being re-resolved on each load.
+	// NOTE: calling SAMModels::clear() here is unnecessary, not dangerous -- appendModels
+	// clears the map itself and rebuilds its whole range from a pinned base on every load.
+	// It used to be dangerous: the map was the only thing stopping a re-append, so dropping
+	// it grew the model table and its VBOs without bound across mods-off/mods-on cycles.
+	// That is no longer how it works, and the table now returns to base + N every load.
+	// Leaving it out anyway, because the unload path has no reason to touch it.
 	SAMBodies::clear();   // drop custom creature body tags (they cache model indices)
 	SAMSync::clear();
 	SAMPatcher::clear();  // unmount + wipe the generated patch overlay

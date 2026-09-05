@@ -16,11 +16,24 @@
 #	include "main.hpp"   // models, polymodels, nummodels, voxel_t, polymodel_t
 #	include "files.hpp"  // loadVoxel
 #	include "init.hpp"   // generatePolyModels, generateVBOs
+#	include "draw.hpp"   // GL_CHECK_ERR + glDelete*: we free the buffers we asked for
 #endif
 
 namespace
 {
 	const char* MOD = "MODELS";
+
+	// Where the VANILLA model table ends, captured the first time we ever append.
+	//
+	// This is what makes a mod model's index the same on two different machines. It is not
+	// "nummodels right now", which depends on what this session has already loaded and
+	// unloaded; it is the fixed size of the base game's table, which is the line count of
+	// models/models.txt (init.cpp:717). Nothing in the mod system moves it: Barony's own mod
+	// models REPLACE entries inside [1, nummodels) through physfsModelIndexUpdate, and
+	// files.cpp:4038 warns if a model index ever lands outside that range.
+	//
+	// -1 until a mod actually ships a model, so a vanilla session never touches any of this.
+	int s_baseIndex = -1;
 
 	// id -> where it landed, and what file it came from.
 	//
@@ -380,28 +393,127 @@ namespace
 #endif
 }
 
+#ifdef SAM_MODELS_HAVE_BARONY
+namespace
+{
+	// Give back everything S.A.M appended, so the next load can rebuild the range from a
+	// known base instead of stacking on top of it.
+	//
+	// The geometry and GPU half mirrors what the engine does for its own model reloads
+	// (mod_tools.cpp:11900-11917). The voxel itself is freed here as well, which that loop
+	// does NOT do -- physfsModelIndexUpdate replaces vanilla voxels in place, whereas these
+	// are ours: loadVoxel (or the MagicaVoxel converter) allocated them for us.
+	void samReleaseAppendedRange()
+	{
+		if ( s_baseIndex < 0 || (int)nummodels <= s_baseIndex ) { return; }
+
+		for ( int c = s_baseIndex; c < (int)nummodels; ++c )
+		{
+			if ( polymodels )
+			{
+					// numfaces goes with faces. faces==nullptr while numfaces>0 is the one
+				// combination generateVBOs cannot survive: it allocates 9*numfaces floats and
+				// then dereferences faces[i] with no null check (files.cpp:5273-5281).
+				if ( polymodels[c].faces ) { free(polymodels[c].faces); polymodels[c].faces = nullptr; }
+				polymodels[c].numfaces = 0;
+				if ( polymodels[c].vao )
+				{
+					GL_CHECK_ERR(glDeleteVertexArrays(1, &polymodels[c].vao));
+					polymodels[c].vao = 0;
+				}
+				if ( polymodels[c].positions )
+				{
+					GL_CHECK_ERR(glDeleteBuffers(1, &polymodels[c].positions));
+					polymodels[c].positions = 0;
+				}
+				if ( polymodels[c].colors )
+				{
+					GL_CHECK_ERR(glDeleteBuffers(1, &polymodels[c].colors));
+					polymodels[c].colors = 0;
+				}
+				if ( polymodels[c].normals )
+				{
+					GL_CHECK_ERR(glDeleteBuffers(1, &polymodels[c].normals));
+					polymodels[c].normals = 0;
+				}
+			}
+			if ( models && models[c] )
+			{
+				if ( models[c]->data ) { free(models[c]->data); }
+				free(models[c]);
+				models[c] = nullptr;
+			}
+		}
+
+		// Published last, and only downwards to a base the renderer was never drawing past
+		// before we grew it.
+		//
+		// There are TWO callers. The normal one is Mods::loadMods, behind a loading screen, at
+		// the same point the engine already tears its own polymodels down. The other is
+		// /sam_reload (consolecommand.cpp), a debug command documented for main-menu use --
+		// that path was already growing these tables and calling generatePolyModels, so it is
+		// no more exposed than it was, but it is not covered by the loading-screen argument.
+		nummodels = (Uint32)s_baseIndex;
+	}
+}
+#endif
+
 int SAMModels::appendModels(const std::vector<Request>& requests)
 {
 #ifndef SAM_MODELS_HAVE_BARONY
 	(void)requests;
 	return 0;
 #else
-	if ( requests.empty() ) { return 0; }
-
-	const int oldCount = (int)nummodels;
-	if ( oldCount <= 0 || !models )
+	if ( (int)nummodels <= 0 || !models )
 	{
 		SAM_ERROR(MOD, "Model table not initialised yet — refusing to append "
 			+ std::to_string(requests.size()) + " model(s). This must run after the engine has loaded models.txt.");
 		return 0;
 	}
 
+	// Pin the end of the vanilla table the first time through, then REBUILD our range on every
+	// load rather than appending to whatever is already there. This is the whole point: an id's
+	// index now depends only on which mods are loaded, because the request list below was built
+	// from a topologically sorted mod set. It no longer depends on what this session loaded and
+	// unloaded first, which two players cannot see and cannot match.
+	if ( s_baseIndex < 0 ) { s_baseIndex = (int)nummodels; }
+	samReleaseAppendedRange();
+	s_index.clear();
+
+	if ( requests.empty() ) { return 0; }
+
+	const int oldCount = s_baseIndex;
+
 	// Load every voxel FIRST, into a staging list. A .vox that fails to load must not
 	// consume an index: the table is positional, so a hole would silently shift every
 	// later model and mis-render other mods' content. Skip it instead.
+	// A placeholder for a request whose FILE could not be loaded on this machine.
+	//
+	// Skipping such a request would compact the list, and then an id's index would depend on
+	// how many earlier files happened to load HERE -- which is the same divergence this whole
+	// rebuild exists to remove, just relocated from session history to machine state. So the
+	// slot is reserved instead, exactly as the engine does for a missing model at init.cpp:755
+	// (which allocates a fresh voxel rather than renumbering).
+	//
+	// 1x1x1 with the single cell set to 255, which is the empty value (files.cpp:4312), so it
+	// builds zero faces and draws nothing. Owned like any other voxel, so the release frees it
+	// without a special case.
+	auto samMakeReservedVoxel = []() -> voxel_t*
+	{
+		voxel_t* v = (voxel_t*)malloc(sizeof(voxel_t));
+		if ( !v ) { return nullptr; }
+		v->sizex = 1; v->sizey = 1; v->sizez = 1;
+		v->data = (Uint8*)malloc(1);
+		if ( !v->data ) { free(v); return nullptr; }
+		v->data[0] = 255;
+		memset(v->palette, 0, sizeof(v->palette));
+		return v;
+	};
+
 	struct Staged { std::string id; std::string path; voxel_t* vox; };
 	std::vector<Staged> staged;
 	staged.reserve(requests.size());
+	std::map<std::string, std::string> seenInBatch;   // id -> path, for the clash warning below
 
 	for ( const Request& r : requests )
 	{
@@ -410,15 +522,16 @@ int SAMModels::appendModels(const std::vector<Request>& requests)
 		// `owner` is only for the message; it is empty for older call sites.
 		const std::string who = r.owner.empty() ? ("[" + r.id + "]") : ("[" + r.owner + "]");
 
-		auto known = s_index.find(r.id);
-		if ( known != s_index.end() )
+		// Duplicates are now checked WITHIN this batch rather than against the surviving map
+		// from last load. The map is cleared above because the range is rebuilt, so a repeat
+		// of the same id here is a genuine clash between two mods -- never the harmless
+		// re-registration that happened when Barony called loadMods a second time.
+		auto known = seenInBatch.find(r.id);
+		if ( known != seenInBatch.end() )
 		{
-			// Same id, same file: this is just Barony calling loadMods again (it does so on
-			// every Play). Nothing is wrong and nothing needs saying.
-			if ( known->second.path == r.physfsPath ) { continue; }
-			// Same id, DIFFERENT file: a real clash, and the second mod silently loses.
+			if ( known->second == r.physfsPath ) { continue; }   // same id, same file: nothing to say
 			SAM_WARN(MOD, "Two different models claim the id '" + r.id + "': already loaded from '"
-				+ known->second.path + "', now also requested from '" + r.physfsPath
+				+ known->second + "', now also requested from '" + r.physfsPath
 				+ "' by " + who + ". Keeping the first. Namespace your model folder"
 				" (models/<yourmod>/...) so ids cannot collide.");
 			continue;
@@ -435,7 +548,9 @@ int SAMModels::appendModels(const std::vector<Request>& requests)
 			if ( !samConverted )
 			{
 				SAM_ERROR(MOD, "Model '" + r.physfsPath + "' for " + who
-					+ " is a MagicaVoxel file that could not be converted. " + convWhy);
+					+ " is a MagicaVoxel file that could not be converted. " + convWhy
+					+ " Its slot is reserved so the other models keep their numbers.");
+				staged.push_back({ r.id, r.physfsPath, samMakeReservedVoxel() });
 				continue;
 			}
 			SAM_INFO(MOD, "Converted MagicaVoxel model '" + r.physfsPath + "' ("
@@ -449,7 +564,8 @@ int SAMModels::appendModels(const std::vector<Request>& requests)
 		if ( !samConverted && !samValidateSlab(r.physfsPath, why) )
 		{
 			SAM_ERROR(MOD, "Model '" + r.physfsPath + "' for " + who + " was not loaded. "
-				+ why + " Skipping it; the rest still load.");
+				+ why + " Its slot is reserved so the other models keep their numbers.");
+			staged.push_back({ r.id, r.physfsPath, samMakeReservedVoxel() });
 			continue;
 		}
 
@@ -479,10 +595,30 @@ int SAMModels::appendModels(const std::vector<Request>& requests)
 			// Validation passed, so this is something else -- out of memory, or a format
 			// quirk we did not model. Say so honestly rather than guessing.
 			SAM_ERROR(MOD, "Could not load model '" + r.physfsPath + "' for " + who
-				+ " even though it looks like a valid slab .vox. Skipping it; the rest still load.");
+				+ " even though it looks like a valid slab .vox. Its slot is reserved so the"
+				" other models keep their numbers.");
+			staged.push_back({ r.id, r.physfsPath, samMakeReservedVoxel() });
 			continue;
 		}
+		// Recorded only now that it really loaded. Claiming it earlier meant a failed request
+		// poisoned the id, and a later good one for the same id was refused with a collision
+		// warning describing a clash that never happened.
+		seenInBatch[r.id] = r.physfsPath;
 		staged.push_back({ r.id, r.physfsPath, vox });
+	}
+
+	// A reserved slot whose own tiny allocation failed would be a null in the table, and
+	// generatePolyModels dereferences models[c]. Out of memory here is not survivable in a way
+	// that preserves numbering, so say so rather than renumbering silently.
+	for ( const Staged& s : staged )
+	{
+		if ( !s.vox )
+		{
+			SAM_ERROR(MOD, "Out of memory reserving a model slot; the remaining models would be"
+				" renumbered, so none are registered this load.");
+			for ( Staged& t : staged ) { if ( t.vox ) { if ( t.vox->data ) { free(t.vox->data); } free(t.vox); } }
+			return 0;
+		}
 	}
 
 	if ( staged.empty() ) { return 0; }
@@ -496,13 +632,18 @@ int SAMModels::appendModels(const std::vector<Request>& requests)
 	voxel_t** grownModels = (voxel_t**)realloc(models, sizeof(voxel_t*) * (size_t)newCount);
 	if ( !grownModels )
 	{
+		// NOT "leaving the table untouched": the release above already freed the previous set,
+		// so this returns with no custom models at all rather than with the old ones.
 		SAM_ERROR(MOD, "Out of memory growing the model table to " + std::to_string(newCount)
-			+ " — leaving the table untouched.");
+			+ " — no custom models are registered this load.");
 		for ( Staged& s : staged ) { if ( s.vox ) { if (s.vox->data) { free(s.vox->data); } free(s.vox); } }
 		return 0;
 	}
 	models = grownModels;
 	for ( int i = 0; i < addCount; ++i ) { models[oldCount + i] = staged[i].vox; }
+	// From here the table owns the staged voxels. The polymodel bail-out below frees them, so
+	// it must also clear these slots or it leaves dangling pointers above nummodels for the
+	// next release to walk.
 
 	// generatePolyModels only reallocs when asked for the FULL range (start==0 &&
 	// end==nummodels); for a partial range it writes straight into the existing array.
@@ -511,11 +652,14 @@ int SAMModels::appendModels(const std::vector<Request>& requests)
 	polymodel_t* grownPoly = (polymodel_t*)realloc(polymodels, sizeof(polymodel_t) * (size_t)newCount);
 	if ( !grownPoly )
 	{
+		// Same as above: the previous set is already gone, so this is not a no-op.
 		SAM_ERROR(MOD, "Out of memory growing the polymodel table to " + std::to_string(newCount)
-			+ " — leaving the table untouched.");
-		// models[] is already grown, but nummodels is still oldCount, so the extra
-		// slots are simply never read. Free the voxels we staged and bail.
+			+ " — no custom models are registered this load.");
+		// models[] is already grown and already points at the staged voxels, so clear those
+		// slots as well as freeing them -- nummodels is still oldCount so nothing reads them
+		// now, but the next release walks [base, nummodels) and must not find stale pointers.
 		for ( Staged& s : staged ) { if ( s.vox ) { if (s.vox->data) { free(s.vox->data); } free(s.vox); } }
+		for ( int i = 0; i < addCount; ++i ) { models[oldCount + i] = nullptr; }
 		return 0;
 	}
 	polymodels = grownPoly;
@@ -614,8 +758,9 @@ int SAMModels::count()
 
 void SAMModels::clear()
 {
-	// Only the id map is dropped. The engine's tables are rebuilt wholesale on the next
-	// mod load, and shrinking them here would invalidate indices the renderer may still
-	// be holding for the rest of this frame.
+	// Only the id map is dropped, and the engine's tables are deliberately left alone:
+	// shrinking them here would invalidate indices the renderer may still be holding for the
+	// rest of this frame. appendModels reclaims the range itself, at the one point in the
+	// frame where that is safe, so nothing accumulates across mods-off/mods-on cycles.
 	s_index.clear();
 }

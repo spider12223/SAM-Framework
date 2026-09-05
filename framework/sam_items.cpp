@@ -35,6 +35,9 @@
 #include "main.hpp"    // list_t/string_t, stringCopy, stringDeconstructor, list_* helpers
 #include "items.hpp"   // items[], ItemGeneric, ItemType, Category, ItemEquippableSlot, NUM_ITEM_SLOTS
 #ifndef EDITOR
+#include "player.hpp"                // players[], inputs.getUIInteraction, inventoryUI
+#include "stat.hpp"                  // stats[] equipment slots
+#include "interface/interface.hpp"   // GenericGUI transmuteItemTarget
 #include "mod_tools.hpp" // ItemTooltips.itemNameStringToItemID — resolves "model_from_item" names
 #endif
 
@@ -1353,8 +1356,10 @@ void SAMItems::registerModModels()
 			}
 		}
 	}
-	if ( reqs.empty() ) { return; }
-
+	// NOT `if ( reqs.empty() ) return;`. appendModels has to be called even with nothing to
+	// register, because that is the call that FREES the previous load's models and resets the
+	// table to its pinned base. Returning early here left an unloaded mod's voxels and GPU
+	// buffers allocated and its ids still resolving in the registry.
 	SAMModels::appendModels(reqs);
 
 	// Point each item at what it asked for. This runs after model_from_item has already
@@ -1424,3 +1429,169 @@ void SAMItems::registerModModels()
 	SAMMonsters::reportBodyResolution();
 #endif
 }
+
+
+/*-------------------------------------------------------------------------------
+	SAMItems: deferred item destruction
+
+	Game-only. This file also compiles into the map editor, which has no players[],
+	no inputs, no GenericGUI and no consumeItem, so the real implementation is
+	guarded and the editor gets no-ops that keep the symbols linkable.
+-------------------------------------------------------------------------------*/
+#ifdef EDITOR
+
+bool SAMItems::queueDestroy(uint32_t, int) { return false; }
+void SAMItems::drainDestroyQueue() {}
+
+#else
+
+namespace
+{
+	// uid + the player whose bag it is. Stored by UID rather than by pointer on purpose:
+	// between queueing and draining the item may be destroyed by ordinary gameplay, and a
+	// stale pointer would be undetectable where a stale uid simply fails to resolve.
+	struct SamPendingDestroy { uint32_t uid; int owner; };
+	std::vector<SamPendingDestroy> s_pendingDestroy;
+
+	// True if this exact Item (by POINTER, not by value) is in one of the player's ten
+	// equipment slots. itemSlot cannot be used here: it matches through itemCompare, so it
+	// happily reports a spare identical sword as the equipped one.
+	bool samItemIsEquippedByPointer(const Item* it, int player)
+	{
+		if ( !it || player < 0 || player >= MAXPLAYERS || !stats[player] ) { return false; }
+		const Stat* s = stats[player];
+		return ( it == s->weapon || it == s->shield || it == s->helmet || it == s->breastplate
+			|| it == s->gloves || it == s->shoes || it == s->cloak || it == s->amulet
+			|| it == s->ring || it == s->mask );
+	}
+
+	// Null every raw Item* the UI keeps outside the inventory list. list_RemoveNode clears
+	// some of these (list.cpp:100-131) and misses others, and the ones it misses are read
+	// every frame while a window is open.
+	void samForgetItemPointer(const Item* it)
+	{
+		if ( !it ) { return; }
+		for ( int i = 0; i < MAXPLAYERS; ++i )
+		{
+			if ( !players[i] ) { continue; }
+			auto* ui = inputs.getUIInteraction(i);
+			if ( ui && ui->selectedItem == it ) { ui->selectedItem = nullptr; }
+			// closeBookGUI, not a bare null: the engine's own two sites call it
+			// (items.cpp:1926, :1987) because it also clears bBookOpen and openBookName,
+			// hides the frame and returns the player to the previous module. Nulling alone
+			// leaves them staring at a book that no longer exists.
+			if ( players[i]->bookGUI.openBookItem == it )
+			{
+				players[i]->bookGUI.closeBookGUI();
+			}
+			if ( GenericGUI[i].transmuteItemTarget == it )
+			{
+				GenericGUI[i].transmuteItemTarget = nullptr;
+			}
+		}
+	}
+}
+
+bool SAMItems::queueDestroy(uint32_t itemUid, int owner)
+{
+	Item* it = uidToItem((Uint32)itemUid);
+	if ( !it )
+	{
+		SAM_WARN("ITEM", "destroy: no item with uid " + std::to_string((unsigned long long)itemUid)
+			+ " (item uids only resolve for a LOCAL player's own items).");
+		return false;
+	}
+	// Refused rather than handled, because unequipping on the script's behalf would change
+	// the player's loadout as a side effect of asking for a delete.
+	for ( int p = 0; p < MAXPLAYERS; ++p )
+	{
+		if ( samItemIsEquippedByPointer(it, p) )
+		{
+			SAM_WARN("ITEM", "destroy refused: that item is equipped. Unequip it first;"
+				" destroying an equipped item can clear the wrong slot, because the engine's"
+				" own slot cleanup matches by value and cannot tell two identical items apart.");
+			return false;
+		}
+	}
+	for ( const auto& q : s_pendingDestroy )
+	{
+		if ( q.uid == itemUid ) { return true; }   // already queued; not an error
+	}
+	s_pendingDestroy.push_back({ itemUid, owner });
+	return true;
+}
+
+void SAMItems::drainDestroyQueue()
+{
+	if ( s_pendingDestroy.empty() ) { return; }
+
+	// Swapped out first: destroying an item can run engine code, and anything that queues
+	// more work during this pass belongs to the NEXT frame, not to an unbounded loop here.
+	std::vector<SamPendingDestroy> batch;
+	batch.swap(s_pendingDestroy);
+
+	for ( const auto& q : batch )
+	{
+		Item* it = uidToItem((Uint32)q.uid);
+		if ( !it ) { continue; }   // ordinary gameplay got there first; nothing to do
+
+		// Re-check: the item may have been equipped between queueing and now.
+		bool equipped = false;
+		for ( int p = 0; p < MAXPLAYERS; ++p )
+		{
+			if ( samItemIsEquippedByPointer(it, p) ) { equipped = true; break; }
+		}
+		if ( equipped )
+		{
+			SAM_WARN("ITEM", "destroy skipped: the item was equipped before the queue drained.");
+			continue;
+		}
+
+		samForgetItemPointer(it);
+
+		// consumeItem decrements and only frees at zero (items.cpp:2436). Zero the stack
+		// first so one call really does destroy, instead of shaving one arrow off forty.
+		it->count = 1;
+		Item* tmp = it;
+		const int owner = ( q.owner >= 0 && q.owner < MAXPLAYERS ) ? q.owner : clientnum;
+
+		// consumeItem's own cleanup nulls whichever slot itemSlot matches (items.cpp:2445),
+		// and itemSlot matches through itemCompare, which cannot tell two identical items
+		// apart. Destroying a spare sword therefore nulls the slot holding the WORN one, and
+		// the unequip is saved. Deciding by pointer above is not enough, because the damage
+		// happens inside the engine call. Snapshot the slots and put back anything that was
+		// cleared while still holding a live item other than the one we are destroying.
+		Item* before[MAXPLAYERS][10] = {};
+		for ( int p = 0; p < MAXPLAYERS; ++p )
+		{
+			if ( !stats[p] ) { continue; }
+			Item* const slots[10] = { stats[p]->weapon, stats[p]->shield, stats[p]->helmet,
+				stats[p]->breastplate, stats[p]->gloves, stats[p]->shoes, stats[p]->cloak,
+				stats[p]->amulet, stats[p]->ring, stats[p]->mask };
+			for ( int k = 0; k < 10; ++k ) { before[p][k] = slots[k]; }
+		}
+
+		consumeItem(tmp, owner);
+
+		for ( int p = 0; p < MAXPLAYERS; ++p )
+		{
+			if ( !stats[p] ) { continue; }
+			Item** slots[10] = { &stats[p]->weapon, &stats[p]->shield, &stats[p]->helmet,
+				&stats[p]->breastplate, &stats[p]->gloves, &stats[p]->shoes, &stats[p]->cloak,
+				&stats[p]->amulet, &stats[p]->ring, &stats[p]->mask };
+			for ( int k = 0; k < 10; ++k )
+			{
+				// Cleared, but what it held was not the item we destroyed: itemSlot matched a
+				// twin. Put it back.
+				if ( *slots[k] == nullptr && before[p][k] != nullptr && before[p][k] != it )
+				{
+					*slots[k] = before[p][k];
+					SAM_WARN("ITEM", "destroy: the engine cleared an equipment slot holding an"
+						" identical item; restored it.");
+				}
+			}
+		}
+	}
+}
+
+#endif // EDITOR

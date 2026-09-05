@@ -27,6 +27,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <cstdint>   // uint32_t in the deferred-destroy queue; this header stays free of SDL
 
 struct SAMModManifest;  // from sam_workshop.hpp (full type only needed in the .cpp)
 
@@ -220,4 +221,21 @@ public:
 	// Name of a Category enum value ("WEAPON", "ARMOR", "GEM", ...), or "" if unknown.
 	// Reverse of the internal categoryFromName; lets scripts read an item's category.
 	static std::string categoryName(int category);
+
+	// ---- deferred destruction ---------------------------------------------------
+	// A script can only run because the engine called into it, and that engine frame is
+	// still holding the item pointer: useItem keeps using `item` after firing
+	// player.on_item_use (items.cpp:2955 then :2983), and dropItem dereferences after
+	// player.on_item_dropped (items.cpp:2032 then :2049). So a script-initiated destroy is
+	// NEVER safe to perform on the spot, and there is no case to detect: it is always
+	// queued and always drained later.
+	//
+	// queueDestroy returns false only for a uid it can already tell will be refused
+	// (equipped, or not resolvable), so a script gets a truthful answer immediately rather
+	// than a success that quietly does nothing.
+	static bool queueDestroy(uint32_t itemUid, int owner);
+
+	// Called once per frame from game.cpp, after gameLogic() has returned and before any
+	// script runs, so nothing on the stack can be holding what we are about to free.
+	static void drainDestroyQueue();
 };

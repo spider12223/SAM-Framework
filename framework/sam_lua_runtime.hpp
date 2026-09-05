@@ -224,6 +224,11 @@ namespace SAMLua
 	const char* lobbyFlagNames();
 	std::string modDataDir(const std::string& ns);      // dir holding this ns's save_data
 
+	// Clears every named RNG stream's draw counter. MUST run when a run starts, or two
+	// machines that have been running for different lengths of time draw different numbers
+	// from the same stream and the determinism guarantee is a lie.
+	void resetRandomStreams();
+
 	// ---- mod-defined networking ("SAMP") ------------------------------------------
 	// One generic envelope so a mod can send its own data between host and clients.
 	// Bounded to a single datagram: NET_PACKET_SIZE is 512, and the 4-byte id, the sender

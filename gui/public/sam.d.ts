@@ -4,7 +4,7 @@
 // Drop this beside your mod's .ts files, or reference it:
 //   /// <reference path="sam.d.ts" />
 //
-// 184 functions, 72 events.
+// 245 functions, 72 events.
 
 declare global {
   /**
@@ -12,7 +12,7 @@ declare global {
    *
    * Host-only: refused on a multiplayer client.
    */
-  function sam_add_class_passive(class_: string, effect: string): boolean;
+  function sam_add_class_passive(class_: any, effect: any): boolean;
 
   /**
    * Add to a player's move-speed multiplier (the result is clamped to [0.1, 3.0]). Additive counterpart to sam_set_move_speed — use it to stack a bonus onto whatever the multiplier already is (e.g. +0.1 on top of a 2.0 from another ability). Host-only; syncs to the owning client.
@@ -33,7 +33,7 @@ declare global {
    *
    * Host-only: refused on a multiplayer client.
    */
-  function sam_apply_monster_effect(uid: string, effect: string, ticks: number): boolean;
+  function sam_apply_monster_effect(uid: number, effect: string, ticks: number): boolean;
 
   /**
    * Attach one of your registered behaviours to a live monster. It runs AFTER vanilla AI each frame rather than replacing it, so the creature still fights and paths normally and your code layers on top.
@@ -46,6 +46,16 @@ declare global {
    * Shake a player's camera. 1 is a nudge, ~10 a solid hit, 20+ violent. Feeds Barony's own shake channels so it decays naturally; for a remote client the host forwards it.
    */
   function sam_camera_shake(player: number, magnitude: number): boolean;
+
+  /**
+   * Whether two items would actually combine, using the game's own comparison rather than a guess at it, so things that never stack (readable books, for instance) correctly answer false. Passing the same item twice is false.
+   */
+  function sam_can_items_stack(player: number, uid_a: number, uid_b: number): boolean;
+
+  /**
+   * Check before promising the player a swap, so a cursed item does not silently refuse halfway through what your mod said it would do.
+   */
+  function sam_can_unequip(player: number, uid: number): boolean;
 
   /**
    * Cancel a pending timer by id (for the calling mod).
@@ -64,14 +74,14 @@ declare global {
    *
    * Host-only: refused on a multiplayer client.
    */
-  function sam_cast_spell_at(player: number, target_uid: string, spell: string): number;
+  function sam_cast_spell_at(player: number, target_uid: number, spell: string): number | null;
 
   /**
    * Fire a spell aimed at a map tile. Free cast, host-only.
    *
    * Host-only: refused on a multiplayer client.
    */
-  function sam_cast_spell_pos(player: number, tile_x: number, tile_y: number, spell: string): number;
+  function sam_cast_spell_pos(player: number, tile_x: number, tile_y: number, spell: string): number | null;
 
   /**
    * Strip EVERY active status effect from a player at once — buffs and debuffs, vanilla and custom.
@@ -99,14 +109,14 @@ declare global {
    *
    * Host-only: refused on a multiplayer client.
    */
-  function sam_damage_number(uid: string, amount: number, type: number): boolean;
+  function sam_damage_number(uid: number, amount: number, type: number): boolean;
 
   /**
    * Deal `amount` damage to any entity by UID (positive = damage); existence-validated.
    *
    * Host-only: refused on a multiplayer client.
    */
-  function sam_deal_damage(entity_uid: string, amount: number): boolean;
+  function sam_deal_damage(entity_uid: number, amount: number): boolean;
 
   /**
    * Delete a persisted per-mod key.
@@ -121,7 +131,7 @@ declare global {
   /**
    * Entities of a KIND near a tile. This is the gap sam_get_nearby_entities leaves: that one skips anything which is not a monster or a player, so doors, chests, levers, gold and dropped items were invisible to scripts.
    */
-  function sam_find_entities(x: number, y: number, radiusTiles: number, kind: string): any[];
+  function sam_find_entities(x: number, y: number, radiusTiles: number, kind: string): any;
 
   /**
    * Fire a custom event to ALL Lua + JS/TS scripts cross-runtime. Only number/bool/string fields cross over; recursion capped at depth 8.
@@ -133,24 +143,39 @@ declare global {
   /**
    * Armor class as the damage formula sees it, gear included.
    */
-  function sam_get_ac(uid: string): number;
+  function sam_get_ac(uid: number): number;
 
   /**
    * What the player actually has an action bound to — use it to print a correct prompt instead of guessing a key.
    */
-  function sam_get_action_binding(player: number, action: string): string;
+  function sam_get_action_binding(player: number, action: string): string | null;
 
   /**
    * Get a player's class name (vanilla or custom).
    */
-  function sam_get_class(player: number): string;
+  function sam_get_class(player: number): string | null;
 
   /**
    * What is inside a chest, or what a creature is carrying.
    *
    * Host-only: refused on a multiplayer client.
    */
-  function sam_get_container_items(uid: string): any[];
+  function sam_get_container_items(uid: number): any;
+
+  /**
+   * Today's date on this machine, which is how you make content that only appears at Halloween or over Christmas. Per-machine, so treat it as decoration rather than as a rule.
+   */
+  function sam_get_date(): any;
+
+  /**
+   * Distance between two entities on the FLOOR PLANE. Height is ignored, so a bat hovering directly overhead reads as zero tiles away. That matches how the game's own range checks work, which is why it is not corrected for here. Use this rather than working it out from sam_get_position, which rounds to whole tiles and so is wrong by up to a tile in each axis.
+   */
+  function sam_get_distance(uid_a: number, uid_b: number): number | null;
+
+  /**
+   * Distance from an entity to a tile, measured to the centre of that tile, which is where the game places things.
+   */
+  function sam_get_distance_to(uid: number, x: number, y: number): number | null;
 
   /**
    * How many ticks of an effect are left (50 = 1s) — so a debuff can scale or decay by time remaining. Readable on clients.
@@ -165,32 +190,57 @@ declare global {
   /**
    * A stat as the game actually uses it — gear, effects and curses folded in — rather than the raw number on the sheet.
    */
-  function sam_get_effective_stat(uid: string, stat: string): number;
+  function sam_get_effective_stat(uid: number, stat: string): number;
 
   /**
    * Every active effect on a player at once — react to "any debuff" or strip all buffs without polling each effect by name. Custom pseudo-effect slots appear as "CUSTOM:<id>".
    */
-  function sam_get_effects(player: number): any[];
+  function sam_get_effects(player: number): any;
 
   /**
    * Read which way an entity is pointing. sam_get_facing takes a PLAYER index and reads where that player looks; this takes an entity uid, which is what a behaviour is handed. Feed it straight to sam_spawn_projectile to fire where the thing is aiming.
    */
-  function sam_get_entity_facing(uid: number): number;
+  function sam_get_entity_facing(uid: number): number | null;
+
+  /**
+   * The entity's collision box. Any overlap test or aim cone written in script needs this, and it was not readable before. In JavaScript this returns an array.
+   */
+  function sam_get_entity_size(uid: number): any;
+
+  /**
+   * Which model an entity is currently drawing. Pairs with sam_get_model, which reports only a model your own script set.
+   */
+  function sam_get_entity_sprite(uid: number): number | null;
+
+  /**
+   * Age of an entity in frames. Divide by sam_get_tick_rate for seconds. Useful for despawning your own spawns after a while without keeping a table of them.
+   */
+  function sam_get_entity_ticks(uid: number): number | null;
+
+  /**
+   * What kind of thing a uid refers to. Lets one handler deal with a mixed list of uids without guessing from what other calls happen to succeed.
+   */
+  function sam_get_entity_type(uid: number): any;
 
   /**
    * Get the item NAME equipped in a slot (ARMOR==BREASTPLATE, BOOTS==SHOES). Vanilla items only — it can't name a custom item, so use sam_get_equipped_item_id to test for one.
    */
-  function sam_get_equipped_item(player: number, slot: string): string;
+  function sam_get_equipped_item(player: number, slot: string): string | null;
 
   /**
    * Get the item ID equipped in a slot. Compare it against sam_item_id("namespace:item") to check whether YOUR custom item is equipped — the id is a number, so the name-returning version above can never match it.
    */
-  function sam_get_equipped_item_id(player: number, slot: string): number;
+  function sam_get_equipped_item_id(player: number, slot: string): number | null;
+
+  /**
+   * Where the ladder or portal off this floor is, found the same way the game's own dowsing does it. In JavaScript this returns an array.
+   */
+  function sam_get_exit_position(): any;
 
   /**
    * Read which way a player is looking. 0 = +x (east), increasing toward +y — so the forward unit vector is (cos yaw, sin yaw) and 'behind' is yaw + π. Use it to place things relative to a player's facing (a marker in front, a follower behind) or to aim. Host-authoritative for remote players; a client always sees its own facing correctly.
    */
-  function sam_get_facing(player: number): number;
+  function sam_get_facing(player: number): number | null;
 
   /**
    * Read a lobby setting the host chose at game start. Lets a mod adapt to the run it is actually in — skip a hunger mechanic when hunger is off, or scale difficulty when hardcore is on.
@@ -203,9 +253,19 @@ declare global {
   function sam_get_floor(): number;
 
   /**
+   * How filling a food is. Takes an item TYPE rather than a uid, so you can price food your mod has not spawned yet. Vanilla foods only: the engine's table has no entry for custom items, so your own food answers 0.
+   */
+  function sam_get_food_satiation(item_type: number): number | null;
+
+  /**
+   * How fast this machine is drawing. Local to whoever asks, so never let it decide anything shared: two players will get different numbers and their games will disagree.
+   */
+  function sam_get_fps(): number;
+
+  /**
    * The picture's own pixel size, so a script can centre or scale it instead of hard-coding the numbers it was exported at. Also the cheapest way to check a picture actually resolves.
    */
-  function sam_get_image_size(image: string): any[];
+  function sam_get_image_size(image: string): any;
 
   /**
    * List a player's inventory. Use each item's uid with sam_remove_item. Empty list for an invalid player.
@@ -218,14 +278,54 @@ declare global {
   function sam_get_inventory_count(player: number, item_name: string): number;
 
   /**
+   * Everything plain about one item in a single call, rather than a dozen separate getters. The computed values live in their own functions (sam_get_item_name, sam_get_item_value, sam_get_item_weight) because each runs real engine code instead of reading a field.
+   */
+  function sam_get_item(uid: number): any;
+
+  /**
+   * The armour value. Same caveat as sam_get_item_attack: the optional wearer only matters for cursed-item inversion, not for their skill or stats.
+   */
+  function sam_get_item_ac(uid: number, player?: number): number | null;
+
+  /**
+   * The weapon's attack value. The optional player is passed to the engine, but it only affects a few special cases such as shapeshifting and cursed-item inversion: it does NOT add that character's skill or strength, so two ordinary humans get the same number. For a real to-hit you still need the character's own stats.
+   */
+  function sam_get_item_attack(uid: number, player?: number): number | null;
+
+  /**
    * The category of an item (WEAPON / ARMOR / GEM / POTION / SCROLL / SPELLBOOK / …). Pass an event's item_type to react by category — e.g. reward the player for identifying any GEM.
    */
-  function sam_get_item_category(item: string): string;
+  function sam_get_item_category(item: any): string | null;
 
   /**
    * Look up one item by type number or by name. The attributes sub-table is where a tooltip's numbers come from (ATK, AC and so on), so this is enough to render your own item description in a panel.
    */
   function sam_get_item_info(item: number): any;
+
+  /**
+   * The item's name, using the alias an unidentified item shows rather than its true name. Note this is the bare name: the blessed, cursed and condition wording the player sees in the tooltip is added separately by the game and is not included here.
+   */
+  function sam_get_item_name(uid: number): string | null;
+
+  /**
+   * Who this item belongs to. It is what the shopkeeper's theft rules read, so it is also how a mod knows whether something was taken rather than bought. An item nobody owns returns nil rather than zero.
+   */
+  function sam_get_item_owner(uid: number): number | null;
+
+  /**
+   * Where this kind of item is worn. Works for custom items too, so an auto-equip mod does not need its own table.
+   */
+  function sam_get_item_slot(item_type: number): any;
+
+  /**
+   * What this pile is worth: the engine's per-item value multiplied by how many you have. Blessing and condition are not part of it, because the engine's own gold value ignores them too; the shop applies those separately when it quotes a price.
+   */
+  function sam_get_item_value(uid: number): number | null;
+
+  /**
+   * Weight of the whole stack, with the engine's quiver rule applied. Add these up across sam_get_inventory for a carried total.
+   */
+  function sam_get_item_weight(uid: number): number | null;
 
   /**
    * Get the SAM-tracked per-player kill count for this session.
@@ -235,7 +335,7 @@ declare global {
   /**
    * Everything about the current floor. sam_get_floor returns a bare number that cannot tell a secret branch from the main one, so location-gated content was impossible before this.
    */
-  function sam_get_level_info(): any[];
+  function sam_get_level_info(): any;
 
   /**
    * How lit a tile is, computed exactly the way the engine computes it, so the number you get back is the number monster vision thresholds on rather than an approximation of it. Barony keeps one SHARED lightmap holding light that is there for everyone (a wall torch, a lit room) plus one per camera that also holds that player's own glow. This reads the shared one by default, because that is the one the AI reads. Pass a player index if you want what that player's screen actually shows instead.
@@ -243,54 +343,69 @@ declare global {
   function sam_get_light_at(x: number, y: number, player: number): any;
 
   /**
+   * The rules this particular map sets. Worth checking before a mod grants levitation or teleports someone, because a map that forbids it will simply undo your effect and the player will not know why.
+   */
+  function sam_get_map_flags(): any;
+
+  /**
+   * The per-floor generation seed, which is the same number on the host and on every client because a client rebuilds the floor from it. Distinct from sam_get_seed, which identifies the whole run. Use it with sam_random when you want per-floor variety that everyone agrees on.
+   */
+  function sam_get_map_seed(): number;
+
+  /**
+   * The ceiling for this item and this player, which differs for arrows, thrown gems and scrap. Read it before writing a count.
+   */
+  function sam_get_max_stack(player: number, uid: number): number | null;
+
+  /**
    * Read back the model ID a script set on this entity. Returns nil for an entity drawing its ordinary model.
    */
-  function sam_get_model(uid: number): string;
+  function sam_get_model(uid: number): string | null;
 
   /**
    * Every S.A.M mod loaded right now. Cross-mod integration with zero engine work: soft-depend on another mod, avoid double registering, or light up extra content when a partner mod is present.
    */
-  function sam_get_mods(): any[];
+  function sam_get_mods(): any;
 
   /**
    * Read per-monster scratch data (boss phases, etc.); in-memory, cleared on shutdown.
    */
-  function sam_get_monster_data(uid: string, key: string): any;
+  function sam_get_monster_data(uid: number, key: string): any;
 
   /**
    * How many ticks of an effect a monster has left.
    */
-  function sam_get_monster_effect_duration(uid: string, effect: string): number;
+  function sam_get_monster_effect_duration(uid: number, effect: string): number;
 
   /**
    * A monster effect's strength/magnitude.
    */
-  function sam_get_monster_effect_strength(uid: string, effect: string): number;
+  function sam_get_monster_effect_strength(uid: number, effect: string): number;
 
   /**
    * Every active effect on a monster at once (custom slots appear as "CUSTOM:<id>").
    */
-  function sam_get_monster_effects(uid: string): any[];
+  function sam_get_monster_effects(uid: number): any;
 
   /**
    * For a mod's custom monster this is the variant name it was given ("Rathalos"). A plain vanilla creature carries an empty variant name, so this falls back to the species name and never hands a script an empty string.
    */
-  function sam_get_monster_name(uid: string): string;
+  function sam_get_monster_name(uid: number): string | null;
 
   /**
    * Read a monster's stat by UID. DEX aliases SPEED.
    */
-  function sam_get_monster_stat(uid: string, stat: string): number;
+  function sam_get_monster_stat(uid: number, stat: string): number;
 
   /**
    * Get the player index a monster is currently targeting (if any).
    */
-  function sam_get_monster_target(uid: string): number;
+  function sam_get_monster_target(uid: number): number;
 
   /**
    * Identify a creature by name instead of the raw integer in an event payload. NOTE this is the BASE type: a custom monster is a variant of a vanilla species, so a mod's "Rathalos" built on a bat answers "bat". Use sam_get_monster_name for the variant's own name, or sam_monster_has_trait to tell modded creatures apart.
    */
-  function sam_get_monster_type(uid: string): string;
+  function sam_get_monster_type(uid: number): string | null;
 
   /**
    * Read a player's move-speed multiplier. Readable on clients.
@@ -302,7 +417,12 @@ declare global {
    *
    * Host-only: refused on a multiplayer client.
    */
-  function sam_get_nearby_entities(player: number, radius: number): any[];
+  function sam_get_nearby_entities(player: number, radius: number): any;
+
+  /**
+   * The rectangle the level generator is actually allowed to use, which excludes the perimeter gap some maps reserve. A spawner that ignores this can place things inside the outer wall. In JavaScript this returns an array.
+   */
+  function sam_get_playable_bounds(): any;
 
   /**
    * Read back a per-player in-memory value set by sam_set_player_data.
@@ -312,17 +432,37 @@ declare global {
   /**
    * Get a player's entity uid, so the uid-based world-ops (get/set position) can act on that player's body.
    */
-  function sam_get_player_uid(player: number): number;
+  function sam_get_player_uid(player: number): number | null;
 
   /**
    * Read any entity's map-tile position (player, monster or ground item). Get a player's uid with sam_get_player_uid.
    */
-  function sam_get_position(uid: number): any[];
+  function sam_get_position(uid: number): any;
+
+  /**
+   * Exact position, including the sub-tile fraction and the z axis. sam_get_position rounds to a whole tile and drops z entirely, so nothing in script could tell a flying bat from a rat standing underneath it, or two creatures sharing one tile. In JavaScript this returns an array [x, y, z].
+   */
+  function sam_get_position_precise(uid: number): any;
 
   /**
    * Get a player's race: a custom race's "namespace:race" id, or the vanilla race name ("human", "skeleton", …). Use it in a race behavior script to gate logic to players of that race.
    */
-  function sam_get_race(player: number): string;
+  function sam_get_race(player: number): string | null;
+
+  /**
+   * This machine's wall clock. Same warning as sam_get_fps: two players' clocks differ, so this must not feed a dice roll or anything you save.
+   */
+  function sam_get_real_time(): number;
+
+  /**
+   * The run clock the game itself displays. It stops during the intro, while you are dead, and while THIS machine has the game paused. Not the same as sam_get_time_played, which counts wall time since the program started, menus included. In multiplayer each machine counts its own, and pausing is local, so a player who spent a minute in their menu is a minute behind everyone else: read it on the host if a rule depends on it.
+   */
+  function sam_get_run_time(): number;
+
+  /**
+   * Read an entity's scale. The counterpart to sam_set_scale, which shipped without a reader. In JavaScript this returns an array.
+   */
+  function sam_get_scale(uid: number): any;
 
   /**
    * Read the seed identifying this run. Pair it with sam_random when you want per-run variety that every player still agrees on.
@@ -332,12 +472,12 @@ declare global {
   /**
    * A proficiency rank. Accepts both spellings — "PRO_SWORD" (the class schema) and "sword" (what player.on_proficiency_increased hands you). effective (default true) includes the equipment bonus the game actually uses; pass false for the raw trained rank. Ranks were completely unreadable before this, even though the framework has always fired the event.
    */
-  function sam_get_skill(uid: string, skill: string, effective: boolean): any;
+  function sam_get_skill(uid: number, skill: string, effective: boolean): any;
 
   /**
    * List the spells a player currently knows.
    */
-  function sam_get_spells(player: number): any[];
+  function sam_get_spells(player: number): any;
 
   /**
    * Read a live player stat. Refused on a multiplayer client.
@@ -347,14 +487,29 @@ declare global {
   function sam_get_stat(player: number, stat: string): number;
 
   /**
+   * Logic frames per second. Barony's step is fixed, so there is no delta time to ask for; this is the constant every per-second conversion needs.
+   */
+  function sam_get_tick_rate(): number;
+
+  /**
    * Read one map tile. Liquid comes from the FLOOR tile, and the engine decides which tiles are liquid from their image filename — so a mod's own tile named "...lava..." reports as lava here too.
    */
-  function sam_get_tile(x: number, y: number): any[];
+  function sam_get_tile(x: number, y: number): any;
 
   /**
    * Get elapsed game ticks for the current run.
    */
   function sam_get_time_played(): number;
+
+  /**
+   * Which spell a spellbook or a spell tome contains. This is the bridge from an item to the spell functions: pair it with sam_grant_spell to teach whatever a book holds without hardcoding the pairing. Anything that is not a book returns nil.
+   */
+  function sam_get_tome_spell(uid: number): number | null;
+
+  /**
+   * How fast something is moving and in what direction. Enough to lead a moving target, or to tell a charging monster from a standing one. In JavaScript this returns an array.
+   */
+  function sam_get_velocity(uid: number): any;
 
   /**
    * Add gold to a player (clamped to >= 0), syncing the client HUD.
@@ -376,6 +531,11 @@ declare global {
    * Host-only: refused on a multiplayer client.
    */
   function sam_grant_spell(player: number, spell: string): boolean;
+
+  /**
+   * Whether a key exists, without loading it. This genuinely distinguishes stored-but-empty from never-stored: saving nil writes a real entry, so sam_has_data is true while sam_load_data gives you nothing back. Use sam_delete_data when you want a key to actually be gone.
+   */
+  function sam_has_data(key: string): boolean;
 
   /**
    * Check whether a player currently has a status effect.
@@ -415,14 +575,41 @@ declare global {
   function sam_hud_text(id: string, x: number, y: number, text: string, color: number): boolean;
 
   /**
+   * Identify an item the way a scroll does, through the engine's own path, so the on_item_identified event fires and the owning player's screen updates. Calling it on an already-identified item succeeds quietly.
+   *
+   * Host-only: refused on a multiplayer client.
+   */
+  function sam_identify_item(player: number, uid: number): boolean;
+
+  /**
    * The EXAGGERATED version of the flash: a colour pop PLUS manga speed lines converging on screen centre PLUS a bright core flare. Pair it with sam_camera_shake and sam_hitstop for a full impact beat. lines is the speed-line count (0 = a plain flash).
    */
   function sam_impact_frame(player: number, r: number, g: number, b: number, intensity: number, duration_ms: number, lines: number): boolean;
 
   /**
+   * Whether the bag has room. This one is genuinely local-only: the inventory grid exists on the machine drawing it, so asking about a remote player would answer about the wrong bag. It returns nil and logs why rather than lying.
+   */
+  function sam_inventory_has_space(player: number): boolean | null;
+
+  /**
    * Check whether a BOUND action is held. Reads Barony's own binding, so it follows whatever the player rebound it to (and works with mouse buttons, which raw keys can't see). Local player only — input never leaves its machine.
    */
   function sam_is_action_held(player: number, action: string): boolean;
+
+  /**
+   * The armour counterpart of sam_is_better_weapon, covering shields, helmets, breastplates, cloaks, boots, gloves and masks. Omit the second item to ask whether it is worth wearing at all, which is only ever true for something that actually goes in one of those slots.
+   */
+  function sam_is_better_armor(uid_new: number, uid_current?: number): boolean;
+
+  /**
+   * The same comparison monsters use when deciding what to pick up. Omit the second item to ask whether it is worth taking at all, which is only ever true for an actual weapon.
+   */
+  function sam_is_better_weapon(uid_new: number, uid_current?: number): boolean;
+
+  /**
+   * Whether this floor is one of the unlit ones.
+   */
+  function sam_is_dark_level(): boolean;
 
   /**
    * Whether the player is actually blocking right now — the real engine state, not just the Defend button being down. Works for remote players in multiplayer.
@@ -432,12 +619,12 @@ declare global {
   /**
    * Would these two fight? The engine's own allegiance answer, so charm, race and faction are all accounted for.
    */
-  function sam_is_enemy(uid_a: string, uid_b: string): boolean;
+  function sam_is_enemy(uid_a: number, uid_b: number): boolean;
 
   /**
    * The other side of sam_is_enemy — allies, followers and charmed creatures.
    */
-  function sam_is_friend(uid_a: string, uid_b: string): boolean;
+  function sam_is_friend(uid_a: number, uid_b: number): boolean;
 
   /**
    * Whether a dead player is walking around as a ghost. Worth checking before granting items or applying effects, since a ghost is not an ordinary player.
@@ -450,14 +637,54 @@ declare global {
   function sam_is_host(): boolean;
 
   /**
+   * Whether a run is actually in progress. Worth checking at the top of a timer callback, which can otherwise fire while nobody is playing.
+   */
+  function sam_is_in_game(): boolean;
+
+  /**
+   * Whether this specific item is currently equipped, as opposed to merely being in the bag.
+   */
+  function sam_is_item_equipped(player: number, uid: number): boolean;
+
+  /**
    * Check whether a supported RAW key is currently held (A-Z, 0-9, F1-F12). Ignores the player's keybinds — prefer sam_is_action_held, which follows them.
    */
   function sam_is_key_held(key_name: string): boolean;
 
   /**
+   * Whether the game is mid-level-change. Entities are being destroyed and rebuilt during this, so it is the wrong moment to touch uids you were holding.
+   */
+  function sam_is_loading(): boolean;
+
+  /**
+   * The engine's own test, so it agrees with what the game counts as melee for skill and damage purposes.
+   */
+  function sam_is_melee_weapon(uid: number): boolean;
+
+  /**
    * Is a given mod namespace loaded? The cheap form of sam_get_mods.
    */
   function sam_is_mod_loaded(namespace: string): boolean;
+
+  /**
+   * Whether the player has the game paused. Each machine has its own answer in multiplayer, where the world keeps running for everyone else.
+   */
+  function sam_is_paused(): boolean;
+
+  /**
+   * The same judgement the game's own AI uses when deciding whether to throw a potion at you rather than drink it.
+   */
+  function sam_is_potion_bad(uid: number): boolean;
+
+  /**
+   * Takes a TYPE, so it answers for an item you have not spawned.
+   */
+  function sam_is_ranged_weapon(item_type: number): boolean;
+
+  /**
+   * Covers everything worn in the shield hand, not only shields: lanterns, torches, quivers, spellbooks and crystal shards all count, as does any custom item your mod marks for the shield slot.
+   */
+  function sam_is_shield(uid: number): boolean;
 
   /**
    * Is this a sane place to put something: in bounds, not inside a wall, not lava. Check before spawning instead of dropping a monster into rock.
@@ -470,16 +697,31 @@ declare global {
   function sam_is_spirit_ghost(player: number): boolean;
 
   /**
+   * Whether the map's rules allow digging here: it returns false for water and lava, the Hell and fortress edges, and any tile marked no-dig. It does NOT check that there is a wall to dig, so it is true on ordinary open floor too. Pair it with sam_get_tile if you need something solid to be there. Out-of-bounds coordinates return false rather than reading past the map.
+   */
+  function sam_is_tile_diggable(x: number, y: number): boolean;
+
+  /**
+   * Whether an entity is visible. The counterpart to sam_set_visible, which shipped without a reader. On a multiplayer CLIENT this is only reliable for hiding your own script did: the engine's entity update sets invisibility flags but never clears them, so a monster whose invisibility potion wears off still reads as hidden on every client. Ask the host if the answer has to be right.
+   */
+  function sam_is_visible(uid: number): boolean | null;
+
+  /**
+   * The item counterpart of sam_monster_has_trait. Takes a TYPE, and an unknown trait name is refused with the valid list logged rather than silently returning false.
+   */
+  function sam_item_has_trait(item_type: number, trait: string): boolean;
+
+  /**
    * Resolve an item's numeric type id — compare it against event fields like on_block's shield_type to react only to a specific item. Accepts a vanilla name or a custom "namespace:item".
    */
-  function sam_item_id(name: string): number;
+  function sam_item_id(name: string): number | null;
 
   /**
    * Kill a monster by UID (runs its normal death + drops; fires on_monster_died).
    *
    * Host-only: refused on a multiplayer client.
    */
-  function sam_kill_monster(uid: string): boolean;
+  function sam_kill_monster(uid: number): boolean;
 
   /**
    * Level a player up count times (default 1) through the real engine path: attribute rolls, HP/MP gain, the level-up screen and sound, and full client sync — the actual benefits, unlike bumping LVL with sam_set_stat. Host-only. Fires the player.on_level_up hook once per level.
@@ -496,22 +738,22 @@ declare global {
   /**
    * List the keys sam_save_data has written for your mod, so you can iterate stored state without having to remember every key name. Returns an empty table when nothing has been saved yet.
    */
-  function sam_list_data_keys(): any[];
+  function sam_list_data_keys(): any;
 
   /**
    * List every item the game knows about, including items added by mods (those have custom = true). This is what a recipe browser, a shop's stock list or a bestiary of loot is built from — before it, a script could only ask about the item already in the player's hand.
    */
-  function sam_list_items(category?: string): any[];
+  function sam_list_items(category?: string): any;
 
   /**
    * List the game's monster types. Note what this does NOT include: a S.A.M custom monster is a variant of a base species rather than a new entry in the engine's table, so it will not appear here as its own row — you will see the species it is built on. The NOTHING sentinel and the engine's reserved padding slots are filtered out. Pair with sam_spawn_monster for an arena mod, or with a panel for a bestiary.
    */
-  function sam_list_monsters(): any[];
+  function sam_list_monsters(): any;
 
   /**
    * List the spells a player can actually be given, with their mana cost. Spells the game hides from its own UI are left out, so what you get back is the set that is meaningful to show a player.
    */
-  function sam_list_spells(): any[];
+  function sam_list_spells(): any;
 
   /**
    * Read back a persisted per-mod value.
@@ -568,21 +810,28 @@ declare global {
    *
    * Host-only: refused on a multiplayer client.
    */
-  function sam_monster_attack(uid: string): boolean;
+  function sam_monster_attack(uid: number): boolean;
+
+  /**
+   * Whether a creature's AI knows how to use a kind of item. Only five species have that behaviour at all: goblins, humans, goatmen, automatons and shadows. Everything else answers false, including custom races, even though sam_monster_equip will happily put the item in their hand. Host-only, because it reads the monster's stats.
+   *
+   * Host-only: refused on a multiplayer client.
+   */
+  function sam_monster_can_wield(uid: number, item_type: number): boolean;
 
   /**
    * Make a monster (or a companion) cast a spell along its own facing. Free cast, host-only.
    *
    * Host-only: refused on a multiplayer client.
    */
-  function sam_monster_cast_spell(uid: string, spell: string): number;
+  function sam_monster_cast_spell(uid: number, spell: string): number | null;
 
   /**
    * Send a monster into a straight-line charge for N ticks (50 = 1 second, default 50, max 500). Aims at its target if it has line of sight, otherwise charges along its current facing.
    *
    * Host-only: refused on a multiplayer client.
    */
-  function sam_monster_charge(uid: string, ticks: number): boolean;
+  function sam_monster_charge(uid: number, ticks: number): boolean;
 
   /**
    * Put an item into a monster's equipment slot. Resolves a custom "ns:item" first and falls back to a vanilla item name. An unknown slot is refused and the valid list is logged.
@@ -596,24 +845,24 @@ declare global {
    *
    * Host-only: refused on a multiplayer client.
    */
-  function sam_monster_face(uid: string, tileX: number, tileY: number): boolean;
+  function sam_monster_face(uid: number, tileX: number, tileY: number): boolean;
 
   /**
    * The monster counterpart of sam_has_effect — e.g. react when a monster you just hit is POISONED. Pass a monster UID (from a monster event or sam_get_nearby_entities).
    */
-  function sam_monster_has_effect(uid: string, effect: string): boolean;
+  function sam_monster_has_effect(uid: number, effect: string): boolean;
 
   /**
    * Reads back what the mod declared in JSON. Without this a mod can SAY a monster is undead and the engine agrees, but the mod's own script cannot ask — so a "bonus vs undead" rule had no way to test for undead. False for every vanilla monster, so it is a no-op without a mod.
    */
-  function sam_monster_has_trait(uid: string, trait: string): boolean;
+  function sam_monster_has_trait(uid: number, trait: string): boolean;
 
   /**
    * Path a monster to a tile using the engine's real pathfinder, then put it in the hunt state so it walks there. Tile coordinates, matching sam_get_position. Returns false when the destination is unreachable.
    *
    * Host-only: refused on a multiplayer client.
    */
-  function sam_monster_path_to(uid: string, tileX: number, tileY: number): boolean;
+  function sam_monster_path_to(uid: number, tileX: number, tileY: number): boolean;
 
   /**
    * Empty one of a monster's equipment slots. Pairs with sam_monster_equip for disarm effects and for swapping a creature's loadout mid-fight.
@@ -625,19 +874,19 @@ declare global {
   /**
    * Override a class's STARTING stats/skills (patch = { STR, DEX, ..., MAXHP, skills = {...} }). Per-machine — call on every peer in multiplayer; reverts on unload.
    */
-  function sam_patch_class(class_: string, patch: any): boolean;
+  function sam_patch_class(class_: any, patch: any): boolean;
 
   /**
    * Override an item type's base fields live: { weight, value/gold_value, level, category, slot, tooltip, name/name_identified, name_unidentified, attributes = {...} }.
    */
-  function sam_patch_item(item: string, patch: any): boolean;
+  function sam_patch_item(item: any, patch: any): boolean;
 
   /**
    * Override a monster type's base stats (e.g. { HP, MAXHP, STR }) for future spawns; also zero RANDOM_* for exact values.
    *
    * Host-only: refused on a multiplayer client.
    */
-  function sam_patch_monster(monster: string, patch: any): boolean;
+  function sam_patch_monster(monster: any, patch: any): boolean;
 
   /**
    * Play a sound for all connected players. sound_id is a vanilla numeric index OR the "namespace:sound" id of a custom sound bundled in the mod. vol 0-255 (default 128).
@@ -658,7 +907,7 @@ declare global {
    *
    * Host-only: refused on a multiplayer client.
    */
-  function sam_play_sound_entity(sound: number, uid: string, volume: number): boolean;
+  function sam_play_sound_entity(sound: number, uid: number, volume: number): boolean;
 
   /**
    * How many players are actually connected right now.
@@ -675,7 +924,7 @@ declare global {
    *
    * Host-only: refused on a multiplayer client.
    */
-  function sam_power_entity(uid: string, on: boolean): boolean;
+  function sam_power_entity(uid: number, on: boolean): boolean;
 
   /**
    * Deterministic random drawn from a named stream owned by your mod. Same run seed plus same stream plus same draw order gives the same number on every machine, which ordinary random() cannot promise. Use it for anything that must agree across a multiplayer party.
@@ -683,11 +932,31 @@ declare global {
   function sam_random(stream: string, min: number, max: number): number;
 
   /**
+   * Rolls a percentage chance. 0 or less is always false and 100 or more is always true, so you never have to clamp. This is the single most-typed line in any mod, and doing it by hand with an undeterministic random is how multiplayer mods drift apart.
+   */
+  function sam_random_chance(stream: string, percent: number): any;
+
+  /**
+   * A deterministic fraction from one of your mod's named streams. Same run, same stream, same call order gives the same number on every machine, which ordinary random() cannot promise.
+   */
+  function sam_random_float(stream: string): number;
+
+  /**
+   * Picks one entry at random, deterministically. Note that Lua lists start at 1 and JavaScript arrays start at 0; each version follows its own language, so the same list gives the same element in both.
+   */
+  function sam_random_from_list(stream: string, list: any): any;
+
+  /**
+   * Picks a key with probability proportional to its weight, for loot tables and spawn tables. Weights need not add up to anything in particular, and a weight of zero or less can never come up.
+   */
+  function sam_random_weighted(stream: string, weights: any): any;
+
+  /**
    * Give a name to a function that will BE an entity's brain. Barony runs every entity through a function pointer once per frame; this puts yours behind one. Your function is called with the entity's uid, once per frame, for every entity you spawned with that behaviour — and everything else in this reference is available inside it, so it can look around, move, shoot, damage, or open a window. Nothing about what it does comes from a list. Register at the top of your script rather than inside a handler, so the name exists before you spawn anything with it. Registering the same name twice replaces the function, and entities already in the world follow the new code. Behaviours are dropped when mods reload.
    *
    * Host-only: refused on a multiplayer client.
    */
-  function sam_register_behavior(name: string, fn: string): boolean;
+  function sam_register_behavior(name: string, fn: (...args: any[]) => any): boolean;
 
   /**
    * Declare a namespaced custom hook. Name must contain a colon ("namespace:hook_name").
@@ -699,7 +968,7 @@ declare global {
    *
    * Host-only: refused on a multiplayer client.
    */
-  function sam_remove_class_passive(class_: string, effect: string): boolean;
+  function sam_remove_class_passive(class_: any, effect: any): boolean;
 
   /**
    * Clear a status effect from a player.
@@ -727,7 +996,7 @@ declare global {
    *
    * Host-only: refused on a multiplayer client.
    */
-  function sam_remove_monster_effect(uid: string, effect: string): boolean;
+  function sam_remove_monster_effect(uid: number, effect: string): boolean;
 
   /**
    * Un-learn a spell from a player's known list (local player). The counterpart to sam_grant_spell.
@@ -739,7 +1008,7 @@ declare global {
   /**
    * Persist a value (number/string/bool/table) for the calling mod under savegames/sam_mod_data/<ns>/.
    */
-  function sam_save_data(key: string, value: string): boolean;
+  function sam_save_data(key: string, value: any): boolean;
 
   /**
    * Flash a player's whole screen in an RGB colour that fades to nothing — the anime "impact frame". intensity 0..1 is the peak opacity. Drawn on the machine the player lives on.
@@ -763,14 +1032,14 @@ declare global {
    *
    * Host-only: refused on a multiplayer client.
    */
-  function sam_set_door(uid: string, open: boolean): boolean;
+  function sam_set_door(uid: number, open: boolean): boolean;
 
   /**
    * Lock or unlock a door.
    *
    * Host-only: refused on a multiplayer client.
    */
-  function sam_set_door_locked(uid: string, locked: boolean): boolean;
+  function sam_set_door_locked(uid: number, locked: boolean): boolean;
 
   /**
    * Retime an ALREADY-ACTIVE effect in place, without re-triggering it. No-op if the effect isn't active (never spawns a fresh one). 50 ticks = 1s.
@@ -794,6 +1063,48 @@ declare global {
   function sam_set_entity_facing(uid: number, radians: number): boolean;
 
   /**
+   * Set the appearance number, which chooses a readable book's contents and which potion or scroll look an unidentified item shows. REFUSED on the types where this field is not decoration: a spell tome stores its spell here, a loot bag its contents, the robots their health and a scepter its charges, and all of that is written to the save, so changing it would permanently alter what the item is.
+   *
+   * Host-only: refused on a multiplayer client.
+   */
+  function sam_set_item_appearance(uid: number, appearance: number): boolean;
+
+  /**
+   * Bless or curse an item. Clamped to a range the tooltips and damage maths can actually represent. Host-only: changing an equipped item from a client would leave the host's copy of that slot stale.
+   *
+   * Host-only: refused on a multiplayer client.
+   */
+  function sam_set_item_beatitude(uid: number, value: number): boolean;
+
+  /**
+   * Set how many are in a stack, up to the item's own limit; a larger number is refused rather than silently wrapped, and sam_get_max_stack tells you the ceiling. A count of zero or less DESTROYS the item, which happens a moment later rather than instantly: the game is still using that item at the point your script runs, so the removal is queued and carried out on the next frame. Destroying an equipped item is refused, because the engine's cleanup identifies items by their contents and cannot tell two identical ones apart.
+   *
+   * Host-only: refused on a multiplayer client.
+   */
+  function sam_set_item_count(uid: number, count: number): boolean;
+
+  /**
+   * Whether this item drops when its owner dies. Turn it off for a boss's crown that is meant to be scenery rather than loot. The true or false is required: leaving it out is refused rather than treated as false, because a silent false pins the item in place for the rest of the game.
+   *
+   * Host-only: refused on a multiplayer client.
+   */
+  function sam_set_item_droppable(uid: number, droppable: boolean): boolean;
+
+  /**
+   * Reassign ownership. This is how a soulbound or stolen-goods mod says what it means using the game's own bookkeeping instead of inventing a parallel one.
+   *
+   * Host-only: refused on a multiplayer client.
+   */
+  function sam_set_item_owner(uid: number, owner_uid: number): boolean;
+
+  /**
+   * Set an item's condition, as a name or as a number from 0 (BROKEN) to 4 (EXCELLENT). Anything outside that range is refused rather than quietly rounded to the nearest end, so a wrong number tells you instead of half working. A string is always read as a name, so pass 3 and not "3". Note that dropping a worn item to BROKEN does not take it off: the game refuses to USE a broken item but leaves it equipped, and that is vanilla behaviour rather than something this call gets wrong.
+   *
+   * Host-only: refused on a multiplayer client.
+   */
+  function sam_set_item_status(uid: number, status: string): boolean;
+
+  /**
    * Swap any entity's model while the game is running. What crosses the wire is the model ID, never an index, so machines with different mod orders still agree. This is what makes transformations, boss phases and damage states possible; before it, a model was fixed at spawn.
    *
    * Host-only: refused on a multiplayer client.
@@ -803,7 +1114,7 @@ declare global {
   /**
    * Store any primitive/table value in a monster's scratch store (JSON-marshaled).
    */
-  function sam_set_monster_data(uid: string, key: string, value: string): boolean;
+  function sam_set_monster_data(uid: number, key: string, value: any): boolean;
 
   /**
    * Rename a living monster. The name is what the player sees when targeting it and what appears in the obituary, so this is how a scripted boss or a named rare gets its title.
@@ -817,14 +1128,14 @@ declare global {
    *
    * Host-only: refused on a multiplayer client.
    */
-  function sam_set_monster_stat(uid: string, stat: string, value: number): boolean;
+  function sam_set_monster_stat(uid: number, stat: string, value: number): boolean;
 
   /**
    * Make a monster acquire a player as its attack target.
    *
    * Host-only: refused on a multiplayer client.
    */
-  function sam_set_monster_target(uid: string, player: number): boolean;
+  function sam_set_monster_target(uid: number, player: number): boolean;
 
   /**
    * Set a player's move-speed multiplier, clamped to [0.1, 3.0]. Host-only; syncs to the owning client. 1.0 is normal speed.
@@ -836,7 +1147,7 @@ declare global {
   /**
    * Store a per-player value (number/string/bool/table) in memory for THIS session — the right tool for cooldowns, ability flags and stack counters you read often. Unlike sam_save_data it never touches disk and is cleared on a new game.
    */
-  function sam_set_player_data(player: number, key: string, value: string): void;
+  function sam_set_player_data(player: number, key: string, value: any): void;
 
   /**
    * Move an entity to a map tile. Players go through the safe teleport path (can't tunnel into walls); other entities are relocated and re-broadcast to clients.
@@ -848,7 +1159,7 @@ declare global {
   /**
    * Run `callback` (a function) every interval_ticks until cancelled. Ticks host-side.
    */
-  function sam_set_repeating_timer(id: string, interval_ticks: number, callback: string): void;
+  function sam_set_repeating_timer(id: string, interval_ticks: number, callback: any): void;
 
   /**
    * Scale an entity. Clamped at 1.99 with a logged warning, because Barony quantises scale on the wire in 1/128 steps with a cap just under 2 — a larger value would look right to you and be invisible to everyone else.
@@ -874,7 +1185,7 @@ declare global {
   /**
    * Run `callback` (a function) once after delay_ticks (50/sec). Replaces any timer with the same id. Ticks host-side.
    */
-  function sam_set_timer(id: string, delay_ticks: number, callback: string): void;
+  function sam_set_timer(id: string, delay_ticks: number, callback: any): void;
 
   /**
    * Show or hide an entity. Refused, with a logged reason, on an entity that has a custom body: the draw pass deliberately keeps those visible, so hiding one this way would not work consistently. Clear the model first, or move it out of sight.
@@ -898,35 +1209,35 @@ declare global {
    *
    * Host-only: refused on a multiplayer client.
    */
-  function sam_spawn_companion(player: number, model_id: string, scale: number): number;
+  function sam_spawn_companion(player: number, model_id: string, scale: number): number | null;
 
   /**
    * Put something in the world that runs your behaviour. This is the other half of sam_register_behavior: that one supplies the code, this gives it a body. The entity starts passable with no collision of its own, because your behaviour decides what it collides with. Leave model empty and it is invisible, which is almost never what you want. Host-only.
    *
    * Host-only: refused on a multiplayer client.
    */
-  function sam_spawn_entity(tile_x: number, tile_y: number, behaviour: string, model?: string): number;
+  function sam_spawn_entity(tile_x: number, tile_y: number, behaviour: string, model?: string): number | null;
 
   /**
    * Spawn a ground item at a map tile. status, beatitude and count let you put an item back exactly as you found it — without them a stash could record that you owned a cursed, worn ring and then only ever hand back a pristine one. The uid comes back so you can move it (sam_set_position) or clear it (sam_remove_entity) later; a uid is never 0, so an older `if sam_spawn_item(...)` check still behaves as it did.
    *
    * Host-only: refused on a multiplayer client.
    */
-  function sam_spawn_item(x: number, y: number, item_name: string, status?: number, beatitude?: number, count?: number): number;
+  function sam_spawn_item(x: number, y: number, item_name: string, status?: number, beatitude?: number, count?: number): number | null;
 
   /**
    * Summon a monster at a map tile. "shopkeeper" makes a working shop; the optional shop_type (0-14) picks the store kind.
    *
    * Host-only: refused on a multiplayer client.
    */
-  function sam_spawn_monster(tile_x: number, tile_y: number, monster_name: string, shop_type: number): number;
+  function sam_spawn_monster(tile_x: number, tile_y: number, monster_name: string, shop_type: number): number | null;
 
   /**
    * Spawn `count` (1-8) monsters of a type near an anchor entity's UID.
    *
    * Host-only: refused on a multiplayer client.
    */
-  function sam_spawn_monsters(near_uid: string, monster_type: string, count: number): number;
+  function sam_spawn_monsters(near_uid: number, monster_type: string, count: number): number;
 
   /**
    * A vanilla particle burst at a tile, so a mod's own effect looks like part of the game.
@@ -940,14 +1251,14 @@ declare global {
    *
    * Host-only: refused on a multiplayer client.
    */
-  function sam_spawn_portal(tile_x: number, tile_y: number): number;
+  function sam_spawn_portal(tile_x: number, tile_y: number): number | null;
 
   /**
    * Fire a moving projectile with its own speed, model, damage and lifetime. Until this the only thing a script could launch was a fixed vanilla spell, which ruled out ranged enemies with real attack patterns, telegraphed boss volleys, and weapons that fire anything but an arrow. It stops on the first thing it hits and fires an "on_projectile_hit" event with .projectile, .target, .x, .y and .damage — spawn a follow-up there for a burst or an explosion. Giving an owner stops the shot killing the player who fired it on its first frame. Leave model empty and the projectile is INVISIBLE, which is almost never what you want. Host-only, like every other world-mutating call. MULTIPLAYER: everything that matters is decided on the host, so damage, collisions and the hit event are correct for everyone — but a connected client has no behaviour for a custom projectile and only moves it when a position update arrives, about 8 times a second, so the flight looks stepped rather than smooth on their screen. Fine for a shot that crosses a room; noticeable on a slow, long-lived one.
    *
    * Host-only: refused on a multiplayer client.
    */
-  function sam_spawn_projectile(tile_x: number, tile_y: number, angle: number, speed: number, damage?: number, lifetime?: number, model?: string, owner?: number): number;
+  function sam_spawn_projectile(tile_x: number, tile_y: number, angle: number, speed: number, damage?: number, lifetime?: number, model?: string, owner?: number): number | null;
 
   /**
    * Can something WALK (or fly) from A to B at all? The softlock check: after a mod edits terrain, ask whether the exit is still reachable before committing.
@@ -959,7 +1270,7 @@ declare global {
    *
    * Host-only: refused on a multiplayer client.
    */
-  function sam_toggle_switch(uid: string): boolean;
+  function sam_toggle_switch(uid: number): boolean;
 
   /**
    * Send the party to any floor, including BACK UP, which the game otherwise never does — a ladder only ever counts upward, so before this no hub, home base or shop you walk back to was possible. The trip is deferred exactly as a ladder defers it, so it is safe to call from inside an event handler. Refused, with a logged reason, on a client, while another level change is already under way, or before a game has started. Nothing on the old floor is preserved: floors regenerate from the map seed, so put anything that must survive in a stash chest or in sam_world_save.
@@ -991,7 +1302,7 @@ declare global {
   /**
    * Put one of your mod's pictures in a panel, scaled to w by h. Resolves the same way sam_show_image does. The colour argument tints the picture and its alpha fades it, so the same file can be reused greyed-out for a locked entry.
    */
-  function sam_ui_image(panel: string, id: string, x: number, y: number, w: number, h: number, image: string, color?: string): boolean;
+  function sam_ui_image(panel: string, id: string, x: number, y: number, w: number, h: number, image: string, color?: number): boolean;
 
   /**
    * Put an editable text box in a panel — a search field, a name entry, a price offer. Read what the player typed with sam_ui_input_text. Place the box clear of any label: a label wide enough to overlap the box will sit on top of it.
@@ -1011,7 +1322,7 @@ declare global {
   /**
    * Put a line of text in a panel. x/y are measured from the panel's top-left corner, not the screen. Give w enough room for the text or it will be cut off — sam_ui_text_size measures a string before you place it. Re-declaring the same id replaces the text, which is how you update a running total.
    */
-  function sam_ui_label(panel: string, id: string, x: number, y: number, w: number, text: string, color?: string): boolean;
+  function sam_ui_label(panel: string, id: string, x: number, y: number, w: number, text: string, color?: number): boolean;
 
   /**
    * Create an empty scrolling list in a panel. Fill it with sam_ui_list_add. This is the widget for a shop's stock, a bestiary, a recipe index or a quest log — anything with more entries than fit on screen.
@@ -1021,7 +1332,7 @@ declare global {
   /**
    * Append one row to a list. Clicking a row fires "ui.on_select" with .panel, .widget set to the list and .value set to the row_id you chose here — so make row_id something you can act on, like an item id, rather than a display string.
    */
-  function sam_ui_list_add(panel: string, id: string, row_id: string, text: string, color?: string): boolean;
+  function sam_ui_list_add(panel: string, id: string, row_id: string, text: string, color?: number): boolean;
 
   /**
    * Empty one list without touching the rest of the panel. Use this before re-filling a list from a search box or a filter, so the old results do not pile up under the new ones.
@@ -1041,17 +1352,27 @@ declare global {
   /**
    * Recolour a panel's background and border. Nothing about a panel's look is fixed by the framework — set the background fully transparent for a bare overlay, or opaque for a solid window. Colours accept the same forms as the HUD calls.
    */
-  function sam_ui_panel_style(panel: string, background: string, border: string, border_width?: number): boolean;
+  function sam_ui_panel_style(panel: string, background: number, border: number, border_width?: number): boolean;
 
   /**
    * Measure a string before you place it. This is how you lay a panel out properly instead of guessing: size a label to its own text so it cannot overlap the widget beside it, right-align a column of numbers, or centre a heading in a panel of known width.
    */
-  function sam_ui_text_size(text: string, font?: string): number;
+  function sam_ui_text_size(text: string, font?: string): number | null;
 
   /**
    * Revert a class stat/skill patch.
    */
-  function sam_unpatch_class(class_: string): boolean;
+  function sam_unpatch_class(class_: any): boolean;
+
+  /**
+   * How much of the savegame's mod-state budget is in use. sam_world_save shares one 64 KB allowance between every mod in the run.
+   */
+  function sam_world_bytes(): number;
+
+  /**
+   * How much room is left before sam_world_save starts refusing writes. Check this before storing something large, rather than discovering the ceiling when a save quietly fails mid-run.
+   */
+  function sam_world_bytes_free(): number;
 
   /**
    * Forget one key for the current character. The whole store is dropped automatically when a run ends, so you only need this to reset something mid-run.
@@ -1061,7 +1382,7 @@ declare global {
   /**
    * List the keys your mod has saved for this character. Handy for migrating an older save's data, or for showing the player what a mod is remembering about their run.
    */
-  function sam_world_keys(): any[];
+  function sam_world_keys(): any;
 
   /**
    * Read a value back from the current character's savegame. nil on a key you have never written is the signal that this is a fresh character — that is the natural place to run first-time setup, like anchoring a home floor.
@@ -1071,7 +1392,7 @@ declare global {
   /**
    * Save a value inside the CURRENT character's savegame. A brand new character starts with none of it, so a hub's unlock flags, a quest's progress or a bank balance cannot leak from one run into the next. Deliberately size-capped (8KB per value, 64KB across all mods) because oversized save data can produce a savegame that fails to load — keep flags and counters here and keep items in a stash chest, which the game persists properly on its own.
    */
-  function sam_world_save(key: string, value: string): boolean;
+  function sam_world_save(key: string, value: any): boolean;
 
   /** Every event name the engine fires. */
   type SamEventName =

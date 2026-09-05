@@ -40,8 +40,10 @@ extern "C" {
 
 #include <cstdlib>
 #include <cstring>
+#include <algorithm> // std::sort: deterministic key order in sam_random_weighted
 #include <cmath>    // lround — move-speed fixed-point encoding
 #include <string>
+#include <type_traits>   // the ItemType assertion on the appearance guard
 #include <vector>
 #include <map>
 #include <fstream>
@@ -65,6 +67,7 @@ extern "C" {
 #	include "entity.hpp"    // Entity::setEffect/setHP/setMP/getUID, act* behaviors, map iteration
 #	include "monster.hpp"   // actMonster, Monster enum
 #	include "collision.hpp" // entityDist
+#	include "scores.hpp"    // completionTime (the run clock the game itself displays)
 #	include "paths.hpp"     // GeneratePathTypes (monster movement bindings)
 #	include "engine/audio/sound.hpp" // playSoundPlayer, numsounds
 #	include "files.hpp"     // outputdir (savegames base dir for persistent mod data)
@@ -945,6 +948,10 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
 		return z ^ (z >> 31);
 	}
+	// Per-stream draw counters. These MUST be cleared when a run starts: they used to live
+	// for the whole process, so a host on its third run of the session had stream "loot" at
+	// 812 while a friend who had just launched was at 0, and the same call returned different
+	// numbers on the two machines even though uniqueGameKey matched.
 	std::map<std::string, unsigned long long> g_rngCounters;
 
 	// Shared by both runtimes so Lua and JS cannot drift apart on the same stream.
@@ -3133,6 +3140,1180 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		return 1;
 	}
 
+
+	// ============================================================================
+	// v2.6 batch 1: reads and dice.
+	//
+	// Everything below is either a read of a field the engine already replicates to every
+	// machine, or a helper built on the deterministic sam_random stream. That is why the
+	// batch is safe: no new packet, no save-format change, and nothing that needs to decide
+	// host authority. The three exceptions say so in their own comment.
+	//
+	// DISTANCES ARE IN TILES. The engine works in world pixels (16 per tile) and entityDist
+	// returns pixels, but every other spatial call in this API speaks tiles, so these divide.
+	// Mixing the two units silently is a worse trap than the conversion.
+	// ============================================================================
+
+	// sam_get_position_precise(uid) -> x, y, z (world pixels, fractional) | nil
+	// sam_get_position truncates to a tile and throws away z entirely, so nothing in script
+	// could tell a flying bat from a rat underneath it, or two monsters sharing a tile.
+	int lua_sam_get_position_precise(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		Entity* e = uidToEntity((Sint32)uid);
+		if ( !e ) { lua_pushnil(Ls); return 1; }
+		lua_pushnumber(Ls, (lua_Number)e->x);
+		lua_pushnumber(Ls, (lua_Number)e->y);
+		lua_pushnumber(Ls, (lua_Number)e->z);
+		return 3;
+	}
+
+	// sam_get_distance(uidA, uidB) -> tiles | nil
+	int lua_sam_get_distance(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		Entity* a = uidToEntity((Sint32)luaL_checkinteger(Ls, 1));
+		Entity* b = uidToEntity((Sint32)luaL_checkinteger(Ls, 2));
+		if ( !a || !b ) { lua_pushnil(Ls); return 1; }
+		lua_pushnumber(Ls, (lua_Number)(entityDist(a, b) / 16.0));
+		return 1;
+	}
+
+	// sam_get_distance_to(uid, tileX, tileY) -> tiles | nil
+	// Measured to the CENTRE of the tile, which is where the engine puts things.
+	int lua_sam_get_distance_to(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		Entity* e = uidToEntity((Sint32)luaL_checkinteger(Ls, 1));
+		const int tx = (int)luaL_checkinteger(Ls, 2);
+		const int ty = (int)luaL_checkinteger(Ls, 3);
+		if ( !e ) { lua_pushnil(Ls); return 1; }
+		const double dx = e->x - ((double)tx * 16.0 + 8.0);
+		const double dy = e->y - ((double)ty * 16.0 + 8.0);
+		lua_pushnumber(Ls, (lua_Number)(std::sqrt(dx * dx + dy * dy) / 16.0));
+		return 1;
+	}
+
+	// sam_get_entity_type(uid) -> "player"|"monster"|"item"|"door"|... | nil
+	// The inverse of the behavior-pointer filter sam_find_entities already applies.
+	int lua_sam_get_entity_type(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		Entity* e = uidToEntity((Sint32)luaL_checkinteger(Ls, 1));
+		if ( !e ) { lua_pushnil(Ls); return 1; }
+		const char* kind = "other";
+		if ( e->behavior == &actPlayer )            { kind = "player"; }
+		else if ( e->behavior == &actMonster )      { kind = "monster"; }
+		else if ( e->behavior == &actItem )         { kind = "item"; }
+		else if ( e->behavior == &actDoor )         { kind = "door"; }
+		else if ( e->behavior == &actChest )        { kind = "chest"; }
+		else if ( e->behavior == &actLadder )       { kind = "ladder"; }
+		else if ( e->behavior == &actPortal )       { kind = "portal"; }
+		else if ( e->behavior == &actGate )         { kind = "gate"; }
+		else if ( e->behavior == &actSwitch )       { kind = "switch"; }
+		else if ( e->behavior == &actFountain )     { kind = "fountain"; }
+		else if ( e->behavior == &actSink )         { kind = "sink"; }
+		else if ( e->behavior == &actBoulder )      { kind = "boulder"; }
+		else if ( e->behavior == &actGib )          { kind = "gib"; }
+		lua_pushstring(Ls, kind);
+		return 1;
+	}
+
+	// sam_get_scale(uid) -> x, y, z | nil. Reader for the existing sam_set_scale.
+	int lua_sam_get_scale(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		Entity* e = uidToEntity((Sint32)luaL_checkinteger(Ls, 1));
+		if ( !e ) { lua_pushnil(Ls); return 1; }
+		lua_pushnumber(Ls, (lua_Number)e->scalex);
+		lua_pushnumber(Ls, (lua_Number)e->scaley);
+		lua_pushnumber(Ls, (lua_Number)e->scalez);
+		return 3;
+	}
+
+	// sam_is_visible(uid) -> boolean | nil. Reader for the existing sam_set_visible.
+	int lua_sam_is_visible(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		Entity* e = uidToEntity((Sint32)luaL_checkinteger(Ls, 1));
+		if ( !e ) { lua_pushnil(Ls); return 1; }
+		lua_pushboolean(Ls, e->flags[INVISIBLE] ? 0 : 1);
+		return 1;
+	}
+
+	// sam_get_velocity(uid) -> vx, vy, vz (pixels per tick) | nil
+	int lua_sam_get_velocity(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		Entity* e = uidToEntity((Sint32)luaL_checkinteger(Ls, 1));
+		if ( !e ) { lua_pushnil(Ls); return 1; }
+		lua_pushnumber(Ls, (lua_Number)e->vel_x);
+		lua_pushnumber(Ls, (lua_Number)e->vel_y);
+		lua_pushnumber(Ls, (lua_Number)e->vel_z);
+		return 3;
+	}
+
+	// sam_get_entity_size(uid) -> sizex, sizey (bounding box, pixels) | nil
+	// Any script-side overlap or aim-cone maths needs this and it was invisible.
+	int lua_sam_get_entity_size(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		Entity* e = uidToEntity((Sint32)luaL_checkinteger(Ls, 1));
+		if ( !e ) { lua_pushnil(Ls); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)e->sizex);
+		lua_pushinteger(Ls, (lua_Integer)e->sizey);
+		return 2;
+	}
+
+	// sam_get_entity_sprite(uid) -> model index | nil
+	int lua_sam_get_entity_sprite(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		Entity* e = uidToEntity((Sint32)luaL_checkinteger(Ls, 1));
+		if ( !e ) { lua_pushnil(Ls); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)e->sprite);
+		return 1;
+	}
+
+	// sam_get_entity_ticks(uid) -> frames this entity has existed | nil
+	int lua_sam_get_entity_ticks(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		Entity* e = uidToEntity((Sint32)luaL_checkinteger(Ls, 1));
+		if ( !e ) { lua_pushnil(Ls); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)e->ticks);
+		return 1;
+	}
+
+	// ---- world reads -----------------------------------------------------------
+
+	// sam_get_map_seed() -> the seed THIS FLOOR was generated from.
+	// Distinct from sam_get_seed, which is the whole run. Identical on host and clients,
+	// because a client regenerates the floor from it, so it is safe to derive shared
+	// per-floor randomness from.
+	int lua_sam_get_map_seed(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		lua_pushinteger(Ls, (lua_Integer)(unsigned long long)mapseed);
+		return 1;
+	}
+
+	// sam_is_dark_level() -> boolean
+	int lua_sam_is_dark_level(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		lua_pushboolean(Ls, darkmap ? 1 : 0);
+		return 1;
+	}
+
+	// sam_get_playable_bounds() -> x1, y1, x2, y2 (tiles, half-open)
+	// The interior the generator will actually use, which excludes the perimeter gap. A
+	// spawner that ignores this puts things inside the outer wall.
+	int lua_sam_get_playable_bounds(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		lua_pushinteger(Ls, (lua_Integer)getMapPossibleLocationX1());
+		lua_pushinteger(Ls, (lua_Integer)getMapPossibleLocationY1());
+		lua_pushinteger(Ls, (lua_Integer)getMapPossibleLocationX2());
+		lua_pushinteger(Ls, (lua_Integer)getMapPossibleLocationY2());
+		return 4;
+	}
+
+	// sam_is_tile_diggable(x, y) -> boolean. The engine's own test, so a mod's mining
+	// mechanic refuses exactly where the game refuses.
+	int lua_sam_is_tile_diggable(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int x = (int)luaL_checkinteger(Ls, 1);
+		const int y = (int)luaL_checkinteger(Ls, 2);
+		// mapTileDiggable does NO validation of its own: it indexes map.tiles immediately,
+		// because every engine caller hands it a raycast hit that is in bounds by
+		// construction. A script hands it whatever the modder typed, so the guard has to be
+		// here. map.tiles is also null until a level is loaded, which a menu timer can hit.
+		if ( !map.tiles || x < 0 || x >= (int)map.width || y < 0 || y >= (int)map.height )
+		{
+			lua_pushboolean(Ls, 0);
+			return 1;
+		}
+		lua_pushboolean(Ls, mapTileDiggable(x, y) ? 1 : 0);
+		return 1;
+	}
+
+	// sam_get_map_flags() -> table of the per-map rules a mod should respect
+	int lua_sam_get_map_flags(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		// MFLAG_* are NOT indices. Each is a macro that already extracts its byte out of
+		// map.flags, e.g. main.hpp:536 is ((map.flags[MAP_FLAG_GENBYTES3] >> 24) & 0xFF).
+		// The first version of this used them to index map.flags a second time, so every
+		// field read map.flags[0] and every answer was wrong. sam_world.cpp:446 had the
+		// correct form all along: compare the macro against zero.
+		lua_newtable(Ls);
+		const struct { const char* name; int value; } flags[] = {
+			{ "no_digging",     MFLAG_DISABLEDIGGING },
+			{ "no_teleport",    MFLAG_DISABLETELEPORT },
+			{ "no_levitation",  MFLAG_DISABLELEVITATION },
+			{ "no_opening",     MFLAG_DISABLEOPENING },
+			{ "no_messages",    MFLAG_DISABLEMESSAGES },
+			{ "no_hunger",      MFLAG_DISABLEHUNGER },
+			{ "gen_adjacent",   MFLAG_GENADJACENTROOMS },
+		};
+		for ( const auto& f : flags )
+		{
+			lua_pushboolean(Ls, f.value != 0 ? 1 : 0);
+			lua_setfield(Ls, -2, f.name);
+		}
+		// A count of tiles, not a yes/no, so it is reported as the number it is.
+		lua_pushinteger(Ls, (lua_Integer)MFLAG_PERIMETER_GAP);
+		lua_setfield(Ls, -2, "perimeter_gap");
+		return 1;
+	}
+
+	// sam_get_exit_position() -> tileX, tileY | nil. The ladder or portal off this floor,
+	// found the same way the game's own /dowse command finds it.
+	int lua_sam_get_exit_position(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		for ( node_t* node = map.entities->first; node; node = node->next )
+		{
+			Entity* e = (Entity*)node->element;
+			if ( !e ) { continue; }
+			// Mirror the engine's own exit finder (drawminimap.cpp:1348-1359) rather than
+			// matching any ladder or portal. skill[3] == 1 is LADDER_SECRET, and is also
+			// what Mages Guild's purely decorative portal sets; portalNotSecret marks a
+			// real Hell exit. skill[19] is the framework's own decorative sam_spawn_portal,
+			// which on a client is prepended to the list and would otherwise win.
+			bool isExit = false;
+			if ( e->behavior == &actLadder )            { isExit = ( e->skill[3] != 1 ); }
+			else if ( e->behavior == &actPortal )       { isExit = ( e->skill[19] != 1 ) && ( e->portalNotSecret == 1 ); }
+			else if ( e->behavior == &actCustomPortal ) { isExit = true; }  // does set loadnextlevel
+			if ( isExit )
+			{
+				lua_pushinteger(Ls, (lua_Integer)((int)e->x >> 4));
+				lua_pushinteger(Ls, (lua_Integer)((int)e->y >> 4));
+				return 2;
+			}
+		}
+		lua_pushnil(Ls);
+		return 1;
+	}
+
+	// ---- time and run state ----------------------------------------------------
+
+	// sam_get_run_time() -> seconds of ACTUAL PLAY this run.
+	// completionTime is the number the game itself shows, and it stops while paused, in the
+	// intro and while dead. sam_get_time_played returns the global `ticks` counter, which
+	// keeps running in menus and resets on relaunch, so it is not this.
+	int lua_sam_get_run_time(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		lua_pushnumber(Ls, (lua_Number)completionTime / (lua_Number)TICKS_PER_SECOND);
+		return 1;
+	}
+
+	// sam_get_tick_rate() -> 50. Barony's logic step is fixed, so there is no delta time to
+	// expose; this is the constant every "per second" conversion needs.
+	int lua_sam_get_tick_rate(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		lua_pushinteger(Ls, (lua_Integer)TICKS_PER_SECOND);
+		return 1;
+	}
+
+	// sam_get_fps() -> this machine's render rate. LOCAL and per-machine: never feed it into
+	// a gameplay roll or two players desync.
+	int lua_sam_get_fps(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		lua_pushnumber(Ls, (lua_Number)fps);
+		return 1;
+	}
+
+	// sam_get_real_time() -> unix seconds. Per-machine wall clock. Same warning as fps: two
+	// players' clocks differ, so this must not decide anything shared or saved.
+	int lua_sam_get_real_time(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		lua_pushinteger(Ls, (lua_Integer)(long long)getTime());
+		return 1;
+	}
+
+	// sam_get_date() -> { year, month, day, hour, min, sec }. Enables seasonal content.
+	// Per-machine, same warning as above.
+	int lua_sam_get_date(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		int y = 0, mo = 0, d = 0, h = 0, mi = 0, sec = 0;
+		getTimeAndDate(getTime(), &y, &mo, &d, &h, &mi, &sec);
+		lua_newtable(Ls);
+		const struct { const char* k; int v; } parts[] = {
+			{ "year", y }, { "month", mo }, { "day", d },
+			{ "hour", h }, { "min", mi }, { "sec", sec },
+		};
+		for ( const auto& p : parts )
+		{
+			lua_pushinteger(Ls, (lua_Integer)p.v);
+			lua_setfield(Ls, -2, p.k);
+		}
+		return 1;
+	}
+
+	// sam_is_paused() -> boolean. Per-machine: each client has its own gamePaused.
+	int lua_sam_is_paused(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		lua_pushboolean(Ls, gamePaused ? 1 : 0);
+		return 1;
+	}
+
+	// sam_is_in_game() -> false while the main menu / intro is up.
+	int lua_sam_is_in_game(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		lua_pushboolean(Ls, intro ? 0 : 1);
+		return 1;
+	}
+
+	// sam_is_loading() -> true during a level change. A timer callback can fire here, and a
+	// script had no way to tell.
+	int lua_sam_is_loading(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		lua_pushboolean(Ls, loading ? 1 : 0);
+		return 1;
+	}
+
+	// ---- dice ------------------------------------------------------------------
+	// All four draw from samRandomDraw, the per-mod deterministic stream behind sam_random,
+	// and never from the engine's local_rng/map_rng: those are lockstep streams and drawing
+	// from them desyncs multiplayer. Same run seed plus same stream plus same call order
+	// gives the same result on every machine.
+
+	// sam_random_float(stream) -> 0.0 .. 1.0
+	int lua_sam_random_float(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* streamC = luaL_checkstring(Ls, 1);
+		const long long v = samRandomDraw(g_currentNs, streamC ? streamC : "", 0, 1000000);
+		lua_pushnumber(Ls, (lua_Number)v / (lua_Number)1000000.0);
+		return 1;
+	}
+
+	// sam_random_chance(stream, percent) -> boolean. The single most-typed line in any mod.
+	// 0 or less is always false and 100 or more always true, so callers need no clamping.
+	int lua_sam_random_chance(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* streamC = luaL_checkstring(Ls, 1);
+		const double pct = (double)luaL_checknumber(Ls, 2);
+		if ( pct <= 0.0 ) { lua_pushboolean(Ls, 0); return 1; }
+		if ( pct >= 100.0 ) { lua_pushboolean(Ls, 1); return 1; }
+		const long long v = samRandomDraw(g_currentNs, streamC ? streamC : "", 1, 1000000);
+		lua_pushboolean(Ls, ((double)v <= pct * 10000.0) ? 1 : 0);
+		return 1;
+	}
+
+	// sam_random_from_list(stream, table) -> one element | nil for an empty list.
+	// Lua indexes from 1; the JS twin indexes from 0. That difference is deliberate and is
+	// exactly the parity class that has bitten this project before, so both are written to
+	// their own language's convention rather than one being ported literally.
+	int lua_sam_random_from_list(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* streamC = luaL_checkstring(Ls, 1);
+		luaL_checktype(Ls, 2, LUA_TTABLE);
+		const lua_Integer n = (lua_Integer)lua_rawlen(Ls, 2);
+		if ( n <= 0 ) { lua_pushnil(Ls); return 1; }
+		const long long pick = samRandomDraw(g_currentNs, streamC ? streamC : "", 1, (long long)n);
+		lua_rawgeti(Ls, 2, (lua_Integer)pick);
+		return 1;
+	}
+
+	// sam_random_weighted(stream, { key = weight, ... }) -> key | nil
+	// Weights need not sum to anything; a weight of 0 or less can never be drawn.
+	int lua_sam_random_weighted(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* streamC = luaL_checkstring(Ls, 1);
+		luaL_checktype(Ls, 2, LUA_TTABLE);
+
+		// Collect and SORT the keys before picking. Lua 5.4 randomises its string hash seed
+		// per process (lstate.c luai_makeseed), so pairs() order differs between two runs of
+		// the same program: five runs of the shipped interpreter over one table gave five
+		// different orders. Walking the table directly would make the host and a client pick
+		// DIFFERENT keys from the same deterministic draw, which is precisely the desync this
+		// function exists to prevent. Sorting also makes Lua and JS agree with each other.
+		std::vector<std::pair<std::string, double>> entries;
+		double total = 0.0;
+		lua_pushnil(Ls);
+		while ( lua_next(Ls, 2) != 0 )
+		{
+			if ( lua_type(Ls, -2) == LUA_TSTRING )
+			{
+				const double w = (double)lua_tonumber(Ls, -1);
+				if ( w > 0.0 )
+				{
+					entries.emplace_back(lua_tostring(Ls, -2), w);
+					total += w;
+				}
+			}
+			lua_pop(Ls, 1);
+		}
+		if ( entries.empty() || total <= 0.0 ) { lua_pushnil(Ls); return 1; }
+		std::sort(entries.begin(), entries.end(),
+			[](const std::pair<std::string, double>& a, const std::pair<std::string, double>& b)
+			{ return a.first < b.first; });
+
+		// Draw over [1, 999999] so target can never equal total exactly: at the top of an
+		// inclusive range floating-point residue left every branch untaken and the function
+		// returned nil for a perfectly valid table.
+		const long long draw = samRandomDraw(g_currentNs, streamC ? streamC : "", 1, 999999);
+		double target = total * ((double)draw / 1000000.0);
+		for ( const auto& e : entries )
+		{
+			target -= e.second;
+			if ( target <= 0.0 ) { lua_pushstring(Ls, e.first.c_str()); return 1; }
+		}
+		// Belt and braces: rounding can only ever leave us at the last entry.
+		lua_pushstring(Ls, entries.back().first.c_str());
+		return 1;
+	}
+
+	// ---- persistence parity ----------------------------------------------------
+
+	// sam_has_data(key) -> boolean. Genuinely distinguishes "stored" from "absent": storing
+	// nil writes a real file containing null, so sam_has_data is true while sam_load_data is
+	// nil. Use sam_delete_data for real absence.
+	int lua_sam_has_data(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* keyC = luaL_checkstring(Ls, 1);
+		const std::string key = keyC ? keyC : "";
+		if ( g_currentNs.empty() || key.empty() ) { lua_pushboolean(Ls, 0); return 1; }
+		// MUST go through samModDataFile, which sanitizes. Every writer does, so building the
+		// path by hand looked for "boss.phase.json" while sam_save_data had written
+		// "boss_phase.json": the check returned false forever and a first-run guard wiped
+		// progress on every launch. Raw concatenation also let a key escape the namespace
+		// directory.
+		const std::string path = samModDataFile(g_currentNs, key);
+		std::error_code ec;
+		lua_pushboolean(Ls, std::filesystem::exists(path, ec) && !ec ? 1 : 0);
+		return 1;
+	}
+
+	// sam_world_bytes() / sam_world_bytes_free() -> where a mod stands against the 64 KB
+	// savegame budget. Today a mod only learns the ceiling exists when a write returns false
+	// mid-run, with nothing to have checked beforehand.
+	int lua_sam_world_bytes(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		lua_pushinteger(Ls, (lua_Integer)SAMWorldState::totalBytes());
+		return 1;
+	}
+
+	int lua_sam_world_bytes_free(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long used = (long long)SAMWorldState::totalBytes();
+		const long long cap = (long long)SAMWorldState::kMaxTotalBytes;
+		lua_pushinteger(Ls, (lua_Integer)(used >= cap ? 0 : cap - used));
+		return 1;
+	}
+
+
+	// ============================================================================
+	// v2.6 batch 2: inventory and items.
+	//
+	// TWO RULES apply to everything here.
+	//
+	// 1. uidToItem (items.cpp:295) deliberately skips any player who is not local, so an
+	//    item uid only ever resolves to the CALLING machine's own items. Nothing in this
+	//    batch can reach a remote player's bag, on the host or anywhere else. Callers get
+	//    nil rather than a wrong answer.
+	// 2. Anything that WRITES is host-only. Changing beatitude or status on an equipped item
+	//    from a client leaves the host's mirrored slot copy stale until the next equip.
+	//
+	// Enums come back as STRINGS, matching every other S.A.M getter: a bare 3 for a status
+	// is unreadable in a mod and stops meaning the same thing if the enum ever grows.
+	// ============================================================================
+
+
+	// Item::canUnequip's decision WITHOUT its side effect. The engine version is non-const
+	// and sets identified = true then calls onItemIdentified on two paths (items.cpp:6301,
+	// :6325), so calling it to answer a question silently identifies the item, and on a
+	// client sends an appearance update to the server. The branches below mirror
+	// items.cpp:6257-6330 exactly; only the identifying is left out.
+	static bool samItemCanUnequipQuiet(const Item* it, const Stat* wielder)
+	{
+		if ( !it ) { return true; }
+		// NOTE: the engine has a "spellbooks always unequippable" branch at items.cpp:6259,
+		// and it is INSIDE a /* */ block: "Spellbooks are no longer equipable." It never
+		// runs, and its literals are stale anyway (100-103 are rings, not books). It was
+		// copied here by mistake and is deliberately absent now.
+		if ( it->type == TOOL_DUCK ) { return true; }
+		if ( wielder )
+		{
+			// An automaton is never stuck with anything (items.cpp:6279).
+			if ( wielder->type == AUTOMATON ) { return true; }
+			// Succubus and friends: a BLESSING is what sticks, not a curse.
+			if ( shouldInvertEquipmentBeatitude(wielder) ) { return it->beatitude <= 0; }
+		}
+		return it->beatitude >= 0;
+	}
+
+	// Compile-time proof that every case in the switch below is an ItemType.
+	//
+	// This is not decoration. The previous version listed TOME_SPELL among the cases, and
+	// TOME_SPELL is a CATEGORY whose value is 14, so the guard protected item type 14 (a
+	// steel sword) and left every tome wide open: the exact opposite of its purpose. A
+	// switch over `int` takes either enum silently. This does not, so it cannot happen again.
+	template<typename T> constexpr bool samIsItemType(T) { return std::is_same<T, ItemType>::value; }
+	static_assert(samIsItemType(READABLE_BOOK) && samIsItemType(SCROLL_MAIL)
+		&& samIsItemType(ENCHANTED_FEATHER) && samIsItemType(MAGICSTAFF_SCEPTER)
+		&& samIsItemType(TOOL_PLAYER_LOOT_BAG) && samIsItemType(TOOL_SENTRYBOT)
+		&& samIsItemType(TOOL_SPELLBOT) && samIsItemType(TOOL_GYROBOT)
+		&& samIsItemType(TOOL_DUMMYBOT),
+		"every case in samItemAppearanceIsGameplay must be an ItemType, not a Category");
+
+	// Types whose `appearance` carries gameplay state rather than a look. Writing it on any
+	// of these changes what the item IS, and appearance is persisted (scores.hpp:606), so
+	// the damage is permanent.
+	//
+	// DERIVED, not remembered: this list is every decode of `appearance` in the engine that
+	// is not the ordinary `% items[type].variations` cosmetic use. The previous version of
+	// this function listed TOME_SPELL as a case in a switch over ItemType; TOME_SPELL is a
+	// CATEGORY (items.hpp:584, value 14) and ItemType 14 is a sword, so it guarded swords
+	// and left every tome open. Tomes are matched by category here, which is what they are.
+	static bool samItemAppearanceIsGameplay(int type)
+	{
+		if ( type < 0 || type >= NUM_ITEM_SLOTS ) { return false; }
+		// A tome's appearance picks the spell it teaches (items.cpp:7449 % TOME_APPEARANCE_MAX).
+		if ( items[type].category == TOME_SPELL ) { return true; }
+		// A spell item's appearance IS the spell the player knows (spell.cpp:1961).
+		if ( items[type].category == SPELL_CAT ) { return true; }
+		switch ( type )
+		{
+			case READABLE_BOOK:            // % numbooks picks which book this is
+			case SCROLL_MAIL:              // % 25 picks which letter
+			case ENCHANTED_FEATHER:        // % ENCHANTED_FEATHER_MAX_DURABILITY: charges left
+			case MAGICSTAFF_SCEPTER:       // % MAGICSTAFF_SCEPTER_CHARGE_MAX: charges left
+			case TOOL_PLAYER_LOOT_BAG:     // owner in the low bits, contents keyed on the rest
+			case TOOL_SENTRYBOT:           // the four bots encode HP (entity.cpp:31653)
+			case TOOL_SPELLBOT:
+			case TOOL_GYROBOT:
+			case TOOL_DUMMYBOT:
+				return true;
+			default:
+				return false;
+		}
+	}
+
+	// The engine's Status enum (items.hpp:588) as text, both directions.
+	static const char* samItemStatusName(int st)
+	{
+		switch ( st )
+		{
+			case BROKEN:     return "BROKEN";
+			case DECREPIT:   return "DECREPIT";
+			case WORN:       return "WORN";
+			case SERVICABLE: return "SERVICABLE";
+			case EXCELLENT:  return "EXCELLENT";
+			default:         return "UNKNOWN";
+		}
+	}
+
+	static bool samItemStatusFromName(const std::string& n, int& out)
+	{
+		std::string u;
+		for ( char c : n ) { u += (char)toupper((unsigned char)c); }
+		if ( u == "BROKEN" )     { out = BROKEN;     return true; }
+		if ( u == "DECREPIT" )   { out = DECREPIT;   return true; }
+		if ( u == "WORN" )       { out = WORN;       return true; }
+		if ( u == "SERVICABLE" || u == "SERVICEABLE" ) { out = SERVICABLE; return true; }
+		if ( u == "EXCELLENT" )  { out = EXCELLENT;  return true; }
+		return false;
+	}
+
+	// items.hpp:637. NO_EQUIP means "cannot be worn", which is different from "unknown".
+	static const char* samItemSlotName(int slot)
+	{
+		switch ( slot )
+		{
+			case EQUIPPABLE_IN_SLOT_WEAPON:      return "WEAPON";
+			case EQUIPPABLE_IN_SLOT_SHIELD:      return "SHIELD";
+			case EQUIPPABLE_IN_SLOT_MASK:        return "MASK";
+			case EQUIPPABLE_IN_SLOT_HELM:        return "HELM";
+			case EQUIPPABLE_IN_SLOT_GLOVES:      return "GLOVES";
+			case EQUIPPABLE_IN_SLOT_BOOTS:       return "BOOTS";
+			case EQUIPPABLE_IN_SLOT_BREASTPLATE: return "BREASTPLATE";
+			case EQUIPPABLE_IN_SLOT_CLOAK:       return "CLOAK";
+			case EQUIPPABLE_IN_SLOT_AMULET:      return "AMULET";
+			case EQUIPPABLE_IN_SLOT_RING:        return "RING";
+			default:                             return "NONE";
+		}
+	}
+
+	// Resolve an item uid, warning once with the reason. Returns nullptr for a uid that is
+	// not the local player's, which is the common case a modder will hit in multiplayer.
+	static Item* samItemFromUid(long long uid)
+	{
+		return uidToItem((Uint32)uid);
+	}
+
+	// sam_get_item(uid) -> table | nil
+	// One call for every plain field on the item, because fifteen one-line getters would be
+	// fifteen things to look up. The computed values (name, weight, value) are separate
+	// functions below, since each runs real engine code rather than reading a member.
+	int lua_sam_get_item(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		Item* it = samItemFromUid((long long)luaL_checkinteger(Ls, 1));
+		if ( !it ) { lua_pushnil(Ls); return 1; }
+		lua_newtable(Ls);
+		lua_pushinteger(Ls, (lua_Integer)it->type);       lua_setfield(Ls, -2, "type");
+		lua_pushinteger(Ls, (lua_Integer)it->count);      lua_setfield(Ls, -2, "count");
+		lua_pushinteger(Ls, (lua_Integer)it->beatitude);  lua_setfield(Ls, -2, "beatitude");
+		lua_pushinteger(Ls, (lua_Integer)it->status);     lua_setfield(Ls, -2, "status");
+		lua_pushstring(Ls, samItemStatusName((int)it->status)); lua_setfield(Ls, -2, "status_name");
+		lua_pushboolean(Ls, it->identified ? 1 : 0);      lua_setfield(Ls, -2, "identified");
+		lua_pushinteger(Ls, (lua_Integer)it->appearance); lua_setfield(Ls, -2, "appearance");
+		lua_pushinteger(Ls, (lua_Integer)it->ownerUid);   lua_setfield(Ls, -2, "owner_uid");
+		lua_pushboolean(Ls, it->isDroppable ? 1 : 0);     lua_setfield(Ls, -2, "droppable");
+		lua_pushinteger(Ls, (lua_Integer)it->x);          lua_setfield(Ls, -2, "grid_x");
+		lua_pushinteger(Ls, (lua_Integer)it->y);          lua_setfield(Ls, -2, "grid_y");
+		return 1;
+	}
+
+	// sam_get_item_name(uid) -> string | nil
+	// Item::getName renders the player-facing name: the blessed/cursed and condition
+	// prefixes, and the unidentified alias rather than the true name. It writes into a
+	// shared buffer, so the string is copied into Lua on the next line and never held.
+	int lua_sam_get_item_name(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		Item* it = samItemFromUid((long long)luaL_checkinteger(Ls, 1));
+		if ( !it ) { lua_pushnil(Ls); return 1; }
+		const char* n = it->getName();
+		lua_pushstring(Ls, n ? n : "");
+		return 1;
+	}
+
+	// sam_get_item_value(uid) -> gold | nil. Per instance, so it accounts for the stack,
+	// the tome and the custom-id band. Distinct from sam_get_item_info's flat table value.
+	int lua_sam_get_item_value(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		Item* it = samItemFromUid((long long)luaL_checkinteger(Ls, 1));
+		if ( !it ) { lua_pushnil(Ls); return 1; }
+		// getGoldValue is PER UNIT and never touches count (items.cpp:5794), so a stack of
+		// fifty gems priced as one. Multiply, because "what is this pile worth" is the
+		// question a shop or loot mod is asking.
+		lua_pushinteger(Ls, (lua_Integer)((long long)it->getGoldValue() * (long long)(it->count > 0 ? it->count : 1)));
+		return 1;
+	}
+
+	// sam_get_item_weight(uid) -> weight | nil. Weight times count, with the quiver rule.
+	int lua_sam_get_item_weight(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		Item* it = samItemFromUid((long long)luaL_checkinteger(Ls, 1));
+		if ( !it ) { lua_pushnil(Ls); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)it->getWeight());
+		return 1;
+	}
+
+	// sam_get_item_attack(uid [, player]) -> tohit | nil
+	// With a player, the number that character would actually get; without, the base.
+	int lua_sam_get_item_attack(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		Item* it = samItemFromUid((long long)luaL_checkinteger(Ls, 1));
+		if ( !it ) { lua_pushnil(Ls); return 1; }
+		const Stat* w = nullptr;
+		if ( !lua_isnoneornil(Ls, 2) )
+		{
+			const int p = (int)luaL_checkinteger(Ls, 2);
+			if ( p >= 0 && p < MAXPLAYERS ) { w = stats[p]; }
+		}
+		lua_pushinteger(Ls, (lua_Integer)it->weaponGetAttack(w));
+		return 1;
+	}
+
+	// sam_get_item_ac(uid [, player]) -> armour class | nil
+	int lua_sam_get_item_ac(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		Item* it = samItemFromUid((long long)luaL_checkinteger(Ls, 1));
+		if ( !it ) { lua_pushnil(Ls); return 1; }
+		const Stat* w = nullptr;
+		if ( !lua_isnoneornil(Ls, 2) )
+		{
+			const int p = (int)luaL_checkinteger(Ls, 2);
+			if ( p >= 0 && p < MAXPLAYERS ) { w = stats[p]; }
+		}
+		lua_pushinteger(Ls, (lua_Integer)it->armorGetAC(w));
+		return 1;
+	}
+
+	// sam_get_tome_spell(uid) -> spell id | nil. Bridges an item to the spell API, so a mod
+	// can read which spell a spellbook teaches and then use sam_grant_spell with it.
+	int lua_sam_get_tome_spell(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		Item* it = samItemFromUid((long long)luaL_checkinteger(Ls, 1));
+		if ( !it ) { lua_pushnil(Ls); return 1; }
+		// Branch on category the way the engine's own getItemVariationFromSpellbookOrTome
+		// does (items.cpp:1252): getTomeSpellID matches only the three TOME_ types and
+		// returns SPELL_NONE for every SPELLBOOK, so binding it alone answered 0 for the
+		// commonest case. nil rather than 0 for "no spell", so `if spell then` works and so
+		// the two runtimes agree: 0 is truthy in Lua and falsy in JS.
+		int spellID = SPELL_NONE;
+		if ( itemCategory(it) == SPELLBOOK )        { spellID = getSpellIDFromSpellbook(it->type); }
+		else if ( itemCategory(it) == TOME_SPELL )  { spellID = it->getTomeSpellID(); }
+		if ( spellID == SPELL_NONE ) { lua_pushnil(Ls); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)spellID);
+		return 1;
+	}
+
+	// sam_get_food_satiation(itemType) -> hunger restored. A TYPE, not a uid: this is the
+	// static table value, so a mod can price food it has not spawned yet.
+	int lua_sam_get_food_satiation(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int t = (int)luaL_checkinteger(Ls, 1);
+		if ( t < 0 || t >= NUM_ITEM_SLOTS ) { lua_pushnil(Ls); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)Item::getBaseFoodSatiation((ItemType)t));
+		return 1;
+	}
+
+	// ---- writes (host only) ----------------------------------------------------
+
+	int lua_sam_set_item_beatitude(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const int v = (int)luaL_checkinteger(Ls, 2);
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_set_item_beatitude refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		Item* it = samItemFromUid(uid);
+		if ( !it ) { lua_pushboolean(Ls, 0); return 1; }
+		// Sint16 on the item; clamp to a sane blessing range rather than letting a script
+		// store a number the tooltip and the damage maths will not survive.
+		// -100..100, matching newItem (items.cpp:217), the ground decode (game.cpp:1870) and
+		// sam_spawn_item. Clamping to 10 here made the same number mean two different things
+		// depending on which entry point a mod used.
+		it->beatitude = (Sint16)((v < -100) ? -100 : ((v > 100) ? 100 : v));
+		lua_pushboolean(Ls, 1);
+		return 1;
+	}
+
+	int lua_sam_set_item_status(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		int st = -1;
+		// lua_type, not lua_isstring: lua_isstring says yes to a NUMBER as well, so the guard
+		// had to exclude numbers by hand and the STRING "3" fell through to the numeric path
+		// while the JS twin sent it to the name lookup and refused it. A string is a status
+		// name in both runtimes now, and a number is a number.
+		if ( lua_type(Ls, 2) == LUA_TSTRING )
+		{
+			if ( !samItemStatusFromName(lua_tostring(Ls, 2), st) )
+			{
+				SAM_ERROR("LUA", "sam_set_item_status: unknown status. Valid: BROKEN, DECREPIT, WORN, SERVICABLE, EXCELLENT.");
+				lua_pushboolean(Ls, 0); return 1;
+			}
+		}
+		else { st = (int)luaL_checkinteger(Ls, 2); }
+		// Refused, not clamped. Clamping a negative up to BROKEN made sam_set_item_status(uid, -3)
+		// succeed here and fail in JS, which is the worst kind of difference: silent.
+		if ( st < BROKEN || st > EXCELLENT )
+		{
+			SAM_ERROR("LUA", "sam_set_item_status: status must be 0 (BROKEN) to 4 (EXCELLENT), or a name.");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_set_item_status refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		Item* it = samItemFromUid(uid);
+		if ( !it ) { lua_pushboolean(Ls, 0); return 1; }
+		// Setting an EQUIPPED item to BROKEN does not unequip it: the engine refuses to USE
+		// a broken item but leaves it worn. That is vanilla behaviour, not an oversight here.
+		it->status = (Status)st;
+		lua_pushboolean(Ls, 1);
+		return 1;
+	}
+
+	// sam_set_item_count(uid, n). Zero goes through consumeItem rather than writing a zero
+	// stack, because a count of 0 left in the bag is an item the UI draws and nothing owns.
+	int lua_sam_set_item_count(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const int n = (int)luaL_checkinteger(Ls, 2);
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_set_item_count refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		Item* it = samItemFromUid(uid);
+		if ( !it ) { lua_pushboolean(Ls, 0); return 1; }
+		// DESTROY is queued, never immediate. This binding can only run from a script, and
+		// a script only runs because the engine called into it, so the caller still holds
+		// this pointer: useItem keeps using `item` after firing player.on_item_use
+		// (items.cpp:2955 then :2983). See SAMItems::queueDestroy.
+		if ( n <= 0 )
+		{
+			int owner = clientnum;
+			for ( int p = 0; p < MAXPLAYERS; ++p )
+			{
+				if ( stats[p] && it->node && it->node->list == &stats[p]->inventory ) { owner = p; break; }
+			}
+			lua_pushboolean(Ls, SAMItems::queueDestroy((Uint32)it->uid, owner) ? 1 : 0);
+			return 1;
+		}
+		// Clamp BEFORE the Sint16 cast. Unclamped, 40000 stored as -25536 and 65536 stored
+		// as 0, which is the empty stack this function is supposed to make impossible; a
+		// negative count then inverts carry weight and is written to the save. The engine's
+		// own ceiling is per item and per player, and this batch exposes it as
+		// sam_get_max_stack, so there is no excuse for picking a different number here.
+		int owner = clientnum;
+		for ( int p = 0; p < MAXPLAYERS; ++p )
+		{
+			if ( stats[p] && it->node && it->node->list == &stats[p]->inventory ) { owner = p; break; }
+		}
+		const int cap = it->getMaxStackLimit(owner);
+		if ( n > cap )
+		{
+			SAM_WARN("LUA", "sam_set_item_count: " + std::to_string(n) + " exceeds this item's"
+				" stack limit of " + std::to_string(cap) + "; refused. Use sam_get_max_stack to check first.");
+			lua_pushboolean(Ls, 0);
+			return 1;
+		}
+		it->count = (Sint16)n;
+		lua_pushboolean(Ls, 1);
+		return 1;
+	}
+
+	// sam_identify_item(player, uid). Goes through the engine's own path, which fires
+	// player.on_item_identified and pushes the appearance to the owning client for us.
+	int lua_sam_identify_item(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const long long uid = (long long)luaL_checkinteger(Ls, 2);
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_identify_item refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		if ( player < 0 || player >= MAXPLAYERS ) { lua_pushboolean(Ls, 0); return 1; }
+		Item* it = samItemFromUid(uid);
+		if ( !it ) { lua_pushboolean(Ls, 0); return 1; }
+		if ( it->identified ) { lua_pushboolean(Ls, 1); return 1; }   // already done, not a failure
+		it->identified = true;
+		Item::onItemIdentified(player, it);
+		lua_pushboolean(Ls, 1);
+		return 1;
+	}
+
+	int lua_sam_set_item_appearance(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const long long ap = (long long)luaL_checkinteger(Ls, 2);
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_set_item_appearance refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		Item* it = samItemFromUid(uid);
+		if ( !it || ap < 0 ) { lua_pushboolean(Ls, 0); return 1; }
+		// Appearance is NOT decoration on every type. A spell tome's taught spell is
+		// appearance % TOME_APPEARANCE_MAX (items.cpp:7451), a loot bag's owner and contents
+		// are keyed on it (items.cpp:8127), the four robots encode HP in it
+		// (entity.cpp:31649) and a scepter encodes charges (items.cpp:8177). All of that is
+		// written to the save, so a "cosmetic" write here is permanent damage. Refuse.
+		if ( samItemAppearanceIsGameplay(it->type) )
+		{
+			SAM_ERROR("LUA", "sam_set_item_appearance: this item type stores gameplay data in"
+				" its appearance (a tome's spell, a loot bag's contents, a robot's HP, a"
+				" scepter's charges). Refused, because the change would be saved.");
+			lua_pushboolean(Ls, 0);
+			return 1;
+		}
+		it->appearance = (Uint32)ap;
+		lua_pushboolean(Ls, 1);
+		return 1;
+	}
+
+	// sam_set_item_droppable(uid, bool). A boss crown that is scenery rather than loot had
+	// no way to say so.
+	int lua_sam_set_item_droppable(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		// Required. lua_toboolean on a missing argument is false, so forgetting the flag made
+		// the item permanently undroppable and said it had succeeded.
+		if ( lua_isnoneornil(Ls, 2) )
+		{
+			SAM_ERROR("LUA", "sam_set_item_droppable: the true/false argument is required.");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		const bool d = lua_toboolean(Ls, 2) != 0;
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_set_item_droppable refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		Item* it = samItemFromUid(uid);
+		if ( !it ) { lua_pushboolean(Ls, 0); return 1; }
+		it->isDroppable = d;
+		lua_pushboolean(Ls, 1);
+		return 1;
+	}
+
+	int lua_sam_get_item_owner(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		Item* it = samItemFromUid((long long)luaL_checkinteger(Ls, 1));
+		if ( !it ) { lua_pushnil(Ls); return 1; }
+		// nil for "nobody", not 0: the docs promise nil, and 0 is truthy in Lua while the
+		// JS twin's 0 is falsy, so the same script took opposite branches in the two runtimes.
+		if ( it->ownerUid == 0 ) { lua_pushnil(Ls); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)it->ownerUid);
+		return 1;
+	}
+
+	// sam_set_item_owner(uid, entityUid). Ownership is what the shopkeeper theft rules read,
+	// so this is how a soulbound or stolen-goods mod expresses itself without its own book.
+	int lua_sam_set_item_owner(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const long long owner = (long long)luaL_checkinteger(Ls, 2);
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_set_item_owner refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		Item* it = samItemFromUid(uid);
+		if ( !it || owner < 0 ) { lua_pushboolean(Ls, 0); return 1; }
+		it->ownerUid = (Uint32)owner;
+		lua_pushboolean(Ls, 1);
+		return 1;
+	}
+
+	// ---- predicates (read-only, client-safe) -----------------------------------
+
+	int lua_sam_is_ranged_weapon(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int t = (int)luaL_checkinteger(Ls, 1);
+		if ( t < 0 || t >= NUM_ITEM_SLOTS ) { lua_pushboolean(Ls, 0); return 1; }
+		lua_pushboolean(Ls, isRangedWeapon((ItemType)t) ? 1 : 0);
+		return 1;
+	}
+
+	int lua_sam_is_melee_weapon(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		Item* it = samItemFromUid((long long)luaL_checkinteger(Ls, 1));
+		if ( !it ) { lua_pushboolean(Ls, 0); return 1; }
+		lua_pushboolean(Ls, isMeleeWeapon(*it) ? 1 : 0);
+		return 1;
+	}
+
+	int lua_sam_is_shield(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		Item* it = samItemFromUid((long long)luaL_checkinteger(Ls, 1));
+		if ( !it ) { lua_pushboolean(Ls, 0); return 1; }
+		// isItemEquippableInShieldSlot, not isShield. The latter demands category == ARMOR
+		// and TYPE_SHIELD, so it is false for lanterns, torches, quivers and spellbooks,
+		// which are precisely the offhand things a mod asks about. This form also honours
+		// the S.A.M SHIELD_SLOT trait (items.cpp:7364).
+		lua_pushboolean(Ls, isItemEquippableInShieldSlot(it) ? 1 : 0);
+		return 1;
+	}
+
+	int lua_sam_is_potion_bad(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		Item* it = samItemFromUid((long long)luaL_checkinteger(Ls, 1));
+		if ( !it ) { lua_pushboolean(Ls, 0); return 1; }
+		lua_pushboolean(Ls, isPotionBad(*it) ? 1 : 0);
+		return 1;
+	}
+
+	// sam_item_has_trait(itemType, "QUIVER") -> boolean. The parity twin of the shipped
+	// sam_monster_has_trait. Takes a TYPE so it works on an item you have not spawned.
+	int lua_sam_item_has_trait(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int t = (int)luaL_checkinteger(Ls, 1);
+		const char* traitC = luaL_checkstring(Ls, 2);
+		std::string u;
+		for ( const char* c = traitC; c && *c; ++c ) { u += (char)toupper((unsigned char)*c); }
+		if ( t < 0 || t >= NUM_ITEM_SLOTS ) { lua_pushboolean(Ls, 0); return 1; }
+		const ItemType ty = (ItemType)t;
+		bool v = false;
+		if ( u == "QUIVER" )           { v = itemTypeIsQuiver(ty); }
+		else if ( u == "FOCI" )        { v = itemTypeIsFoci(ty); }
+		else if ( u == "INSTRUMENT" )  { v = itemTypeIsInstrument(ty); }
+		else if ( u == "THROWN_BALL" ) { v = itemTypeIsThrownBall(ty); }
+		else
+		{
+			SAM_ERROR("LUA", "sam_item_has_trait: unknown trait. Valid: QUIVER, FOCI, INSTRUMENT, THROWN_BALL.");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		lua_pushboolean(Ls, v ? 1 : 0);
+		return 1;
+	}
+
+	// sam_get_item_slot(itemType) -> "WEAPON" | ... | "NONE". A TYPE, because this is the
+	// static table fact about where a thing is worn, and it works for custom items too.
+	int lua_sam_get_item_slot(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int t = (int)luaL_checkinteger(Ls, 1);
+		if ( t < 0 || t >= NUM_ITEM_SLOTS ) { lua_pushnil(Ls); return 1; }
+		lua_pushstring(Ls, samItemSlotName((int)items[t].item_slot));
+		return 1;
+	}
+
+	int lua_sam_is_better_weapon(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		Item* a = samItemFromUid((long long)luaL_checkinteger(Ls, 1));
+		Item* b = lua_isnoneornil(Ls, 2) ? nullptr : samItemFromUid((long long)luaL_checkinteger(Ls, 2));
+		if ( !a ) { lua_pushboolean(Ls, 0); return 1; }
+		// isThisABetterWeapon short-circuits to TRUE whenever there is nothing to compare
+		// against (items.cpp:7199), with no category test, so the documented "is this an
+		// upgrade over nothing" form said yes to bread. Ask the category ourselves.
+		if ( !b && itemCategory(a) != WEAPON ) { lua_pushboolean(Ls, 0); return 1; }
+		lua_pushboolean(Ls, Item::isThisABetterWeapon(*a, b) ? 1 : 0);
+		return 1;
+	}
+
+	int lua_sam_is_better_armor(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		Item* a = samItemFromUid((long long)luaL_checkinteger(Ls, 1));
+		Item* b = lua_isnoneornil(Ls, 2) ? nullptr : samItemFromUid((long long)luaL_checkinteger(Ls, 2));
+		if ( !a ) { lua_pushboolean(Ls, 0); return 1; }
+		// isThisABetterArmor short-circuits to TRUE the moment there is nothing to compare
+		// against (items.cpp:7215) and never asks whether the new item is armour at all, so
+		// the documented "is this worth wearing" form said yes to a potion. The engine only
+		// ever reaches that function through checkEquipType, which has already routed the
+		// item into one of these seven slots (entity.cpp:26149-26228). That routing is the
+		// guard, and it is the same short-circuit already fixed in sam_is_better_weapon.
+		if ( !b )
+		{
+			const int t = (int)a->type;
+			if ( t < 0 || t >= NUM_ITEM_SLOTS ) { lua_pushboolean(Ls, 0); return 1; }
+			const int slot = (int)items[t].item_slot;
+			if ( slot != EQUIPPABLE_IN_SLOT_SHIELD && slot != EQUIPPABLE_IN_SLOT_MASK
+				&& slot != EQUIPPABLE_IN_SLOT_HELM && slot != EQUIPPABLE_IN_SLOT_GLOVES
+				&& slot != EQUIPPABLE_IN_SLOT_BOOTS && slot != EQUIPPABLE_IN_SLOT_BREASTPLATE
+				&& slot != EQUIPPABLE_IN_SLOT_CLOAK )
+			{
+				lua_pushboolean(Ls, 0); return 1;
+			}
+		}
+		lua_pushboolean(Ls, Item::isThisABetterArmor(*a, b) ? 1 : 0);
+		return 1;
+	}
+
+	// ---- queries ---------------------------------------------------------------
+
+	int lua_sam_is_item_equipped(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		Item* it = samItemFromUid((long long)luaL_checkinteger(Ls, 2));
+		if ( !it || player < 0 || player >= MAXPLAYERS || !stats[player] ) { lua_pushboolean(Ls, 0); return 1; }
+		// By POINTER. itemIsEquipped compares with itemCompare across the ten slots
+		// (items.cpp:4895), so two identical rings are indistinguishable and the spare
+		// reports as worn.
+		const Stat* st = stats[player];
+		const bool worn = ( it == st->weapon || it == st->shield || it == st->helmet
+			|| it == st->breastplate || it == st->gloves || it == st->shoes
+			|| it == st->cloak || it == st->amulet || it == st->ring || it == st->mask );
+		lua_pushboolean(Ls, worn ? 1 : 0);
+		return 1;
+	}
+
+	// sam_can_unequip(player, uid) -> boolean. False for a cursed item, which is exactly
+	// what a mod needs to check before promising the player a swap.
+	int lua_sam_can_unequip(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		Item* it = samItemFromUid((long long)luaL_checkinteger(Ls, 2));
+		if ( !it || player < 0 || player >= MAXPLAYERS ) { lua_pushboolean(Ls, 0); return 1; }
+		// NOT Item::canUnequip. That function is non-const and IDENTIFIES the item as a side
+		// effect (items.cpp:6301 and :6325 both do identified = true; onItemIdentified(...)),
+		// so a mod polling this in on_tick would silently identify every cursed item the
+		// player owns, and on a client would send an appearance update to the server.
+		// Answer from the fields it would have read.
+		lua_pushboolean(Ls, samItemCanUnequipQuiet(it, stats[player]) ? 1 : 0);
+		return 1;
+	}
+
+	// sam_inventory_has_space(player) -> boolean.
+	// LOCAL PLAYER ONLY, and this one really is a hard limit rather than caution: the query
+	// reads players[p]->inventoryUI, a UI grid that exists only on the machine drawing it.
+	// Asking about a remote player would return that machine's own bag, which is worse than
+	// refusing, so it refuses.
+	int lua_sam_inventory_has_space(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] ) { lua_pushnil(Ls); return 1; }
+		if ( !players[player]->isLocalPlayer() )
+		{
+			SAM_WARN("LUA", "sam_inventory_has_space: the inventory grid is local to each machine;"
+				" a remote player cannot be asked. Returning nil.");
+			lua_pushnil(Ls);
+			return 1;
+		}
+		lua_pushboolean(Ls, players[player]->inventoryUI.bItemInventoryHasFreeSlot() ? 1 : 0);
+		return 1;
+	}
+
+	int lua_sam_get_max_stack(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		Item* it = samItemFromUid((long long)luaL_checkinteger(Ls, 2));
+		if ( !it || player < 0 || player >= MAXPLAYERS ) { lua_pushnil(Ls); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)it->getMaxStackLimit(player));
+		return 1;
+	}
+
+	// sam_can_items_stack(player, uidA, uidB) -> boolean. Needed by anything that writes a
+	// count, so it ships beside sam_set_item_count rather than later.
+	int lua_sam_can_items_stack(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		Item* a = samItemFromUid((long long)luaL_checkinteger(Ls, 2));
+		Item* b = samItemFromUid((long long)luaL_checkinteger(Ls, 3));
+		if ( !a || !b || player < 0 || player >= MAXPLAYERS ) { lua_pushboolean(Ls, 0); return 1; }
+		// Same type, same beatitude, same status and same identified state is what the engine
+		// means by stackable; shouldItemStack then applies the per-type ceiling.
+		// The engine's own test, rather than a hand-rolled field comparison that missed the
+		// derived model index, the unidentified scroll label, the types that skip status,
+		// and the never-stack classes. a != b because one uid twice is not a merge, and the
+		// ceiling belongs to the DESTINATION stack.
+		lua_pushboolean(Ls, ( a != b && itemCompare(a, b, false) == 0
+			&& b->shouldItemStack(player) ) ? 1 : 0);
+		return 1;
+	}
+
+	// sam_monster_can_wield(monsterUid, itemType) -> boolean. Host-only in effect: it reads
+	// the monster's Stat, which a client does not hold for an ordinary creature.
+	int lua_sam_monster_can_wield(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long muid = (long long)luaL_checkinteger(Ls, 1);
+		const int t = (int)luaL_checkinteger(Ls, 2);
+		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_monster_can_wield refused: host only."); lua_pushboolean(Ls, 0); return 1; }
+		Entity* e = samResolveMonster(muid);
+		if ( !e || t < 0 || t >= NUM_ITEM_SLOTS ) { lua_pushboolean(Ls, 0); return 1; }
+		// Value-initialised: Item has no constructor and its header says no destructor is
+		// ever called, so a plain declaration would leave uid, x, y and ownerUid holding
+		// whatever was on the stack, and canWieldItem may read them.
+		Item probe{};
+		probe.type = (ItemType)t;
+		probe.status = EXCELLENT;
+		probe.beatitude = 0;
+		probe.count = 1;
+		probe.appearance = 0;
+		probe.identified = true;
+		lua_pushboolean(Ls, e->canWieldItem(probe) ? 1 : 0);
+		return 1;
+	}
+
 	// sam_get_position(uid) -> tileX, tileY | nil. Any live entity (player/monster/item).
 	int lua_sam_get_position(lua_State* Ls)
 	{
@@ -3386,18 +4567,22 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_remove_item refused: host only."); lua_pushboolean(Ls, 0); return 1; }
 		Item* it = uidToItem((Uint32)uid);
 		if ( !it ) { SAM_WARN("LUA", "sam_remove_item: no item uid " + std::to_string(uid) + "."); lua_pushboolean(Ls, 0); return 1; }
+		// Through the queue, like sam_set_item_count. This used to free inline, which is a
+		// use-after-free on the commonest mod pattern there is: player.on_item_use fires at
+		// items.cpp:2955 and useItem keeps dereferencing the same pointer at :3011 and :3046.
+		// The old equipped test here used itemSlot, which matches by VALUE and so refused a
+		// loose item that merely looked like a worn one; queueDestroy compares pointers.
 		int owner = -1;
 		for ( int p = 0; p < MAXPLAYERS; ++p )
 		{
 			if ( !stats[p] ) { continue; }
-			if ( itemSlot(stats[p], it) != nullptr )
-			{ SAM_WARN("LUA", "sam_remove_item: item uid " + std::to_string(uid) + " is equipped; unequip first."); lua_pushboolean(Ls, 0); return 1; }
-			for ( node_t* n = stats[p]->inventory.first; n; n = n->next ) { if ( (Item*)n->element == it ) { owner = p; break; } }
+			for ( node_t* n = stats[p]->inventory.first; n; n = n->next )
+			{
+				if ( (Item*)n->element == it ) { owner = p; break; }
+			}
+			if ( owner >= 0 ) { break; }
 		}
-		Item* ref = it;
-		while ( ref ) { consumeItem(ref, owner >= 0 ? owner : 0); } // decrements + frees the whole stack
-		SAM_INFO("LUA", "Removed item uid " + std::to_string(uid) + ".");
-		lua_pushboolean(Ls, 1);
+		lua_pushboolean(Ls, SAMItems::queueDestroy((Uint32)it->uid, owner >= 0 ? owner : clientnum) ? 1 : 0);
 		return 1;
 	}
 #endif
@@ -5528,6 +6713,69 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		lua_setglobal(L, "sam_camera_shake");
 		lua_pushcfunction(L, lua_sam_hitstop);
 		lua_setglobal(L, "sam_hitstop");
+		// ---- v2.6 batch 1: reads and dice -------------------------------------
+		lua_pushcfunction(L, lua_sam_get_position_precise); lua_setglobal(L, "sam_get_position_precise");
+		lua_pushcfunction(L, lua_sam_get_distance);         lua_setglobal(L, "sam_get_distance");
+		lua_pushcfunction(L, lua_sam_get_distance_to);      lua_setglobal(L, "sam_get_distance_to");
+		lua_pushcfunction(L, lua_sam_get_entity_type);      lua_setglobal(L, "sam_get_entity_type");
+		lua_pushcfunction(L, lua_sam_get_scale);            lua_setglobal(L, "sam_get_scale");
+		lua_pushcfunction(L, lua_sam_is_visible);           lua_setglobal(L, "sam_is_visible");
+		lua_pushcfunction(L, lua_sam_get_velocity);         lua_setglobal(L, "sam_get_velocity");
+		lua_pushcfunction(L, lua_sam_get_entity_size);      lua_setglobal(L, "sam_get_entity_size");
+		lua_pushcfunction(L, lua_sam_get_entity_sprite);    lua_setglobal(L, "sam_get_entity_sprite");
+		lua_pushcfunction(L, lua_sam_get_entity_ticks);     lua_setglobal(L, "sam_get_entity_ticks");
+		lua_pushcfunction(L, lua_sam_get_map_seed);         lua_setglobal(L, "sam_get_map_seed");
+		lua_pushcfunction(L, lua_sam_is_dark_level);        lua_setglobal(L, "sam_is_dark_level");
+		lua_pushcfunction(L, lua_sam_get_playable_bounds);  lua_setglobal(L, "sam_get_playable_bounds");
+		lua_pushcfunction(L, lua_sam_is_tile_diggable);     lua_setglobal(L, "sam_is_tile_diggable");
+		lua_pushcfunction(L, lua_sam_get_map_flags);        lua_setglobal(L, "sam_get_map_flags");
+		lua_pushcfunction(L, lua_sam_get_exit_position);    lua_setglobal(L, "sam_get_exit_position");
+		lua_pushcfunction(L, lua_sam_get_run_time);         lua_setglobal(L, "sam_get_run_time");
+		lua_pushcfunction(L, lua_sam_get_tick_rate);        lua_setglobal(L, "sam_get_tick_rate");
+		lua_pushcfunction(L, lua_sam_get_fps);              lua_setglobal(L, "sam_get_fps");
+		lua_pushcfunction(L, lua_sam_get_real_time);        lua_setglobal(L, "sam_get_real_time");
+		lua_pushcfunction(L, lua_sam_get_date);             lua_setglobal(L, "sam_get_date");
+		lua_pushcfunction(L, lua_sam_is_paused);            lua_setglobal(L, "sam_is_paused");
+		lua_pushcfunction(L, lua_sam_is_in_game);           lua_setglobal(L, "sam_is_in_game");
+		lua_pushcfunction(L, lua_sam_is_loading);           lua_setglobal(L, "sam_is_loading");
+		lua_pushcfunction(L, lua_sam_random_float);         lua_setglobal(L, "sam_random_float");
+		lua_pushcfunction(L, lua_sam_random_chance);        lua_setglobal(L, "sam_random_chance");
+		lua_pushcfunction(L, lua_sam_random_from_list);     lua_setglobal(L, "sam_random_from_list");
+		lua_pushcfunction(L, lua_sam_random_weighted);      lua_setglobal(L, "sam_random_weighted");
+		lua_pushcfunction(L, lua_sam_has_data);             lua_setglobal(L, "sam_has_data");
+		lua_pushcfunction(L, lua_sam_world_bytes);          lua_setglobal(L, "sam_world_bytes");
+		lua_pushcfunction(L, lua_sam_world_bytes_free);     lua_setglobal(L, "sam_world_bytes_free");
+		// ---- v2.6 batch 2: inventory and items --------------------------------
+		lua_pushcfunction(L, lua_sam_get_item);             lua_setglobal(L, "sam_get_item");
+		lua_pushcfunction(L, lua_sam_get_item_name);        lua_setglobal(L, "sam_get_item_name");
+		lua_pushcfunction(L, lua_sam_get_item_value);       lua_setglobal(L, "sam_get_item_value");
+		lua_pushcfunction(L, lua_sam_get_item_weight);      lua_setglobal(L, "sam_get_item_weight");
+		lua_pushcfunction(L, lua_sam_get_item_attack);      lua_setglobal(L, "sam_get_item_attack");
+		lua_pushcfunction(L, lua_sam_get_item_ac);          lua_setglobal(L, "sam_get_item_ac");
+		lua_pushcfunction(L, lua_sam_get_tome_spell);       lua_setglobal(L, "sam_get_tome_spell");
+		lua_pushcfunction(L, lua_sam_get_food_satiation);   lua_setglobal(L, "sam_get_food_satiation");
+		lua_pushcfunction(L, lua_sam_set_item_beatitude);   lua_setglobal(L, "sam_set_item_beatitude");
+		lua_pushcfunction(L, lua_sam_set_item_status);      lua_setglobal(L, "sam_set_item_status");
+		lua_pushcfunction(L, lua_sam_set_item_count);       lua_setglobal(L, "sam_set_item_count");
+		lua_pushcfunction(L, lua_sam_identify_item);        lua_setglobal(L, "sam_identify_item");
+		lua_pushcfunction(L, lua_sam_set_item_appearance);  lua_setglobal(L, "sam_set_item_appearance");
+		lua_pushcfunction(L, lua_sam_set_item_droppable);   lua_setglobal(L, "sam_set_item_droppable");
+		lua_pushcfunction(L, lua_sam_get_item_owner);       lua_setglobal(L, "sam_get_item_owner");
+		lua_pushcfunction(L, lua_sam_set_item_owner);       lua_setglobal(L, "sam_set_item_owner");
+		lua_pushcfunction(L, lua_sam_is_ranged_weapon);     lua_setglobal(L, "sam_is_ranged_weapon");
+		lua_pushcfunction(L, lua_sam_is_melee_weapon);      lua_setglobal(L, "sam_is_melee_weapon");
+		lua_pushcfunction(L, lua_sam_is_shield);            lua_setglobal(L, "sam_is_shield");
+		lua_pushcfunction(L, lua_sam_is_potion_bad);        lua_setglobal(L, "sam_is_potion_bad");
+		lua_pushcfunction(L, lua_sam_item_has_trait);       lua_setglobal(L, "sam_item_has_trait");
+		lua_pushcfunction(L, lua_sam_get_item_slot);        lua_setglobal(L, "sam_get_item_slot");
+		lua_pushcfunction(L, lua_sam_is_better_weapon);     lua_setglobal(L, "sam_is_better_weapon");
+		lua_pushcfunction(L, lua_sam_is_better_armor);      lua_setglobal(L, "sam_is_better_armor");
+		lua_pushcfunction(L, lua_sam_is_item_equipped);     lua_setglobal(L, "sam_is_item_equipped");
+		lua_pushcfunction(L, lua_sam_can_unequip);          lua_setglobal(L, "sam_can_unequip");
+		lua_pushcfunction(L, lua_sam_inventory_has_space);  lua_setglobal(L, "sam_inventory_has_space");
+		lua_pushcfunction(L, lua_sam_get_max_stack);        lua_setglobal(L, "sam_get_max_stack");
+		lua_pushcfunction(L, lua_sam_can_items_stack);      lua_setglobal(L, "sam_can_items_stack");
+		lua_pushcfunction(L, lua_sam_monster_can_wield);    lua_setglobal(L, "sam_monster_can_wield");
 #endif
 	}
 
@@ -6478,6 +7726,12 @@ namespace SAMLua
 	long long randomDraw(const std::string& ns, const std::string& stream, long long lo, long long hi)
 	{
 		return samRandomDraw(ns, stream, lo, hi);
+	}
+
+	void resetRandomStreams()
+	{
+		// Called when a run begins so every machine starts each named stream at draw 0.
+		g_rngCounters.clear();
 	}
 
 	int lobbyFlag(const std::string& name, bool& ok)

@@ -1,6 +1,6 @@
 # S.A.M function reference
 
-Every script function the framework exposes: **184 functions** and **72 events**.
+Every script function the framework exposes: **245 functions** and **72 events**.
 All of them work identically in Lua, JavaScript and TypeScript.
 
 This page is generated from the API definition, so it cannot fall behind the code. If a
@@ -14,33 +14,33 @@ For guides and worked examples, see [scripting-reference.md](scripting-reference
 ## Contents
 
 - [Combat](#combat) (1)
-- [Context](#context) (3)
+- [Context](#context) (11)
 - [Custom events](#custom-events) (2)
 - [Damage](#damage) (2)
-- [Entities](#entities) (2)
-- [Game content](#game-content) (4)
+- [Entities](#entities) (10)
+- [Game content](#game-content) (5)
 - [HUD](#hud) (3)
 - [Hooks](#hooks) (2)
 - [Input](#input) (3)
-- [Inventory](#inventory) (3)
+- [Inventory](#inventory) (30)
 - [Live patching](#live-patching) (6)
 - [Logging](#logging) (2)
 - [Mechanisms](#mechanisms) (4)
-- [Monsters](#monsters) (21)
+- [Monsters](#monsters) (22)
 - [Multiplayer](#multiplayer) (3)
 - [Networking](#networking) (1)
 - [Panels](#panels) (16)
-- [Persistence](#persistence) (10)
-- [Pictures](#pictures) (10)
+- [Persistence](#persistence) (13)
+- [Pictures](#pictures) (12)
 - [Player state](#player-state) (13)
 - [Presentation](#presentation) (8)
 - [Rewards](#rewards) (5)
-- [Spells](#spells) (8)
+- [Spells](#spells) (9)
 - [Status effects](#status-effects) (9)
-- [Terrain](#terrain) (8)
+- [Terrain](#terrain) (9)
 - [Timers](#timers) (3)
-- [Truth](#truth) (13)
-- [World](#world) (12)
+- [Truth](#truth) (17)
+- [World](#world) (17)
 - [Your own logic](#your-own-logic) (7)
 - [Events](#events) (72)
 
@@ -69,6 +69,18 @@ Fire a moving projectile with its own speed, model, damage and lifetime. Until t
 
 ## Context
 
+### `sam_get_date()`
+
+Today's date on this machine, which is how you make content that only appears at Halloween or over Christmas. Per-machine, so treat it as decoration rather than as a rule.
+
+**Returns:** a table/object with year, month, day, hour, min, sec
+
+### `sam_get_fps()`
+
+How fast this machine is drawing. Local to whoever asks, so never let it decide anything shared: two players will get different numbers and their games will disagree.
+
+**Returns:** this machine's render rate (number)
+
 ### `sam_get_level_info()`
 
 Everything about the current floor. sam_get_floor returns a bare number that cannot tell a secret branch from the main one, so location-gated content was impossible before this.
@@ -81,6 +93,36 @@ Every S.A.M mod loaded right now. Cross-mod integration with zero engine work: s
 
 **Returns:** array of { ns, name, version, author }
 
+### `sam_get_real_time()`
+
+This machine's wall clock. Same warning as sam_get_fps: two players' clocks differ, so this must not feed a dice roll or anything you save.
+
+**Returns:** seconds since 1970 (number)
+
+### `sam_get_run_time()`
+
+The run clock the game itself displays. It stops during the intro, while you are dead, and while THIS machine has the game paused. Not the same as sam_get_time_played, which counts wall time since the program started, menus included. In multiplayer each machine counts its own, and pausing is local, so a player who spent a minute in their menu is a minute behind everyone else: read it on the host if a rule depends on it.
+
+**Returns:** seconds of actual play this run (number)
+
+### `sam_get_tick_rate()`
+
+Logic frames per second. Barony's step is fixed, so there is no delta time to ask for; this is the constant every per-second conversion needs.
+
+**Returns:** 50 (number)
+
+### `sam_is_in_game()`
+
+Whether a run is actually in progress. Worth checking at the top of a timer callback, which can otherwise fire while nobody is playing.
+
+**Returns:** false while the main menu or intro is up (boolean)
+
+### `sam_is_loading()`
+
+Whether the game is mid-level-change. Entities are being destroyed and rebuilt during this, so it is the wrong moment to touch uids you were holding.
+
+**Returns:** true during a level change (boolean)
+
 ### `sam_is_mod_loaded(namespace)`
 
 Is a given mod namespace loaded? The cheap form of sam_get_mods.
@@ -90,6 +132,12 @@ Is a given mod namespace loaded? The cheap form of sam_get_mods.
 | `namespace` | string |
 
 **Returns:** boolean
+
+### `sam_is_paused()`
+
+Whether the player has the game paused. Each machine has its own answer in multiplayer, where the world keeps running for everyone else.
+
+**Returns:** true if this machine has the game paused (boolean)
 
 
 ## Custom events
@@ -149,6 +197,69 @@ Rewrite incoming damage (clamped to >= 0). ONLY valid inside an on_before_damage
 
 ## Entities
 
+### `sam_get_distance(uid_a, uid_b)`
+
+Distance between two entities on the FLOOR PLANE. Height is ignored, so a bat hovering directly overhead reads as zero tiles away. That matches how the game's own range checks work, which is why it is not corrected for here. Use this rather than working it out from sam_get_position, which rounds to whole tiles and so is wrong by up to a tile in each axis.
+
+| argument | type |
+|---|---|
+| `uid_a` | int |
+| `uid_b` | int |
+
+**Returns:** distance in tiles (number), or nil if either entity is gone
+
+### `sam_get_distance_to(uid, x, y)`
+
+Distance from an entity to a tile, measured to the centre of that tile, which is where the game places things.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+| `x` | int (tile) |
+| `y` | int (tile) |
+
+**Returns:** distance in tiles (number), or nil
+
+### `sam_get_entity_size(uid)`
+
+The entity's collision box. Any overlap test or aim cone written in script needs this, and it was not readable before. In JavaScript this returns an array.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+
+**Returns:** sizex, sizey in pixels (numbers), or nil
+
+### `sam_get_entity_sprite(uid)`
+
+Which model an entity is currently drawing. Pairs with sam_get_model, which reports only a model your own script set.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+
+**Returns:** the model index (number), or nil
+
+### `sam_get_entity_ticks(uid)`
+
+Age of an entity in frames. Divide by sam_get_tick_rate for seconds. Useful for despawning your own spawns after a while without keeping a table of them.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+
+**Returns:** frames this entity has existed (number), or nil
+
+### `sam_get_entity_type(uid)`
+
+What kind of thing a uid refers to. Lets one handler deal with a mixed list of uids without guessing from what other calls happen to succeed.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+
+**Returns:** one of "player", "monster", "item", "door", "chest", "ladder", "portal", "gate", "switch", "fountain", "sink", "boulder", "gib", "other", or nil
+
 ### `sam_get_facing(player)`
 
 Read which way a player is looking. 0 = +x (east), increasing toward +y — so the forward unit vector is (cos yaw, sin yaw) and 'behind' is yaw + π. Use it to place things relative to a player's facing (a marker in front, a follower behind) or to aim. Host-authoritative for remote players; a client always sees its own facing correctly.
@@ -172,8 +283,38 @@ List UIDs of monsters/players within `radius` tiles of a player (never raw point
 
 **Returns:** an array/table of creature UIDs (max 32)
 
+### `sam_get_position_precise(uid)`
+
+Exact position, including the sub-tile fraction and the z axis. sam_get_position rounds to a whole tile and drops z entirely, so nothing in script could tell a flying bat from a rat standing underneath it, or two creatures sharing one tile. In JavaScript this returns an array [x, y, z].
+
+| argument | type |
+|---|---|
+| `uid` | int |
+
+**Returns:** x, y, z in world pixels (fractional), or nil
+
+### `sam_get_velocity(uid)`
+
+How fast something is moving and in what direction. Enough to lead a moving target, or to tell a charging monster from a standing one. In JavaScript this returns an array.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+
+**Returns:** vx, vy, vz in pixels per tick (numbers), or nil
+
 
 ## Game content
+
+### `sam_get_food_satiation(item_type)`
+
+How filling a food is. Takes an item TYPE rather than a uid, so you can price food your mod has not spawned yet. Vanilla foods only: the engine's table has no entry for custom items, so your own food answers 0.
+
+| argument | type |
+|---|---|
+| `item_type` | int |
+
+**Returns:** hunger restored (number), or nil for an unknown type
 
 ### `sam_get_item_info(item)`
 
@@ -315,6 +456,29 @@ Check whether a supported RAW key is currently held (A-Z, 0-9, F1-F12). Ignores 
 
 ## Inventory
 
+### `sam_can_items_stack(player, uid_a, uid_b)`
+
+Whether two items would actually combine, using the game's own comparison rather than a guess at it, so things that never stack (readable books, for instance) correctly answer false. Passing the same item twice is false.
+
+| argument | type |
+|---|---|
+| `player` | int |
+| `uid_a` | int |
+| `uid_b` | int |
+
+**Returns:** true if the two would merge (boolean)
+
+### `sam_can_unequip(player, uid)`
+
+Check before promising the player a swap, so a cursed item does not silently refuse halfway through what your mod said it would do.
+
+| argument | type |
+|---|---|
+| `player` | int |
+| `uid` | int |
+
+**Returns:** false if the item is cursed onto them (boolean)
+
 ### `sam_get_equipped_item(player, slot)`
 
 Get the item NAME equipped in a slot (ARMOR==BREASTPLATE, BOOTS==SHOES). Vanilla items only — it can't name a custom item, so use sam_get_equipped_item_id to test for one.
@@ -347,6 +511,284 @@ Count how many of an item (vanilla or custom name) a player holds.
 | `item_name` | string |
 
 **Returns:** total count held (number)
+
+### `sam_get_item(uid)`
+
+Everything plain about one item in a single call, rather than a dozen separate getters. The computed values live in their own functions (sam_get_item_name, sam_get_item_value, sam_get_item_weight) because each runs real engine code instead of reading a field.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+
+**Returns:** a table/object with type, count, beatitude, status, status_name, identified, appearance, owner_uid, droppable, grid_x, grid_y, or nil
+
+### `sam_get_item_ac(uid, player)`
+
+The armour value. Same caveat as sam_get_item_attack: the optional wearer only matters for cursed-item inversion, not for their skill or stats.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+| `player` | int (optional) |
+
+**Returns:** the armour value (number), or nil
+
+### `sam_get_item_attack(uid, player)`
+
+The weapon's attack value. The optional player is passed to the engine, but it only affects a few special cases such as shapeshifting and cursed-item inversion: it does NOT add that character's skill or strength, so two ordinary humans get the same number. For a real to-hit you still need the character's own stats.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+| `player` | int (optional) |
+
+**Returns:** the weapon's attack value (number), or nil
+
+### `sam_get_item_name(uid)`
+
+The item's name, using the alias an unidentified item shows rather than its true name. Note this is the bare name: the blessed, cursed and condition wording the player sees in the tooltip is added separately by the game and is not included here.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+
+**Returns:** the item's name (string), or nil
+
+### `sam_get_item_owner(uid)`
+
+Who this item belongs to. It is what the shopkeeper's theft rules read, so it is also how a mod knows whether something was taken rather than bought. An item nobody owns returns nil rather than zero.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+
+**Returns:** the owning entity's uid (number), or nil if nobody owns it
+
+### `sam_get_item_slot(item_type)`
+
+Where this kind of item is worn. Works for custom items too, so an auto-equip mod does not need its own table.
+
+| argument | type |
+|---|---|
+| `item_type` | int |
+
+**Returns:** one of WEAPON, SHIELD, MASK, HELM, GLOVES, BOOTS, BREASTPLATE, CLOAK, AMULET, RING, or NONE for something that cannot be worn
+
+### `sam_get_item_value(uid)`
+
+What this pile is worth: the engine's per-item value multiplied by how many you have. Blessing and condition are not part of it, because the engine's own gold value ignores them too; the shop applies those separately when it quotes a price.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+
+**Returns:** gold value of the whole stack (number), or nil
+
+### `sam_get_item_weight(uid)`
+
+Weight of the whole stack, with the engine's quiver rule applied. Add these up across sam_get_inventory for a carried total.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+
+**Returns:** weight of this stack (number), or nil
+
+### `sam_get_max_stack(player, uid)`
+
+The ceiling for this item and this player, which differs for arrows, thrown gems and scrap. Read it before writing a count.
+
+| argument | type |
+|---|---|
+| `player` | int |
+| `uid` | int |
+
+**Returns:** the largest this stack may grow (number), or nil
+
+### `sam_identify_item(player, uid)`
+
+> Host-only.
+
+Identify an item the way a scroll does, through the engine's own path, so the on_item_identified event fires and the owning player's screen updates. Calling it on an already-identified item succeeds quietly.
+
+| argument | type |
+|---|---|
+| `player` | int |
+| `uid` | int |
+
+**Returns:** true on success (boolean)
+
+### `sam_inventory_has_space(player)`
+
+Whether the bag has room. This one is genuinely local-only: the inventory grid exists on the machine drawing it, so asking about a remote player would answer about the wrong bag. It returns nil and logs why rather than lying.
+
+| argument | type |
+|---|---|
+| `player` | int |
+
+**Returns:** true if there is a free slot (boolean), or nil for a remote player
+
+### `sam_is_better_armor(uid_new, uid_current)`
+
+The armour counterpart of sam_is_better_weapon, covering shields, helmets, breastplates, cloaks, boots, gloves and masks. Omit the second item to ask whether it is worth wearing at all, which is only ever true for something that actually goes in one of those slots.
+
+| argument | type |
+|---|---|
+| `uid_new` | int |
+| `uid_current` | int (optional) |
+
+**Returns:** true if the first is an upgrade (boolean)
+
+### `sam_is_better_weapon(uid_new, uid_current)`
+
+The same comparison monsters use when deciding what to pick up. Omit the second item to ask whether it is worth taking at all, which is only ever true for an actual weapon.
+
+| argument | type |
+|---|---|
+| `uid_new` | int |
+| `uid_current` | int (optional; omit to compare against nothing) |
+
+**Returns:** true if the first is an upgrade (boolean)
+
+### `sam_is_item_equipped(player, uid)`
+
+Whether this specific item is currently equipped, as opposed to merely being in the bag.
+
+| argument | type |
+|---|---|
+| `player` | int |
+| `uid` | int |
+
+**Returns:** true if that player is wearing or wielding it (boolean)
+
+### `sam_is_melee_weapon(uid)`
+
+The engine's own test, so it agrees with what the game counts as melee for skill and damage purposes.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+
+**Returns:** true for a melee weapon (boolean)
+
+### `sam_is_potion_bad(uid)`
+
+The same judgement the game's own AI uses when deciding whether to throw a potion at you rather than drink it.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+
+**Returns:** true if drinking this is a bad idea (boolean)
+
+### `sam_is_ranged_weapon(item_type)`
+
+Takes a TYPE, so it answers for an item you have not spawned.
+
+| argument | type |
+|---|---|
+| `item_type` | int |
+
+**Returns:** true for a bow, crossbow or sling (boolean)
+
+### `sam_is_shield(uid)`
+
+Covers everything worn in the shield hand, not only shields: lanterns, torches, quivers, spellbooks and crystal shards all count, as does any custom item your mod marks for the shield slot.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+
+**Returns:** true if this occupies the offhand slot (boolean)
+
+### `sam_item_has_trait(item_type, trait)`
+
+The item counterpart of sam_monster_has_trait. Takes a TYPE, and an unknown trait name is refused with the valid list logged rather than silently returning false.
+
+| argument | type |
+|---|---|
+| `item_type` | int |
+| `trait` | string — one of: `QUIVER`, `FOCI`, `INSTRUMENT`, `THROWN_BALL` |
+
+**Returns:** true if the type has that trait (boolean)
+
+### `sam_set_item_appearance(uid, appearance)`
+
+> Host-only.
+
+Set the appearance number, which chooses a readable book's contents and which potion or scroll look an unidentified item shows. REFUSED on the types where this field is not decoration: a spell tome stores its spell here, a loot bag its contents, the robots their health and a scepter its charges, and all of that is written to the save, so changing it would permanently alter what the item is.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+| `appearance` | int |
+
+**Returns:** true on success (boolean), false if the type is refused
+
+### `sam_set_item_beatitude(uid, value)`
+
+> Host-only.
+
+Bless or curse an item. Clamped to a range the tooltips and damage maths can actually represent. Host-only: changing an equipped item from a client would leave the host's copy of that slot stale.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+| `value` | int (-100 to 100; negative is cursed) |
+
+**Returns:** true on success (boolean)
+
+### `sam_set_item_count(uid, count)`
+
+> Host-only.
+
+Set how many are in a stack, up to the item's own limit; a larger number is refused rather than silently wrapped, and sam_get_max_stack tells you the ceiling. A count of zero or less DESTROYS the item, which happens a moment later rather than instantly: the game is still using that item at the point your script runs, so the removal is queued and carried out on the next frame. Destroying an equipped item is refused, because the engine's cleanup identifies items by their contents and cannot tell two identical ones apart.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+| `count` | int |
+
+**Returns:** true if accepted (boolean)
+
+### `sam_set_item_droppable(uid, droppable)`
+
+> Host-only.
+
+Whether this item drops when its owner dies. Turn it off for a boss's crown that is meant to be scenery rather than loot. The true or false is required: leaving it out is refused rather than treated as false, because a silent false pins the item in place for the rest of the game.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+| `droppable` | boolean (required) |
+
+**Returns:** true on success (boolean)
+
+### `sam_set_item_owner(uid, owner_uid)`
+
+> Host-only.
+
+Reassign ownership. This is how a soulbound or stolen-goods mod says what it means using the game's own bookkeeping instead of inventing a parallel one.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+| `owner_uid` | int |
+
+**Returns:** true on success (boolean)
+
+### `sam_set_item_status(uid, status)`
+
+> Host-only.
+
+Set an item's condition, as a name or as a number from 0 (BROKEN) to 4 (EXCELLENT). Anything outside that range is refused rather than quietly rounded to the nearest end, so a wrong number tells you instead of half working. A string is always read as a name, so pass 3 and not "3". Note that dropping a worn item to BROKEN does not take it off: the game refuses to USE a broken item but leaves it equipped, and that is vanilla behaviour rather than something this call gets wrong.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+| `status` | string name or int 0-4 — one of: `BROKEN`, `DECREPIT`, `WORN`, `SERVICABLE`, `EXCELLENT` |
+
+**Returns:** true on success (boolean), false if the status is out of range
 
 
 ## Live patching
@@ -606,6 +1048,19 @@ Make a monster swing immediately, using whatever attack pose its current weapon 
 | `uid` | uid |
 
 **Returns:** true on success (boolean)
+
+### `sam_monster_can_wield(uid, item_type)`
+
+> Host-only.
+
+Whether a creature's AI knows how to use a kind of item. Only five species have that behaviour at all: goblins, humans, goatmen, automatons and shadows. Everything else answers false, including custom races, even though sam_monster_equip will happily put the item in their hand. Host-only, because it reads the monster's stats.
+
+| argument | type |
+|---|---|
+| `uid` | int (monster) |
+| `item_type` | int |
+
+**Returns:** true if that creature's AI will pick up and use the item (boolean)
 
 ### `sam_monster_charge(uid, ticks)`
 
@@ -1038,6 +1493,16 @@ Read back a per-player in-memory value set by sam_set_player_data.
 
 **Returns:** the stored value, or nil/undefined if unset
 
+### `sam_has_data(key)`
+
+Whether a key exists, without loading it. This genuinely distinguishes stored-but-empty from never-stored: saving nil writes a real entry, so sam_has_data is true while sam_load_data gives you nothing back. Use sam_delete_data when you want a key to actually be gone.
+
+| argument | type |
+|---|---|
+| `key` | string |
+
+**Returns:** true if your mod has saved something under this key (boolean)
+
 ### `sam_list_data_keys()`
 
 List the keys sam_save_data has written for your mod, so you can iterate stored state without having to remember every key name. Returns an empty table when nothing has been saved yet.
@@ -1076,6 +1541,18 @@ Store a per-player value (number/string/bool/table) in memory for THIS session �
 | `value` | any |
 
 **Returns:** nothing
+
+### `sam_world_bytes()`
+
+How much of the savegame's mod-state budget is in use. sam_world_save shares one 64 KB allowance between every mod in the run.
+
+**Returns:** bytes currently used across all mods (number)
+
+### `sam_world_bytes_free()`
+
+How much room is left before sam_world_save starts refusing writes. Check this before storing something large, rather than discovering the ceiling when a save quietly fails mid-run.
+
+**Returns:** bytes still available (number)
 
 ### `sam_world_clear(key)`
 
@@ -1149,6 +1626,16 @@ Read back the model ID a script set on this entity. Returns nil for an entity dr
 
 **Returns:** the model ID string, or nil if the entity has no script-set model
 
+### `sam_get_scale(uid)`
+
+Read an entity's scale. The counterpart to sam_set_scale, which shipped without a reader. In JavaScript this returns an array.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+
+**Returns:** x, y, z scale (numbers), or nil
+
 ### `sam_hide_image(player)`
 
 Take the overlay away early. No player clears every player's.
@@ -1174,6 +1661,16 @@ A PERSISTENT picture in the script HUD — a portrait, a custom gauge, a marker.
 | `color` | int (0xRRGGBBAA) |
 
 **Returns:** true on success (boolean)
+
+### `sam_is_visible(uid)`
+
+Whether an entity is visible. The counterpart to sam_set_visible, which shipped without a reader. On a multiplayer CLIENT this is only reliable for hiding your own script did: the engine's entity update sets invisibility flags but never clears them, so a monster whose invisibility potion wears off still reads as hidden on every client. Ask the host if the answer has to be right.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+
+**Returns:** true if the entity is being drawn (boolean), or nil
 
 ### `sam_set_model(uid, model_id)`
 
@@ -1626,6 +2123,16 @@ List the spells a player currently knows.
 
 **Returns:** array/table of spell internal-name strings
 
+### `sam_get_tome_spell(uid)`
+
+Which spell a spellbook or a spell tome contains. This is the bridge from an item to the spell functions: pair it with sam_grant_spell to teach whatever a book holds without hardcoding the pairing. Anything that is not a book returns nil.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+
+**Returns:** the spell id (number), or nil if the item teaches no spell
+
 ### `sam_grant_spell(player, spell)`
 
 > Host-only.
@@ -1852,6 +2359,17 @@ Is this a sane place to put something: in bounds, not inside a wall, not lava. C
 
 **Returns:** boolean
 
+### `sam_is_tile_diggable(x, y)`
+
+Whether the map's rules allow digging here: it returns false for water and lava, the Hell and fortress edges, and any tile marked no-dig. It does NOT check that there is a wall to dig, so it is true on ordinary open floor too. Pair it with sam_get_tile if you need something solid to be there. Out-of-bounds coordinates return false rather than reading past the map.
+
+| argument | type |
+|---|---|
+| `x` | int (tile) |
+| `y` | int (tile) |
+
+**Returns:** true if this tile's terrain permits digging (boolean)
+
 ### `sam_line_of_sight(x1, y1, x2, y2, blockedByEntities)`
 
 Can a straight line get from A to B? This is the engine's own trace, so it agrees with what is drawn — unlike plain distance, which sees through solid rock.
@@ -2069,6 +2587,49 @@ Deterministic random drawn from a named stream owned by your mod. Same run seed 
 
 **Returns:** an integer in [min, max]
 
+### `sam_random_chance(stream, percent)`
+
+Rolls a percentage chance. 0 or less is always false and 100 or more is always true, so you never have to clamp. This is the single most-typed line in any mod, and doing it by hand with an undeterministic random is how multiplayer mods drift apart.
+
+| argument | type |
+|---|---|
+| `stream` | string |
+| `percent` | number (0 to 100) |
+
+**Returns:** true or false
+
+### `sam_random_float(stream)`
+
+A deterministic fraction from one of your mod's named streams. Same run, same stream, same call order gives the same number on every machine, which ordinary random() cannot promise.
+
+| argument | type |
+|---|---|
+| `stream` | string (any name; each stream is independent) |
+
+**Returns:** a number from 0.0 to 1.0
+
+### `sam_random_from_list(stream, list)`
+
+Picks one entry at random, deterministically. Note that Lua lists start at 1 and JavaScript arrays start at 0; each version follows its own language, so the same list gives the same element in both.
+
+| argument | type |
+|---|---|
+| `stream` | string |
+| `list` | table/array |
+
+**Returns:** one element, or nil for an empty list
+
+### `sam_random_weighted(stream, weights)`
+
+Picks a key with probability proportional to its weight, for loot tables and spawn tables. Weights need not add up to anything in particular, and a weight of zero or less can never come up.
+
+| argument | type |
+|---|---|
+| `stream` | string |
+| `weights` | table/object of key to weight |
+
+**Returns:** one key, or nil if no weight is positive
+
 
 ## World
 
@@ -2084,6 +2645,12 @@ Make a companion THRUST forward for a few ticks — the punch motion. Call it re
 
 **Returns:** true if uid is a live companion (boolean); false otherwise
 
+### `sam_get_exit_position()`
+
+Where the ladder or portal off this floor is, found the same way the game's own dowsing does it. In JavaScript this returns an array.
+
+**Returns:** tile x, y of the way onward, or nil if none was found
+
 ### `sam_get_inventory(player)`
 
 List a player's inventory. Use each item's uid with sam_remove_item. Empty list for an invalid player.
@@ -2093,6 +2660,24 @@ List a player's inventory. Use each item's uid with sam_remove_item. Empty list 
 | `player` | int |
 
 **Returns:** a list of items, each { uid, type, name, count, beatitude, status, identified, equipped }
+
+### `sam_get_map_flags()`
+
+The rules this particular map sets. Worth checking before a mod grants levitation or teleports someone, because a map that forbids it will simply undo your effect and the player will not know why.
+
+**Returns:** a table/object of booleans (no_digging, no_teleport, no_levitation, no_opening, no_messages, no_hunger, gen_adjacent) plus perimeter_gap, which is a tile count
+
+### `sam_get_map_seed()`
+
+The per-floor generation seed, which is the same number on the host and on every client because a client rebuilds the floor from it. Distinct from sam_get_seed, which identifies the whole run. Use it with sam_random when you want per-floor variety that everyone agrees on.
+
+**Returns:** the seed this floor was generated from (number)
+
+### `sam_get_playable_bounds()`
+
+The rectangle the level generator is actually allowed to use, which excludes the perimeter gap some maps reserve. A spawner that ignores this can place things inside the outer wall. In JavaScript this returns an array.
+
+**Returns:** x1, y1, x2, y2 in tiles, upper bounds exclusive
 
 ### `sam_get_player_uid(player)`
 
@@ -2113,6 +2698,12 @@ Read any entity's map-tile position (player, monster or ground item). Get a play
 | `uid` | int |
 
 **Returns:** tile x, tile y (two values in Lua; an [x, y] array in JS), or nil/null if the uid is gone
+
+### `sam_is_dark_level()`
+
+Whether this floor is one of the unlit ones.
+
+**Returns:** true on a dark floor (boolean)
 
 ### `sam_remove_entity(uid)`
 

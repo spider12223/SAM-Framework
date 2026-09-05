@@ -37,6 +37,7 @@ extern "C" {
 }
 
 #include <string>
+#include <type_traits>   // the ItemType assertion on the appearance guard
 #include <cctype>
 #include <vector>
 #include <chrono>
@@ -45,6 +46,7 @@ extern "C" {
 #include <cstdio>
 #include <cstring>
 #include <cstdint>
+#include <algorithm> // std::sort: deterministic key order in sam_random_weighted
 #include <cmath>       // v1.5.0: std::atan2 for aimed spell casts
 #include <filesystem>
 
@@ -62,6 +64,7 @@ extern "C" {
 #	include "entity.hpp"    // Entity::setEffect/setHP/setMP/getUID, act* behaviors, map iteration
 #	include "monster.hpp"   // actMonster, Monster enum
 #	include "collision.hpp" // entityDist
+#	include "scores.hpp"    // completionTime (sam_get_run_time)
 #	include "paths.hpp"     // GeneratePathTypes (monster movement bindings)
 #	include "engine/audio/sound.hpp" // playSoundPlayer, numsounds
 #	include "files.hpp"     // outputdir (savegames base dir for persistent mod data)
@@ -230,6 +233,80 @@ namespace
 	static bool samHasArg(int argc, JSValueConst* argv, int i)
 	{
 		return ( argc > i && !JS_IsUndefined(argv[i]) && !JS_IsNull(argv[i]) );
+	}
+
+	// What counts as a number, since QuickJS itself will not say.
+	//
+	// JS_ToInt32 and JS_ToInt64 apply JavaScript's coercion rules and report SUCCESS for
+	// every one of them: "sword" and {} become NaN and then 0, true becomes 1, [] becomes 0.
+	// Nothing downstream can tell that apart from a deliberate 0, and 0 is the destructive
+	// value in more than one place -- sam_set_item_count(uid, "two") deleted the item, and
+	// sam_set_item_beatitude(uid, obj) stripped a curse. Lua's luaL_checkinteger raises on
+	// all of these, so the same typo behaved differently in the two runtimes.
+	//
+	// A numeric STRING is accepted, because Lua's own coercion accepts it and mods do read
+	// numbers out of text. Everything that is not a finite number is refused.
+	static bool samJsNum(JSContext* ctx, JSValueConst v, double* out)
+	{
+		if ( JS_IsBool(v) ) { return false; }   // luaL_checkinteger raises on a boolean too
+		double d = 0.0;
+		if ( JS_ToFloat64(ctx, &d, v) < 0 )
+		{
+			// "sword" does not throw, but an object with a throwing valueOf does, and a
+			// pending exception left on the context would surface at the next unrelated call.
+			JS_FreeValue(ctx, JS_GetException(ctx));
+			return false;
+		}
+		if ( d != d ) { return false; }                        // NaN: "sword", {}, [1,2]
+		if ( d > 9.0e15 || d < -9.0e15 ) { return false; }     // infinity, and past integer precision
+		*out = d;
+		return true;
+	}
+
+	// Optional numeric argument: leaves the caller's default in place when the argument is
+	// absent, and warns rather than substituting a wrong number when it is unreadable.
+	static void samJsOptI32(JSContext* ctx, int argc, JSValueConst* argv, int i, int32_t* io, const char* who)
+	{
+		if ( !samHasArg(argc, argv, i) ) { return; }
+		double d = 0.0;
+		if ( !samJsNum(ctx, argv[i], &d) )
+		{
+			SAM_WARN("JS", std::string(who) + ": argument " + std::to_string(i + 1)
+				+ " is not a number; ignoring it.");
+			return;
+		}
+		*io = (int32_t)d;
+	}
+
+	static void samJsOptI64(JSContext* ctx, int argc, JSValueConst* argv, int i, int64_t* io, const char* who)
+	{
+		if ( !samHasArg(argc, argv, i) ) { return; }
+		double d = 0.0;
+		if ( !samJsNum(ctx, argv[i], &d) )
+		{
+			SAM_WARN("JS", std::string(who) + ": argument " + std::to_string(i + 1)
+				+ " is not a number; ignoring it.");
+			return;
+		}
+		*io = (int64_t)d;
+	}
+
+	// Required numeric argument: refuses the whole call rather than guessing.
+	static bool samJsReqI32(JSContext* ctx, int argc, JSValueConst* argv, int i, int32_t* out, const char* who)
+	{
+		if ( !samHasArg(argc, argv, i) )
+		{
+			SAM_ERROR("JS", std::string(who) + ": argument " + std::to_string(i + 1) + " is required.");
+			return false;
+		}
+		double d = 0.0;
+		if ( !samJsNum(ctx, argv[i], &d) )
+		{
+			SAM_ERROR("JS", std::string(who) + ": argument " + std::to_string(i + 1) + " must be a number.");
+			return false;
+		}
+		*out = (int32_t)d;
+		return true;
 	}
 
 	// ---- host functions exposed to scripts ------------------------------------
@@ -1549,6 +1626,982 @@ namespace
 	}
 
 	// sam_get_position(uid) -> [tileX, tileY] | null.
+	
+	// ============================================================================
+	// v2.6 batch 1: reads and dice. Twins of the Lua bindings; see sam_lua_runtime.cpp
+	// for the reasoning behind each. Two deliberate language differences:
+	//   - Lua returns several values; JS returns an array.
+	//   - sam_random_from_list indexes from 0 here and from 1 there, because each follows
+	//     its own language. Porting one literally is the parity bug this project has hit
+	//     before, so they are written separately on purpose.
+	// ============================================================================
+
+	JSValue js_sam_get_position_precise(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0; if ( samHasArg(argc, argv, 0) ) { JS_ToInt64(ctx, &uid, argv[0]); }
+		Entity* e = uidToEntity((Sint32)uid);
+		if ( !e ) { return JS_NULL; }
+		JSValue a = JS_NewArray(ctx);
+		JS_SetPropertyUint32(ctx, a, 0, JS_NewFloat64(ctx, (double)e->x));
+		JS_SetPropertyUint32(ctx, a, 1, JS_NewFloat64(ctx, (double)e->y));
+		JS_SetPropertyUint32(ctx, a, 2, JS_NewFloat64(ctx, (double)e->z));
+		return a;
+	}
+
+	JSValue js_sam_get_distance(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t ua = 0, ub = 0;
+		if ( samHasArg(argc, argv, 0) ) { JS_ToInt64(ctx, &ua, argv[0]); }
+		if ( samHasArg(argc, argv, 1) ) { JS_ToInt64(ctx, &ub, argv[1]); }
+		Entity* a = uidToEntity((Sint32)ua);
+		Entity* b = uidToEntity((Sint32)ub);
+		if ( !a || !b ) { return JS_NULL; }
+		return JS_NewFloat64(ctx, (double)(entityDist(a, b) / 16.0));
+	}
+
+	JSValue js_sam_get_distance_to(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0; int32_t tx = 0, ty = 0;
+		if ( samHasArg(argc, argv, 0) ) { JS_ToInt64(ctx, &uid, argv[0]); }
+		if ( samHasArg(argc, argv, 1) ) { JS_ToInt32(ctx, &tx, argv[1]); }
+		if ( samHasArg(argc, argv, 2) ) { JS_ToInt32(ctx, &ty, argv[2]); }
+		Entity* e = uidToEntity((Sint32)uid);
+		if ( !e ) { return JS_NULL; }
+		const double dx = e->x - ((double)tx * 16.0 + 8.0);
+		const double dy = e->y - ((double)ty * 16.0 + 8.0);
+		return JS_NewFloat64(ctx, std::sqrt(dx * dx + dy * dy) / 16.0);
+	}
+
+	JSValue js_sam_get_entity_type(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0; if ( samHasArg(argc, argv, 0) ) { JS_ToInt64(ctx, &uid, argv[0]); }
+		Entity* e = uidToEntity((Sint32)uid);
+		if ( !e ) { return JS_NULL; }
+		const char* kind = "other";
+		if ( e->behavior == &actPlayer )            { kind = "player"; }
+		else if ( e->behavior == &actMonster )      { kind = "monster"; }
+		else if ( e->behavior == &actItem )         { kind = "item"; }
+		else if ( e->behavior == &actDoor )         { kind = "door"; }
+		else if ( e->behavior == &actChest )        { kind = "chest"; }
+		else if ( e->behavior == &actLadder )       { kind = "ladder"; }
+		else if ( e->behavior == &actPortal )       { kind = "portal"; }
+		else if ( e->behavior == &actGate )         { kind = "gate"; }
+		else if ( e->behavior == &actSwitch )       { kind = "switch"; }
+		else if ( e->behavior == &actFountain )     { kind = "fountain"; }
+		else if ( e->behavior == &actSink )         { kind = "sink"; }
+		else if ( e->behavior == &actBoulder )      { kind = "boulder"; }
+		else if ( e->behavior == &actGib )          { kind = "gib"; }
+		return JS_NewString(ctx, kind);
+	}
+
+	JSValue js_sam_get_scale(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0; if ( samHasArg(argc, argv, 0) ) { JS_ToInt64(ctx, &uid, argv[0]); }
+		Entity* e = uidToEntity((Sint32)uid);
+		if ( !e ) { return JS_NULL; }
+		JSValue a = JS_NewArray(ctx);
+		JS_SetPropertyUint32(ctx, a, 0, JS_NewFloat64(ctx, (double)e->scalex));
+		JS_SetPropertyUint32(ctx, a, 1, JS_NewFloat64(ctx, (double)e->scaley));
+		JS_SetPropertyUint32(ctx, a, 2, JS_NewFloat64(ctx, (double)e->scalez));
+		return a;
+	}
+
+	JSValue js_sam_is_visible(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0; if ( samHasArg(argc, argv, 0) ) { JS_ToInt64(ctx, &uid, argv[0]); }
+		Entity* e = uidToEntity((Sint32)uid);
+		if ( !e ) { return JS_NULL; }
+		return JS_NewBool(ctx, e->flags[INVISIBLE] ? 0 : 1);
+	}
+
+	JSValue js_sam_get_velocity(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0; if ( samHasArg(argc, argv, 0) ) { JS_ToInt64(ctx, &uid, argv[0]); }
+		Entity* e = uidToEntity((Sint32)uid);
+		if ( !e ) { return JS_NULL; }
+		JSValue a = JS_NewArray(ctx);
+		JS_SetPropertyUint32(ctx, a, 0, JS_NewFloat64(ctx, (double)e->vel_x));
+		JS_SetPropertyUint32(ctx, a, 1, JS_NewFloat64(ctx, (double)e->vel_y));
+		JS_SetPropertyUint32(ctx, a, 2, JS_NewFloat64(ctx, (double)e->vel_z));
+		return a;
+	}
+
+	JSValue js_sam_get_entity_size(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0; if ( samHasArg(argc, argv, 0) ) { JS_ToInt64(ctx, &uid, argv[0]); }
+		Entity* e = uidToEntity((Sint32)uid);
+		if ( !e ) { return JS_NULL; }
+		JSValue a = JS_NewArray(ctx);
+		JS_SetPropertyUint32(ctx, a, 0, JS_NewInt32(ctx, (int)e->sizex));
+		JS_SetPropertyUint32(ctx, a, 1, JS_NewInt32(ctx, (int)e->sizey));
+		return a;
+	}
+
+	JSValue js_sam_get_entity_sprite(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0; if ( samHasArg(argc, argv, 0) ) { JS_ToInt64(ctx, &uid, argv[0]); }
+		Entity* e = uidToEntity((Sint32)uid);
+		if ( !e ) { return JS_NULL; }
+		return JS_NewInt32(ctx, (int)e->sprite);
+	}
+
+	JSValue js_sam_get_entity_ticks(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0; if ( samHasArg(argc, argv, 0) ) { JS_ToInt64(ctx, &uid, argv[0]); }
+		Entity* e = uidToEntity((Sint32)uid);
+		if ( !e ) { return JS_NULL; }
+		return JS_NewInt64(ctx, (int64_t)e->ticks);
+	}
+
+	JSValue js_sam_get_map_seed(JSContext* ctx, JSValueConst, int, JSValueConst*)
+	{
+		SAMLogger::noteApiCall();
+		return JS_NewInt64(ctx, (int64_t)(uint64_t)mapseed);
+	}
+
+	JSValue js_sam_is_dark_level(JSContext* ctx, JSValueConst, int, JSValueConst*)
+	{
+		SAMLogger::noteApiCall();
+		return JS_NewBool(ctx, darkmap ? 1 : 0);
+	}
+
+	JSValue js_sam_get_playable_bounds(JSContext* ctx, JSValueConst, int, JSValueConst*)
+	{
+		SAMLogger::noteApiCall();
+		JSValue a = JS_NewArray(ctx);
+		JS_SetPropertyUint32(ctx, a, 0, JS_NewInt32(ctx, getMapPossibleLocationX1()));
+		JS_SetPropertyUint32(ctx, a, 1, JS_NewInt32(ctx, getMapPossibleLocationY1()));
+		JS_SetPropertyUint32(ctx, a, 2, JS_NewInt32(ctx, getMapPossibleLocationX2()));
+		JS_SetPropertyUint32(ctx, a, 3, JS_NewInt32(ctx, getMapPossibleLocationY2()));
+		return a;
+	}
+
+	JSValue js_sam_is_tile_diggable(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t x = 0, y = 0;
+		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &x, argv[0]); }
+		if ( samHasArg(argc, argv, 1) ) { JS_ToInt32(ctx, &y, argv[1]); }
+		// See the Lua twin: mapTileDiggable validates nothing, because every engine caller
+		// hands it an in-bounds raycast hit. map.tiles is also null before a level loads.
+		if ( !map.tiles || x < 0 || x >= (int)map.width || y < 0 || y >= (int)map.height )
+		{
+			return JS_FALSE;
+		}
+		return JS_NewBool(ctx, mapTileDiggable((int)x, (int)y) ? 1 : 0);
+	}
+
+	JSValue js_sam_get_map_flags(JSContext* ctx, JSValueConst, int, JSValueConst*)
+	{
+		SAMLogger::noteApiCall();
+		// MFLAG_* already extract their byte out of map.flags (main.hpp:536); using them to
+		// index map.flags a second time made every field read map.flags[0]. See the Lua twin.
+		JSValue o = JS_NewObject(ctx);
+		const struct { const char* name; int value; } flags[] = {
+			{ "no_digging",     MFLAG_DISABLEDIGGING },
+			{ "no_teleport",    MFLAG_DISABLETELEPORT },
+			{ "no_levitation",  MFLAG_DISABLELEVITATION },
+			{ "no_opening",     MFLAG_DISABLEOPENING },
+			{ "no_messages",    MFLAG_DISABLEMESSAGES },
+			{ "no_hunger",      MFLAG_DISABLEHUNGER },
+			{ "gen_adjacent",   MFLAG_GENADJACENTROOMS },
+		};
+		for ( const auto& f : flags )
+		{
+			JS_SetPropertyStr(ctx, o, f.name, JS_NewBool(ctx, f.value != 0 ? 1 : 0));
+		}
+		JS_SetPropertyStr(ctx, o, "perimeter_gap", JS_NewInt32(ctx, (int)MFLAG_PERIMETER_GAP));
+		return o;
+	}
+
+	JSValue js_sam_get_exit_position(JSContext* ctx, JSValueConst, int, JSValueConst*)
+	{
+		SAMLogger::noteApiCall();
+		for ( node_t* node = map.entities->first; node; node = node->next )
+		{
+			Entity* e = (Entity*)node->element;
+			if ( !e ) { continue; }
+			// Mirrors drawminimap.cpp:1348-1359, same as the Lua twin: skip secret ladders,
+			// Mages Guild's decorative portal, and the framework's own sam_spawn_portal.
+			bool isExit = false;
+			if ( e->behavior == &actLadder )            { isExit = ( e->skill[3] != 1 ); }
+			else if ( e->behavior == &actPortal )       { isExit = ( e->skill[19] != 1 ) && ( e->portalNotSecret == 1 ); }
+			else if ( e->behavior == &actCustomPortal ) { isExit = true; }
+			if ( isExit )
+			{
+				JSValue a = JS_NewArray(ctx);
+				JS_SetPropertyUint32(ctx, a, 0, JS_NewInt32(ctx, (int)e->x >> 4));
+				JS_SetPropertyUint32(ctx, a, 1, JS_NewInt32(ctx, (int)e->y >> 4));
+				return a;
+			}
+		}
+		return JS_NULL;
+	}
+
+	JSValue js_sam_get_run_time(JSContext* ctx, JSValueConst, int, JSValueConst*)
+	{
+		SAMLogger::noteApiCall();
+		return JS_NewFloat64(ctx, (double)completionTime / (double)TICKS_PER_SECOND);
+	}
+
+	JSValue js_sam_get_tick_rate(JSContext* ctx, JSValueConst, int, JSValueConst*)
+	{
+		SAMLogger::noteApiCall();
+		return JS_NewInt32(ctx, (int)TICKS_PER_SECOND);
+	}
+
+	JSValue js_sam_get_fps(JSContext* ctx, JSValueConst, int, JSValueConst*)
+	{
+		SAMLogger::noteApiCall();
+		return JS_NewFloat64(ctx, (double)fps);
+	}
+
+	JSValue js_sam_get_real_time(JSContext* ctx, JSValueConst, int, JSValueConst*)
+	{
+		SAMLogger::noteApiCall();
+		return JS_NewInt64(ctx, (int64_t)getTime());
+	}
+
+	JSValue js_sam_get_date(JSContext* ctx, JSValueConst, int, JSValueConst*)
+	{
+		SAMLogger::noteApiCall();
+		int y = 0, mo = 0, d = 0, h = 0, mi = 0, sec = 0;
+		getTimeAndDate(getTime(), &y, &mo, &d, &h, &mi, &sec);
+		JSValue o = JS_NewObject(ctx);
+		JS_SetPropertyStr(ctx, o, "year",  JS_NewInt32(ctx, y));
+		JS_SetPropertyStr(ctx, o, "month", JS_NewInt32(ctx, mo));
+		JS_SetPropertyStr(ctx, o, "day",   JS_NewInt32(ctx, d));
+		JS_SetPropertyStr(ctx, o, "hour",  JS_NewInt32(ctx, h));
+		JS_SetPropertyStr(ctx, o, "min",   JS_NewInt32(ctx, mi));
+		JS_SetPropertyStr(ctx, o, "sec",   JS_NewInt32(ctx, sec));
+		return o;
+	}
+
+	JSValue js_sam_is_paused(JSContext* ctx, JSValueConst, int, JSValueConst*)
+	{
+		SAMLogger::noteApiCall();
+		return JS_NewBool(ctx, gamePaused ? 1 : 0);
+	}
+
+	JSValue js_sam_is_in_game(JSContext* ctx, JSValueConst, int, JSValueConst*)
+	{
+		SAMLogger::noteApiCall();
+		return JS_NewBool(ctx, intro ? 0 : 1);
+	}
+
+	JSValue js_sam_is_loading(JSContext* ctx, JSValueConst, int, JSValueConst*)
+	{
+		SAMLogger::noteApiCall();
+		return JS_NewBool(ctx, loading ? 1 : 0);
+	}
+
+	JSValue js_sam_random_float(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		const char* streamC = samHasArg(argc, argv, 0) ? JS_ToCString(ctx, argv[0]) : nullptr;
+		const std::string stream = streamC ? streamC : "";
+		if ( streamC ) { JS_FreeCString(ctx, streamC); }
+		const long long v = SAMLua::randomDraw(g_currentNs, stream, 0, 1000000);
+		return JS_NewFloat64(ctx, (double)v / 1000000.0);
+	}
+
+	JSValue js_sam_random_chance(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		const char* streamC = samHasArg(argc, argv, 0) ? JS_ToCString(ctx, argv[0]) : nullptr;
+		const std::string stream = streamC ? streamC : "";
+		if ( streamC ) { JS_FreeCString(ctx, streamC); }
+		double pct = 0.0; if ( samHasArg(argc, argv, 1) ) { JS_ToFloat64(ctx, &pct, argv[1]); }
+		if ( pct <= 0.0 ) { return JS_FALSE; }
+		if ( pct >= 100.0 ) { return JS_TRUE; }
+		const long long v = SAMLua::randomDraw(g_currentNs, stream, 1, 1000000);
+		return JS_NewBool(ctx, ((double)v <= pct * 10000.0) ? 1 : 0);
+	}
+
+	// Indexes from 0 here and from 1 in Lua. See the header comment: each follows its own
+	// language rather than one being a literal port of the other.
+	JSValue js_sam_random_from_list(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		const char* streamC = samHasArg(argc, argv, 0) ? JS_ToCString(ctx, argv[0]) : nullptr;
+		const std::string stream = streamC ? streamC : "";
+		if ( streamC ) { JS_FreeCString(ctx, streamC); }
+		if ( !samHasArg(argc, argv, 1) || !JS_IsObject(argv[1]) ) { return JS_NULL; }
+		uint32_t n = 0;
+		JSValue lenv = JS_GetPropertyStr(ctx, argv[1], "length");
+		JS_ToUint32(ctx, &n, lenv);
+		JS_FreeValue(ctx, lenv);
+		if ( n == 0 ) { return JS_NULL; }
+		const long long pick = SAMLua::randomDraw(g_currentNs, stream, 0, (long long)n - 1);
+		return JS_GetPropertyUint32(ctx, argv[1], (uint32_t)pick);
+	}
+
+	JSValue js_sam_random_weighted(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		const char* streamC = samHasArg(argc, argv, 0) ? JS_ToCString(ctx, argv[0]) : nullptr;
+		const std::string stream = streamC ? streamC : "";
+		if ( streamC ) { JS_FreeCString(ctx, streamC); }
+		if ( !samHasArg(argc, argv, 1) || !JS_IsObject(argv[1]) ) { return JS_NULL; }
+
+		JSPropertyEnum* props = nullptr;
+		uint32_t count = 0;
+		if ( JS_GetOwnPropertyNames(ctx, &props, &count, argv[1], JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) != 0 )
+		{
+			return JS_NULL;
+		}
+		// Frees every atom and the table itself, on every exit path below.
+		auto releaseProps = [&]() {
+			for ( uint32_t i = 0; i < count; ++i ) { JS_FreeAtom(ctx, props[i].atom); }
+			js_free(ctx, props);
+		};
+
+		// SORTED, like the Lua twin. JS property order is insertion order and therefore
+		// stable within one process, but it is not the same order Lua would produce, and the
+		// two runtimes must agree with each other as well as with themselves.
+		std::vector<std::pair<std::string, double>> entries;
+		double total = 0.0;
+		for ( uint32_t i = 0; i < count; ++i )
+		{
+			JSValue v = JS_GetProperty(ctx, argv[1], props[i].atom);
+			double w = 0.0; JS_ToFloat64(ctx, &w, v);
+			JS_FreeValue(ctx, v);
+			if ( w > 0.0 )
+			{
+				const char* k = JS_AtomToCString(ctx, props[i].atom);
+				if ( k ) { entries.emplace_back(k, w); JS_FreeCString(ctx, k); total += w; }
+			}
+		}
+		releaseProps();     // the atoms are no longer needed; the keys are copied out
+		if ( entries.empty() || total <= 0.0 ) { return JS_NULL; }
+		std::sort(entries.begin(), entries.end(),
+			[](const std::pair<std::string, double>& a, const std::pair<std::string, double>& b)
+			{ return a.first < b.first; });
+
+		// [1, 999999], never the inclusive top: at exactly total, float residue left every
+		// branch untaken and a valid table returned null.
+		const long long draw = SAMLua::randomDraw(g_currentNs, stream, 1, 999999);
+		double target = total * ((double)draw / 1000000.0);
+		for ( const auto& e : entries )
+		{
+			target -= e.second;
+			if ( target <= 0.0 ) { return JS_NewString(ctx, e.first.c_str()); }
+		}
+		return JS_NewString(ctx, entries.back().first.c_str());
+	}
+
+	JSValue js_sam_has_data(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		const char* keyC = samHasArg(argc, argv, 0) ? JS_ToCString(ctx, argv[0]) : nullptr;
+		const std::string key = keyC ? keyC : "";
+		if ( keyC ) { JS_FreeCString(ctx, keyC); }
+		if ( g_currentNs.empty() || key.empty() ) { return JS_FALSE; }
+		// Through samModDataFile, which sanitizes, exactly as every writer does. Building the
+		// path by hand looked for a file no writer ever creates. See the Lua twin.
+		const std::string path = samModDataFile(g_currentNs, key);
+		std::error_code ec;
+		return JS_NewBool(ctx, (std::filesystem::exists(path, ec) && !ec) ? 1 : 0);
+	}
+
+	JSValue js_sam_world_bytes(JSContext* ctx, JSValueConst, int, JSValueConst*)
+	{
+		SAMLogger::noteApiCall();
+		return JS_NewInt64(ctx, (int64_t)SAMWorldState::totalBytes());
+	}
+
+	JSValue js_sam_world_bytes_free(JSContext* ctx, JSValueConst, int, JSValueConst*)
+	{
+		SAMLogger::noteApiCall();
+		const long long used = (long long)SAMWorldState::totalBytes();
+		const long long cap = (long long)SAMWorldState::kMaxTotalBytes;
+		return JS_NewInt64(ctx, (int64_t)(used >= cap ? 0 : cap - used));
+	}
+
+	
+	// ============================================================================
+	// v2.6 batch 2: inventory and items. Twins of the Lua bindings; the reasoning for
+	// each lives in sam_lua_runtime.cpp. The same two rules apply:
+	//   uidToItem only ever resolves the LOCAL player's items (items.cpp:295).
+	//   Every write is host-only.
+	// The only language difference is that a Lua table comes back as a JS object.
+	// ============================================================================
+
+
+	// Item::canUnequip's decision WITHOUT its side effect. The engine version is non-const
+	// and sets identified = true then calls onItemIdentified on two paths (items.cpp:6301,
+	// :6325), so calling it to answer a question silently identifies the item, and on a
+	// client sends an appearance update to the server. The branches below mirror
+	// items.cpp:6257-6330 exactly; only the identifying is left out.
+	static bool samItemCanUnequipQuiet(const Item* it, const Stat* wielder)
+	{
+		if ( !it ) { return true; }
+		// NOTE: the engine has a "spellbooks always unequippable" branch at items.cpp:6259,
+		// and it is INSIDE a /* */ block: "Spellbooks are no longer equipable." It never
+		// runs, and its literals are stale anyway (100-103 are rings, not books). It was
+		// copied here by mistake and is deliberately absent now.
+		if ( it->type == TOOL_DUCK ) { return true; }
+		if ( wielder )
+		{
+			// An automaton is never stuck with anything (items.cpp:6279).
+			if ( wielder->type == AUTOMATON ) { return true; }
+			// Succubus and friends: a BLESSING is what sticks, not a curse.
+			if ( shouldInvertEquipmentBeatitude(wielder) ) { return it->beatitude <= 0; }
+		}
+		return it->beatitude >= 0;
+	}
+
+	// Compile-time proof that every case in the switch below is an ItemType.
+	//
+	// This is not decoration. The previous version listed TOME_SPELL among the cases, and
+	// TOME_SPELL is a CATEGORY whose value is 14, so the guard protected item type 14 (a
+	// steel sword) and left every tome wide open: the exact opposite of its purpose. A
+	// switch over `int` takes either enum silently. This does not, so it cannot happen again.
+	template<typename T> constexpr bool samIsItemType(T) { return std::is_same<T, ItemType>::value; }
+	static_assert(samIsItemType(READABLE_BOOK) && samIsItemType(SCROLL_MAIL)
+		&& samIsItemType(ENCHANTED_FEATHER) && samIsItemType(MAGICSTAFF_SCEPTER)
+		&& samIsItemType(TOOL_PLAYER_LOOT_BAG) && samIsItemType(TOOL_SENTRYBOT)
+		&& samIsItemType(TOOL_SPELLBOT) && samIsItemType(TOOL_GYROBOT)
+		&& samIsItemType(TOOL_DUMMYBOT),
+		"every case in samItemAppearanceIsGameplay must be an ItemType, not a Category");
+
+	// Types whose `appearance` carries gameplay state rather than a look. Writing it on any
+	// of these changes what the item IS, and appearance is persisted (scores.hpp:606), so
+	// the damage is permanent.
+	//
+	// DERIVED, not remembered: this list is every decode of `appearance` in the engine that
+	// is not the ordinary `% items[type].variations` cosmetic use. The previous version of
+	// this function listed TOME_SPELL as a case in a switch over ItemType; TOME_SPELL is a
+	// CATEGORY (items.hpp:584, value 14) and ItemType 14 is a sword, so it guarded swords
+	// and left every tome open. Tomes are matched by category here, which is what they are.
+	static bool samItemAppearanceIsGameplay(int type)
+	{
+		if ( type < 0 || type >= NUM_ITEM_SLOTS ) { return false; }
+		// A tome's appearance picks the spell it teaches (items.cpp:7449 % TOME_APPEARANCE_MAX).
+		if ( items[type].category == TOME_SPELL ) { return true; }
+		// A spell item's appearance IS the spell the player knows (spell.cpp:1961).
+		if ( items[type].category == SPELL_CAT ) { return true; }
+		switch ( type )
+		{
+			case READABLE_BOOK:            // % numbooks picks which book this is
+			case SCROLL_MAIL:              // % 25 picks which letter
+			case ENCHANTED_FEATHER:        // % ENCHANTED_FEATHER_MAX_DURABILITY: charges left
+			case MAGICSTAFF_SCEPTER:       // % MAGICSTAFF_SCEPTER_CHARGE_MAX: charges left
+			case TOOL_PLAYER_LOOT_BAG:     // owner in the low bits, contents keyed on the rest
+			case TOOL_SENTRYBOT:           // the four bots encode HP (entity.cpp:31653)
+			case TOOL_SPELLBOT:
+			case TOOL_GYROBOT:
+			case TOOL_DUMMYBOT:
+				return true;
+			default:
+				return false;
+		}
+	}
+
+	static const char* samJsItemStatusName(int st)
+	{
+		switch ( st )
+		{
+			case BROKEN:     return "BROKEN";
+			case DECREPIT:   return "DECREPIT";
+			case WORN:       return "WORN";
+			case SERVICABLE: return "SERVICABLE";
+			case EXCELLENT:  return "EXCELLENT";
+			default:         return "UNKNOWN";
+		}
+	}
+
+	static bool samJsItemStatusFromName(const std::string& n, int& out)
+	{
+		std::string u;
+		for ( char c : n ) { u += (char)toupper((unsigned char)c); }
+		if ( u == "BROKEN" )     { out = BROKEN;     return true; }
+		if ( u == "DECREPIT" )   { out = DECREPIT;   return true; }
+		if ( u == "WORN" )       { out = WORN;       return true; }
+		if ( u == "SERVICABLE" || u == "SERVICEABLE" ) { out = SERVICABLE; return true; }
+		if ( u == "EXCELLENT" )  { out = EXCELLENT;  return true; }
+		return false;
+	}
+
+	static const char* samJsItemSlotName(int slot)
+	{
+		switch ( slot )
+		{
+			case EQUIPPABLE_IN_SLOT_WEAPON:      return "WEAPON";
+			case EQUIPPABLE_IN_SLOT_SHIELD:      return "SHIELD";
+			case EQUIPPABLE_IN_SLOT_MASK:        return "MASK";
+			case EQUIPPABLE_IN_SLOT_HELM:        return "HELM";
+			case EQUIPPABLE_IN_SLOT_GLOVES:      return "GLOVES";
+			case EQUIPPABLE_IN_SLOT_BOOTS:       return "BOOTS";
+			case EQUIPPABLE_IN_SLOT_BREASTPLATE: return "BREASTPLATE";
+			case EQUIPPABLE_IN_SLOT_CLOAK:       return "CLOAK";
+			case EQUIPPABLE_IN_SLOT_AMULET:      return "AMULET";
+			case EQUIPPABLE_IN_SLOT_RING:        return "RING";
+			default:                             return "NONE";
+		}
+	}
+
+	static Item* samJsItemFromUid(JSContext* ctx, int argc, JSValueConst* argv, int idx)
+	{
+		// Not uidToItem(0): a missing or unreadable argument used to resolve to uid 0, which
+		// is a real lookup that can return a real item. Refuse instead, the way the Lua twin
+		// does when luaL_checkinteger raises.
+		double d = 0.0;
+		if ( !samHasArg(argc, argv, idx) ) { return nullptr; }
+		if ( !samJsNum(ctx, argv[idx], &d) ) { return nullptr; }
+		if ( d <= 0.0 ) { return nullptr; }
+		return uidToItem((Uint32)(int64_t)d);
+	}
+
+	JSValue js_sam_get_item(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		Item* it = samJsItemFromUid(ctx, argc, argv, 0);
+		if ( !it ) { return JS_NULL; }
+		JSValue o = JS_NewObject(ctx);
+		JS_SetPropertyStr(ctx, o, "type",        JS_NewInt32(ctx, (int)it->type));
+		JS_SetPropertyStr(ctx, o, "count",       JS_NewInt32(ctx, (int)it->count));
+		JS_SetPropertyStr(ctx, o, "beatitude",   JS_NewInt32(ctx, (int)it->beatitude));
+		JS_SetPropertyStr(ctx, o, "status",      JS_NewInt32(ctx, (int)it->status));
+		JS_SetPropertyStr(ctx, o, "status_name", JS_NewString(ctx, samJsItemStatusName((int)it->status)));
+		JS_SetPropertyStr(ctx, o, "identified",  JS_NewBool(ctx, it->identified ? 1 : 0));
+		JS_SetPropertyStr(ctx, o, "appearance",  JS_NewInt64(ctx, (int64_t)it->appearance));
+		JS_SetPropertyStr(ctx, o, "owner_uid",   JS_NewInt64(ctx, (int64_t)it->ownerUid));
+		JS_SetPropertyStr(ctx, o, "droppable",   JS_NewBool(ctx, it->isDroppable ? 1 : 0));
+		JS_SetPropertyStr(ctx, o, "grid_x",      JS_NewInt32(ctx, (int)it->x));
+		JS_SetPropertyStr(ctx, o, "grid_y",      JS_NewInt32(ctx, (int)it->y));
+		return o;
+	}
+
+	JSValue js_sam_get_item_name(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		Item* it = samJsItemFromUid(ctx, argc, argv, 0);
+		if ( !it ) { return JS_NULL; }
+		// getName writes into a shared buffer; JS_NewString copies it here and now.
+		const char* n = it->getName();
+		return JS_NewString(ctx, n ? n : "");
+	}
+
+	JSValue js_sam_get_item_value(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		Item* it = samJsItemFromUid(ctx, argc, argv, 0);
+		if ( !it ) { return JS_NULL; }
+		// Per unit in the engine; multiplied here. See the Lua twin.
+		return JS_NewInt64(ctx, (int64_t)it->getGoldValue() * (int64_t)(it->count > 0 ? it->count : 1));
+	}
+
+	JSValue js_sam_get_item_weight(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		Item* it = samJsItemFromUid(ctx, argc, argv, 0);
+		if ( !it ) { return JS_NULL; }
+		return JS_NewInt32(ctx, (int)it->getWeight());
+	}
+
+	JSValue js_sam_get_item_attack(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		Item* it = samJsItemFromUid(ctx, argc, argv, 0);
+		if ( !it ) { return JS_NULL; }
+		const Stat* w = nullptr;
+		int32_t p = -1;
+		samJsOptI32(ctx, argc, argv, 1, &p, "sam_get_item_attack");
+		if ( p >= 0 && p < MAXPLAYERS ) { w = stats[p]; }
+		return JS_NewInt32(ctx, (int)it->weaponGetAttack(w));
+	}
+
+	JSValue js_sam_get_item_ac(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		Item* it = samJsItemFromUid(ctx, argc, argv, 0);
+		if ( !it ) { return JS_NULL; }
+		const Stat* w = nullptr;
+		int32_t p = -1;
+		samJsOptI32(ctx, argc, argv, 1, &p, "sam_get_item_ac");
+		if ( p >= 0 && p < MAXPLAYERS ) { w = stats[p]; }
+		return JS_NewInt32(ctx, (int)it->armorGetAC(w));
+	}
+
+	JSValue js_sam_get_tome_spell(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		Item* it = samJsItemFromUid(ctx, argc, argv, 0);
+		if ( !it ) { return JS_NULL; }
+		// See the Lua twin: branch on category, and null for no spell so both runtimes agree.
+		int spellID = SPELL_NONE;
+		if ( itemCategory(it) == SPELLBOOK )        { spellID = getSpellIDFromSpellbook(it->type); }
+		else if ( itemCategory(it) == TOME_SPELL )  { spellID = it->getTomeSpellID(); }
+		if ( spellID == SPELL_NONE ) { return JS_NULL; }
+		return JS_NewInt32(ctx, spellID);
+	}
+
+	JSValue js_sam_get_food_satiation(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t t = -1; samJsOptI32(ctx, argc, argv, 0, &t, __func__);
+		if ( t < 0 || t >= NUM_ITEM_SLOTS ) { return JS_NULL; }
+		return JS_NewInt32(ctx, Item::getBaseFoodSatiation((ItemType)t));
+	}
+
+	// ---- writes (host only) ----------------------------------------------------
+
+	JSValue js_sam_set_item_beatitude(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		// Required, and it must really be a number: a forgotten argument wrote 0 and stripped
+		// a curse or a blessing, and so did any value QuickJS coerced to 0 for us.
+		int32_t v = 0;
+		if ( !samJsReqI32(ctx, argc, argv, 1, &v, "sam_set_item_beatitude") ) { return JS_FALSE; }
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_set_item_beatitude refused: host only."); return JS_FALSE; }
+		Item* it = samJsItemFromUid(ctx, argc, argv, 0);
+		if ( !it ) { return JS_FALSE; }
+		// -100..100, matching newItem and sam_spawn_item.
+		it->beatitude = (Sint16)((v < -100) ? -100 : ((v > 100) ? 100 : v));
+		return JS_TRUE;
+	}
+
+	JSValue js_sam_set_item_status(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		// Seeded OUTSIDE the enum. 0 is BROKEN (items.hpp:588), so a forgotten argument used
+		// to break the item and a `st < BROKEN` clamp could never notice.
+		int st = -1;
+		if ( !samHasArg(argc, argv, 1) )
+		{
+			SAM_ERROR("JS", "sam_set_item_status: the status argument is required.");
+			return JS_FALSE;
+		}
+		if ( JS_IsString(argv[1]) )
+		{
+			const char* c = JS_ToCString(ctx, argv[1]);
+			const std::string name = c ? c : "";
+			if ( c ) { JS_FreeCString(ctx, c); }
+			if ( !samJsItemStatusFromName(name, st) )
+			{
+				SAM_ERROR("JS", "sam_set_item_status: unknown status. Valid: BROKEN, DECREPIT, WORN, SERVICABLE, EXCELLENT.");
+				return JS_FALSE;
+			}
+		}
+		else
+		{
+			int32_t n = 0;
+			if ( !samJsReqI32(ctx, argc, argv, 1, &n, "sam_set_item_status") ) { return JS_FALSE; }
+			st = (int)n;
+		}
+		// Refused, not clamped, and refused in BOTH runtimes: the Lua twin used to clamp a
+		// negative up to BROKEN and answer true while this one answered false, so the same
+		// script reported two different outcomes depending on the language it was written in.
+		if ( st < BROKEN || st > EXCELLENT )
+		{
+			SAM_ERROR("JS", "sam_set_item_status: status must be 0 (BROKEN) to 4 (EXCELLENT), or a name.");
+			return JS_FALSE;
+		}
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_set_item_status refused: host only."); return JS_FALSE; }
+		Item* it = samJsItemFromUid(ctx, argc, argv, 0);
+		if ( !it ) { return JS_FALSE; }
+		it->status = (Status)st;
+		return JS_TRUE;
+	}
+
+	JSValue js_sam_set_item_count(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		// Zero is the DESTRUCTIVE branch here, so anything that silently becomes zero deletes
+		// the item: a forgotten argument, and equally "two" or {} or NaN, all of which
+		// JS_ToInt32 would have converted for us without complaint. Lua raises on every one
+		// of them; JS has to be told.
+		int32_t n = 0;
+		if ( !samJsReqI32(ctx, argc, argv, 1, &n, "sam_set_item_count") ) { return JS_FALSE; }
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_set_item_count refused: host only."); return JS_FALSE; }
+		Item* it = samJsItemFromUid(ctx, argc, argv, 0);
+		if ( !it ) { return JS_FALSE; }
+		int owner = clientnum;
+		for ( int p = 0; p < MAXPLAYERS; ++p )
+		{
+			if ( stats[p] && it->node && it->node->list == &stats[p]->inventory ) { owner = p; break; }
+		}
+		// Queued, never immediate: the engine frame that dispatched this event still holds
+		// the pointer. See SAMItems::queueDestroy.
+		if ( n <= 0 )
+		{
+			return JS_NewBool(ctx, SAMItems::queueDestroy((Uint32)it->uid, owner) ? 1 : 0);
+		}
+		const int cap = it->getMaxStackLimit(owner);
+		if ( n > cap )
+		{
+			SAM_WARN("JS", "sam_set_item_count: " + std::to_string((int)n) + " exceeds this item's"
+				" stack limit of " + std::to_string(cap) + "; refused. Use sam_get_max_stack to check first.");
+			return JS_FALSE;
+		}
+		it->count = (Sint16)n;
+		return JS_TRUE;
+	}
+
+	JSValue js_sam_identify_item(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1; samJsOptI32(ctx, argc, argv, 0, &player, __func__);
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_identify_item refused: host only."); return JS_FALSE; }
+		if ( player < 0 || player >= MAXPLAYERS ) { return JS_FALSE; }
+		Item* it = samJsItemFromUid(ctx, argc, argv, 1);
+		if ( !it ) { return JS_FALSE; }
+		if ( it->identified ) { return JS_TRUE; }
+		it->identified = true;
+		Item::onItemIdentified((int)player, it);
+		return JS_TRUE;
+	}
+
+	JSValue js_sam_set_item_appearance(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t ap = -1; samJsOptI64(ctx, argc, argv, 1, &ap, __func__);
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_set_item_appearance refused: host only."); return JS_FALSE; }
+		Item* it = samJsItemFromUid(ctx, argc, argv, 0);
+		if ( !it || ap < 0 ) { return JS_FALSE; }
+		// See the Lua twin: appearance carries gameplay state on several types and is saved.
+		if ( samItemAppearanceIsGameplay((int)it->type) )
+		{
+			SAM_ERROR("JS", "sam_set_item_appearance: this item type stores gameplay data in"
+				" its appearance (a tome's spell, a loot bag's contents, a robot's HP, a"
+				" scepter's charges). Refused, because the change would be saved.");
+			return JS_FALSE;
+		}
+		it->appearance = (Uint32)ap;
+		return JS_TRUE;
+	}
+
+	JSValue js_sam_set_item_droppable(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		// Required: defaulting to false made a forgotten argument silently pin the item in
+		// place forever. See the Lua twin.
+		if ( !samHasArg(argc, argv, 1) )
+		{
+			SAM_ERROR("JS", "sam_set_item_droppable: the true/false argument is required.");
+			return JS_FALSE;
+		}
+		const bool d = ( JS_ToBool(ctx, argv[1]) != 0 );
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_set_item_droppable refused: host only."); return JS_FALSE; }
+		Item* it = samJsItemFromUid(ctx, argc, argv, 0);
+		if ( !it ) { return JS_FALSE; }
+		it->isDroppable = d;
+		return JS_TRUE;
+	}
+
+	JSValue js_sam_get_item_owner(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		Item* it = samJsItemFromUid(ctx, argc, argv, 0);
+		if ( !it ) { return JS_NULL; }
+		if ( it->ownerUid == 0 ) { return JS_NULL; }   // matches the Lua twin
+		return JS_NewInt64(ctx, (int64_t)it->ownerUid);
+	}
+
+	JSValue js_sam_set_item_owner(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t owner = -1; samJsOptI64(ctx, argc, argv, 1, &owner, __func__);
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_set_item_owner refused: host only."); return JS_FALSE; }
+		Item* it = samJsItemFromUid(ctx, argc, argv, 0);
+		if ( !it || owner < 0 ) { return JS_FALSE; }
+		it->ownerUid = (Uint32)owner;
+		return JS_TRUE;
+	}
+
+	// ---- predicates ------------------------------------------------------------
+
+	JSValue js_sam_is_ranged_weapon(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t t = -1; samJsOptI32(ctx, argc, argv, 0, &t, __func__);
+		if ( t < 0 || t >= NUM_ITEM_SLOTS ) { return JS_FALSE; }
+		return JS_NewBool(ctx, isRangedWeapon((ItemType)t) ? 1 : 0);
+	}
+
+	JSValue js_sam_is_melee_weapon(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		Item* it = samJsItemFromUid(ctx, argc, argv, 0);
+		if ( !it ) { return JS_FALSE; }
+		return JS_NewBool(ctx, isMeleeWeapon(*it) ? 1 : 0);
+	}
+
+	JSValue js_sam_is_shield(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		Item* it = samJsItemFromUid(ctx, argc, argv, 0);
+		if ( !it ) { return JS_FALSE; }
+		// isItemEquippableInShieldSlot: isShield excludes lanterns, torches, quivers and
+		// spellbooks, which are exactly the offhand cases a mod asks about.
+		return JS_NewBool(ctx, isItemEquippableInShieldSlot(it) ? 1 : 0);
+	}
+
+	JSValue js_sam_is_potion_bad(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		Item* it = samJsItemFromUid(ctx, argc, argv, 0);
+		if ( !it ) { return JS_FALSE; }
+		return JS_NewBool(ctx, isPotionBad(*it) ? 1 : 0);
+	}
+
+	JSValue js_sam_item_has_trait(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t t = -1; samJsOptI32(ctx, argc, argv, 0, &t, __func__);
+		const char* c = samHasArg(argc, argv, 1) ? JS_ToCString(ctx, argv[1]) : nullptr;
+		std::string u;
+		for ( const char* p = c; p && *p; ++p ) { u += (char)toupper((unsigned char)*p); }
+		if ( c ) { JS_FreeCString(ctx, c); }
+		if ( t < 0 || t >= NUM_ITEM_SLOTS ) { return JS_FALSE; }
+		const ItemType ty = (ItemType)t;
+		if ( u == "QUIVER" )           { return JS_NewBool(ctx, itemTypeIsQuiver(ty) ? 1 : 0); }
+		if ( u == "FOCI" )             { return JS_NewBool(ctx, itemTypeIsFoci(ty) ? 1 : 0); }
+		if ( u == "INSTRUMENT" )       { return JS_NewBool(ctx, itemTypeIsInstrument(ty) ? 1 : 0); }
+		if ( u == "THROWN_BALL" )      { return JS_NewBool(ctx, itemTypeIsThrownBall(ty) ? 1 : 0); }
+		SAM_ERROR("JS", "sam_item_has_trait: unknown trait. Valid: QUIVER, FOCI, INSTRUMENT, THROWN_BALL.");
+		return JS_FALSE;
+	}
+
+	JSValue js_sam_get_item_slot(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t t = -1; samJsOptI32(ctx, argc, argv, 0, &t, __func__);
+		if ( t < 0 || t >= NUM_ITEM_SLOTS ) { return JS_NULL; }
+		return JS_NewString(ctx, samJsItemSlotName((int)items[t].item_slot));
+	}
+
+	JSValue js_sam_is_better_weapon(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		Item* a = samJsItemFromUid(ctx, argc, argv, 0);
+		Item* b = samHasArg(argc, argv, 1) ? samJsItemFromUid(ctx, argc, argv, 1) : nullptr;
+		if ( !a ) { return JS_FALSE; }
+		// See the Lua twin: without a category test this says yes to anything.
+		if ( !b && itemCategory(a) != WEAPON ) { return JS_FALSE; }
+		return JS_NewBool(ctx, Item::isThisABetterWeapon(*a, b) ? 1 : 0);
+	}
+
+	JSValue js_sam_is_better_armor(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		Item* a = samJsItemFromUid(ctx, argc, argv, 0);
+		Item* b = samHasArg(argc, argv, 1) ? samJsItemFromUid(ctx, argc, argv, 1) : nullptr;
+		if ( !a ) { return JS_FALSE; }
+		// isThisABetterArmor short-circuits to TRUE the moment there is nothing to compare
+		// against (items.cpp:7215) and never asks whether the new item is armour at all, so
+		// the documented "is this worth wearing" form said yes to a potion. The engine only
+		// ever reaches that function through checkEquipType, which has already routed the
+		// item into one of these seven slots (entity.cpp:26149-26228). That routing is the
+		// guard, and it is the same short-circuit already fixed in sam_is_better_weapon.
+		if ( !b )
+		{
+			const int t = (int)a->type;
+			if ( t < 0 || t >= NUM_ITEM_SLOTS ) { return JS_FALSE; }
+			const int slot = (int)items[t].item_slot;
+			if ( slot != EQUIPPABLE_IN_SLOT_SHIELD && slot != EQUIPPABLE_IN_SLOT_MASK
+				&& slot != EQUIPPABLE_IN_SLOT_HELM && slot != EQUIPPABLE_IN_SLOT_GLOVES
+				&& slot != EQUIPPABLE_IN_SLOT_BOOTS && slot != EQUIPPABLE_IN_SLOT_BREASTPLATE
+				&& slot != EQUIPPABLE_IN_SLOT_CLOAK )
+			{
+				return JS_FALSE;
+			}
+		}
+		return JS_NewBool(ctx, Item::isThisABetterArmor(*a, b) ? 1 : 0);
+	}
+
+	// ---- queries ---------------------------------------------------------------
+
+	JSValue js_sam_is_item_equipped(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1; samJsOptI32(ctx, argc, argv, 0, &player, __func__);
+		Item* it = samJsItemFromUid(ctx, argc, argv, 1);
+		if ( !it || player < 0 || player >= MAXPLAYERS || !stats[player] ) { return JS_FALSE; }
+		// By POINTER: itemIsEquipped compares by value and cannot tell two identical rings apart.
+		const Stat* st = stats[player];
+		const bool worn = ( it == st->weapon || it == st->shield || it == st->helmet
+			|| it == st->breastplate || it == st->gloves || it == st->shoes
+			|| it == st->cloak || it == st->amulet || it == st->ring || it == st->mask );
+		return JS_NewBool(ctx, worn ? 1 : 0);
+	}
+
+	JSValue js_sam_can_unequip(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1; samJsOptI32(ctx, argc, argv, 0, &player, __func__);
+		Item* it = samJsItemFromUid(ctx, argc, argv, 1);
+		if ( !it || player < 0 || player >= MAXPLAYERS ) { return JS_FALSE; }
+		// NOT Item::canUnequip: it identifies the item as a side effect. See the Lua twin.
+		return JS_NewBool(ctx, samItemCanUnequipQuiet(it, stats[player]) ? 1 : 0);
+	}
+
+	JSValue js_sam_inventory_has_space(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1; samJsOptI32(ctx, argc, argv, 0, &player, __func__);
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] ) { return JS_NULL; }
+		if ( !players[player]->isLocalPlayer() )
+		{
+			SAM_WARN("JS", "sam_inventory_has_space: the inventory grid is local to each machine;"
+				" a remote player cannot be asked. Returning null.");
+			return JS_NULL;
+		}
+		return JS_NewBool(ctx, players[player]->inventoryUI.bItemInventoryHasFreeSlot() ? 1 : 0);
+	}
+
+	JSValue js_sam_get_max_stack(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1; samJsOptI32(ctx, argc, argv, 0, &player, __func__);
+		Item* it = samJsItemFromUid(ctx, argc, argv, 1);
+		if ( !it || player < 0 || player >= MAXPLAYERS ) { return JS_NULL; }
+		return JS_NewInt32(ctx, it->getMaxStackLimit((int)player));
+	}
+
+	JSValue js_sam_can_items_stack(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1; samJsOptI32(ctx, argc, argv, 0, &player, __func__);
+		Item* a = samJsItemFromUid(ctx, argc, argv, 1);
+		Item* b = samJsItemFromUid(ctx, argc, argv, 2);
+		if ( !a || !b || player < 0 || player >= MAXPLAYERS ) { return JS_FALSE; }
+		// The engine's own comparison, a != b, and the ceiling on the DESTINATION.
+		return JS_NewBool(ctx, ( a != b && itemCompare(a, b, false) == 0
+			&& b->shouldItemStack((int)player) ) ? 1 : 0);
+	}
+
+	JSValue js_sam_monster_can_wield(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t muid = 0; samJsOptI64(ctx, argc, argv, 0, &muid, __func__);
+		int32_t t = -1;   samJsOptI32(ctx, argc, argv, 1, &t, __func__);
+		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_monster_can_wield refused: host only."); return JS_FALSE; }
+		Entity* e = samResolveMonster((long long)muid);
+		if ( !e || t < 0 || t >= NUM_ITEM_SLOTS ) { return JS_FALSE; }
+		// Value-initialised: Item has no constructor, so a plain declaration would leave
+		// several members holding whatever was on the stack.
+		Item probe{};
+		probe.type = (ItemType)t;
+		probe.status = EXCELLENT;
+		probe.beatitude = 0;
+		probe.count = 1;
+		probe.appearance = 0;
+		probe.identified = true;
+		return JS_NewBool(ctx, e->canWieldItem(probe) ? 1 : 0);
+	}
+
 	JSValue js_sam_get_position(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
@@ -1861,14 +2914,15 @@ namespace
 		for ( int p = 0; p < MAXPLAYERS; ++p )
 		{
 			if ( !stats[p] ) { continue; }
-			if ( itemSlot(stats[p], it) != nullptr )
-			{ SAM_WARN("JS", "sam_remove_item: item uid " + std::to_string(uid) + " is equipped; unequip first."); return JS_NewBool(ctx, 0); }
-			for ( node_t* n = stats[p]->inventory.first; n; n = n->next ) { if ( (Item*)n->element == it ) { owner = p; break; } }
+			for ( node_t* n = stats[p]->inventory.first; n; n = n->next )
+			{
+				if ( (Item*)n->element == it ) { owner = p; break; }
+			}
+			if ( owner >= 0 ) { break; }
 		}
-		Item* ref = it;
-		while ( ref ) { consumeItem(ref, owner >= 0 ? owner : 0); }
-		SAM_INFO("JS", "Removed item uid " + std::to_string(uid) + ".");
-		return JS_NewBool(ctx, 1);
+		// Through the queue, like the Lua twin: this used to free inline, which is a
+		// use-after-free when a mod destroys the item inside its own on_item_use handler.
+		return JS_NewBool(ctx, SAMItems::queueDestroy((Uint32)it->uid, owner >= 0 ? owner : clientnum) ? 1 : 0);
 	}
 #endif
 
@@ -4437,6 +5491,69 @@ namespace
 		JS_SetPropertyStr(ctx, g, "sam_impact_frame", JS_NewCFunction(ctx, js_sam_impact_frame, "sam_impact_frame", 7));
 		JS_SetPropertyStr(ctx, g, "sam_camera_shake", JS_NewCFunction(ctx, js_sam_camera_shake, "sam_camera_shake", 2));
 		JS_SetPropertyStr(ctx, g, "sam_hitstop", JS_NewCFunction(ctx, js_sam_hitstop, "sam_hitstop", 1));
+		// ---- v2.6 batch 1: reads and dice -------------------------------------
+		JS_SetPropertyStr(ctx, g, "sam_get_position_precise", JS_NewCFunction(ctx, js_sam_get_position_precise, "sam_get_position_precise", 1));
+		JS_SetPropertyStr(ctx, g, "sam_get_distance", JS_NewCFunction(ctx, js_sam_get_distance, "sam_get_distance", 2));
+		JS_SetPropertyStr(ctx, g, "sam_get_distance_to", JS_NewCFunction(ctx, js_sam_get_distance_to, "sam_get_distance_to", 3));
+		JS_SetPropertyStr(ctx, g, "sam_get_entity_type", JS_NewCFunction(ctx, js_sam_get_entity_type, "sam_get_entity_type", 1));
+		JS_SetPropertyStr(ctx, g, "sam_get_scale", JS_NewCFunction(ctx, js_sam_get_scale, "sam_get_scale", 1));
+		JS_SetPropertyStr(ctx, g, "sam_is_visible", JS_NewCFunction(ctx, js_sam_is_visible, "sam_is_visible", 1));
+		JS_SetPropertyStr(ctx, g, "sam_get_velocity", JS_NewCFunction(ctx, js_sam_get_velocity, "sam_get_velocity", 1));
+		JS_SetPropertyStr(ctx, g, "sam_get_entity_size", JS_NewCFunction(ctx, js_sam_get_entity_size, "sam_get_entity_size", 1));
+		JS_SetPropertyStr(ctx, g, "sam_get_entity_sprite", JS_NewCFunction(ctx, js_sam_get_entity_sprite, "sam_get_entity_sprite", 1));
+		JS_SetPropertyStr(ctx, g, "sam_get_entity_ticks", JS_NewCFunction(ctx, js_sam_get_entity_ticks, "sam_get_entity_ticks", 1));
+		JS_SetPropertyStr(ctx, g, "sam_get_map_seed", JS_NewCFunction(ctx, js_sam_get_map_seed, "sam_get_map_seed", 0));
+		JS_SetPropertyStr(ctx, g, "sam_is_dark_level", JS_NewCFunction(ctx, js_sam_is_dark_level, "sam_is_dark_level", 0));
+		JS_SetPropertyStr(ctx, g, "sam_get_playable_bounds", JS_NewCFunction(ctx, js_sam_get_playable_bounds, "sam_get_playable_bounds", 0));
+		JS_SetPropertyStr(ctx, g, "sam_is_tile_diggable", JS_NewCFunction(ctx, js_sam_is_tile_diggable, "sam_is_tile_diggable", 2));
+		JS_SetPropertyStr(ctx, g, "sam_get_map_flags", JS_NewCFunction(ctx, js_sam_get_map_flags, "sam_get_map_flags", 0));
+		JS_SetPropertyStr(ctx, g, "sam_get_exit_position", JS_NewCFunction(ctx, js_sam_get_exit_position, "sam_get_exit_position", 0));
+		JS_SetPropertyStr(ctx, g, "sam_get_run_time", JS_NewCFunction(ctx, js_sam_get_run_time, "sam_get_run_time", 0));
+		JS_SetPropertyStr(ctx, g, "sam_get_tick_rate", JS_NewCFunction(ctx, js_sam_get_tick_rate, "sam_get_tick_rate", 0));
+		JS_SetPropertyStr(ctx, g, "sam_get_fps", JS_NewCFunction(ctx, js_sam_get_fps, "sam_get_fps", 0));
+		JS_SetPropertyStr(ctx, g, "sam_get_real_time", JS_NewCFunction(ctx, js_sam_get_real_time, "sam_get_real_time", 0));
+		JS_SetPropertyStr(ctx, g, "sam_get_date", JS_NewCFunction(ctx, js_sam_get_date, "sam_get_date", 0));
+		JS_SetPropertyStr(ctx, g, "sam_is_paused", JS_NewCFunction(ctx, js_sam_is_paused, "sam_is_paused", 0));
+		JS_SetPropertyStr(ctx, g, "sam_is_in_game", JS_NewCFunction(ctx, js_sam_is_in_game, "sam_is_in_game", 0));
+		JS_SetPropertyStr(ctx, g, "sam_is_loading", JS_NewCFunction(ctx, js_sam_is_loading, "sam_is_loading", 0));
+		JS_SetPropertyStr(ctx, g, "sam_random_float", JS_NewCFunction(ctx, js_sam_random_float, "sam_random_float", 1));
+		JS_SetPropertyStr(ctx, g, "sam_random_chance", JS_NewCFunction(ctx, js_sam_random_chance, "sam_random_chance", 2));
+		JS_SetPropertyStr(ctx, g, "sam_random_from_list", JS_NewCFunction(ctx, js_sam_random_from_list, "sam_random_from_list", 2));
+		JS_SetPropertyStr(ctx, g, "sam_random_weighted", JS_NewCFunction(ctx, js_sam_random_weighted, "sam_random_weighted", 2));
+		JS_SetPropertyStr(ctx, g, "sam_has_data", JS_NewCFunction(ctx, js_sam_has_data, "sam_has_data", 1));
+		JS_SetPropertyStr(ctx, g, "sam_world_bytes", JS_NewCFunction(ctx, js_sam_world_bytes, "sam_world_bytes", 0));
+		JS_SetPropertyStr(ctx, g, "sam_world_bytes_free", JS_NewCFunction(ctx, js_sam_world_bytes_free, "sam_world_bytes_free", 0));
+		// ---- v2.6 batch 2: inventory and items --------------------------------
+		JS_SetPropertyStr(ctx, g, "sam_get_item", JS_NewCFunction(ctx, js_sam_get_item, "sam_get_item", 1));
+		JS_SetPropertyStr(ctx, g, "sam_get_item_name", JS_NewCFunction(ctx, js_sam_get_item_name, "sam_get_item_name", 1));
+		JS_SetPropertyStr(ctx, g, "sam_get_item_value", JS_NewCFunction(ctx, js_sam_get_item_value, "sam_get_item_value", 1));
+		JS_SetPropertyStr(ctx, g, "sam_get_item_weight", JS_NewCFunction(ctx, js_sam_get_item_weight, "sam_get_item_weight", 1));
+		JS_SetPropertyStr(ctx, g, "sam_get_item_attack", JS_NewCFunction(ctx, js_sam_get_item_attack, "sam_get_item_attack", 2));
+		JS_SetPropertyStr(ctx, g, "sam_get_item_ac", JS_NewCFunction(ctx, js_sam_get_item_ac, "sam_get_item_ac", 2));
+		JS_SetPropertyStr(ctx, g, "sam_get_tome_spell", JS_NewCFunction(ctx, js_sam_get_tome_spell, "sam_get_tome_spell", 1));
+		JS_SetPropertyStr(ctx, g, "sam_get_food_satiation", JS_NewCFunction(ctx, js_sam_get_food_satiation, "sam_get_food_satiation", 1));
+		JS_SetPropertyStr(ctx, g, "sam_set_item_beatitude", JS_NewCFunction(ctx, js_sam_set_item_beatitude, "sam_set_item_beatitude", 2));
+		JS_SetPropertyStr(ctx, g, "sam_set_item_status", JS_NewCFunction(ctx, js_sam_set_item_status, "sam_set_item_status", 2));
+		JS_SetPropertyStr(ctx, g, "sam_set_item_count", JS_NewCFunction(ctx, js_sam_set_item_count, "sam_set_item_count", 2));
+		JS_SetPropertyStr(ctx, g, "sam_identify_item", JS_NewCFunction(ctx, js_sam_identify_item, "sam_identify_item", 2));
+		JS_SetPropertyStr(ctx, g, "sam_set_item_appearance", JS_NewCFunction(ctx, js_sam_set_item_appearance, "sam_set_item_appearance", 2));
+		JS_SetPropertyStr(ctx, g, "sam_set_item_droppable", JS_NewCFunction(ctx, js_sam_set_item_droppable, "sam_set_item_droppable", 2));
+		JS_SetPropertyStr(ctx, g, "sam_get_item_owner", JS_NewCFunction(ctx, js_sam_get_item_owner, "sam_get_item_owner", 1));
+		JS_SetPropertyStr(ctx, g, "sam_set_item_owner", JS_NewCFunction(ctx, js_sam_set_item_owner, "sam_set_item_owner", 2));
+		JS_SetPropertyStr(ctx, g, "sam_is_ranged_weapon", JS_NewCFunction(ctx, js_sam_is_ranged_weapon, "sam_is_ranged_weapon", 1));
+		JS_SetPropertyStr(ctx, g, "sam_is_melee_weapon", JS_NewCFunction(ctx, js_sam_is_melee_weapon, "sam_is_melee_weapon", 1));
+		JS_SetPropertyStr(ctx, g, "sam_is_shield", JS_NewCFunction(ctx, js_sam_is_shield, "sam_is_shield", 1));
+		JS_SetPropertyStr(ctx, g, "sam_is_potion_bad", JS_NewCFunction(ctx, js_sam_is_potion_bad, "sam_is_potion_bad", 1));
+		JS_SetPropertyStr(ctx, g, "sam_item_has_trait", JS_NewCFunction(ctx, js_sam_item_has_trait, "sam_item_has_trait", 2));
+		JS_SetPropertyStr(ctx, g, "sam_get_item_slot", JS_NewCFunction(ctx, js_sam_get_item_slot, "sam_get_item_slot", 1));
+		JS_SetPropertyStr(ctx, g, "sam_is_better_weapon", JS_NewCFunction(ctx, js_sam_is_better_weapon, "sam_is_better_weapon", 2));
+		JS_SetPropertyStr(ctx, g, "sam_is_better_armor", JS_NewCFunction(ctx, js_sam_is_better_armor, "sam_is_better_armor", 2));
+		JS_SetPropertyStr(ctx, g, "sam_is_item_equipped", JS_NewCFunction(ctx, js_sam_is_item_equipped, "sam_is_item_equipped", 2));
+		JS_SetPropertyStr(ctx, g, "sam_can_unequip", JS_NewCFunction(ctx, js_sam_can_unequip, "sam_can_unequip", 2));
+		JS_SetPropertyStr(ctx, g, "sam_inventory_has_space", JS_NewCFunction(ctx, js_sam_inventory_has_space, "sam_inventory_has_space", 1));
+		JS_SetPropertyStr(ctx, g, "sam_get_max_stack", JS_NewCFunction(ctx, js_sam_get_max_stack, "sam_get_max_stack", 2));
+		JS_SetPropertyStr(ctx, g, "sam_can_items_stack", JS_NewCFunction(ctx, js_sam_can_items_stack, "sam_can_items_stack", 3));
+		JS_SetPropertyStr(ctx, g, "sam_monster_can_wield", JS_NewCFunction(ctx, js_sam_monster_can_wield, "sam_monster_can_wield", 2));
 #endif
 		JS_FreeValue(ctx, g);
 	}
