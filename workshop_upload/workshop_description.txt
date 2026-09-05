@@ -1,6 +1,6 @@
 [h1]S.A.M Framework (Support All Mods)[/h1]
 
-Barony was never built to be modded. S.A.M is the layer that makes it modded anyway: a patched game that reads plain JSON and runs Lua, JavaScript or TypeScript, so a mod can be made in an afternoon by someone who has never opened a C++ file.
+Barony was never built to be modded. S.A.M is the layer that makes it modded anyway: a patched game that reads plain JSON and runs Lua, JavaScript or TypeScript, so a mod can be made in an afternoon by someone who has never opened C++.
 
 [b]S.A.M is a dependency, not a playable mod.[/b] On its own it adds nothing. It is what other mods are built on. Install it once and every S.A.M mod works.
 
@@ -36,8 +36,6 @@ A mod here is not a guest that can only react. It can be told a player was hit a
 [b]Creatures that think for themselves.[/b] Barony runs everything in the world through a function once per frame, and until now that function was always ours. Now your script can BE it. A turret that tracks and leads a moving target. A boss that changes the rules at half health. None of it picked from a list somebody else wrote.
 
 [b]Mods that change what happens.[/b] Most events used to be announcements after the fact. Now a mod can halve incoming damage, rewrite what a chest holds, or refuse a hit outright. And two mods that both reduce damage BOTH apply, because each sees what the last one left. That is the difference between mods that stack and mods that fight.
-
-[b]Saves that stopped drifting.[/b] Custom items used to be saved by load order, so reordering your mod list turned a saved sword into another mod's potion. Fixed, and saves record which mods made them.
 
 [b]Playing multiplayer? Install this anyway.[/b] S.A.M closes eleven memory safety holes inherited from the base game, reachable with no mods.
 
@@ -99,9 +97,9 @@ Only two functions ever get called: [b]on_event(event)[/b] and [b]on_tick(event)
 
 [h1]HOW TO USE A MOD[/h1]
 
-Put the mod folder in [b]...\steamapps\common\Barony\mods\[/b], launch the game, click [b]Mods[/b], open [b]Local Mods[/b], click [b]Load Mod[/b], then [b]Start Modded Game[/b].
+Put the mod folder in [b]...\steamapps\common\Barony\mods\[/b], launch, click [b]Mods[/b], [b]Local Mods[/b], [b]Load Mod[/b], then [b]Start Modded Game[/b].
 
-[b]Workshop mod instead?[/b] Subscribe, then let Steam finish downloading before you launch. If [b]Load Mod[/b] does nothing, Steam has not finished: close Steam fully, reopen, wait, then launch.
+[b]Workshop mod?[/b] Subscribe and let Steam finish downloading first. If [b]Load Mod[/b] does nothing, it has not: close Steam fully, reopen, wait, launch.
 
 [hr][/hr]
 
