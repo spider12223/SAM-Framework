@@ -8,18 +8,24 @@ Barony was never built to be modded. S.A.M is the layer that makes it modded any
 
 [hr][/hr]
 
-[h1]NEW IN 2.5: EVERY FUNCTION IS WRITTEN DOWN[/h1]
+[h1]NEW IN 2.6: CUSTOM RACES WORK IN MULTIPLAYER[/h1]
 
-S.A.M gives your script [b]245 functions[/b] and [b]72 events[/b]. For a long time the documentation described 48 of them, and the other 136 worked perfectly while appearing nowhere anyone could find. That is fixed.
+Played a custom race online? Your character looks fine to you and wrong to everyone else: a white body, a limb replaced by a coloured block, a head belonging to something else.
 
-[b]The complete reference:[/b] every function and event, with its arguments, types and return values, and which calls only run on the host.
+A race's body was described using numbers that only mean something on the machine that sent them, so the other game drew whatever sat at those slots in its own table. It had already worked the body out correctly, and the host overwrote that right answer a fraction of a second later. If you ever saw a character look right for an instant after a floor loaded and then flip wrong, that was this.
+
+Now what travels between machines is a name, never a number, and each game picks the model from its own copy of your mod.
+
+[h1]61 NEW FUNCTIONS: 184 TO 245[/h1]
+
+All of items and inventory: read an item's real displayed name, what the stack is worth, its attack and armour; change condition, blessing, count, owner and whether it can be dropped; ask what slot it fills and what stacks with what; compare two items the way the game's own creatures do when deciding what to pick up. Plus positions, facing, distances, tile queries, seeded random and run timing.
+
+[b]The complete reference[/b], every function and event with arguments, types, return values and host-only flags:
 https://github.com/spider12223/SAM-Framework/blob/main/docs/function-reference.md
 
-It is generated from the framework's own API definition rather than written by hand, so it cannot fall behind the code. If a function is missing there, it is missing from the framework.
+It is generated from the framework's own API definition, so it cannot fall behind the code.
 
-[b]Writing your mod in TypeScript?[/b] [b]sam.d.ts[/b] now ships in this folder and with every release. Point your editor at it and you get autocomplete, argument names and type checking across the whole API.
-
-[b]Custom models got real in 2.5 too.[/b] MagicaVoxel files are accepted directly and turned the right way up for you, models can be swapped while the game runs, custom creatures finally look right to every player instead of only the host, and a race can use the thirteen limb slots Barony allocates and never used.
+[b]Writing in TypeScript?[/b] [b]sam.d.ts[/b] ships in this folder and with every release. Point your editor at it for autocomplete and type checking across the whole API.
 
 [hr][/hr]
 
@@ -31,9 +37,9 @@ A mod here is not a guest that can only react. It can be told a player was hit a
 
 [b]Mods that change what happens.[/b] Most events used to be announcements after the fact. Now a mod can halve incoming damage, rewrite what a chest holds, or refuse a hit outright. And two mods that both reduce damage BOTH apply, because each sees what the last one left. That is the difference between mods that stack and mods that fight.
 
-[b]Saves that stopped drifting.[/b] Custom items were numbered in the order your mods loaded, and only the number was saved. Reorder your mod list and a saved sword quietly became another mod's potion. Fixed, and saves now record which mods made them.
+[b]Saves that stopped drifting.[/b] Custom items used to be saved by load order, so reordering your mod list turned a saved sword into another mod's potion. Fixed, and saves record which mods made them.
 
-[b]Playing multiplayer? Install this anyway.[/b] 2.0 closes eleven memory safety holes inherited from the base game that were reachable with no mods at all.
+[b]Playing multiplayer? Install this anyway.[/b] S.A.M closes eleven memory safety holes inherited from the base game, reachable with no mods.
 
 [hr][/hr]
 
@@ -42,12 +48,12 @@ A mod here is not a guest that can only react. It can be told a player was hit a
 [*][b]Creatures with their own logic.[/b] Not a reskin. Your script runs once per frame and decides what the thing does.
 [*][b]Rules that really change.[/b] Armour that reduces a hit. A curse that rewrites a chest as it opens. A class that cannot be poisoned.
 [*][b]Your own windows.[/b] Panels with buttons, pictures, scrolling lists and text boxes, for a shop, a quest log or a bestiary.
-[*][b]A home you can go back to.[/b] Send the party to any floor, including back UP, which the game itself never does, plus a chest whose contents survive every floor and every save.
+[*][b]A home you can go back to.[/b] Send the party to any floor, including back UP, which the game never does, plus a chest that survives every floor and save.
 [*][b]Classes.[/b] Attributes, skills, starting gear, spells, level up growth, and a character select portrait with real stat bars.
 [*][b]Items and weapons.[/b] Real entries in Barony's item table, with your own model and icon.
 [*][b]Monsters.[/b] Variants of any creature with your own stats, gear, followers and spawn floors, and your own animated model.
 [*][b]Spells and projectiles.[/b] Custom spells that really cast, and projectiles with their own speed, model, damage and range.
-[*][b]Status effects, races, sounds, models, tinkering recipes.[/b] Your own buffs, monster bodies to play as, .ogg files, voxel models, and changes to what the tinkering kit builds.
+[*][b]Status effects, races, sounds, models, recipes.[/b] Your own buffs, monster bodies to play as, .ogg files, voxel models, and changes to what the tinkering kit builds.
 [*][b]Vanilla patches.[/b] Edit the game's data in layers, so two mods stack instead of overwriting each other.
 [/list]
 
@@ -65,7 +71,7 @@ Build a class, item, monster, spell or effect with dropdowns and sliders, watch 
 
 JSON says what your content [i]is[/i]. A script says what it [i]does[/i]. Drop a .lua, .js or .ts file next to any JSON and it loads automatically. TypeScript is compiled for you.
 
-[b]72 events[/b] to react to, and now to change. [b]245 functions[/b] to act with: grant items and gold, read and set stats, apply effects, cast spells, deal or change damage, teleport, spawn monsters, run your own per frame logic on anything you spawn, open windows, timers, saved data, screen effects, and live patching that reverts when your mod unloads.
+[b]72 events[/b] to react to, and now to change. [b]245 functions[/b] to act with: grant items and gold, read and set stats, apply effects, cast spells, deal or change damage, teleport, spawn monsters, run your own per frame logic, open windows, timers, saved data, screen effects, and live patching that reverts when your mod unloads.
 
 Only two functions ever get called: [b]on_event(event)[/b] and [b]on_tick(event)[/b].
 
@@ -100,9 +106,6 @@ Put the mod folder in [b]...\steamapps\common\Barony\mods\[/b], launch the game,
 [hr][/hr]
 
 [h1]SOURCE AND DOCS[/h1]
-
-[b]Function reference[/b] (all 245 functions and 72 events):
-https://github.com/spider12223/SAM-Framework/blob/main/docs/function-reference.md
 
 S.A.M is open source. Framework, Mod Builder, schemas, docs, and a guide to publishing your own mod:
 
