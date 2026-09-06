@@ -95,7 +95,7 @@ from items, which register under their path. Declare it:
 
 ---
 
-## The four ways this goes wrong
+## The five ways this goes wrong
 
 ### 1. Pointing at a vanilla creature file
 
@@ -130,7 +130,8 @@ The framework now warns when a model path resolves to a base-game file:
 ```
 
 **If you want to look like an existing creature, use a custom race instead**, which keeps all
-the limbs. See `race.schema.json` and its `host_body` field.
+the limbs. See `race.schema.json` and its `host_body` field. Read point 5 below first if anyone
+is going to see you online.
 
 A race can also bring its OWN models for each limb, with `limb_models`:
 
@@ -187,6 +188,36 @@ but **not** a `.vox` you have changed on disk. Restart the game to see an edited
 
 Model scale is capped just under 2x, and in multiplayer a scale of exactly 2.0 wraps to zero
 and the thing vanishes. Build it at the size you want it.
+
+### 5. Assuming a custom race works for players who do not have your mod
+
+It does not, and this one is worth reading twice, because the obvious workaround does not
+work either.
+
+**Everyone who is meant to see your race needs the S.A.M exe AND your mod.** Without both, they
+see the plain host body instead. That is the whole rule, and the rest of this section is why.
+
+A game decides whether something is a player by looking at its head model. It accepts the
+vanilla player heads, plus the head of any race **that machine has registered**. Your race is
+only registered on machines that loaded your mod. To everybody else your head is just some
+model, so your character is not recognised as a player at all: it is never given a body, never
+moved, and stands frozen and invisible where it spawned. Other players can still walk into it
+and hit it.
+
+**Pointing your race at a vanilla model does not save you.** This is the trap, because it feels
+like it should. If your `limb_models` name a stock creature's limbs, every machine already has
+those files, so it is tempting to assume multiplayer is fine. It is not. The other player was
+never missing the artwork. They are missing the RACE, and that is what the recognition depends
+on. A stock Gharbad head is still not a player head to someone who has not loaded a mod that
+says so.
+
+Since 2.6.1 this degrades properly instead of breaking: the host sends the host body's ordinary
+player head, so a player without your mod sees a normal, moving creature of whatever
+`host_body` you chose. They still will not see your race's own look, because they do not have
+it. What they will no longer see is an invisible statue.
+
+If you are testing this, test it the way it will actually be played: **one machine with the mod
+hosting, one machine without it joining.** Two modded machines will never show you the problem.
 
 ---
 

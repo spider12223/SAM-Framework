@@ -16,6 +16,8 @@ A race's body was described using numbers that only mean something on the machin
 
 Now what travels between machines is a name, never a number, and each game picks the model from its own copy of your mod.
 
+[b]Both players need S.A.M and the same mod to see a custom race.[/b] Without it they see the creature it is built on, moving normally rather than frozen in place.
+
 [h1]61 NEW FUNCTIONS: 184 TO 245[/h1]
 
 All of items and inventory: read an item's real displayed name, what the stack is worth, its attack and armour; change condition, blessing, count, owner and whether it can be dropped; ask what slot it fills and what stacks with what; compare two items the way the game's own creatures do when deciding what to pick up. Plus positions, facing, distances, tile queries, seeded random and run timing.

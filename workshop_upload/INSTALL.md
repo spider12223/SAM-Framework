@@ -159,6 +159,15 @@ Barony"** that writes the mod straight into your `mods/` folder (Chrome/Edge).
 **Multiplayer says mods don't match.**
 - Every player in the lobby needs the S.A.M exe **and** the same enabled mods.
   S.A.M compares a fingerprint and warns if they differ.
+- This is a warning, not a refusal. You can still play. What you cannot do is see
+  content you have not installed.
+
+**Someone is playing a custom race and I see an ordinary creature.**
+- You do not have their mod. A race only exists on machines that loaded it, so
+  everyone else sees the plain creature it is built on. Install the same mod and
+  they will look right.
+- This is also true when the race uses the base game's own artwork. You are not
+  missing the model, you are missing the race, and that is what the game checks.
 
 ---
 
