@@ -669,15 +669,60 @@ int SAMClasses::classIdAtIndex(int index)
 	return -1;
 }
 
+std::string SAMClasses::canonicalName(int classId, int player)
+{
+	if ( classId >= SAM_CLASS_ID_BASE )
+	{
+		const SAMClassDef* def = getClass(classId);
+		return def ? def->id : std::string();
+	}
+#ifndef EDITOR
+	// Game build only. playerClassLangEntry lives behind main.hpp, which this file includes
+	// under #ifndef EDITOR -- editor.exe links sam_classes.cpp but not the class-name tables,
+	// so an unguarded call here is an editor build error. Same fence as everything else in
+	// this file that reaches into engine internals.
+	const char* n = playerClassLangEntry(classId, player);
+	return n ? std::string(n) : std::string();
+#else
+	(void)player;
+	return std::string();
+#endif
+}
+
 int SAMClasses::classIdForIdString(const std::string& idString)
 {
 	for ( const auto& kv : s_registry )
 	{
-		if ( kv.second.id == idString )
+		// Case-INSENSITIVE. The vanilla-name branch beside every caller of this lowercases, so an
+		// exact match here meant "MyMod:Sword" missed a declared "mymod:sword" while "Steel_Sword"
+		// resolved fine. Ids are stored exactly as the mod wrote them, so the fold happens here.
+		auto samFold = [](std::string v) {
+			for ( char& c : v ) { c = (char)std::tolower((unsigned char)c); }
+			return v;
+		};
+		if ( samFold(kv.second.id) == samFold(idString) )
 		{
 			return kv.first;
 		}
 	}
+	// Then the VANILLA class names, so what sam_get_class returns for a stock class resolves
+	// too. Without this there was no path at all from a vanilla class name to its id, in either
+	// runtime -- the producer and every consumer simply could not meet.
+#ifndef EDITOR
+	// Game build only, for the same reason as canonicalName above.
+	{
+		std::string want = idString;
+		for ( char& c : want ) { c = (char)std::tolower((unsigned char)c); }
+		for ( int c = 0; c < NUMCLASSES; ++c )
+		{
+			const char* n = playerClassLangEntry(c, 0);
+			if ( !n || !n[0] ) { continue; }
+			std::string have = n;
+			for ( char& ch : have ) { ch = (char)std::tolower((unsigned char)ch); }
+			if ( have == want ) { return c; }
+		}
+	}
+#endif
 	return -1;
 }
 

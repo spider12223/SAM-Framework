@@ -141,10 +141,22 @@ void SAMSounds::clear()
 	s_index.clear();
 }
 
+	// Case-INSENSITIVE, like the vanilla-name branch beside every caller of this. Mod ids are
+	// stored exactly as written, so an exact match meant "MyMod:Sword" missed a declared
+	// "mymod:sword" while "Steel_Sword" resolved fine -- an asymmetry a modder cannot see.
 int SAMSounds::soundIndexForId(const std::string& id)
 {
 	auto it = s_index.find(id);
-	return (it != s_index.end()) ? it->second : -1;
+	if ( it != s_index.end() ) { return it->second; }
+	std::string want = id;
+	for ( char& c : want ) { c = (char)std::tolower((unsigned char)c); }
+	for ( const auto& kv : s_index )
+	{
+		std::string have = kv.first;
+		for ( char& c : have ) { c = (char)std::tolower((unsigned char)c); }
+		if ( have == want ) { return kv.second; }
+	}
+	return -1;
 }
 
 int SAMSounds::count() { return static_cast<int>(s_index.size()); }

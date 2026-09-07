@@ -246,7 +246,12 @@ declare global {
 for (const f of FUNCS.slice().sort((a, b) => a.name.localeCompare(b.name))) {
   const doc = (f.desc || '').replace(/\*\//g, '*\\/')
   dts += `  /**\n   * ${doc}${f.hostOnly ? '\n   *\n   * Host-only: refused on a multiplayer client.' : ''}\n   */\n`
-  dts += `  function ${f.name}(${(f.params || []).map(p => `${safeParam(p.name)}${/optional/i.test(p.type) ? '?' : ''}: ${tsType(p.type)}`).join(', ')}): ${tsRet(f.returns, f.ts)};\n\n`
+  // `optional: true` is the property samApi.js actually uses, and this line only ever regex-tested
+  // the TYPE STRING for the word "optional" -- so a parameter marked properly came out REQUIRED in
+  // the .d.ts and a TypeScript mod written from the docs would not compile. sam_set_on_fire escaped
+  // only because its type string happens to contain the word. The --check gate cannot see this: the
+  // file it produces parses perfectly and is simply wrong about what you may leave out.
+  dts += `  function ${f.name}(${(f.params || []).map(p => `${safeParam(p.name)}${(p.optional || /optional/i.test(p.type)) ? '?' : ''}: ${tsType(p.type)}`).join(', ')}): ${tsRet(f.returns, f.ts)};\n\n`
 }
 dts += `  /** Every event name the engine fires. */\n  type SamEventName =\n${EVENTS.map(e => `    | ${JSON.stringify(e.name)}`).sort().join('\n')};\n\n`
 dts += `  interface SamEvent {\n    name: SamEventName;\n    [field: string]: any;\n  }\n`

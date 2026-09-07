@@ -5,6 +5,7 @@
 #include "sam_catalog.hpp"
 #include <cstring>
 #include "sam_items.hpp"
+#include "sam_spells.hpp"  // a custom spell reports its DECLARED "ns:spell" id
 #include "sam_logger.hpp"
 
 #include <cctype>
@@ -134,10 +135,39 @@ int SAMCatalog::itemTypeFor(const std::string& nameOrId)
 	auto it = ItemTooltips.itemNameStringToItemID.find(lower(nameOrId));
 	if ( it != ItemTooltips.itemNameStringToItemID.end() ) { return it->second; }
 	// Last resort: match a display name exactly, so a browser can round-trip what it showed.
-	for ( int t = 0; t < NUM_ITEM_SLOTS; ++t )
+	//
+	// ALL matches, not the first one. "tablet" is the identified name of three different tomes
+	// (sorcery, mysticism, thaumaturgy), and returning the first meant sam_get_item_info("tablet")
+	// quietly answered sorcery. Picking one silently is the failure that hides for months; naming
+	// the candidates costs the author a minute and tells them exactly what to write instead.
+	//
+	// Safe to have this tier at all, checked against the shipped data rather than assumed: no
+	// display name collides with a DIFFERENT item's internal key, so placing it last can never
+	// hijack a resolution that already worked. It must never be widened to the UNIDENTIFIED name,
+	// where "spellbook" alone is shared by 127 items.
 	{
-		const char* nm = ::items[t].getIdentifiedName();
-		if ( nm && nm[0] && lower(nm) == lower(nameOrId) ) { return t; }
+		std::vector<int> hits;
+		const std::string want = lower(nameOrId);
+		for ( int t = 0; t < NUM_ITEM_SLOTS; ++t )
+		{
+			const char* nm = ::items[t].getIdentifiedName();
+			if ( nm && nm[0] && lower(nm) == want ) { hits.push_back(t); }
+		}
+		if ( hits.size() == 1 ) { return hits[0]; }
+		if ( hits.size() > 1 )
+		{
+			std::string names;
+			for ( size_t i = 0; i < hits.size(); ++i )
+			{
+				if ( !names.empty() ) { names += ", "; }
+				const char* internal = ( hits[i] >= 0 && hits[i] < NUMITEMS )
+					? itemNameStrings[hits[i] + 2] : "?";
+				names += internal;
+			}
+			SAM_ERROR("CATALOG", "'" + nameOrId + "' is a displayed name shared by "
+				+ std::to_string((int)hits.size()) + " items: " + names
+				+ ". Refusing to guess -- pass one of those names, or the numeric type.");
+		}
 	}
 	return -1;
 #endif
@@ -183,7 +213,14 @@ std::vector<SAMCatalog::SpellEntry> SAMCatalog::spells()
 		if ( s->hide_from_ui ) { continue; }
 		SpellEntry e;
 		e.id = s->ID;
-		e.name = s->spell_internal_name;
+		// A CUSTOM spell reports the id its mod declared ("mymod:frostlance"), not the mangled
+		// internal name S.A.M generated for the engine ("spell_sam_mymod_frostlance"). Both
+		// resolve on the way back in, but only one of them is a string the mod ever wrote, so
+		// comparing an event against your own declaration used to be impossible.
+		{
+			const SAMSpellDef* samDef = SAMSpells::getSpell(s->ID);
+			e.name = ( samDef && !samDef->id.empty() ) ? samDef->id : std::string(s->spell_internal_name);
+		}
 		e.cost = getCostOfSpell(s);
 		e.custom = false;
 		out.push_back(e);

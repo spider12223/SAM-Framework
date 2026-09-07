@@ -272,11 +272,50 @@ int SAMWorld::lightAt(int x, int y, int player)
 
 // ---- finding things -----------------------------------------------------------------
 
+// The kinds findEntities accepts, in ONE place, so the test below and the error message cannot
+// drift apart. "gib" and "other" are words sam_get_entity_type PRODUCES, so a script that reads a
+// kind and searches for more of it can pass them straight back.
+static const char* const SAM_FIND_KINDS[] = {
+	"any", "door", "chest", "fountain", "sink", "switch", "gate", "ladder", "portal",
+	"item", "gold", "boulder", "monster", "player", "gib", "other",
+};
+
 std::vector<uint32_t> SAMWorld::findEntities(int x, int y, double radiusTiles,
 	const std::string& kind)
 {
 	std::vector<uint32_t> out;
 #ifdef SAM_WORLD_HAVE_BARONY
+	// CHECKED FIRST, above the map guard and above the loop, and reported ONCE PER DISTINCT WORD.
+	//
+	// This lived at the bottom of the loop behind a function-local `static bool`, which is
+	// process-wide and never reset -- so the first bad kind anywhere in the session was reported
+	// and every one after it, from any mod, went back to returning a silent empty list. That is
+	// the exact condition the branch was added to remove. And sitting inside the loop meant a bad
+	// kind was never reported at all on a level with no entities, because the function returns
+	// before the loop when map.entities is null.
+	{
+		bool known = false;
+		for ( const char* k : SAM_FIND_KINDS ) { if ( kind == k ) { known = true; break; } }
+		if ( !known )
+		{
+			// Keyed on the offending word, and capped so a script passing a fresh string every
+			// tick cannot grow this without bound.
+			static std::vector<std::string> samToldKinds;
+			if ( std::find(samToldKinds.begin(), samToldKinds.end(), kind) == samToldKinds.end() )
+			{
+				if ( samToldKinds.size() < 32 ) { samToldKinds.push_back(kind); }
+				std::string valid;
+				for ( const char* k : SAM_FIND_KINDS )
+				{
+					if ( !valid.empty() ) { valid += ", "; }
+					valid += k;
+				}
+				SAM_ERROR("WORLD", "sam_find_entities: '" + kind + "' is not a kind. Valid: "
+					+ valid + ". Returning nothing.");
+			}
+			return out;
+		}
+	}
 	if ( !map.entities ) { return out; }
 	const real_t cx = x * 16.0 + 8.0, cy = y * 16.0 + 8.0;
 	const real_t maxDist = radiusTiles * 16.0;
@@ -301,6 +340,17 @@ std::vector<uint32_t> SAMWorld::findEntities(int x, int y, double radiusTiles,
 		else if ( kind == "boulder" )  { match = ( e->behavior == &actBoulder ); }
 		else if ( kind == "monster" )  { match = ( e->behavior == &actMonster ); }
 		else if ( kind == "player" )   { match = ( e->behavior == &actPlayer ); }
+		else if ( kind == "gib" )      { match = ( e->behavior == &actGib ); }
+		else if ( kind == "other" )
+		{
+			match = !( e->behavior == &actPlayer || e->behavior == &actMonster
+				|| e->behavior == &actItem || e->behavior == &actDoor || e->behavior == &actChest
+				|| e->behavior == &actLadder || e->behavior == &actPortal || e->behavior == &actGate
+				|| e->behavior == &actSwitch || e->behavior == &actFountain || e->behavior == &actSink
+				|| e->behavior == &actBoulder || e->behavior == &actGib || e->behavior == &actGoldBag );
+		}
+		// No unknown-kind arm here any more: the word was checked against SAM_FIND_KINDS before
+		// the loop started, so anything reaching this point is one of them.
 		if ( !match ) { continue; }
 
 		const real_t ddx = e->x - cx, ddy = e->y - cy;

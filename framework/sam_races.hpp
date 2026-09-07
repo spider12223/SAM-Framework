@@ -154,6 +154,12 @@ public:
 	// Reverse lookup: runtime race id for a "namespace:race" id string, or -1.
 	static int raceIdForIdString(const std::string& idString);
 
+	// The identifier a SCRIPT sees for this race: a custom race's "ns:race" id, or the vanilla
+	// race's own name ("skeleton"). The same string sam_get_race returns, exported so the
+	// engine's event sites can emit it instead of a raw language-file lookup -- the one in
+	// menu.cpp was emitting the literal string "DEPRECATED" for every vanilla race.
+	static std::string canonicalName(int raceId);
+
 	// ---- cross-machine race identity ------------------------------------------------
 	//
 	// A race's numeric id is assigned in registration order and is therefore MACHINE-LOCAL:

@@ -309,6 +309,74 @@ namespace
 		return true;
 	}
 
+
+	// The same two, for REAL arguments. Batch 3 is the first batch whose arguments are mostly
+	// reals -- a force, an angle, an elevation -- and the helper set above stops at integers, so
+	// without these every float argument would go back to a bare JS_ToFloat64 and back to
+	// silently accepting "hard" as 0.0.
+	static void samJsOptF64(JSContext* ctx, int argc, JSValueConst* argv, int i, double* io, const char* who)
+	{
+		if ( !samHasArg(argc, argv, i) ) { return; }
+		double d = 0.0;
+		if ( !samJsNum(ctx, argv[i], &d) )
+		{
+			SAM_WARN("JS", std::string(who) + ": argument " + std::to_string(i + 1)
+				+ " is not a number; ignoring it.");
+			return;
+		}
+		*io = d;
+	}
+
+	static bool samJsReqF64(JSContext* ctx, int argc, JSValueConst* argv, int i, double* out, const char* who)
+	{
+		if ( !samHasArg(argc, argv, i) )
+		{
+			SAM_ERROR("JS", std::string(who) + ": argument " + std::to_string(i + 1) + " is required.");
+			return false;
+		}
+		double d = 0.0;
+		if ( !samJsNum(ctx, argv[i], &d) )
+		{
+			SAM_ERROR("JS", std::string(who) + ": argument " + std::to_string(i + 1) + " must be a number.");
+			return false;
+		}
+		*out = d;
+		return true;
+	}
+
+	// A REQUIRED uid. samJsReqI32 truncates to 32 bits, and a uid is wider than that.
+	static bool samJsReqI32Wide(JSContext* ctx, int argc, JSValueConst* argv, int i, int64_t* out, const char* who)
+	{
+		double d = 0.0;
+		if ( !samJsReqF64(ctx, argc, argv, i, &d, who) ) { return false; }
+		*out = (int64_t)d;
+		return true;
+	}
+
+	// A REQUIRED flag; see the Lua twin for why a missing one is refused rather than guessed.
+	static bool samBoolReqJs(JSContext* ctx, int argc, JSValueConst* argv, int i, const char* who, bool* out)
+	{
+		if ( !samHasArg(argc, argv, i) )
+		{
+			SAM_ERROR("JS", std::string(who) + ": argument " + std::to_string(i + 1)
+				+ " (true or false) is required.");
+			return false;
+		}
+		*out = JS_ToBool(ctx, argv[i]) != 0;
+		return true;
+	}
+
+	// A flag argument, with ONE rule across both runtimes.
+	//
+	// lua_toboolean says TRUE for the number 0; JS_ToBool says FALSE for it. So sam_set_visible(
+	// uid, 0) already means opposite things in Lua and JS today, in shipped code. JavaScript's
+	// rule is the one a modder expects from a 0, so it wins, and Lua is brought to it.
+	static bool samBoolArgJs(JSContext* ctx, int argc, JSValueConst* argv, int i, bool dflt)
+	{
+		if ( !samHasArg(argc, argv, i) ) { return dflt; }
+		return JS_ToBool(ctx, argv[i]) != 0;
+	}
+
 	// ---- host functions exposed to scripts ------------------------------------
 	JSValue js_sam_log(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
@@ -325,7 +393,7 @@ namespace
 	{
 		SAMLogger::noteApiCall();
 		int32_t player = -1;
-		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		samJsOptI32(ctx, argc, argv, 0, &player, __func__);
 		std::string name;
 		if ( samHasArg(argc, argv, 1) ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
 
@@ -343,13 +411,10 @@ namespace
 		// Resolve a custom "namespace:item" id first, else a vanilla name (case-insensitive).
 		int resolvedType = -1;
 		if ( name.find(':') != std::string::npos ) { resolvedType = SAMItems::itemIdForIdString(name); }
-		if ( resolvedType < 0 )
-		{
-			std::string lower = name;
-			for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
-			auto it = ItemTooltips.itemNameStringToItemID.find(lower);
-			if ( it != ItemTooltips.itemNameStringToItemID.end() ) { resolvedType = it->second; }
-		}
+		// One resolver, shared with every other name-taking call: digits, "ns:id", the internal
+		// name, then the DISPLAYED name -- which is what sam_list_items and sam_get_container_items
+		// hand out, and what this used to refuse.
+		if ( resolvedType < 0 ) { resolvedType = SAMCatalog::itemTypeFor(name); }
 		if ( resolvedType < 0 )
 		{
 			SAM_ERROR("JS", "sam_grant_item: unknown item '" + name
@@ -361,9 +426,9 @@ namespace
 		// Optional trailing args: beatitude (blessed +N / cursed -N), status (0=BROKEN .. 4=
 		// EXCELLENT), count. The 2-arg call (plain, uncursed, one item) is unchanged.
 		int32_t beatitudeArg = 0, statusArg = (int)EXCELLENT, countArg = 1;
-		if ( samHasArg(argc, argv, 2) ) { JS_ToInt32(ctx, &beatitudeArg, argv[2]); }
-		if ( samHasArg(argc, argv, 3) ) { JS_ToInt32(ctx, &statusArg, argv[3]); }
-		if ( samHasArg(argc, argv, 4) ) { JS_ToInt32(ctx, &countArg, argv[4]); }
+		samJsOptI32(ctx, argc, argv, 2, &beatitudeArg, __func__);
+		samJsOptI32(ctx, argc, argv, 3, &statusArg, __func__);
+		samJsOptI32(ctx, argc, argv, 4, &countArg, __func__);
 		const Sint16 beatitude = (Sint16)beatitudeArg;
 		if ( statusArg < (int)BROKEN ) { statusArg = (int)BROKEN; }
 		if ( statusArg > (int)EXCELLENT ) { statusArg = (int)EXCELLENT; }
@@ -416,8 +481,8 @@ namespace
 	{
 		SAMLogger::noteApiCall();
 		int32_t player = -1, amount = 0;
-		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
-		if ( samHasArg(argc, argv, 1) ) { JS_ToInt32(ctx, &amount, argv[1]); }
+		samJsOptI32(ctx, argc, argv, 0, &player, __func__);
+		samJsOptI32(ctx, argc, argv, 1, &amount, __func__);
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_grant_gold refused: host only."); return JS_NewBool(ctx, 0); }
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !stats[player] )
 		{ SAM_ERROR("JS", "sam_grant_gold: invalid player index " + std::to_string(player) + "."); return JS_NewBool(ctx, 0); }
@@ -441,11 +506,11 @@ namespace
 		SAMLogger::noteApiCall();
 		int32_t player = -1, ticks = 0;
 		std::string name;
-		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		samJsOptI32(ctx, argc, argv, 0, &player, __func__);
 		if ( samHasArg(argc, argv, 1) ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
-		if ( samHasArg(argc, argv, 2) ) { JS_ToInt32(ctx, &ticks, argv[2]); }
+		samJsOptI32(ctx, argc, argv, 2, &ticks, __func__);
 		int32_t strength = 0;
-		if ( samHasArg(argc, argv, 3) ) { JS_ToInt32(ctx, &strength, argv[3]); } // optional tier/magnitude
+		samJsOptI32(ctx, argc, argv, 3, &strength, __func__); // optional tier/magnitude
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_apply_effect refused: host only."); return JS_NewBool(ctx, 0); }
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity )
 		{ SAM_ERROR("JS", "sam_apply_effect: invalid player index " + std::to_string(player) + "."); return JS_NewBool(ctx, 0); }
@@ -470,7 +535,7 @@ namespace
 		SAMLogger::noteApiCall();
 		int32_t player = -1;
 		std::string name;
-		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		samJsOptI32(ctx, argc, argv, 0, &player, __func__);
 		if ( samHasArg(argc, argv, 1) ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_remove_effect refused: host only."); return JS_NewBool(ctx, 0); }
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity )
@@ -486,7 +551,7 @@ namespace
 	JSValue js_sam_clear_effects(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		int32_t player = -1; samJsOptI32(ctx, argc, argv, 0, &player, __func__);
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_clear_effects refused: host only."); return JS_NewInt32(ctx, 0); }
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity || !stats[player] )
 		{ SAM_ERROR("JS", "sam_clear_effects: invalid player index " + std::to_string(player) + "."); return JS_NewInt32(ctx, 0); }
@@ -502,9 +567,9 @@ namespace
 	{
 		SAMLogger::noteApiCall();
 		int32_t player = -1, ticks = 0; std::string name;
-		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		samJsOptI32(ctx, argc, argv, 0, &player, __func__);
 		if ( samHasArg(argc, argv, 1) ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
-		if ( samHasArg(argc, argv, 2) ) { JS_ToInt32(ctx, &ticks, argv[2]); }
+		samJsOptI32(ctx, argc, argv, 2, &ticks, __func__);
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_set_effect_duration refused: host only."); return JS_NewBool(ctx, 0); }
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity || !stats[player] )
 		{ SAM_ERROR("JS", "sam_set_effect_duration: invalid player index " + std::to_string(player) + "."); return JS_NewBool(ctx, 0); }
@@ -519,9 +584,9 @@ namespace
 	{
 		SAMLogger::noteApiCall();
 		int32_t player = -1, strength = 0; std::string name;
-		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		samJsOptI32(ctx, argc, argv, 0, &player, __func__);
 		if ( samHasArg(argc, argv, 1) ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
-		if ( samHasArg(argc, argv, 2) ) { JS_ToInt32(ctx, &strength, argv[2]); }
+		samJsOptI32(ctx, argc, argv, 2, &strength, __func__);
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_set_effect_strength refused: host only."); return JS_NewBool(ctx, 0); }
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity || !stats[player] )
 		{ SAM_ERROR("JS", "sam_set_effect_strength: invalid player index " + std::to_string(player) + "."); return JS_NewBool(ctx, 0); }
@@ -539,7 +604,7 @@ namespace
 		SAMLogger::noteApiCall();
 		int32_t player = -1;
 		std::string name;
-		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		samJsOptI32(ctx, argc, argv, 0, &player, __func__);
 		if ( samHasArg(argc, argv, 1) ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_get_stat refused: host only."); return JS_NewInt32(ctx, 0); }
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !stats[player] )
@@ -570,9 +635,9 @@ namespace
 		SAMLogger::noteApiCall();
 		int32_t player = -1, value = 0;
 		std::string name;
-		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		samJsOptI32(ctx, argc, argv, 0, &player, __func__);
 		if ( samHasArg(argc, argv, 1) ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
-		if ( samHasArg(argc, argv, 2) ) { JS_ToInt32(ctx, &value, argv[2]); }
+		samJsOptI32(ctx, argc, argv, 2, &value, __func__);
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_set_stat refused: host only."); return JS_NewBool(ctx, 0); }
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !stats[player] )
 		{ SAM_ERROR("JS", "sam_set_stat: invalid player index " + std::to_string(player) + "."); return JS_NewBool(ctx, 0); }
@@ -615,8 +680,8 @@ namespace
 		SAMLogger::noteApiCall();
 		int32_t player = -1;
 		double mult = 1.0;
-		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
-		if ( samHasArg(argc, argv, 1) ) { JS_ToFloat64(ctx, &mult, argv[1]); }
+		samJsOptI32(ctx, argc, argv, 0, &player, __func__);
+		samJsOptF64(ctx, argc, argv, 1, &mult, __func__);
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_set_move_speed refused: host only."); return JS_NewBool(ctx, 0); }
 		if ( player < 0 || player >= MAXPLAYERS )
 		{ SAM_ERROR("JS", "sam_set_move_speed: invalid player index " + std::to_string(player) + "."); return JS_NewBool(ctx, 0); }
@@ -630,7 +695,7 @@ namespace
 	{
 		SAMLogger::noteApiCall();
 		int32_t player = -1;
-		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		samJsOptI32(ctx, argc, argv, 0, &player, __func__);
 		return JS_NewFloat64(ctx, SAMLua::getMoveSpeedMult(player));
 	}
 
@@ -641,8 +706,8 @@ namespace
 		SAMLogger::noteApiCall();
 		int32_t player = -1;
 		double delta = 0.0;
-		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
-		if ( samHasArg(argc, argv, 1) ) { JS_ToFloat64(ctx, &delta, argv[1]); }
+		samJsOptI32(ctx, argc, argv, 0, &player, __func__);
+		samJsOptF64(ctx, argc, argv, 1, &delta, __func__);
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_add_move_speed refused: host only."); return JS_NewBool(ctx, 0); }
 		if ( player < 0 || player >= MAXPLAYERS )
 		{ SAM_ERROR("JS", "sam_add_move_speed: invalid player index " + std::to_string(player) + "."); return JS_NewBool(ctx, 0); }
@@ -656,8 +721,8 @@ namespace
 	{
 		SAMLogger::noteApiCall();
 		int32_t player = -1, count = 1;
-		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
-		if ( samHasArg(argc, argv, 1) ) { JS_ToInt32(ctx, &count, argv[1]); }
+		samJsOptI32(ctx, argc, argv, 0, &player, __func__);
+		samJsOptI32(ctx, argc, argv, 1, &count, __func__);
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_level_up refused: host only."); return JS_NewBool(ctx, 0); }
 #ifdef SAM_JS_HAVE_BARONY
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !stats[player] )
@@ -709,7 +774,7 @@ namespace
 	JSValue js_sam_is_ghost(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		int32_t player = -1; samJsOptI32(ctx, argc, argv, 0, &player, __func__);
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] ) { return JS_NewBool(ctx, 0); }
 		return JS_NewBool(ctx, players[player]->ghost.isActive() ? 1 : 0);
 	}
@@ -718,7 +783,7 @@ namespace
 	JSValue js_sam_is_spirit_ghost(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		int32_t player = -1; samJsOptI32(ctx, argc, argv, 0, &player, __func__);
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] ) { return JS_NewBool(ctx, 0); }
 		return JS_NewBool(ctx, players[player]->ghost.isSpiritGhost() ? 1 : 0);
 	}
@@ -756,7 +821,9 @@ namespace
 			std::string fn = entry.path().filename().string();
 			if ( fn.size() <= 5 || fn.substr(fn.size() - 5) != ".json" ) { continue; }
 			fn.erase(fn.size() - 5);
-			JS_SetPropertyUint32(ctx, arr, idx++, JS_NewString(ctx, fn.c_str()));
+			// Decoded, so this returns the key sam_save_data was CALLED with. See the Lua twin.
+			const std::string decoded = SAMLua::decodeDataKey(fn);
+			JS_SetPropertyUint32(ctx, arr, idx++, JS_NewString(ctx, decoded.c_str()));
 		}
 		return arr;
 	}
@@ -766,8 +833,8 @@ namespace
 		SAMLogger::noteApiCall();
 		int32_t x = 0, y = 0;
 		std::string name;
-		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &x, argv[0]); }
-		if ( samHasArg(argc, argv, 1) ) { JS_ToInt32(ctx, &y, argv[1]); }
+		samJsOptI32(ctx, argc, argv, 0, &x, __func__);
+		samJsOptI32(ctx, argc, argv, 1, &y, __func__);
 		if ( samHasArg(argc, argv, 2) ) { const char* s = JS_ToCString(ctx, argv[2]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_spawn_item refused: host only."); return JS_NewBool(ctx, 0); }
 		// Resolve a custom "namespace:item" id first, else a vanilla name (case-insensitive),
@@ -778,13 +845,10 @@ namespace
 		{
 			resolvedType = SAMItems::itemIdForIdString(name);
 		}
-		if ( resolvedType < 0 )
-		{
-			std::string lower = name;
-			for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
-			auto it = ItemTooltips.itemNameStringToItemID.find(lower);
-			if ( it != ItemTooltips.itemNameStringToItemID.end() ) { resolvedType = it->second; }
-		}
+		// One resolver, shared with every other name-taking call: digits, "ns:id", the internal
+		// name, then the DISPLAYED name -- which is what sam_list_items and sam_get_container_items
+		// hand out, and what this used to refuse.
+		if ( resolvedType < 0 ) { resolvedType = SAMCatalog::itemTypeFor(name); }
 		if ( resolvedType < 0 )
 		{
 			SAM_ERROR("JS", "sam_spawn_item: unknown item '" + name
@@ -795,9 +859,9 @@ namespace
 		// why -- restoring saved world state needs the item to come back as it was, and a
 		// script needs a handle to what it placed.
 		int32_t statusArg = (int)EXCELLENT, beatitudeArg = 0, countArg = 1;
-		if ( samHasArg(argc, argv, 3) ) { JS_ToInt32(ctx, &statusArg, argv[3]); }
-		if ( samHasArg(argc, argv, 4) ) { JS_ToInt32(ctx, &beatitudeArg, argv[4]); }
-		if ( samHasArg(argc, argv, 5) ) { JS_ToInt32(ctx, &countArg, argv[5]); }
+		samJsOptI32(ctx, argc, argv, 3, &statusArg, __func__);
+		samJsOptI32(ctx, argc, argv, 4, &beatitudeArg, __func__);
+		samJsOptI32(ctx, argc, argv, 5, &countArg, __func__);
 		const Status st = (Status)samClampInt(statusArg, (int)BROKEN, (int)EXCELLENT);
 		const Sint16 be = (Sint16)samClampInt(beatitudeArg, -100, 100);
 		const Sint16 ct = (Sint16)samClampInt(countArg, 1, 1000);
@@ -824,13 +888,7 @@ namespace
 		{
 			id = SAMItems::itemIdForIdString(name);
 		}
-		else
-		{
-			std::string lower = name;
-			for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
-			auto it = ItemTooltips.itemNameStringToItemID.find(lower);
-			if ( it != ItemTooltips.itemNameStringToItemID.end() ) { id = it->second; }
-		}
+		else { id = SAMCatalog::itemTypeFor(name); }   // shared resolver; accepts a displayed name too
 		if ( id < 0 ) { return JS_NULL; }
 		return JS_NewInt32(ctx, id);
 	}
@@ -840,7 +898,7 @@ namespace
 		SAMLogger::noteApiCall();
 		int32_t player = -1;
 		std::string text;
-		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		samJsOptI32(ctx, argc, argv, 0, &player, __func__);
 		if ( samHasArg(argc, argv, 1) ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { text = s; JS_FreeCString(ctx, s); } }
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_message refused: host only."); return JS_NewBool(ctx, 0); }
 		if ( player < 0 || player >= MAXPLAYERS )
@@ -856,14 +914,16 @@ namespace
 		if ( argc >= 1 && JS_IsString(argv[0]) )
 		{
 			const char* nm = JS_ToCString(ctx, argv[0]);
-			soundId = nm ? SAMSounds::soundIndexForId(nm) : -1;
+			// Through the shared resolver, so a bare "boom" means "one of MINE" here exactly as it
+			// does in Lua. This called SAMSounds directly and so had no bare-id fallback at all.
+			soundId = nm ? SAMLua::resolveSoundAssetIn(nm, g_currentNs) : -1;
 			if ( nm ) { JS_FreeCString(ctx, nm); }
 			if ( soundId < 0 ) { SAM_ERROR("JS", "sam_play_sound: unknown sound name."); return JS_NewBool(ctx, 0); }
 		}
-		else if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &soundId, argv[0]); }
+		else samJsOptI32(ctx, argc, argv, 0, &soundId, __func__);
 		// samHasArg, not a bare undefined test: an explicit null used to overwrite the 128
 		// default with 0 and the sound played inaudibly, where the Lua call played normally.
-		if ( samHasArg(argc, argv, 1) ) { JS_ToInt32(ctx, &vol, argv[1]); }
+		samJsOptI32(ctx, argc, argv, 1, &vol, __func__);
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_play_sound refused: host only."); return JS_NewBool(ctx, 0); }
 		if ( soundId < 0 || (Uint32)soundId >= numsounds )
 		{ SAM_ERROR("JS", "sam_play_sound: sound id " + std::to_string(soundId) + " out of range (0.." + std::to_string(numsounds) + ")."); return JS_NewBool(ctx, 0); }
@@ -883,8 +943,8 @@ namespace
 		SAMLogger::noteApiCall();
 		int32_t player = -1;
 		double radiusTiles = 0.0;
-		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
-		if ( samHasArg(argc, argv, 1) ) { JS_ToFloat64(ctx, &radiusTiles, argv[1]); }
+		samJsOptI32(ctx, argc, argv, 0, &player, __func__);
+		samJsOptF64(ctx, argc, argv, 1, &radiusTiles, __func__);
 		JSValue arr = JS_NewArray(ctx);
 		if ( multiplayer == CLIENT ) { return arr; }
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity || !map.entities ) { return arr; }
@@ -922,7 +982,10 @@ namespace
 		Stat* s = stats[player];
 		if ( slot == "WEAPON" )                          { return s->weapon; }
 		if ( slot == "SHIELD" )                          { return s->shield; }
-		if ( slot == "HELMET" )                          { return s->helmet; }
+		// "HELM" as well: sam_get_item_slot emits HELM, and one S.A.M call's output must be
+		// accepted by the next. The monster twin (samMonsterSlot) already took both, which is
+		// what makes this an oversight rather than a deliberate second vocabulary.
+		if ( slot == "HELMET" || slot == "HELM" )        { return s->helmet; }
 		if ( slot == "ARMOR" || slot == "BREASTPLATE" )  { return s->breastplate; }
 		if ( slot == "GLOVES" )                          { return s->gloves; }
 		if ( slot == "BOOTS" || slot == "SHOES" )        { return s->shoes; }
@@ -936,7 +999,7 @@ namespace
 	JSValue js_sam_get_equipped_item(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		int32_t player = -1; samJsOptI32(ctx, argc, argv, 0, &player, __func__);
 		std::string slot; if ( samHasArg(argc, argv, 1) ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { slot = s; JS_FreeCString(ctx, s); } }
 		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return JS_NULL; }
 		for ( char& c : slot ) { c = (char)std::toupper((unsigned char)c); }
@@ -952,7 +1015,7 @@ namespace
 	JSValue js_sam_get_equipped_item_id(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		int32_t player = -1; samJsOptI32(ctx, argc, argv, 0, &player, __func__);
 		std::string slot; if ( samHasArg(argc, argv, 1) ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { slot = s; JS_FreeCString(ctx, s); } }
 		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return JS_NULL; }
 		for ( char& c : slot ) { c = (char)std::toupper((unsigned char)c); }
@@ -966,7 +1029,7 @@ namespace
 	JSValue js_sam_is_defending(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		int32_t player = -1; samJsOptI32(ctx, argc, argv, 0, &player, __func__);
 		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return JS_NewBool(ctx, 0); }
 		return JS_NewBool(ctx, stats[player]->defending ? 1 : 0);
 	}
@@ -976,7 +1039,7 @@ namespace
 	JSValue js_sam_is_action_held(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		int32_t player = -1; samJsOptI32(ctx, argc, argv, 0, &player, __func__);
 		std::string action; if ( samHasArg(argc, argv, 1) ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { action = s; JS_FreeCString(ctx, s); } }
 		return JS_NewBool(ctx, SAMLua::isActionHeld(player, action) ? 1 : 0);
 	}
@@ -986,7 +1049,7 @@ namespace
 	JSValue js_sam_get_action_binding(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		int32_t player = -1; samJsOptI32(ctx, argc, argv, 0, &player, __func__);
 		std::string action; if ( samHasArg(argc, argv, 1) ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { action = s; JS_FreeCString(ctx, s); } }
 		const char* b = SAMLua::actionBinding(player, action);
 		if ( !b || !b[0] ) { return JS_NULL; }
@@ -996,14 +1059,16 @@ namespace
 	JSValue js_sam_get_inventory_count(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		int32_t player = -1; samJsOptI32(ctx, argc, argv, 0, &player, __func__);
 		std::string name; if ( samHasArg(argc, argv, 1) ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
 		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return JS_NewInt32(ctx, 0); }
-		std::string lower = name; for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
-		int wantType = -1;
-		auto mit = ItemTooltips.itemNameStringToItemID.find(lower);
-		if ( mit != ItemTooltips.itemNameStringToItemID.end() ) { wantType = mit->second; }
-		else { const int cid = SAMItems::itemIdForIdString(name); if ( cid >= 0 ) { wantType = cid; } }
+		// Shared resolver, and an unresolvable name says so rather than answering 0 in silence.
+		const int wantType = SAMCatalog::itemTypeFor(name);
+		if ( wantType < 0 )
+		{
+			SAM_ERROR("JS", "sam_get_inventory_count: unknown item '" + name
+				+ "'. Returning 0, which is NOT the same as owning none -- check the name.");
+		}
 		if ( wantType < 0 ) { return JS_NewInt32(ctx, 0); }
 		long long total = 0;
 		for ( node_t* node = stats[player]->inventory.first; node != nullptr; node = node->next )
@@ -1017,7 +1082,7 @@ namespace
 	JSValue js_sam_has_effect(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		int32_t player = -1; samJsOptI32(ctx, argc, argv, 0, &player, __func__);
 		std::string name; if ( samHasArg(argc, argv, 1) ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
 		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return JS_NewBool(ctx, 0); }
 		const int eff = samEffectNameToId(name.c_str());
@@ -1028,15 +1093,22 @@ namespace
 	JSValue js_sam_get_class(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		int32_t player = -1; samJsOptI32(ctx, argc, argv, 0, &player, __func__);
 		if ( player < 0 || player >= MAXPLAYERS ) { return JS_NULL; }
 		// SAM-aware, mirroring the Lua binding: custom ids resolve from the registry, since
 		// playerClassLangEntry returns a bogus string for them (see the Lua samClassName note).
+		//
+		// def->id, NOT def->name. This said `name` while the Lua twin was changed to `id`, so the
+		// two runtimes returned different strings for the same call and only ONE of them is
+		// accepted by anything: SAMClasses::classIdForIdString matches against the id, so
+		// sam_patch_class(sam_get_class(0), ...) -- the read-then-modify pattern the docs
+		// advertise -- worked in Lua and was refused in JavaScript. The display name resolves
+		// nowhere and cannot be fed back into any function that takes a class.
 		const int cls = client_classes[player];
 		if ( cls >= SAM_CLASS_ID_BASE )
 		{
 			const SAMClassDef* def = SAMClasses::getClass(cls);
-			return JS_NewString(ctx, def ? def->name.c_str() : "");
+			return JS_NewString(ctx, def ? def->id.c_str() : "");
 		}
 		return JS_NewString(ctx, playerClassLangEntry(cls, player));
 	}
@@ -1046,7 +1118,7 @@ namespace
 	JSValue js_sam_get_race(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		int32_t player = -1; samJsOptI32(ctx, argc, argv, 0, &player, __func__);
 		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return JS_NULL; }
 		const int race = stats[player]->playerRace;
 		if ( race >= SAM_RACE_ID_BASE )
@@ -1062,7 +1134,7 @@ namespace
 	JSValue js_sam_get_kills(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		int32_t player = -1; samJsOptI32(ctx, argc, argv, 0, &player, __func__);
 		return JS_NewInt64(ctx, SAMLua::getKills(player)); // shared session counter
 	}
 
@@ -1076,6 +1148,12 @@ namespace
 	// ---- persistent per-mod data (Part 3) --------------------------------------
 	// JSON under <savegames>/sam_mod_data/<namespace>/<key>.json via QuickJS's
 	// built-in JSON. Namespace comes from the currently-executing script (g_currentNs).
+
+	// The key codec lives in the Lua runtime and is exported, so both runtimes map a key to the
+	// SAME file. It used to be duplicated byte-for-byte here, which is how two copies of one
+	// resolver drift apart.
+	static std::string samEncodeKey(const std::string& k) { return SAMLua::encodeDataKey(k); }
+	static std::string samDecodeKey(const std::string& k) { return SAMLua::decodeDataKey(k); }
 
 	std::string samSanitize(const std::string& s)
 	{
@@ -1091,7 +1169,10 @@ namespace
 #else
 		const std::string base = "./sam_mod_data";
 #endif
-		return base + "/" + samSanitize(ns) + "/" + samSanitize(key) + ".json";
+		const std::string dir = base + "/" + samSanitize(ns);
+		// See the Lua twin: rescue anything an older build wrote under the previous filename.
+		SAMLua::migrateLegacyDataFile(dir, key);
+		return dir + "/" + samEncodeKey(key) + ".json";
 	}
 
 	// JSON.stringify for the four "store this value" bindings. A value that cannot be
@@ -1253,7 +1334,7 @@ namespace
 		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
 		const bool on = samHasArg(argc, argv, 1) ? ( JS_ToBool(ctx, argv[1]) > 0 ) : true;
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_set_chest_stash refused: host only."); return JS_FALSE; }
-		Entity* e = uidToEntity((Sint32)uid);
+		Entity* e = SAMLua::resolveEntityQuiet((long long)uid);
 		if ( !e ) { SAM_WARN("JS", "sam_set_chest_stash: no entity with uid " + std::to_string(uid) + "."); return JS_FALSE; }
 		if ( e->behavior != &actChest )
 		{
@@ -1565,13 +1646,17 @@ namespace
 	JSValue js_sam_deal_damage(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		if ( argc < 2 ) { return JS_FALSE; }
-		int64_t uid = 0;    JS_ToInt64(ctx, &uid, argv[0]);
-		int32_t amount = 0; JS_ToInt32(ctx, &amount, argv[1]);
+		// The checked helpers, not raw JS_ToInt32. This batch repaired this function's entity
+		// resolution and left its ARGUMENTS on the coercion the batch exists to remove:
+		// JS_ToInt32 reports SUCCESS for "ten", {}, [] and NaN, every one of which becomes 0, so
+		// sam_deal_damage(boss, somethingUnreadable) logged "0 damage", returned true and left
+		// the boss untouched -- while the Lua twin's luaL_checkinteger raises on all of them.
+		int64_t uid = 0; int32_t amount = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_deal_damage") ) { return JS_FALSE; }
+		if ( !samJsReqI32(ctx, argc, argv, 1, &amount, "sam_deal_damage") ) { return JS_FALSE; }
 #ifdef SAM_JS_HAVE_BARONY
-		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_deal_damage refused: host only."); return JS_FALSE; }
-		Entity* e = uidToEntity((Uint32)uid);
-		if ( !e ) { SAM_WARN("JS", "sam_deal_damage: no entity with uid " + std::to_string(uid) + "."); return JS_FALSE; }
+		Entity* e = SAMLua::resolveWritableEntity((long long)uid, "sam_deal_damage");
+		if ( !e ) { return JS_FALSE; }
 		const int dmg = ( amount < 0 ) ? amount : -amount;
 		e->modHP(dmg);
 		SAM_INFO("SAM", "sam_deal_damage: " + std::to_string(-dmg) + " damage to uid " + std::to_string(uid));
@@ -1620,7 +1705,7 @@ namespace
 	JSValue js_sam_get_player_uid(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		int32_t player = -1; samJsOptI32(ctx, argc, argv, 0, &player, __func__);
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity ) { return JS_NULL; }
 		return JS_NewInt64(ctx, (int64_t)players[player]->entity->getUID());
 	}
@@ -1639,8 +1724,8 @@ namespace
 	JSValue js_sam_get_position_precise(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int64_t uid = 0; if ( samHasArg(argc, argv, 0) ) { JS_ToInt64(ctx, &uid, argv[0]); }
-		Entity* e = uidToEntity((Sint32)uid);
+		int64_t uid = 0; samJsOptI64(ctx, argc, argv, 0, &uid, __func__);
+		Entity* e = SAMLua::resolveEntityQuiet((long long)uid);
 		if ( !e ) { return JS_NULL; }
 		JSValue a = JS_NewArray(ctx);
 		JS_SetPropertyUint32(ctx, a, 0, JS_NewFloat64(ctx, (double)e->x));
@@ -1653,10 +1738,10 @@ namespace
 	{
 		SAMLogger::noteApiCall();
 		int64_t ua = 0, ub = 0;
-		if ( samHasArg(argc, argv, 0) ) { JS_ToInt64(ctx, &ua, argv[0]); }
-		if ( samHasArg(argc, argv, 1) ) { JS_ToInt64(ctx, &ub, argv[1]); }
-		Entity* a = uidToEntity((Sint32)ua);
-		Entity* b = uidToEntity((Sint32)ub);
+		samJsOptI64(ctx, argc, argv, 0, &ua, __func__);
+		samJsOptI64(ctx, argc, argv, 1, &ub, __func__);
+		Entity* a = SAMLua::resolveEntityQuiet((long long)ua);
+		Entity* b = SAMLua::resolveEntityQuiet((long long)ub);
 		if ( !a || !b ) { return JS_NULL; }
 		return JS_NewFloat64(ctx, (double)(entityDist(a, b) / 16.0));
 	}
@@ -1665,10 +1750,10 @@ namespace
 	{
 		SAMLogger::noteApiCall();
 		int64_t uid = 0; int32_t tx = 0, ty = 0;
-		if ( samHasArg(argc, argv, 0) ) { JS_ToInt64(ctx, &uid, argv[0]); }
-		if ( samHasArg(argc, argv, 1) ) { JS_ToInt32(ctx, &tx, argv[1]); }
-		if ( samHasArg(argc, argv, 2) ) { JS_ToInt32(ctx, &ty, argv[2]); }
-		Entity* e = uidToEntity((Sint32)uid);
+		samJsOptI64(ctx, argc, argv, 0, &uid, __func__);
+		samJsOptI32(ctx, argc, argv, 1, &tx, __func__);
+		samJsOptI32(ctx, argc, argv, 2, &ty, __func__);
+		Entity* e = SAMLua::resolveEntityQuiet((long long)uid);
 		if ( !e ) { return JS_NULL; }
 		const double dx = e->x - ((double)tx * 16.0 + 8.0);
 		const double dy = e->y - ((double)ty * 16.0 + 8.0);
@@ -1678,8 +1763,8 @@ namespace
 	JSValue js_sam_get_entity_type(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int64_t uid = 0; if ( samHasArg(argc, argv, 0) ) { JS_ToInt64(ctx, &uid, argv[0]); }
-		Entity* e = uidToEntity((Sint32)uid);
+		int64_t uid = 0; samJsOptI64(ctx, argc, argv, 0, &uid, __func__);
+		Entity* e = SAMLua::resolveEntityQuiet((long long)uid);
 		if ( !e ) { return JS_NULL; }
 		const char* kind = "other";
 		if ( e->behavior == &actPlayer )            { kind = "player"; }
@@ -1695,14 +1780,16 @@ namespace
 		else if ( e->behavior == &actSink )         { kind = "sink"; }
 		else if ( e->behavior == &actBoulder )      { kind = "boulder"; }
 		else if ( e->behavior == &actGib )          { kind = "gib"; }
+		// See the Lua twin: "gold" was accepted by sam_find_entities and produced by nothing.
+		else if ( e->behavior == &actGoldBag )      { kind = "gold"; }
 		return JS_NewString(ctx, kind);
 	}
 
 	JSValue js_sam_get_scale(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int64_t uid = 0; if ( samHasArg(argc, argv, 0) ) { JS_ToInt64(ctx, &uid, argv[0]); }
-		Entity* e = uidToEntity((Sint32)uid);
+		int64_t uid = 0; samJsOptI64(ctx, argc, argv, 0, &uid, __func__);
+		Entity* e = SAMLua::resolveEntityQuiet((long long)uid);
 		if ( !e ) { return JS_NULL; }
 		JSValue a = JS_NewArray(ctx);
 		JS_SetPropertyUint32(ctx, a, 0, JS_NewFloat64(ctx, (double)e->scalex));
@@ -1714,8 +1801,8 @@ namespace
 	JSValue js_sam_is_visible(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int64_t uid = 0; if ( samHasArg(argc, argv, 0) ) { JS_ToInt64(ctx, &uid, argv[0]); }
-		Entity* e = uidToEntity((Sint32)uid);
+		int64_t uid = 0; samJsOptI64(ctx, argc, argv, 0, &uid, __func__);
+		Entity* e = SAMLua::resolveEntityQuiet((long long)uid);
 		if ( !e ) { return JS_NULL; }
 		return JS_NewBool(ctx, e->flags[INVISIBLE] ? 0 : 1);
 	}
@@ -1723,8 +1810,8 @@ namespace
 	JSValue js_sam_get_velocity(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int64_t uid = 0; if ( samHasArg(argc, argv, 0) ) { JS_ToInt64(ctx, &uid, argv[0]); }
-		Entity* e = uidToEntity((Sint32)uid);
+		int64_t uid = 0; samJsOptI64(ctx, argc, argv, 0, &uid, __func__);
+		Entity* e = SAMLua::resolveEntityQuiet((long long)uid);
 		if ( !e ) { return JS_NULL; }
 		JSValue a = JS_NewArray(ctx);
 		JS_SetPropertyUint32(ctx, a, 0, JS_NewFloat64(ctx, (double)e->vel_x));
@@ -1736,8 +1823,8 @@ namespace
 	JSValue js_sam_get_entity_size(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int64_t uid = 0; if ( samHasArg(argc, argv, 0) ) { JS_ToInt64(ctx, &uid, argv[0]); }
-		Entity* e = uidToEntity((Sint32)uid);
+		int64_t uid = 0; samJsOptI64(ctx, argc, argv, 0, &uid, __func__);
+		Entity* e = SAMLua::resolveEntityQuiet((long long)uid);
 		if ( !e ) { return JS_NULL; }
 		JSValue a = JS_NewArray(ctx);
 		JS_SetPropertyUint32(ctx, a, 0, JS_NewInt32(ctx, (int)e->sizex));
@@ -1748,8 +1835,8 @@ namespace
 	JSValue js_sam_get_entity_sprite(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int64_t uid = 0; if ( samHasArg(argc, argv, 0) ) { JS_ToInt64(ctx, &uid, argv[0]); }
-		Entity* e = uidToEntity((Sint32)uid);
+		int64_t uid = 0; samJsOptI64(ctx, argc, argv, 0, &uid, __func__);
+		Entity* e = SAMLua::resolveEntityQuiet((long long)uid);
 		if ( !e ) { return JS_NULL; }
 		return JS_NewInt32(ctx, (int)e->sprite);
 	}
@@ -1757,8 +1844,8 @@ namespace
 	JSValue js_sam_get_entity_ticks(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int64_t uid = 0; if ( samHasArg(argc, argv, 0) ) { JS_ToInt64(ctx, &uid, argv[0]); }
-		Entity* e = uidToEntity((Sint32)uid);
+		int64_t uid = 0; samJsOptI64(ctx, argc, argv, 0, &uid, __func__);
+		Entity* e = SAMLua::resolveEntityQuiet((long long)uid);
 		if ( !e ) { return JS_NULL; }
 		return JS_NewInt64(ctx, (int64_t)e->ticks);
 	}
@@ -1790,8 +1877,8 @@ namespace
 	{
 		SAMLogger::noteApiCall();
 		int32_t x = 0, y = 0;
-		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &x, argv[0]); }
-		if ( samHasArg(argc, argv, 1) ) { JS_ToInt32(ctx, &y, argv[1]); }
+		samJsOptI32(ctx, argc, argv, 0, &x, __func__);
+		samJsOptI32(ctx, argc, argv, 1, &y, __func__);
 		// See the Lua twin: mapTileDiggable validates nothing, because every engine caller
 		// hands it an in-bounds raycast hit. map.tiles is also null before a level loads.
 		if ( !map.tiles || x < 0 || x >= (int)map.width || y < 0 || y >= (int)map.height )
@@ -1921,7 +2008,7 @@ namespace
 		const char* streamC = samHasArg(argc, argv, 0) ? JS_ToCString(ctx, argv[0]) : nullptr;
 		const std::string stream = streamC ? streamC : "";
 		if ( streamC ) { JS_FreeCString(ctx, streamC); }
-		double pct = 0.0; if ( samHasArg(argc, argv, 1) ) { JS_ToFloat64(ctx, &pct, argv[1]); }
+		double pct = 0.0; samJsOptF64(ctx, argc, argv, 1, &pct, __func__);
 		if ( pct <= 0.0 ) { return JS_FALSE; }
 		if ( pct >= 100.0 ) { return JS_TRUE; }
 		const long long v = SAMLua::randomDraw(g_currentNs, stream, 1, 1000000);
@@ -2466,11 +2553,24 @@ namespace
 		if ( c ) { JS_FreeCString(ctx, c); }
 		if ( t < 0 || t >= NUM_ITEM_SLOTS ) { return JS_FALSE; }
 		const ItemType ty = (ItemType)t;
-		if ( u == "QUIVER" )           { return JS_NewBool(ctx, itemTypeIsQuiver(ty) ? 1 : 0); }
-		if ( u == "FOCI" )             { return JS_NewBool(ctx, itemTypeIsFoci(ty) ? 1 : 0); }
-		if ( u == "INSTRUMENT" )       { return JS_NewBool(ctx, itemTypeIsInstrument(ty) ? 1 : 0); }
-		if ( u == "THROWN_BALL" )      { return JS_NewBool(ctx, itemTypeIsThrownBall(ty) ? 1 : 0); }
-		SAM_ERROR("JS", "sam_item_has_trait: unknown trait. Valid: QUIVER, FOCI, INSTRUMENT, THROWN_BALL.");
+		// All ELEVEN traits a mod may declare. See the Lua twin: the bit a custom item declared
+		// (ItemGeneric::samTraits) OR the engine's predicate for a vanilla one. Four of these had
+		// no reader anywhere before.
+		const Uint64 declared = ::items[t].samTraits;
+		if ( u == "RANGED" )           { return JS_NewBool(ctx, (( declared & SAMItemTrait::RANGED ) || isRangedWeapon(ty)) ? 1 : 0); }
+		if ( u == "QUIVER" )           { return JS_NewBool(ctx, (( declared & SAMItemTrait::QUIVER ) || itemTypeIsQuiver(ty)) ? 1 : 0); }
+		if ( u == "FOCI" )             { return JS_NewBool(ctx, (( declared & SAMItemTrait::FOCI ) || itemTypeIsFoci(ty)) ? 1 : 0); }
+		if ( u == "INSTRUMENT" )       { return JS_NewBool(ctx, (( declared & SAMItemTrait::INSTRUMENT ) || itemTypeIsInstrument(ty)) ? 1 : 0); }
+		if ( u == "THROWN_BALL" )      { return JS_NewBool(ctx, (( declared & SAMItemTrait::THROWN_BALL ) || itemTypeIsThrownBall(ty)) ? 1 : 0); }
+		if ( u == "SHIELD_SLOT" )      { return JS_NewBool(ctx, ( declared & SAMItemTrait::SHIELD_SLOT ) ? 1 : 0); }
+		if ( u == "POTION_BAD" )       { return JS_NewBool(ctx, ( declared & SAMItemTrait::POTION_BAD ) ? 1 : 0); }
+		if ( u == "AUTOMATON_FOOD" )   { return JS_NewBool(ctx, ( declared & SAMItemTrait::AUTOMATON_FOOD ) ? 1 : 0); }
+		if ( u == "TINKER_THROWABLE" ) { return JS_NewBool(ctx, ( declared & SAMItemTrait::TINKER_THROWABLE ) ? 1 : 0); }
+		if ( u == "USABLE" )           { return JS_NewBool(ctx, ( declared & SAMItemTrait::USABLE ) ? 1 : 0); }
+		if ( u == "BEATITUDE_AC" )     { return JS_NewBool(ctx, ( declared & SAMItemTrait::BEATITUDE_AC ) ? 1 : 0); }
+		SAM_ERROR("JS", "sam_item_has_trait: unknown trait '" + u + "'. Valid: RANGED, QUIVER, FOCI,"
+			" INSTRUMENT, THROWN_BALL, SHIELD_SLOT, POTION_BAD, AUTOMATON_FOOD, TINKER_THROWABLE,"
+			" USABLE, BEATITUDE_AC.");
 		return JS_FALSE;
 	}
 
@@ -2605,8 +2705,8 @@ namespace
 	JSValue js_sam_get_position(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int64_t uid = 0; if ( samHasArg(argc, argv, 0) ) { JS_ToInt64(ctx, &uid, argv[0]); }
-		Entity* e = uidToEntity((Sint32)uid);
+		int64_t uid = 0; samJsOptI64(ctx, argc, argv, 0, &uid, __func__);
+		Entity* e = SAMLua::resolveEntityQuiet((long long)uid);
 		if ( !e ) { return JS_NULL; }
 		JSValue arr = JS_NewArray(ctx);
 		JS_SetPropertyUint32(ctx, arr, 0, JS_NewInt32(ctx, (int)e->x >> 4));
@@ -2619,19 +2719,50 @@ namespace
 	JSValue js_sam_set_position(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
+		// All three arguments are REQUIRED. They were read with the optional helpers, so
+		// sam_set_position(uid) quietly meant tile (0, 0) -- a real destination, in the corner of
+		// every map.
 		int64_t uid = 0; int32_t tx = 0, ty = 0;
-		if ( samHasArg(argc, argv, 0) ) { JS_ToInt64(ctx, &uid, argv[0]); }
-		if ( samHasArg(argc, argv, 1) ) { JS_ToInt32(ctx, &tx, argv[1]); }
-		if ( samHasArg(argc, argv, 2) ) { JS_ToInt32(ctx, &ty, argv[2]); }
-		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_set_position refused: host only."); return JS_NewBool(ctx, 0); }
-		Entity* e = uidToEntity((Sint32)uid);
-		if ( !e ) { SAM_WARN("JS", "sam_set_position: no entity uid " + std::to_string(uid) + "."); return JS_NewBool(ctx, 0); }
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_set_position") ) { return JS_NewBool(ctx, 0); }
+		if ( !samJsReqI32(ctx, argc, argv, 1, &tx, "sam_set_position") ) { return JS_NewBool(ctx, 0); }
+		if ( !samJsReqI32(ctx, argc, argv, 2, &ty, "sam_set_position") ) { return JS_NewBool(ctx, 0); }
+		Entity* e = SAMLua::resolveWritableEntity((long long)uid, "sam_set_position");
+		if ( !e ) { return JS_NewBool(ctx, 0); }
 		if ( tx < 0 || tx >= (int)map.width || ty < 0 || ty >= (int)map.height )
 		{ SAM_ERROR("JS", "sam_set_position: tile out of bounds."); return JS_NewBool(ctx, 0); }
 		if ( e->behavior == &actPlayer )
 		{
 			const bool ok = e->teleport(tx, ty);
 			return JS_NewBool(ctx, ok ? 1 : 0);
+		}
+		// A GROUND ITEM CANNOT BE MOVED FOR ANYBODY BUT THE HOST, and nothing used to say so.
+		// ENTU's flag block only ever sets a flag TRUE (net.cpp:2024-2037), so the
+		// `flags[NOUPDATE] = false` below is unrepresentable on the wire; meanwhile actItem
+		// re-asserts NOUPDATE on the CLIENT every single tick (actitem.cpp:418), the client
+		// bounces our update back as NOUP, and the host's handler clears UPDATENEEDED, so the
+		// sweep stops trying. ENTF cannot rescue it either: that would race a 50 Hz re-assert
+		// against an 8 Hz sweep over unreliable UDP. So this warns and still moves -- the same
+		// shape as the blocked-tile warning -- because the move IS real on the host.
+		if ( multiplayer == SERVER
+			&& ( e->behavior == &actItem || e->behavior == &actGoldBag
+				|| e->behavior == &actFlame || e->behavior == &actGate ) )
+		{
+			SAM_WARN("JS", "sam_set_position: this kind of entity refuses position updates on a client, so"
+				" other players will keep seeing it at the old tile. The move is real on the host"
+				" only. Remove it and spawn a new one at the destination if everyone must see it.");
+		}
+		// Warns and still places; see the Lua twin for why refusing would break the deliberate case.
+		{
+			const hit_t samSavedHit = hit;
+			const bool blocked = ( checkObstacle((tx << 4) + 8, (ty << 4) + 8, e, nullptr) != 0 );
+			hit = samSavedHit;
+			if ( blocked )
+			{
+				SAM_WARN("JS", "sam_set_position: that tile is blocked for this entity, so it is"
+					" being placed inside something. Fine for a decoration; a monster put there"
+					" cannot get out. sam_can_stand(uid, x, y) answers this before you move"
+					" anything.");
+			}
 		}
 		e->x = (double)(tx * 16 + 8);
 		e->y = (double)(ty * 16 + 8);
@@ -2667,8 +2798,8 @@ namespace
 	{
 		SAMLogger::noteApiCall();
 		int32_t tx = 0, ty = 0; std::string monName;
-		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &tx, argv[0]); }
-		if ( samHasArg(argc, argv, 1) ) { JS_ToInt32(ctx, &ty, argv[1]); }
+		samJsOptI32(ctx, argc, argv, 0, &tx, __func__);
+		samJsOptI32(ctx, argc, argv, 1, &ty, __func__);
 		if ( samHasArg(argc, argv, 2) ) { const char* s = JS_ToCString(ctx, argv[2]); if ( s ) { monName = s; JS_FreeCString(ctx, s); } }
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_spawn_monster refused: host only."); return JS_NULL; }
 		if ( tx < 0 || tx >= (int)map.width || ty < 0 || ty >= (int)map.height )
@@ -2714,8 +2845,8 @@ namespace
 	{
 		SAMLogger::noteApiCall();
 		int32_t tx = 0, ty = 0;
-		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &tx, argv[0]); }
-		if ( samHasArg(argc, argv, 1) ) { JS_ToInt32(ctx, &ty, argv[1]); }
+		samJsOptI32(ctx, argc, argv, 0, &tx, __func__);
+		samJsOptI32(ctx, argc, argv, 1, &ty, __func__);
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_spawn_portal refused: host only."); return JS_NULL; }
 		if ( tx < 0 || tx >= (int)map.width || ty < 0 || ty >= (int)map.height )
 		{ SAM_ERROR("JS", "sam_spawn_portal: tile out of bounds."); return JS_NULL; }
@@ -2737,22 +2868,44 @@ namespace
 
 	// sam_remove_entity(uid) -> bool. Remove a non-player world entity by uid (portal
 	// marker, spawned monster, ground item...). Refuses players. Frees any light. Host only.
+	// sam_can_stand(uid, tileX, tileY) -> boolean. See the Lua twin for why the bounds test
+	// comes first: checkObstacle answers CLEAR for every coordinate outside the map.
+	JSValue js_sam_can_stand(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0; int32_t tx = 0, ty = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_can_stand") ) { return JS_FALSE; }
+		if ( !samJsReqI32(ctx, argc, argv, 1, &tx, "sam_can_stand") ) { return JS_FALSE; }
+		if ( !samJsReqI32(ctx, argc, argv, 2, &ty, "sam_can_stand") ) { return JS_FALSE; }
+#ifdef SAM_JS_HAVE_BARONY
+		Entity* e = SAMLua::resolveReadableEntity((long long)uid, "sam_can_stand");
+		if ( !e ) { return JS_FALSE; }
+		if ( tx < 0 || tx >= (int)map.width || ty < 0 || ty >= (int)map.height ) { return JS_FALSE; }
+		// See the Lua twin: a client does not keep the entity grid this test reads.
+		if ( multiplayer == CLIENT )
+		{
+			SAM_WARN("JS", "sam_can_stand: on a connected client this only sees walls and floor,"
+				" not creatures, because the client does not keep the entity grid the test reads."
+				" Ask the host if the answer has to include who is standing there.");
+		}
+		const hit_t samSavedHit = hit;
+		const bool ok = ( checkObstacle((tx << 4) + 8, (ty << 4) + 8, e, nullptr) == 0 );
+		hit = samSavedHit;   // never leave the engine's global perturbed by our probe
+		return JS_NewBool(ctx, ok ? 1 : 0);
+#else
+		return JS_FALSE;
+#endif
+	}
+
 	JSValue js_sam_remove_entity(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		if ( argc < 1 ) { return JS_FALSE; }
-		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
-		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_remove_entity refused: host only."); return JS_FALSE; }
-		Entity* e = uidToEntity((Sint32)uid);
-		if ( !e ) { return JS_FALSE; }
-		if ( e->behavior == &actPlayer ) { SAM_WARN("JS", "sam_remove_entity refused: cannot remove a player."); return JS_FALSE; }
-		// See the Lua binding: an open chest is also held in openedChest[], which nothing
-		// here clears, so removing the entity left a dangling pointer for the still-open
-		// chest UI. closeChest() is a no-op when the chest is not open.
-		if ( e->behavior == &actChest ) { e->closeChest(); }
-		e->removeLightField();
-		if ( e->mynode ) { list_RemoveNode(e->mynode); }
-		return JS_TRUE;
+		// QUEUED, not freed here -- see the Lua twin. Freeing an Entity mid-event is a
+		// use-after-free: Entity::attack keeps dereferencing hit.entity for ~160 lines after the
+		// modHP call that fired the damage event a mod is handling. Shared queue, one drain.
+		int64_t uid = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_remove_entity") ) { return JS_FALSE; }
+		return JS_NewBool(ctx, SAMLua::queueRemoveEntity((unsigned int)uid, "sam_remove_entity") ? 1 : 0);
 	}
 
 	// sam_spawn_companion(player, model_id [, scale]) -> uid | null. Twin of the Lua binding:
@@ -2762,11 +2915,13 @@ namespace
 	{
 		SAMLogger::noteApiCall();
 		int32_t player = -1;
-		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		samJsOptI32(ctx, argc, argv, 0, &player, __func__);
 		const char* modelC = ( samHasArg(argc, argv, 1) ) ? JS_ToCString(ctx, argv[1]) : nullptr;
 		double scale = 1.0;
-		if ( samHasArg(argc, argv, 2) ) { JS_ToFloat64(ctx, &scale, argv[2]); }
-		const unsigned long long uid = SAMLua::spawnCompanion(player, modelC ? modelC : "", scale);
+		samJsOptF64(ctx, argc, argv, 2, &scale, __func__);
+		// g_currentNs is OURS. The shared spawn functions default to the Lua runtime's namespace,
+		// which is empty during a JS callback and is the wrong mod's when a Lua event fired us.
+		const unsigned long long uid = SAMLua::spawnCompanion(player, modelC ? modelC : "", scale, g_currentNs);
 		if ( modelC ) { JS_FreeCString(ctx, modelC); }
 		if ( uid == 0 ) { return JS_NULL; }
 		return JS_NewInt64(ctx, (int64_t)uid);
@@ -2787,7 +2942,7 @@ namespace
 	{
 		SAMLogger::noteApiCall();
 		int32_t player = -1;
-		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		samJsOptI32(ctx, argc, argv, 0, &player, __func__);
 		const double yaw = SAMLua::getFacing(player);
 		if ( yaw < 0.0 ) { return JS_NULL; }
 		return JS_NewFloat64(ctx, yaw);
@@ -2800,12 +2955,12 @@ namespace
 		SAMLogger::noteApiCall();
 		int32_t player = -1, r = 0, g = 0, b = 0, ms = 180;
 		double inten = 1.0;
-		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
-		if ( samHasArg(argc, argv, 1) ) { JS_ToInt32(ctx, &r, argv[1]); }
-		if ( samHasArg(argc, argv, 2) ) { JS_ToInt32(ctx, &g, argv[2]); }
-		if ( samHasArg(argc, argv, 3) ) { JS_ToInt32(ctx, &b, argv[3]); }
-		if ( samHasArg(argc, argv, 4) ) { JS_ToFloat64(ctx, &inten, argv[4]); }
-		if ( samHasArg(argc, argv, 5) ) { JS_ToInt32(ctx, &ms, argv[5]); }
+		samJsOptI32(ctx, argc, argv, 0, &player, __func__);
+		samJsOptI32(ctx, argc, argv, 1, &r, __func__);
+		samJsOptI32(ctx, argc, argv, 2, &g, __func__);
+		samJsOptI32(ctx, argc, argv, 3, &b, __func__);
+		samJsOptF64(ctx, argc, argv, 4, &inten, __func__);
+		samJsOptI32(ctx, argc, argv, 5, &ms, __func__);
 #ifdef SAM_JS_HAVE_BARONY
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] ) { return JS_FALSE; }
 		SAMLua::triggerScreenFlash(player, r, g, b, inten, ms, 0, 0); // style 0 = plain fill
@@ -2823,13 +2978,13 @@ namespace
 		SAMLogger::noteApiCall();
 		int32_t player = -1, r = 0, g = 0, b = 0, ms = 220, lines = 110;
 		double inten = 1.0;
-		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
-		if ( samHasArg(argc, argv, 1) ) { JS_ToInt32(ctx, &r, argv[1]); }
-		if ( samHasArg(argc, argv, 2) ) { JS_ToInt32(ctx, &g, argv[2]); }
-		if ( samHasArg(argc, argv, 3) ) { JS_ToInt32(ctx, &b, argv[3]); }
-		if ( samHasArg(argc, argv, 4) ) { JS_ToFloat64(ctx, &inten, argv[4]); }
-		if ( samHasArg(argc, argv, 5) ) { JS_ToInt32(ctx, &ms, argv[5]); }
-		if ( samHasArg(argc, argv, 6) ) { JS_ToInt32(ctx, &lines, argv[6]); }
+		samJsOptI32(ctx, argc, argv, 0, &player, __func__);
+		samJsOptI32(ctx, argc, argv, 1, &r, __func__);
+		samJsOptI32(ctx, argc, argv, 2, &g, __func__);
+		samJsOptI32(ctx, argc, argv, 3, &b, __func__);
+		samJsOptF64(ctx, argc, argv, 4, &inten, __func__);
+		samJsOptI32(ctx, argc, argv, 5, &ms, __func__);
+		samJsOptI32(ctx, argc, argv, 6, &lines, __func__);
 #ifdef SAM_JS_HAVE_BARONY
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] ) { return JS_FALSE; }
 		SAMLua::triggerScreenFlash(player, r, g, b, inten, ms, 1, lines); // style 1 = manga burst
@@ -2846,8 +3001,8 @@ namespace
 		SAMLogger::noteApiCall();
 		int32_t player = -1;
 		double mag = 0.0;
-		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
-		if ( samHasArg(argc, argv, 1) ) { JS_ToFloat64(ctx, &mag, argv[1]); }
+		samJsOptI32(ctx, argc, argv, 0, &player, __func__);
+		samJsOptF64(ctx, argc, argv, 1, &mag, __func__);
 #ifdef SAM_JS_HAVE_BARONY
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] ) { return JS_FALSE; }
 		SAMLua::triggerCameraShake(player, mag);
@@ -2863,7 +3018,7 @@ namespace
 	{
 		SAMLogger::noteApiCall();
 		int32_t ms = 0;
-		if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &ms, argv[0]); }
+		samJsOptI32(ctx, argc, argv, 0, &ms, __func__);
 #ifdef SAM_JS_HAVE_BARONY
 		if ( multiplayer != SINGLE ) { return JS_FALSE; }
 		SAMLua::triggerHitstop(ms);
@@ -2879,7 +3034,7 @@ namespace
 	JSValue js_sam_get_inventory(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		int32_t player = -1; samJsOptI32(ctx, argc, argv, 0, &player, __func__);
 		JSValue arr = JS_NewArray(ctx);
 		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return arr; }
 		uint32_t idx = 0;
@@ -2891,7 +3046,14 @@ namespace
 			JS_SetPropertyStr(ctx, o, "uid", JS_NewInt64(ctx, (int64_t)it->uid));
 			JS_SetPropertyStr(ctx, o, "type", JS_NewInt32(ctx, (int32_t)it->type));
 			if ( (int)it->type >= 0 && (int)it->type < NUMITEMS ) { JS_SetPropertyStr(ctx, o, "name", JS_NewString(ctx, itemNameStrings[(int)it->type + 2])); }
-			else { JS_SetPropertyStr(ctx, o, "name", JS_NewString(ctx, "custom")); }
+			else
+			{
+				// The mod item's own "ns:item" id, not the literal word "custom". See the Lua twin:
+				// that string was identical for every modded item, so two of them could not be
+				// told apart, and the id every consumer accepts was already in the registry.
+				const SAMItemDef* samDef = SAMItems::getItem((int)it->type);
+				JS_SetPropertyStr(ctx, o, "name", JS_NewString(ctx, samDef ? samDef->id.c_str() : "custom"));
+			}
 			JS_SetPropertyStr(ctx, o, "count", JS_NewInt32(ctx, (int32_t)it->count));
 			JS_SetPropertyStr(ctx, o, "beatitude", JS_NewInt32(ctx, (int32_t)it->beatitude));
 			JS_SetPropertyStr(ctx, o, "status", JS_NewInt32(ctx, (int32_t)it->status));
@@ -2906,7 +3068,7 @@ namespace
 	JSValue js_sam_remove_item(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int64_t uid = 0; if ( samHasArg(argc, argv, 0) ) { JS_ToInt64(ctx, &uid, argv[0]); }
+		int64_t uid = 0; samJsOptI64(ctx, argc, argv, 0, &uid, __func__);
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_remove_item refused: host only."); return JS_NewBool(ctx, 0); }
 		Item* it = uidToItem((Uint32)uid);
 		if ( !it ) { SAM_WARN("JS", "sam_remove_item: no item uid " + std::to_string(uid) + "."); return JS_NewBool(ctx, 0); }
@@ -3069,7 +3231,7 @@ namespace
 		if ( argc < 1 ) { return JS_FALSE; }
 		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
 		int32_t ticks = 50;
-		if ( samHasArg(argc, argv, 1) ) { JS_ToInt32(ctx, &ticks, argv[1]); }
+		samJsOptI32(ctx, argc, argv, 1, &ticks, __func__);
 #ifdef SAM_JS_HAVE_BARONY
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_monster_charge refused: host only."); return JS_FALSE; }
 		Entity* e = samResolveMonster(uid);
@@ -3207,8 +3369,8 @@ namespace
 		int32_t player = 0, ms = 0, alpha = 255;
 		JS_ToInt32(ctx, &player, argv[0]);
 		const char* img = JS_ToCString(ctx, argv[1]);
-		if ( samHasArg(argc, argv, 2) ) { JS_ToInt32(ctx, &ms, argv[2]); }
-		if ( samHasArg(argc, argv, 3) ) { JS_ToInt32(ctx, &alpha, argv[3]); }
+		samJsOptI32(ctx, argc, argv, 2, &ms, __func__);
+		samJsOptI32(ctx, argc, argv, 3, &alpha, __func__);
 		const int fit = samImageFitJS(ctx, argc, argv, 4);
 		const bool ok = SAMImages::show(player, g_currentNs, img ? img : "",
 			ms, alpha, fit, 0, 0, 0, 0);
@@ -3226,8 +3388,8 @@ namespace
 		const char* img = JS_ToCString(ctx, argv[1]);
 		JS_ToInt32(ctx, &x, argv[2]); JS_ToInt32(ctx, &y, argv[3]);
 		JS_ToInt32(ctx, &w, argv[4]); JS_ToInt32(ctx, &h, argv[5]);
-		if ( samHasArg(argc, argv, 6) ) { JS_ToInt32(ctx, &ms, argv[6]); }
-		if ( samHasArg(argc, argv, 7) ) { JS_ToInt32(ctx, &alpha, argv[7]); }
+		samJsOptI32(ctx, argc, argv, 6, &ms, __func__);
+		samJsOptI32(ctx, argc, argv, 7, &alpha, __func__);
 		const bool ok = SAMImages::show(player, g_currentNs, img ? img : "",
 			ms, alpha, SAMImages::FIT_RECT, x, y, w, h);
 		if ( img ) { JS_FreeCString(ctx, img); }
@@ -3459,7 +3621,7 @@ namespace
 		const char* panel = JS_ToCString(ctx, argv[0]);
 		const Uint32 bg = samHudColorJS(ctx, argc, argv, 1, 0);
 		const Uint32 border = samHudColorJS(ctx, argc, argv, 2, 0);
-		int32_t bw = -1; if ( samHasArg(argc, argv, 3) ) { JS_ToInt32(ctx, &bw, argv[3]); }
+		int32_t bw = -1; samJsOptI32(ctx, argc, argv, 3, &bw, __func__);
 		const bool ok = SAMUi::panelStyle(g_currentNs, panel ? panel : "", bg, border, bw);
 		if ( panel ) { JS_FreeCString(ctx, panel); }
 		return ok ? JS_TRUE : JS_FALSE;
@@ -3615,12 +3777,12 @@ namespace
 		JS_ToFloat64(ctx, &x, argv[0]); JS_ToFloat64(ctx, &y, argv[1]);
 		JS_ToFloat64(ctx, &angle, argv[2]); JS_ToFloat64(ctx, &speed, argv[3]);
 		int32_t dmg = 0, life = 100, owner = -1;
-		if ( samHasArg(argc, argv, 4) ) { JS_ToInt32(ctx, &dmg, argv[4]); }
-		if ( samHasArg(argc, argv, 5) ) { JS_ToInt32(ctx, &life, argv[5]); }
+		samJsOptI32(ctx, argc, argv, 4, &dmg, __func__);
+		samJsOptI32(ctx, argc, argv, 5, &life, __func__);
 		const char* model = samHasArg(argc, argv, 6) ? JS_ToCString(ctx, argv[6]) : nullptr;
-		if ( samHasArg(argc, argv, 7) ) { JS_ToInt32(ctx, &owner, argv[7]); }
+		samJsOptI32(ctx, argc, argv, 7, &owner, __func__);
 		const unsigned long long uid = SAMLua::spawnProjectile(owner, x, y, angle, speed,
-			dmg, life, model ? model : "");
+			dmg, life, model ? model : "", g_currentNs);   // our namespace, not the Lua runtime's
 		if ( model ) { JS_FreeCString(ctx, model); }
 		if ( uid == 0 ) { return JS_NULL; }
 		return JS_NewInt64(ctx, (int64_t)uid);
@@ -3740,7 +3902,7 @@ namespace
 		if ( argc < 2 ) { return JS_NewInt32(ctx, 0); }
 		int32_t x = 0, y = 0; JS_ToInt32(ctx, &x, argv[0]); JS_ToInt32(ctx, &y, argv[1]);
 		// -1 default, matching Lua: the shared lightmap the monster AI reads.
-		int32_t pl = -1; if ( samHasArg(argc, argv, 2) ) { JS_ToInt32(ctx, &pl, argv[2]); }
+		int32_t pl = -1; samJsOptI32(ctx, argc, argv, 2, &pl, __func__);
 		return JS_NewInt32(ctx, SAMWorld::lightAt(x, y, pl));
 	}
 
@@ -3842,7 +4004,7 @@ namespace
 		const std::string n = samUpper(nameC ? nameC : "");
 		if ( nameC ) { JS_FreeCString(ctx, nameC); }
 #ifdef SAM_JS_HAVE_BARONY
-		Entity* e = uidToEntity((Sint32)uid);
+		Entity* e = SAMLua::resolveEntityQuiet((long long)uid);
 		if ( !e || !e->getStats() ) { return JS_NULL; }
 		Stat* st = e->getStats();
 		long long v = 0;
@@ -3865,7 +4027,7 @@ namespace
 		if ( argc < 1 ) { return JS_NULL; }
 		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
 #ifdef SAM_JS_HAVE_BARONY
-		Entity* e = uidToEntity((Sint32)uid);
+		Entity* e = SAMLua::resolveEntityQuiet((long long)uid);
 		if ( !e || !e->getStats() ) { return JS_NULL; }
 		return JS_NewInt32(ctx, AC(e->getStats()));
 #else
@@ -3884,7 +4046,7 @@ namespace
 		const bool eff = ( samHasArg(argc, argv, 2) ) ? (JS_ToBool(ctx, argv[2]) > 0) : true;
 #ifdef SAM_JS_HAVE_BARONY
 		if ( skill < 0 ) { SAM_WARN("JS", "sam_get_skill: unknown skill."); return JS_NULL; }
-		Entity* e = uidToEntity((Sint32)uid);
+		Entity* e = SAMLua::resolveEntityQuiet((long long)uid);
 		if ( !e || !e->getStats() ) { return JS_NULL; }
 		Stat* st = e->getStats();
 		return JS_NewInt32(ctx, eff ? st->getModifiedProficiency(skill) : st->getProficiency(skill));
@@ -3899,8 +4061,8 @@ namespace
 		if ( argc < 2 ) { return JS_FALSE; }
 		int64_t a = 0, b = 0; JS_ToInt64(ctx, &a, argv[0]); JS_ToInt64(ctx, &b, argv[1]);
 #ifdef SAM_JS_HAVE_BARONY
-		Entity* ea = uidToEntity((Sint32)a);
-		Entity* eb = uidToEntity((Sint32)b);
+		Entity* ea = SAMLua::resolveEntityQuiet((long long)a);
+		Entity* eb = SAMLua::resolveEntityQuiet((long long)b);
 		if ( !ea || !eb ) { return JS_FALSE; }
 		return (wantEnemy ? ea->checkEnemy(eb) : ea->checkFriend(eb)) ? JS_TRUE : JS_FALSE;
 #else
@@ -3952,7 +4114,7 @@ namespace
 		if ( JS_IsString(v) )
 		{
 			const char* nm = JS_ToCString(ctx, v);
-			const int id = SAMSounds::soundIndexForId(nm ? nm : "");
+			const int id = SAMLua::resolveSoundAssetIn(nm ? nm : "", g_currentNs);   // bare id = one of mine
 			if ( nm ) { JS_FreeCString(ctx, nm); }
 			return id;
 		}
@@ -3967,7 +4129,7 @@ namespace
 		if ( argc < 3 ) { return JS_FALSE; }
 		const int snd = samResolveSoundIdJS(ctx, argv[0]);
 		double tx = 0, ty = 0; JS_ToFloat64(ctx, &tx, argv[1]); JS_ToFloat64(ctx, &ty, argv[2]);
-		int32_t vol = 128; if ( samHasArg(argc, argv, 3) ) { JS_ToInt32(ctx, &vol, argv[3]); }
+		int32_t vol = 128; samJsOptI32(ctx, argc, argv, 3, &vol, __func__);
 #ifdef SAM_JS_HAVE_BARONY
 		if ( snd < 0 || snd >= (int)numsounds ) { return JS_FALSE; }
 		if ( vol < 0 ) { vol = 0; } if ( vol > 255 ) { vol = 255; }
@@ -3984,10 +4146,10 @@ namespace
 		if ( argc < 2 ) { return JS_FALSE; }
 		const int snd = samResolveSoundIdJS(ctx, argv[0]);
 		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[1]);
-		int32_t vol = 128; if ( samHasArg(argc, argv, 2) ) { JS_ToInt32(ctx, &vol, argv[2]); }
+		int32_t vol = 128; samJsOptI32(ctx, argc, argv, 2, &vol, __func__);
 #ifdef SAM_JS_HAVE_BARONY
 		if ( snd < 0 || snd >= (int)numsounds ) { return JS_FALSE; }
-		Entity* e = uidToEntity((Sint32)uid);
+		Entity* e = SAMLua::resolveEntityQuiet((long long)uid);
 		if ( !e ) { return JS_FALSE; }
 		if ( vol < 0 ) { vol = 0; } if ( vol > 255 ) { vol = 255; }
 		playSoundEntity(e, (Uint16)snd, (Uint8)vol);
@@ -4006,8 +4168,8 @@ namespace
 		if ( kindC ) { JS_FreeCString(ctx, kindC); }
 		double tx = 0, ty = 0, z = 0, scale = 1.0;
 		JS_ToFloat64(ctx, &tx, argv[1]); JS_ToFloat64(ctx, &ty, argv[2]);
-		if ( samHasArg(argc, argv, 3) ) { JS_ToFloat64(ctx, &z, argv[3]); }
-		if ( samHasArg(argc, argv, 4) ) { JS_ToFloat64(ctx, &scale, argv[4]); }
+		samJsOptF64(ctx, argc, argv, 3, &z, __func__);
+		samJsOptF64(ctx, argc, argv, 4, &scale, __func__);
 #ifdef SAM_JS_HAVE_BARONY
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_spawn_particle refused: host only."); return JS_FALSE; }
 		const Sint16 px = (Sint16)(tx * 16.0 + 8.0), py = (Sint16)(ty * 16.0 + 8.0), pz = (Sint16)z;
@@ -4029,10 +4191,10 @@ namespace
 		if ( argc < 2 ) { return JS_FALSE; }
 		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
 		int32_t amount = 0; JS_ToInt32(ctx, &amount, argv[1]);
-		int32_t gibType = 0; if ( samHasArg(argc, argv, 2) ) { JS_ToInt32(ctx, &gibType, argv[2]); }
+		int32_t gibType = 0; samJsOptI32(ctx, argc, argv, 2, &gibType, __func__);
 #ifdef SAM_JS_HAVE_BARONY
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_damage_number refused: host only."); return JS_FALSE; }
-		Entity* e = uidToEntity((Sint32)uid);
+		Entity* e = SAMLua::resolveEntityQuiet((long long)uid);
 		if ( !e ) { return JS_FALSE; }
 		spawnDamageGib(e, amount, gibType, 0, true);
 		return JS_TRUE;
@@ -4138,13 +4300,7 @@ namespace
 			std::string name = s ? s : "";
 			if ( s ) { JS_FreeCString(ctx, s); }
 			if ( name.find(':') != std::string::npos ) { type = SAMItems::itemIdForIdString(name); }
-			if ( type < 0 )
-			{
-				std::string lower = name;
-				for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
-				auto it = ItemTooltips.itemNameStringToItemID.find(lower);
-				if ( it != ItemTooltips.itemNameStringToItemID.end() ) { type = it->second; }
-			}
+			if ( type < 0 ) { type = SAMCatalog::itemTypeFor(name); }   // shared resolver
 		}
 		if ( type < 0 || type >= NUM_ITEM_SLOTS ) { return JS_UNDEFINED; }
 		const std::string cat = SAMItems::categoryName((int)items[type].category);
@@ -4236,42 +4392,414 @@ namespace
 	JSValue js_sam_set_scale(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		if ( argc < 2 ) { return JS_FALSE; }
-		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
-		double sc = 1.0;
-		if ( JS_ToFloat64(ctx, &sc, argv[1]) < 0 || !std::isfinite(sc) )
+		int64_t uid = 0; double sc = 1.0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_set_scale") ) { return JS_FALSE; }
+		if ( !samJsReqF64(ctx, argc, argv, 1, &sc, "sam_set_scale") ) { return JS_FALSE; }
+		if ( !std::isfinite(sc) )
 		{
 			SAM_ERROR("JS", "sam_set_scale: scale must be a finite number.");
 			return JS_FALSE;
 		}
 #ifdef SAM_JS_HAVE_BARONY
-		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_set_scale refused: host only."); return JS_FALSE; }
-		Entity* e = uidToEntity((Uint32)uid);
+		// The SHARED resolver, not uidToEntity: this twin still accepted a sentinel uid and a
+		// limb long after the Lua side stopped, because the ship gate compares names, not bodies.
+		Entity* e = SAMLua::resolveWritableEntity((long long)uid, "sam_set_scale");
 		if ( !e ) { return JS_FALSE; }
-		if ( sc <= 0.0 ) { sc = 1.0; }
-		if ( sc > 1.99 && multiplayer != SINGLE )
+		// See the Lua twin: 0 used to become FULL SIZE silently, and the wire cannot carry
+		// anything under 1/128.
+		if ( !(sc > 0.0) )
+		{
+			SAM_ERROR("JS", "sam_set_scale: scale must be greater than 0 (was "
+				+ std::to_string(sc) + "). To make something disappear use sam_set_visible.");
+			return JS_FALSE;
+		}
+		if ( sc < 1.0 / 128.0 )
+		{
+			SAM_WARN("JS", "sam_set_scale: " + std::to_string(sc) + " is below the 1/128 the"
+				" network can carry, so other players would see it disappear. Clamped.");
+			sc = 1.0 / 128.0;
+		}
+		// Clamped ALWAYS, matching the Lua twin: the wire carries scale as (Uint8)(scale * 128),
+		// so a mod authored in singleplayer at 3.0 was silently wrong for everybody else.
+		if ( sc > 1.99 )
 		{
 			SAM_WARN("JS", "sam_set_scale: past the 1.99 the network can carry; clamped.");
 			sc = 1.99;
 		}
 		e->scalex = sc; e->scaley = sc; e->scalez = sc;
+		e->flags[UPDATENEEDED] = true;   // without this the 8 Hz sweep never tells a client
 		return JS_TRUE;
 #else
 		(void)uid; return JS_FALSE;
 #endif
 	}
 
+	// sam_set_damage_immune(uid, on) -> boolean. See the Lua twin; the two runtimes share one set,
+	// so a mod written half in each language sees one answer.
+	JSValue js_sam_set_damage_immune(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0; bool on = false;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_set_damage_immune") ) { return JS_FALSE; }
+		if ( !samBoolReqJs(ctx, argc, argv, 1, "sam_set_damage_immune", &on) ) { return JS_FALSE; }
+#ifdef SAM_JS_HAVE_BARONY
+		Entity* e = SAMLua::resolveWritableEntity((long long)uid, "sam_set_damage_immune");
+		if ( !e ) { return JS_FALSE; }
+		// See the Lua twin: only a player or a monster takes damage through Entity::modHP.
+		if ( !(e->behavior == &actPlayer || e->behavior == &actMonster) )
+		{
+			SAM_WARN("JS", "sam_set_damage_immune refused: uid " + std::to_string(uid) + " is not"
+				" a player or a monster. Only those take damage through the one place this"
+				" immunity lives. Chests, doors, furniture and breakable props carry their own"
+				" health that nothing here can reach.");
+			return JS_FALSE;
+		}
+		SAMLua::setDamageImmune((unsigned int)uid, on);
+		return JS_TRUE;
+#else
+		(void)uid; (void)on; return JS_FALSE;
+#endif
+	}
+
+	// sam_is_damage_immune(uid) -> boolean.
+	JSValue js_sam_is_damage_immune(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_is_damage_immune") ) { return JS_FALSE; }
+#ifdef SAM_JS_HAVE_BARONY
+		return JS_NewBool(ctx, ( uid > 0 && SAMLua::isDamageImmune((unsigned int)uid) ) ? 1 : 0);
+#else
+		(void)uid; return JS_FALSE;
+#endif
+	}
+
+	// sam_move_entity(uid, dxTiles, dyTiles) -> tiles actually moved | null. See the Lua twin:
+	// clipMove slides along walls and reports the distance it managed, which is the answer a
+	// script pushing something needs.
+	JSValue js_sam_move_entity(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0; double dx = 0.0, dy = 0.0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_move_entity") ) { return JS_NULL; }
+		if ( !samJsReqF64(ctx, argc, argv, 1, &dx, "sam_move_entity") ) { return JS_NULL; }
+		if ( !samJsReqF64(ctx, argc, argv, 2, &dy, "sam_move_entity") ) { return JS_NULL; }
+#ifdef SAM_JS_HAVE_BARONY
+		Entity* e = SAMLua::resolveWritableEntity((long long)uid, "sam_move_entity");
+		if ( !e ) { return JS_NULL; }
+		if ( !std::isfinite(dx) || !std::isfinite(dy) )
+		{
+			SAM_ERROR("JS", "sam_move_entity: the distance must be two finite numbers.");
+			return JS_NULL;
+		}
+		if ( e->behavior == &actPlayer )
+		{
+			const int pn = e->skill[2];
+			if ( multiplayer == SERVER && pn >= 0 && pn < MAXPLAYERS
+				&& players[pn] && !players[pn]->isLocalPlayer() )
+			{
+				SAM_WARN("JS", "sam_move_entity: that player is on another machine, which owns its"
+					" own position and will report it back over this within a frame or two. Use"
+					" sam_set_position, which teleports properly, or sam_apply_force to shove them.");
+			}
+		}
+		// A GROUND ITEM CANNOT BE MOVED FOR ANYBODY BUT THE HOST, and nothing used to say so.
+		// ENTU's flag block only ever sets a flag TRUE (net.cpp:2024-2037), so the
+		// `flags[NOUPDATE] = false` below is unrepresentable on the wire; meanwhile actItem
+		// re-asserts NOUPDATE on the CLIENT every single tick (actitem.cpp:418), the client
+		// bounces our update back as NOUP, and the host's handler clears UPDATENEEDED, so the
+		// sweep stops trying. ENTF cannot rescue it either: that would race a 50 Hz re-assert
+		// against an 8 Hz sweep over unreliable UDP. So this warns and still moves -- the same
+		// shape as the blocked-tile warning -- because the move IS real on the host.
+		if ( multiplayer == SERVER
+			&& ( e->behavior == &actItem || e->behavior == &actGoldBag
+				|| e->behavior == &actFlame || e->behavior == &actGate ) )
+		{
+			SAM_WARN("JS", "sam_move_entity: this kind of entity refuses position updates on a client, so"
+				" other players will keep seeing it at the old tile. The move is real on the host"
+				" only. Remove it and spawn a new one at the destination if everyone must see it.");
+		}
+		// SUB-STEPPED; see the Lua twin. clipMove tests only the destination point, so one big
+		// step walks straight over a wall and reports the full distance as moved.
+		real_t samVx = (real_t)(dx * 16.0), samVy = (real_t)(dy * 16.0);
+		if ( std::fabs(samVx) > 16.0 * 1024.0 || std::fabs(samVy) > 16.0 * 1024.0 )
+		{
+			SAM_ERROR("JS", "sam_move_entity: that distance is past the end of any map. Use"
+				" sam_set_position to place something somewhere far away.");
+			return JS_NULL;
+		}
+		const int samSteps = std::max(1, (int)std::ceil(std::sqrt(samVx * samVx + samVy * samVy) / 7.0));
+		samVx /= (real_t)samSteps;
+		samVy /= (real_t)samSteps;
+		const hit_t samSavedHit = hit;   // clipMove's first statement is `hit.entity = NULL;`
+		real_t moved = 0.0;
+		for ( int samI = 0; samI < samSteps; ++samI )
+		{
+			const real_t samGot = clipMove(&e->x, &e->y, samVx, samVy, e);
+			moved += samGot;
+			if ( samGot <= 0.0 ) { break; }
+		}
+		hit = samSavedHit;
+		e->flags[UPDATENEEDED] = true;
+		e->flags[NOUPDATE] = false;
+		TileEntityList.updateEntity(*e);
+		return JS_NewFloat64(ctx, (double)(moved / 16.0));
+#else
+		(void)uid; (void)dx; (void)dy; return JS_NULL;
+#endif
+	}
+
+	// sam_apply_force(uid, force, angle [, ticks]) -> boolean. Calls the SAME shared body as Lua,
+	// because which field a shove goes into differs between a player and a monster and that is
+	// not knowledge worth having two copies of.
+	JSValue js_sam_apply_force(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0; double force = 0.0, angle = 0.0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_apply_force") ) { return JS_FALSE; }
+		if ( !samJsReqF64(ctx, argc, argv, 1, &force, "sam_apply_force") ) { return JS_FALSE; }
+		if ( !samJsReqF64(ctx, argc, argv, 2, &angle, "sam_apply_force") ) { return JS_FALSE; }
+		int32_t ticks = 30;
+		samJsOptI32(ctx, argc, argv, 3, &ticks, "sam_apply_force");
+#ifdef SAM_JS_HAVE_BARONY
+		Entity* e = SAMLua::resolveWritableEntity((long long)uid, "sam_apply_force");
+		if ( !e ) { return JS_FALSE; }
+		if ( !std::isfinite(force) || !std::isfinite(angle) )
+		{
+			SAM_ERROR("JS", "sam_apply_force: force and angle must be finite numbers.");
+			return JS_FALSE;
+		}
+		if ( force > 7.0 || force < -7.0 )
+		{
+			SAM_WARN("JS", "sam_apply_force: force is clamped to 7, past which a single step can"
+				" jump clean over a wall instead of hitting it.");
+			force = ( force > 0.0 ) ? 7.0 : -7.0;
+		}
+		if ( ticks < 1 ) { ticks = 1; }
+		if ( ticks > 3600 ) { ticks = 3600; }
+		// See the Lua twin: ENFS packs the angle as (Sint16)(value * 256), so degrees passed by
+		// mistake wrap and shove a remote player the wrong way.
+		angle = std::fmod(angle, 2.0 * PI);
+		if ( angle < 0.0 ) { angle += 2.0 * PI; }
+		return JS_NewBool(ctx, SAMLua::applyForceTo(e, force, angle, (int)ticks) ? 1 : 0);
+#else
+		(void)uid; (void)force; (void)angle; return JS_FALSE;
+#endif
+	}
+
+	// sam_set_on_fire(uid [, on]) -> boolean. Answers "is it on fire now", which is deliberately
+	// NOT what Entity::SetEntityOnFire returns; see the Lua twin for the three meanings hiding in
+	// its false, and for why putting fires out belongs in the same function.
+	JSValue js_sam_set_on_fire(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_set_on_fire") ) { return JS_FALSE; }
+		const bool on = samBoolArgJs(ctx, argc, argv, 1, true);
+#ifdef SAM_JS_HAVE_BARONY
+		Entity* e = SAMLua::resolveWritableEntity((long long)uid, "sam_set_on_fire");
+		if ( !e ) { return JS_FALSE; }
+
+		if ( !on )
+		{
+			if ( e->flags[BURNING] )
+			{
+				e->flags[BURNING] = false;
+				e->char_fire = 0;
+				if ( multiplayer == SERVER ) { serverUpdateEntityFlag(e, BURNING); }
+				if ( e->behavior == &actPlayer )
+				{
+					messagePlayer(e->skill[2], MESSAGE_STATUS, "%s", Language::get(647));
+				}
+			}
+			return JS_FALSE;   // asked for not-burning, and it is not burning
+		}
+
+		if ( e->flags[BURNING] ) { return JS_TRUE; }
+		if ( !e->flags[BURNABLE] )
+		{
+			// See the Lua twin: a monster spawned this frame has not run its species init yet.
+			if ( e->behavior == &actMonster && e->skill[3] == 0 )
+			{
+				SAM_WARN("JS", "sam_set_on_fire: this monster was spawned this frame and has not run"
+					" its own setup yet, so it is not burnable YET. Wait a frame (sam_set_timer with"
+					" a short delay) and it will light normally.");
+			}
+			else
+			{
+				SAM_WARN("JS", "sam_set_on_fire: this entity is not BURNABLE, so the engine will"
+					" never light it. sam_set_entity_flag(uid, \"BURNABLE\", true) first if that is"
+					" what you want.");
+			}
+			return JS_FALSE;
+		}
+		const bool lit = e->SetEntityOnFire(nullptr);
+		if ( !lit )
+		{
+			SAM_WARN("JS", "sam_set_on_fire: this creature resists fire. Skeletons and automatons"
+				" never burn, and neither does anyone wearing a machinist apron or an amulet of"
+				" burning resistance.");
+		}
+		else if ( !e->getStats() )
+		{
+			SAM_WARN("JS", "sam_set_on_fire: this entity has no stats, and the burn timer only runs"
+				" for players and monsters, so it will burn for ever and hurt nothing. That is fine"
+				" for a brazier. Call sam_set_on_fire(uid, false) to put it out.");
+		}
+		return JS_NewBool(ctx, lit ? 1 : 0);
+#else
+		(void)uid; (void)on; return JS_FALSE;
+#endif
+	}
+
+	// sam_get_entity_flag(uid, "FLAG") -> boolean | null. null, not false, for an unknown name:
+	// false is a real answer, so returning it for a typo hides the mistake. See the Lua twin.
+	JSValue js_sam_get_entity_flag(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_get_entity_flag") ) { return JS_NULL; }
+		if ( !samHasArg(argc, argv, 1) )
+		{
+			SAM_ERROR("JS", "sam_get_entity_flag: argument 2 (the flag name) is required.");
+			return JS_NULL;
+		}
+		const char* flagName = JS_ToCString(ctx, argv[1]);
+		if ( !flagName ) { return JS_NULL; }
+#ifdef SAM_JS_HAVE_BARONY
+		const int idx = SAMLua::resolveEntityFlag(flagName, false, "sam_get_entity_flag");
+		JS_FreeCString(ctx, flagName);
+		if ( idx < 0 ) { return JS_NULL; }
+		Entity* e = SAMLua::resolveReadableEntity((long long)uid, "sam_get_entity_flag");
+		if ( !e ) { return JS_NULL; }
+		return JS_NewBool(ctx, e->flags[idx] ? 1 : 0);
+#else
+		JS_FreeCString(ctx, flagName);
+		(void)uid; return JS_NULL;
+#endif
+	}
+
+	// sam_set_entity_flag(uid, "FLAG", on) -> boolean. Same names, same refusals, same reasons as
+	// the Lua twin, because both call one shared table.
+	JSValue js_sam_set_entity_flag(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0; bool on = false;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_set_entity_flag") ) { return JS_FALSE; }
+		if ( !samHasArg(argc, argv, 1) )
+		{
+			SAM_ERROR("JS", "sam_set_entity_flag: argument 2 (the flag name) is required.");
+			return JS_FALSE;
+		}
+		if ( !samBoolReqJs(ctx, argc, argv, 2, "sam_set_entity_flag", &on) ) { return JS_FALSE; }
+		const char* flagName = JS_ToCString(ctx, argv[1]);
+		if ( !flagName ) { return JS_FALSE; }
+#ifdef SAM_JS_HAVE_BARONY
+		const int idx = SAMLua::resolveEntityFlag(flagName, true, "sam_set_entity_flag");
+		JS_FreeCString(ctx, flagName);
+		if ( idx < 0 ) { return JS_FALSE; }
+		Entity* e = SAMLua::resolveWritableEntity((long long)uid, "sam_set_entity_flag");
+		if ( !e ) { return JS_FALSE; }
+		e->flags[idx] = on;
+		if ( multiplayer == SERVER ) { serverUpdateEntityFlag(e, idx); }
+		return JS_TRUE;
+#else
+		JS_FreeCString(ctx, flagName);
+		(void)uid; (void)on; return JS_FALSE;
+#endif
+	}
+
+	// sam_set_entity_size(uid, size [, sizeY]) -> boolean. See the Lua twin for the whole story:
+	// the clamp to 0..127 exists because the wire carries the size as one signed byte, and a
+	// negative half-extent inverts the client's hitbox test.
+	JSValue js_sam_set_entity_size(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		// Read WIDE and clamp wide. samJsReqI32 casts to int32 before returning, so 2^31 arrived
+		// here as INT32_MIN and the clamp below turned it into 0 -- the "nothing collides with
+		// this" value -- while the Lua twin, which keeps the number in a long long all the way to
+		// its clamp, produced 127 from the same input. Same warning printed, opposite hitboxes.
+		int64_t uid = 0, sx64 = 0, sy64 = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_set_entity_size") ) { return JS_FALSE; }
+		if ( !samJsReqI32Wide(ctx, argc, argv, 1, &sx64, "sam_set_entity_size") ) { return JS_FALSE; }
+		sy64 = sx64;
+		{
+			double samSyD = (double)sy64;
+			samJsOptF64(ctx, argc, argv, 2, &samSyD, "sam_set_entity_size");
+			sy64 = (int64_t)samSyD;
+		}
+		int32_t sx = (int32_t)std::max<int64_t>(-1, std::min<int64_t>(128, sx64));
+		int32_t sy = (int32_t)std::max<int64_t>(-1, std::min<int64_t>(128, sy64));
+#ifdef SAM_JS_HAVE_BARONY
+		Entity* e = SAMLua::resolveWritableEntity((long long)uid, "sam_set_entity_size");
+		if ( !e ) { return JS_FALSE; }
+		if ( sx < 0 || sx > 127 || sy < 0 || sy > 127 )
+		{
+			SAM_WARN("JS", "sam_set_entity_size: sizes are clamped to 0..127, because the network"
+				" carries them as one signed byte and a larger number arrives negative, which turns"
+				" the hitbox inside-out on every other player's machine.");
+		}
+		if ( sx < 0 ) { sx = 0; } if ( sx > 127 ) { sx = 127; }
+		if ( sy < 0 ) { sy = 0; } if ( sy > 127 ) { sy = 127; }
+		e->sizex = (Sint32)sx;
+		e->sizey = (Sint32)sy;
+		e->flags[UPDATENEEDED] = true;
+		return JS_TRUE;
+#else
+		(void)uid; (void)sx; (void)sy; return JS_FALSE;
+#endif
+	}
+
+	// sam_set_elevation(uid, z) -> boolean. Same z sam_get_position_precise returns, and in
+	// Barony that axis points DOWN, so negative is up. Refuses players and monsters because their
+	// species code rewrites z every frame; see the Lua twin.
+	JSValue js_sam_set_elevation(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0; double z = 0.0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_set_elevation") ) { return JS_FALSE; }
+		if ( !samJsReqF64(ctx, argc, argv, 1, &z, "sam_set_elevation") ) { return JS_FALSE; }
+		if ( !std::isfinite(z) )
+		{
+			SAM_ERROR("JS", "sam_set_elevation: z must be a finite number.");
+			return JS_FALSE;
+		}
+#ifdef SAM_JS_HAVE_BARONY
+		Entity* e = SAMLua::resolveWritableEntity((long long)uid, "sam_set_elevation");
+		if ( !e ) { return JS_FALSE; }
+		if ( e->behavior == &actPlayer || e->behavior == &actMonster || SAMLua::isCompanionEntity(e) )
+		{
+			SAM_WARN("JS", "sam_set_elevation refused: a player's, a monster's or a companion's"
+				" height is rewritten every frame by code that owns it (a companion by its own"
+				" hover curve), so this would be erased before the next frame drew. Use a"
+				" levitation effect for a creature; a companion's float height is fixed.");
+			return JS_FALSE;
+		}
+		if ( z < -1023.0 || z > 1023.0 )
+		{
+			SAM_WARN("JS", "sam_set_elevation: z is clamped to -1023..1023, which is what the"
+				" network can carry. Negative is up.");
+			z = ( z < 0.0 ) ? -1023.0 : 1023.0;
+		}
+		e->z = z;
+		e->new_z = z;
+		e->flags[UPDATENEEDED] = true;
+		return JS_TRUE;
+#else
+		(void)uid; (void)z; return JS_FALSE;
+#endif
+	}
+
 	JSValue js_sam_set_visible(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		// Lua's lua_toboolean treats a missing second argument as false, so JS must too, or
-		// sam_set_visible(uid) hides in one runtime and is refused in the other.
-		if ( argc < 1 ) { return JS_FALSE; }
-		int64_t uid = 0; JS_ToInt64(ctx, &uid, argv[0]);
-		const bool vis = ( argc >= 2 ) ? (JS_ToBool(ctx, argv[1]) != 0) : false;
+		// A missing flag is REFUSED in both runtimes now, rather than read as "hide". See the
+		// Lua twin: guessing wrong on a flag stays invisible until the wrong thing is on screen.
+		int64_t uid = 0; bool vis = false;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_set_visible") ) { return JS_FALSE; }
+		if ( !samBoolReqJs(ctx, argc, argv, 1, "sam_set_visible", &vis) ) { return JS_FALSE; }
 #ifdef SAM_JS_HAVE_BARONY
-		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_set_visible refused: host only."); return JS_FALSE; }
-		Entity* e = uidToEntity((Uint32)uid);
+		Entity* e = SAMLua::resolveWritableEntity((long long)uid, "sam_set_visible");
 		if ( !e ) { return JS_FALSE; }
 		// See the Lua twin: a custom body is deliberately un-skipped in the draw pass, so
 		// hiding it this way would work on nobody's screen consistently.
@@ -4347,10 +4875,10 @@ namespace
 				+ "' (expected a vanilla name like \"IRON_DAGGER\" or a custom \"namespace:item\").");
 			return JS_FALSE;
 		}
-		int32_t beatitude = 0; if ( samHasArg(argc, argv, 3) ) { JS_ToInt32(ctx, &beatitude, argv[3]); }
-		int32_t statusArg = (int32_t)EXCELLENT; if ( samHasArg(argc, argv, 4) ) { JS_ToInt32(ctx, &statusArg, argv[4]); }
+		int32_t beatitude = 0; samJsOptI32(ctx, argc, argv, 3, &beatitude, __func__);
+		int32_t statusArg = (int32_t)EXCELLENT; samJsOptI32(ctx, argc, argv, 4, &statusArg, __func__);
 		statusArg = samClampInt(statusArg, (int)BROKEN, (int)EXCELLENT);
-		int32_t count = 1; if ( samHasArg(argc, argv, 5) ) { JS_ToInt32(ctx, &count, argv[5]); }
+		int32_t count = 1; samJsOptI32(ctx, argc, argv, 5, &count, __func__);
 		if ( count < 1 ) { count = 1; }
 		Item* item = newItem(static_cast<ItemType>(resolvedType), static_cast<Status>(statusArg),
 			(Sint16)beatitude, count, 0, true, nullptr);
@@ -4405,7 +4933,11 @@ namespace
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_attach_behavior refused: host only."); return JS_FALSE; }
 		Entity* e = samResolveMonster(uid);
 		if ( !e ) { SAM_WARN("JS", "sam_attach_behavior: no monster uid " + std::to_string((long long)uid)); return JS_FALSE; }
-		const std::string full = g_currentNs + ":" + name;
+		// The same ':' rule sam_register_behavior uses. Prefixing unconditionally meant the
+		// "mymod:sentry" the docs tell you to register with became "mymod:mymod:sentry" here, so
+		// only the bare form ever survived the round trip.
+		std::string full = name;
+		if ( full.find(':') == std::string::npos ) { full = g_currentNs + ":" + full; }
 		const int idx = SAMLua::behaviorIndexFor(full);
 		if ( idx < 0 )
 		{
@@ -4544,7 +5076,7 @@ namespace
 	JSValue js_sam_get_monster_effects(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int64_t uid = 0; if ( samHasArg(argc, argv, 0) ) { JS_ToInt64(ctx, &uid, argv[0]); }
+		int64_t uid = 0; samJsOptI64(ctx, argc, argv, 0, &uid, __func__);
 		JSValue arr = JS_NewArray(ctx);
 #ifdef SAM_JS_HAVE_BARONY
 		Entity* e = samResolveMonster(uid);
@@ -4721,7 +5253,7 @@ namespace
 	JSValue js_sam_get_effect_duration(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		int32_t player = -1; samJsOptI32(ctx, argc, argv, 0, &player, __func__);
 		std::string name; if ( samHasArg(argc, argv, 1) ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
 		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return JS_NewInt32(ctx, 0); }
 		const int eff = samEffectNameToId(name.c_str());
@@ -4733,7 +5265,7 @@ namespace
 	JSValue js_sam_get_effect_strength(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		int32_t player = -1; samJsOptI32(ctx, argc, argv, 0, &player, __func__);
 		std::string name; if ( samHasArg(argc, argv, 1) ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
 		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return JS_NewInt32(ctx, 0); }
 		const int eff = samEffectNameToId(name.c_str());
@@ -4745,7 +5277,7 @@ namespace
 	JSValue js_sam_get_effects(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		int32_t player = -1; samJsOptI32(ctx, argc, argv, 0, &player, __func__);
 		JSValue arr = JS_NewArray(ctx);
 		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return arr; }
 		uint32_t n = 0;
@@ -5123,6 +5655,19 @@ namespace
 	// v1.5.0 spell helpers (JS twins of the Lua ones).
 	static int samJsResolveSpellId(const std::string& spell)
 	{
+		// A numeric id as text. See the Lua twin: sam_get_tome_spell hands back a NUMBER and
+		// every consumer here was string-only, so "read what this spellbook teaches, then grant
+		// it" resolved nothing.
+		{
+			bool digits = !spell.empty();
+			for ( char c : spell ) { if ( c < '0' || c > '9' ) { digits = false; break; } }
+			if ( digits )
+			{
+				const int nid = (int)strtol(spell.c_str(), nullptr, 10);
+				if ( ItemTooltips.spellItems.find(nid) != ItemTooltips.spellItems.end() ) { return nid; }
+				return -1;
+			}
+		}
 		if ( spell.find(':') != std::string::npos )
 		{
 			const SAMSpellDef* d = SAMSpells::getSpellByName(spell);
@@ -5158,7 +5703,7 @@ namespace
 #ifdef SAM_JS_HAVE_BARONY
 		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_cast_spell_at refused: host only."); return JS_NULL; }
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity ) { return JS_NULL; }
-		Entity* target = uidToEntity((Sint32)targetUid);
+		Entity* target = SAMLua::resolveEntityQuiet((long long)targetUid);
 		if ( !target ) { return JS_NULL; }
 		const int id = samJsResolveSpellId(spell);
 		if ( id < 0 ) { SAM_ERROR("JS", "sam_cast_spell_at: unknown spell '" + spell + "'."); return JS_NULL; }
@@ -5214,7 +5759,7 @@ namespace
 	JSValue js_sam_get_spells(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
-		int32_t player = -1; if ( samHasArg(argc, argv, 0) ) { JS_ToInt32(ctx, &player, argv[0]); }
+		int32_t player = -1; samJsOptI32(ctx, argc, argv, 0, &player, __func__);
 		JSValue arr = JS_NewArray(ctx);
 #ifdef SAM_JS_HAVE_BARONY
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] ) { return arr; }
@@ -5392,6 +5937,15 @@ namespace
 		JS_SetPropertyStr(ctx, g, "sam_clear_model", JS_NewCFunction(ctx, js_sam_clear_model, "sam_clear_model", 1));
 		JS_SetPropertyStr(ctx, g, "sam_get_model", JS_NewCFunction(ctx, js_sam_get_model, "sam_get_model", 1));
 		JS_SetPropertyStr(ctx, g, "sam_set_scale", JS_NewCFunction(ctx, js_sam_set_scale, "sam_set_scale", 2));
+		JS_SetPropertyStr(ctx, g, "sam_set_entity_size", JS_NewCFunction(ctx, js_sam_set_entity_size, "sam_set_entity_size", 3));
+		JS_SetPropertyStr(ctx, g, "sam_set_damage_immune", JS_NewCFunction(ctx, js_sam_set_damage_immune, "sam_set_damage_immune", 2));
+		JS_SetPropertyStr(ctx, g, "sam_is_damage_immune", JS_NewCFunction(ctx, js_sam_is_damage_immune, "sam_is_damage_immune", 1));
+		JS_SetPropertyStr(ctx, g, "sam_move_entity", JS_NewCFunction(ctx, js_sam_move_entity, "sam_move_entity", 3));
+		JS_SetPropertyStr(ctx, g, "sam_apply_force", JS_NewCFunction(ctx, js_sam_apply_force, "sam_apply_force", 4));
+		JS_SetPropertyStr(ctx, g, "sam_set_on_fire", JS_NewCFunction(ctx, js_sam_set_on_fire, "sam_set_on_fire", 2));
+		JS_SetPropertyStr(ctx, g, "sam_get_entity_flag", JS_NewCFunction(ctx, js_sam_get_entity_flag, "sam_get_entity_flag", 2));
+		JS_SetPropertyStr(ctx, g, "sam_set_entity_flag", JS_NewCFunction(ctx, js_sam_set_entity_flag, "sam_set_entity_flag", 3));
+		JS_SetPropertyStr(ctx, g, "sam_set_elevation", JS_NewCFunction(ctx, js_sam_set_elevation, "sam_set_elevation", 2));
 		JS_SetPropertyStr(ctx, g, "sam_set_visible", JS_NewCFunction(ctx, js_sam_set_visible, "sam_set_visible", 2));
 		JS_SetPropertyStr(ctx, g, "sam_monster_equip", JS_NewCFunction(ctx, js_sam_monster_equip, "sam_monster_equip", 6));
 		JS_SetPropertyStr(ctx, g, "sam_monster_unequip", JS_NewCFunction(ctx, js_sam_monster_unequip, "sam_monster_unequip", 2));
@@ -5463,6 +6017,7 @@ namespace
 		// v2 world-ops: position / teleport / spawn / inventory.
 		JS_SetPropertyStr(ctx, g, "sam_get_player_uid", JS_NewCFunction(ctx, js_sam_get_player_uid, "sam_get_player_uid", 1));
 		JS_SetPropertyStr(ctx, g, "sam_get_position", JS_NewCFunction(ctx, js_sam_get_position, "sam_get_position", 1));
+		JS_SetPropertyStr(ctx, g, "sam_can_stand", JS_NewCFunction(ctx, js_sam_can_stand, "sam_can_stand", 3));
 		JS_SetPropertyStr(ctx, g, "sam_set_position", JS_NewCFunction(ctx, js_sam_set_position, "sam_set_position", 3));
 		JS_SetPropertyStr(ctx, g, "sam_spawn_monster", JS_NewCFunction(ctx, js_sam_spawn_monster, "sam_spawn_monster", 4));
 		JS_SetPropertyStr(ctx, g, "sam_spawn_portal", JS_NewCFunction(ctx, js_sam_spawn_portal, "sam_spawn_portal", 2));

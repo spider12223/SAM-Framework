@@ -18,14 +18,12 @@ Now what travels between machines is a name, never a number, and each game picks
 
 [b]Both players need S.A.M and the same mod to see a custom race.[/b] Without it they see the creature it is built on, moving normally rather than frozen in place.
 
-[h1]61 NEW FUNCTIONS: 184 TO 245[/h1]
+[h1]71 NEW FUNCTIONS: 184 TO 255[/h1]
 
-All of items and inventory: read an item's real displayed name, what the stack is worth, its attack and armour; change condition, blessing, count, owner and whether it can be dropped; ask what slot it fills and what stacks with what; compare two items the way the game's own creatures do when deciding what to pick up. Plus positions, facing, distances, tile queries, seeded random and run timing.
+All of items and inventory: read an item's real displayed name, what the stack is worth, its attack and armour; change condition, blessing, count, owner and whether it can be dropped; ask what slot it fills and what stacks with what; compare two items the way the game's own creatures do when deciding what to pick up. Plus the world itself: shove a creature the way an arrow does, nudge one along a wall, ask if a spot will take it, float a prop, set it alight, or make a boss invulnerable while it talks.
 
 [b]The complete reference[/b], every function and event with arguments, types, return values and host-only flags:
 https://github.com/spider12223/SAM-Framework/blob/main/docs/function-reference.md
-
-It is generated from the framework's own API definition, so it cannot fall behind the code.
 
 [b]Writing in TypeScript?[/b] [b]sam.d.ts[/b] ships in this folder and with every release. Point your editor at it for autocomplete and type checking across the whole API.
 
@@ -71,7 +69,7 @@ Build a class, item, monster, spell or effect with dropdowns and sliders, watch 
 
 JSON says what your content [i]is[/i]. A script says what it [i]does[/i]. Drop a .lua, .js or .ts file next to any JSON and it loads automatically. TypeScript is compiled for you.
 
-[b]72 events[/b] to react to, and now to change. [b]245 functions[/b] to act with: grant items and gold, read and set stats, apply effects, cast spells, deal or change damage, teleport, spawn monsters, run your own per frame logic, open windows, timers, saved data, screen effects, and live patching that reverts when your mod unloads.
+[b]72 events[/b] to react to, and now to change. [b]255 functions[/b] to act with: grant items and gold, read and set stats, apply effects, cast spells, deal or change damage, teleport, spawn monsters, run your own per frame logic, open windows, timers, saved data, screen effects, and live patching that reverts when your mod unloads.
 
 Only two functions ever get called: [b]on_event(event)[/b] and [b]on_tick(event)[/b].
 

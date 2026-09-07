@@ -182,6 +182,12 @@ public:
 	// Used to recover the class id from a carousel button's name.
 	static int classIdForIdString(const std::string& idString);
 
+	// The identifier a SCRIPT sees for this class: a custom class's "ns:class" id, or the
+	// vanilla class's own lowercase name. The same string sam_get_class returns, exported so
+	// the engine's event sites can emit it instead of a raw language-file lookup -- two of
+	// which were emitting "Effect has no use" and "DEPRECATED".
+	static std::string canonicalName(int classId, int player);
+
 	// --- v0.7.0 Feature 5: modify existing content (revert on unload) ----------
 	// Override a class's STARTING stats. classnum is a vanilla id (0..NUMCLASSES-1)
 	// or a registered custom id (>= SAM_CLASS_ID_BASE). Absolute values; affects only

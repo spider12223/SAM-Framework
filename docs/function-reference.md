@@ -1,6 +1,6 @@
 # S.A.M function reference
 
-Every script function the framework exposes: **245 functions** and **72 events**.
+Every script function the framework exposes: **255 functions** and **72 events**.
 All of them work identically in Lua, JavaScript and TypeScript.
 
 This page is generated from the API definition, so it cannot fall behind the code. If a
@@ -31,7 +31,7 @@ For guides and worked examples, see [scripting-reference.md](scripting-reference
 - [Networking](#networking) (1)
 - [Panels](#panels) (16)
 - [Persistence](#persistence) (13)
-- [Pictures](#pictures) (12)
+- [Pictures](#pictures) (16)
 - [Player state](#player-state) (13)
 - [Presentation](#presentation) (8)
 - [Rewards](#rewards) (5)
@@ -40,7 +40,7 @@ For guides and worked examples, see [scripting-reference.md](scripting-reference
 - [Terrain](#terrain) (9)
 - [Timers](#timers) (3)
 - [Truth](#truth) (17)
-- [World](#world) (17)
+- [World](#world) (23)
 - [Your own logic](#your-own-logic) (7)
 - [Events](#events) (72)
 
@@ -252,13 +252,13 @@ Age of an entity in frames. Divide by sam_get_tick_rate for seconds. Useful for 
 
 ### `sam_get_entity_type(uid)`
 
-What kind of thing a uid refers to. Lets one handler deal with a mixed list of uids without guessing from what other calls happen to succeed.
+What kind of thing a uid refers to. Lets one handler deal with a mixed list of uids without guessing from what other calls happen to succeed. Every word it returns is one sam_find_entities accepts, so you can read a kind and then go looking for more of the same.
 
 | argument | type |
 |---|---|
 | `uid` | int |
 
-**Returns:** one of "player", "monster", "item", "door", "chest", "ladder", "portal", "gate", "switch", "fountain", "sink", "boulder", "gib", "other", or nil
+**Returns:** one of ENTITY_KINDS (string), or nil
 
 ### `sam_get_facing(player)`
 
@@ -328,7 +328,7 @@ Look up one item by type number or by name. The attributes sub-table is where a 
 
 ### `sam_list_items(category)`
 
-List every item the game knows about, including items added by mods (those have custom = true). This is what a recipe browser, a shop's stock list or a bestiary of loot is built from — before it, a script could only ask about the item already in the player's hand.
+List every item the game knows about, including items added by mods (those have custom = true). This is what a recipe browser, a shop's stock list or a bestiary of loot is built from. The name it gives you is accepted by sam_grant_item, sam_spawn_item, sam_item_id and the rest, so listing and then granting works; if two items happen to share a displayed name the call refuses and names both rather than guessing.
 
 | argument | type |
 |---|---|
@@ -445,11 +445,11 @@ Check whether a BOUND action is held. Reads Barony's own binding, so it follows 
 
 ### `sam_is_key_held(key_name)`
 
-Check whether a supported RAW key is currently held (A-Z, 0-9, F1-F12). Ignores the player's keybinds — prefer sam_is_action_held, which follows them.
+Check whether a RAW key is currently held. Takes any key name the game itself uses, so what sam_get_action_binding hands back works here: single letters and digits, F1 to F12, and the spelled-out keys such as "Space", "Return", "Escape" and "Left Shift". A MOUSE binding has no key behind it and cannot be answered here; it says so in the log rather than returning false forever. Ignores the player's keybinds — prefer sam_is_action_held, which follows them and handles every binding kind.
 
 | argument | type |
 |---|---|
-| `key_name` | string — one of: `A-Z`, `0-9`, `F1-F12` |
+| `key_name` | string |
 
 **Returns:** whether the key is down (boolean)
 
@@ -486,7 +486,7 @@ Get the item NAME equipped in a slot (ARMOR==BREASTPLATE, BOOTS==SHOES). Vanilla
 | argument | type |
 |---|---|
 | `player` | int |
-| `slot` | string — one of: `WEAPON`, `SHIELD`, `HELMET`, `ARMOR`, `BREASTPLATE`, `GLOVES`, `BOOTS`, `SHOES`, `RING`, `AMULET`, `CLOAK`, `MASK` |
+| `slot` | string — one of: `WEAPON`, `SHIELD`, `HELMET`, `HELM`, `ARMOR`, `BREASTPLATE`, `GLOVES`, `BOOTS`, `SHOES`, `RING`, `AMULET`, `CLOAK`, `MASK` |
 
 **Returns:** the item name (string; nil/null if slot empty)
 
@@ -497,7 +497,7 @@ Get the item ID equipped in a slot. Compare it against sam_item_id("namespace:it
 | argument | type |
 |---|---|
 | `player` | int |
-| `slot` | string — one of: `WEAPON`, `SHIELD`, `HELMET`, `ARMOR`, `BREASTPLATE`, `GLOVES`, `BOOTS`, `SHOES`, `RING`, `AMULET`, `CLOAK`, `MASK` |
+| `slot` | string — one of: `WEAPON`, `SHIELD`, `HELMET`, `HELM`, `ARMOR`, `BREASTPLATE`, `GLOVES`, `BOOTS`, `SHOES`, `RING`, `AMULET`, `CLOAK`, `MASK` |
 
 **Returns:** the numeric item id (int; nil/null if slot empty)
 
@@ -703,12 +703,12 @@ Covers everything worn in the shield hand, not only shields: lanterns, torches, 
 
 ### `sam_item_has_trait(item_type, trait)`
 
-The item counterpart of sam_monster_has_trait. Takes a TYPE, and an unknown trait name is refused with the valid list logged rather than silently returning false.
+The item counterpart of sam_monster_has_trait. Takes a TYPE. Answers for all eleven traits a mod can declare, checking what the item declared and then the game's own rule for a vanilla one. An unknown trait name is refused with the valid list logged rather than silently returning false.
 
 | argument | type |
 |---|---|
 | `item_type` | int |
-| `trait` | string — one of: `QUIVER`, `FOCI`, `INSTRUMENT`, `THROWN_BALL` |
+| `trait` | string — one of: `RANGED`, `QUIVER`, `FOCI`, `INSTRUMENT`, `THROWN_BALL`, `SHIELD_SLOT`, `POTION_BAD`, `AUTOMATON_FOOD`, `TINKER_THROWABLE`, `USABLE`, `BEATITUDE_AC` |
 
 **Returns:** true if the type has that trait (boolean)
 
@@ -819,14 +819,14 @@ Override a class's STARTING stats/skills (patch = { STR, DEX, ..., MAXHP, skills
 
 ### `sam_patch_item(item, patch)`
 
-Override an item type's base fields live: { weight, value/gold_value, level, category, slot, tooltip, name/name_identified, name_unidentified, attributes = {...} }.
+Override an item type's base fields live: { weight, value/gold_value, level, category, slot, tooltip, name/name_identified, name_unidentified, attributes = {...} }. An unrecognised category or slot name is refused rather than being read as WEAPON or NO_EQUIP, which are real values that would have applied silently. The whole patch is checked before any of it is written, so a false really does mean the item is untouched. Category and slot names are matched without regard to case, so "weapon" and "WEAPON" are the same thing.
 
 | argument | type |
 |---|---|
 | `item` | any — one of: `item id (int)`, `vanilla name (string)`, `"ns:item" (string)` |
 | `patch` | table |
 
-**Returns:** true on success (boolean)
+**Returns:** true on success (boolean); false if a category or slot name is not recognised, and then nothing at all is changed
 
 ### `sam_patch_monster(monster, patch)`
 
@@ -996,7 +996,7 @@ A monster effect's strength/magnitude.
 
 ### `sam_get_monster_effects(uid)`
 
-Every active effect on a monster at once (custom slots appear as "CUSTOM:<id>").
+Every active effect on a monster at once. Custom slots appear under the id you declared them with, like "mymod:frostbite", and vanilla ones under the lowercase name the effect events use.
 
 | argument | type |
 |---|---|
@@ -1606,6 +1606,17 @@ Drop a script-set model and go back to whatever the entity would otherwise draw.
 
 **Returns:** true on success (boolean)
 
+### `sam_get_entity_flag(uid, flag)`
+
+Read one of Barony's entity flags by name. An unknown name gives you nil, never false: false is a real answer to a question like "is this passable", so handing it back for a typo would send your script down the wrong branch without a word. Readable on a client, but a client's copy of a flag is only as fresh as the last update the host sent about that entity.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+| `flag` | string — one of: `BRIGHT`, `INVISIBLE`, `NOUPDATE`, `UPDATENEEDED`, `GENIUS`, `OVERDRAW`, `SPRITE`, `BLOCKSIGHT`, `BURNING`, `BURNABLE`, `UNCLICKABLE`, `PASSABLE`, `USERFLAG1`, `USERFLAG2`, `INVISIBLE_DITHER`, `NOCLIP_WALLS`, `NOCLIP_CREATURES`, `ENTITY_SKIP_CULLING`, `STASIS_DITHER` |
+
+**Returns:** true or false (boolean), or nil/null if the flag name is not one of the ones listed, if the uid is gone, or if the uid is a shared engine marker (0, -2, -3, -4)
+
 ### `sam_get_image_size(image)`
 
 The picture's own pixel size, so a script can centre or scale it instead of hard-coding the numbers it was exported at. Also the cheapest way to check a picture actually resolves.
@@ -1672,6 +1683,47 @@ Whether an entity is visible. The counterpart to sam_set_visible, which shipped 
 
 **Returns:** true if the entity is being drawn (boolean), or nil
 
+### `sam_set_elevation(uid, z)`
+
+> Host-only.
+
+Set how high an entity floats. This is the engine's raw z, the third value sam_get_position_precise gives you, so reading and writing it round-trips. Barony's z axis points DOWN (gravity adds to it), so negative numbers are up and 0 is the floor. Clamped to -1023..1023, which is what the network can carry. REFUSED on players and monsters: their height is rewritten from scratch by their own species code on every single frame, so the call would report success and be erased before the next frame drew. Lift a creature with a levitation effect instead. Also refused on a companion, whose own hover curve rewrites its height every tick for the same reason. Use this on props, ground items, spawned portals, and entities your script owns through sam_register_behavior (though if your own handler writes the height, it wins).
+
+| argument | type |
+|---|---|
+| `uid` | int |
+| `z` | number (the same z sam_get_position_precise returns; NEGATIVE IS UP) |
+
+**Returns:** true on success (boolean); false for a player, a monster or a companion
+
+### `sam_set_entity_flag(uid, flag, on)`
+
+> Host-only.
+
+Turn one of Barony's entity flags on or off, and tell the other players about it. PASSABLE for a decoration nobody should bump into, BLOCKSIGHT for a prop that should cast a shadow, UNCLICKABLE for scenery, BRIGHT for something that glows, BURNABLE to make a prop able to catch fire. Four flags are read-only here and the refusal tells you why: INVISIBLE belongs to sam_set_visible and BURNING to sam_set_on_fire, both of which know extra rules this one does not, while NOUPDATE and UPDATENEEDED are how the network sweep decides who to tell about what, and STASIS_DITHER is rewritten from the stasis effect on every frame so setting it would be undone before you saw it.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+| `flag` | string — one of: `BRIGHT`, `GENIUS`, `OVERDRAW`, `SPRITE`, `BLOCKSIGHT`, `BURNABLE`, `UNCLICKABLE`, `PASSABLE`, `USERFLAG1`, `USERFLAG2`, `INVISIBLE_DITHER`, `NOCLIP_WALLS`, `NOCLIP_CREATURES`, `ENTITY_SKIP_CULLING` |
+| `on` | boolean |
+
+**Returns:** true on success (boolean); false for an unknown or read-only flag, or an entity you may not write to
+
+### `sam_set_entity_size(uid, size, size_y)`
+
+> Host-only.
+
+Set an entity's collision box. The number is a half-extent in world units, 16 to a tile, so 4 is the usual monster and 0 means nothing collides with it. size_y defaults to the same value. Clamped to 0..127 in every mode: the network carries the size as one signed byte, so anything larger arrives negative on the other machines and turns the hitbox inside-out there while looking correct to you. Pair it with sam_set_scale when you grow a model and want the swing to match. Unlike sam_set_elevation this sticks, because the engine only writes sizes when an entity is created.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+| `size` | int (0-127, half-width in world units; 16 is one tile) |
+| `size_y` | int |
+
+**Returns:** true on success (boolean)
+
 ### `sam_set_model(uid, model_id)`
 
 > Host-only.
@@ -1689,25 +1741,25 @@ Swap any entity's model while the game is running. What crosses the wire is the 
 
 > Host-only.
 
-Scale an entity. Clamped at 1.99 with a logged warning, because Barony quantises scale on the wire in 1/128 steps with a cap just under 2 — a larger value would look right to you and be invisible to everyone else.
+Scale an entity. A scale of 0 or less is REFUSED, not quietly treated as 1.0 the way it used to be, which turned a script easing a model down to nothing into a model that popped back to full size on the last frame. To make something disappear use sam_set_visible. Clamped at the bottom to 1/128 with a warning as well, because the wire packs scale into one byte as scale times 128, so anything smaller arrives as 0 and vanishes on every other machine. Clamped at 1.99 with a logged warning, in EVERY mode including singleplayer: Barony quantises scale on the wire in 1/128 steps with a cap just under 2, so a larger value looks right to you and wrong to everyone else. The clamp used to be skipped in singleplayer, which meant a mod authored at 3.0 worked for its author and was broken the moment anyone hosted it.
 
 | argument | type |
 |---|---|
 | `uid` | int |
 | `scale` | number (1.0 is normal) |
 
-**Returns:** true on success (boolean)
+**Returns:** true on success (boolean); false for a scale of 0 or less
 
 ### `sam_set_visible(uid, visible)`
 
 > Host-only.
 
-Show or hide an entity. Refused, with a logged reason, on an entity that has a custom body: the draw pass deliberately keeps those visible, so hiding one this way would not work consistently. Clear the model first, or move it out of sight.
+Show or hide an entity. The flag is REQUIRED: leaving it out is refused rather than guessed. A numeric 0 counts as false in both runtimes now (Lua used to read 0 as true, so the same call did opposite things in Lua and JavaScript). Refused, with a logged reason, on an entity that has a custom body: the draw pass deliberately keeps those visible, so hiding one this way would not work consistently. Clear the model first, or move it out of sight.
 
 | argument | type |
 |---|---|
 | `uid` | int |
-| `visible` | boolean (optional, defaults to false) |
+| `visible` | boolean |
 
 **Returns:** true on success (boolean)
 
@@ -1760,13 +1812,13 @@ Add to a player's move-speed multiplier (the result is clamped to [0.1, 3.0]). A
 
 ### `sam_get_class(player)`
 
-Get a player's class name (vanilla or custom).
+Which class a player is, as an identifier you can act on: a custom class's "namespace:class" id, or the vanilla class's own name. Accepted by sam_patch_class, sam_add_class_passive and the rest, so you can read a player's class and then change it. It is not a display string; a custom class returns its id rather than its title.
 
 | argument | type |
 |---|---|
 | `player` | int |
 
-**Returns:** the class name (string; nil/null if invalid)
+**Returns:** the class id (string; nil/null if invalid)
 
 ### `sam_get_floor()`
 
@@ -2237,7 +2289,7 @@ The effect's strength/magnitude for effects that store one (GROWTH tiers, potion
 
 ### `sam_get_effects(player)`
 
-Every active effect on a player at once — react to "any debuff" or strip all buffs without polling each effect by name. Custom pseudo-effect slots appear as "CUSTOM:<id>".
+Every active effect on a player at once — react to "any debuff" or strip all buffs without polling each effect by name. Custom pseudo-effect slots appear under the id you declared them with, like "mymod:frostbite", and vanilla ones under the same lowercase name the effect events use, so a list from here can be compared directly against an event's effect_name.
 
 | argument | type |
 |---|---|
@@ -2302,14 +2354,14 @@ Change the magnitude/tier of an ALREADY-ACTIVE effect while keeping its remainin
 
 ### `sam_find_entities(x, y, radiusTiles, kind)`
 
-Entities of a KIND near a tile. This is the gap sam_get_nearby_entities leaves: that one skips anything which is not a monster or a player, so doors, chests, levers, gold and dropped items were invisible to scripts.
+Entities of a KIND near a tile. This is the gap sam_get_nearby_entities leaves: that one skips anything which is not a monster or a player, so doors, chests, levers, gold and dropped items were invisible to scripts. A kind you spell wrong is logged by name and returns nothing, rather than returning the empty list that looks exactly like "nothing nearby" — each distinct wrong word is reported once.
 
 | argument | type |
 |---|---|
 | `x` | int |
 | `y` | int |
 | `radiusTiles` | number |
-| `kind` | string — one of: `any`, `door`, `chest`, `fountain`, `sink`, `switch`, `gate`, `ladder`, `portal`, `item`, `gold`, `boulder`, `monster`, `player` |
+| `kind` | string — one of: `any`, `player`, `monster`, `item`, `gold`, `door`, `chest`, `fountain`, `sink`, `switch`, `gate`, `ladder`, `portal`, `boulder`, `gib`, `other` |
 
 **Returns:** array of uids
 
@@ -2486,7 +2538,7 @@ Read a lobby setting the host chose at game start. Lets a mod adapt to the run i
 
 ### `sam_get_monster_name(uid)`
 
-For a mod's custom monster this is the variant name it was given ("Rathalos"). A plain vanilla creature carries an empty variant name, so this falls back to the species name and never hands a script an empty string.
+For a mod's custom monster this is the variant name it was given ("Rathalos"). A plain vanilla creature carries an empty variant name, so this falls back to the species name and never hands a script an empty string. DISPLAY only: a named creature answers with its own epithet (a shopkeeper is "Adrian"), and no call takes that back. To clone or patch what you are looking at, use sam_get_monster_type, which returns the species name that sam_spawn_monster and sam_patch_monster accept.
 
 | argument | type |
 |---|---|
@@ -2633,6 +2685,33 @@ Picks a key with probability proportional to its weight, for loot tables and spa
 
 ## World
 
+### `sam_apply_force(uid, force, angle, ticks)`
+
+> Host-only.
+
+Shove an entity, using the engine's own knockback. The angle is a Barony yaw in radians, the same number sam_get_facing gives you, so away-from-you is atan2(theirY - myY, theirX - myX). This is deliberately not a raw velocity write: both act functions throw velocity away unless the knockback effect is active, and a player takes the impulse in a completely different field from a monster, so a hand-written version does nothing at all to the two targets you would actually aim it at. The optional ticks is how long the stagger lasts and defaults to 30, which is what the engine uses. Force is capped at 7 because a single step bigger than that can jump clean over a wall instead of hitting it. Returns false, with a logged reason, for a creature that refuses knockback outright: liches, minotaurs, the devil and shopkeepers are immune, and the engine's own knockback does nothing to them either. It also returns false for anything whose behaviour never reads velocity at all, which includes the decorative portals sam_spawn_portal creates: use sam_move_entity on those. The angle is wrapped into 0 to 2 pi for you, because the network carries it as a fixed-point number that overflows past about 128 radians.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+| `force` | number (0.6 is an arrow hit, 1.4 a strong one, 7 the ceiling) |
+| `angle` | number (radians, same as sam_get_facing) |
+| `ticks` | int |
+
+**Returns:** true if something will act on the shove (boolean)
+
+### `sam_can_stand(uid, tile_x, tile_y)`
+
+Ask whether THIS entity could stand on that tile. Different from sam_is_spawnable, which only reads the map and cannot see other entities or the asker's own collision profile: levitation, body size and the pass-through set all change the answer. Check with this before sam_set_position instead of dropping a monster inside a wall. True is necessary but not sufficient for a player teleport, which applies extra rules of its own (no teleporting on the minotaur levels, and MFLAG_DISABLETELEPORT maps). One multiplayer caveat, and it is logged when it applies: on a connected client this only sees walls and floor, not creatures, because the client does not keep the entity grid the test reads. Ask the host when the answer has to include who is standing there.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+| `tile_x` | int |
+| `tile_y` | int |
+
+**Returns:** true if that entity would fit at that tile (boolean); false if it is blocked, or the tile is off the map, or the uid is gone
+
 ### `sam_companion_punch(uid)`
 
 > Host-only.
@@ -2653,7 +2732,7 @@ Where the ladder or portal off this floor is, found the same way the game's own 
 
 ### `sam_get_inventory(player)`
 
-List a player's inventory. Use each item's uid with sam_remove_item. Empty list for an invalid player.
+List a player's inventory. Use each item's uid with sam_remove_item. A mod item reports its own "namespace:item" id as its name, so it can be told apart from other mod items and fed back into sam_grant_item. Empty list for an invalid player.
 
 | argument | type |
 |---|---|
@@ -2699,17 +2778,41 @@ Read any entity's map-tile position (player, monster or ground item). Get a play
 
 **Returns:** tile x, tile y (two values in Lua; an [x, y] array in JS), or nil/null if the uid is gone
 
+### `sam_is_damage_immune(uid)`
+
+Whether a script has made this entity immune to damage with sam_set_damage_immune. The immunity lives on the host, so ask the host if the answer has to be right.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+
+**Returns:** true or false (boolean)
+
 ### `sam_is_dark_level()`
 
 Whether this floor is one of the unlit ones.
 
 **Returns:** true on a dark floor (boolean)
 
+### `sam_move_entity(uid, dx, dy)`
+
+> Host-only.
+
+Nudge an entity by a relative distance, sliding along whatever it runs into rather than stopping dead or passing through. The answer is the distance it MANAGED, so 0 means something is right there and 0.3 out of a requested 2 means it hit a corner: a plain true or false would have hidden the difference. Distances are in tiles, like every other spatial call here, and a long move is walked in short steps so it cannot skip over a wall: the engine's collision test only looks at where you land, not at the path, so a single two-tile step used to step clean over a one-tile wall and report the whole distance as clear. Nudging another player's character logs a warning, because their machine owns their position and will report it back over yours within a frame or two. Use sam_set_position to teleport, or sam_apply_force to shove. One multiplayer limit worth knowing: a ground item, a gold bag, a flame or a gate refuses position updates on a client, so moving one is real on the host and other players keep seeing it where it was. You get a logged warning when that happens. Remove it and spawn a new one at the destination if everyone has to see it.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+| `dx` | number (tiles, can be fractional) |
+| `dy` | number (tiles, can be fractional) |
+
+**Returns:** how far it actually moved, in tiles (number), or nil/null if the uid is refused
+
 ### `sam_remove_entity(uid)`
 
 > Host-only.
 
-Remove a non-player world entity by uid — a sam_spawn_portal marker, a spawned monster, a companion, a ground item, etc. Refuses players (use the normal death/teleport paths for those). Frees any light the entity owned.
+Remove a non-player world entity by uid: a sam_spawn_portal marker, a spawned monster, a companion, a ground item, etc. Refuses players (use the normal death/teleport paths for those). Frees any light the entity owned, and closes the chest UI first if it is a chest somebody has open. The removal is QUEUED and happens on the next frame, so the uid still resolves for the rest of the current event. That is deliberate: your handler was called from inside the engine, which is still holding a pointer to that entity, so freeing it immediately corrupted memory.
 
 | argument | type |
 |---|---|
@@ -2742,11 +2845,37 @@ Turn an existing chest into permanent storage. Its contents then live in the pla
 
 **Returns:** true if the chest was converted (boolean)
 
+### `sam_set_damage_immune(uid, on)`
+
+> Host-only.
+
+Make a player or a monster stop taking damage, or let them take damage again. It works at the one place every point of damage to a CREATURE is applied, right beside the engine's own invulnerabilities, so for a creature nothing gets through by another route. Anything else is refused and the refusal says why: chests, doors, furniture and breakable decorations do not have health in that sense, they carry their own separate pools that a hit decrements directly, and no immunity here could reach them. The hit still lands, the sound still plays and the knockback still happens; only the loss of health is stopped, which is what invulnerable means everywhere else in Barony. You could already do this from an on_before_damage handler, and still can; this costs nothing per hit and needs no bookkeeping. It is session state: never saved, and cleared on every floor and at the start of a run, because entity uids restart from 1 on each level and a leftover entry would hand your boss's invulnerability to a rat downstairs.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+| `on` | boolean |
+
+**Returns:** true on success (boolean); false for anything that is not a player or a monster
+
+### `sam_set_on_fire(uid, on)`
+
+> Host-only.
+
+Set something alight, or put it out with sam_set_on_fire(uid, false). The answer is whether it is burning NOW, which is deliberately not what the engine's own function returns: that one answers false for an entity that was already on fire, so a script retrying on false would retry for ever. Two things stop a fire starting and each logs its reason. An entity that is not BURNABLE will never light (turn the flag on with sam_set_entity_flag first), and skeletons, automatons, anyone in a machinist apron and anyone wearing an amulet of burning resistance are immune. One thing to know about props: the burn timer only runs for players and monsters, so a chest or a decoration you light stays lit for the rest of the level and hurts nothing. That is useful for a brazier, and the second argument is how you undo it.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+| `on` | boolean (optional, defaults to true) |
+
+**Returns:** true if the entity is on fire once the call finishes (boolean)
+
 ### `sam_set_position(uid, tile_x, tile_y)`
 
 > Host-only.
 
-Move an entity to a map tile. Players go through the safe teleport path (can't tunnel into walls); other entities are relocated and re-broadcast to clients.
+Move an entity to a map tile. Players go through the safe teleport path and cannot tunnel into walls; everything else is relocated and re-broadcast to clients. Anything that is not a player is placed where you asked even when the tile is blocked, because putting a decoration inside a wall alcove is a real thing mods do, but you get a logged warning: a monster dropped into a wall is stuck there for good. Call sam_can_stand first when the answer matters. A shared engine marker uid (0 or a negative number) and a limb uid are both refused with a reason. In multiplayer a ground item, a gold bag, a flame or a gate refuses position updates on a client, so moving one of those is host-only and you get a logged warning saying so.
 
 | argument | type |
 |---|---|

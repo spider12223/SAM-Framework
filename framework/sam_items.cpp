@@ -43,6 +43,7 @@
 
 #include <fstream>
 #include <sstream>
+#include <cctype>     // std::toupper -- slotFromName/categoryFromName fold their own input
 #include <cstring>
 #include <cstdlib>
 #include <set>
@@ -190,8 +191,22 @@ static bool listContains(const std::vector<std::string>& v, const std::string& s
 	return false;
 }
 
-static Category categoryFromName(const std::string& n)
+// Case-folded HERE rather than at each call site. The bindings fold `category` before handing it
+// over and do not fold `slot` (sam_lua_runtime.cpp:7161-7162, sam_js_runtime.cpp:5477-5478), so a
+// perfectly ordinary lowercase "equippable_in_slot_weapon" was refused as a typo. Folding inside
+// makes the contract "a name, in any case" for every caller, the loader included, instead of
+// something each one has to remember.
+static std::string samFoldName(const std::string& s)
 {
+	std::string o;
+	o.reserve(s.size());
+	for ( char c : s ) { o += (char)std::toupper((unsigned char)c); }
+	return o;
+}
+
+static Category categoryFromName(const std::string& nIn)
+{
+	const std::string n = samFoldName(nIn);   // see slotFromName: the caller should not have to
 	if ( n == "WEAPON" ) { return WEAPON; }
 	if ( n == "ARMOR" ) { return ARMOR; }
 	if ( n == "AMULET" ) { return AMULET; }
@@ -207,7 +222,10 @@ static Category categoryFromName(const std::string& n)
 	if ( n == "BOOK" ) { return BOOK; }
 	if ( n == "SPELL_CAT" ) { return SPELL_CAT; }
 	if ( n == "TOME_SPELL" ) { return TOME_SPELL; }
-	return WEAPON; // fallback
+	// NOT `return WEAPON`. A fallback that is a real value is worse than an error: patching an
+	// item with a category this did not recognise turned armour into a weapon and reported
+	// success. -1 means "not a category", and the caller refuses.
+	return (Category)(-1);
 }
 
 // Reverse of categoryFromName: Category enum value -> name string. Exposed via SAMItems so
@@ -235,8 +253,9 @@ std::string SAMItems::categoryName(int category)
 	}
 }
 
-static ItemEquippableSlot slotFromName(const std::string& n)
+static ItemEquippableSlot slotFromName(const std::string& nIn)
 {
+	const std::string n = samFoldName(nIn);
 	if ( n == "EQUIPPABLE_IN_SLOT_WEAPON" ) { return EQUIPPABLE_IN_SLOT_WEAPON; }
 	if ( n == "EQUIPPABLE_IN_SLOT_SHIELD" ) { return EQUIPPABLE_IN_SLOT_SHIELD; }
 	if ( n == "EQUIPPABLE_IN_SLOT_MASK" ) { return EQUIPPABLE_IN_SLOT_MASK; }
@@ -247,8 +266,40 @@ static ItemEquippableSlot slotFromName(const std::string& n)
 	if ( n == "EQUIPPABLE_IN_SLOT_CLOAK" ) { return EQUIPPABLE_IN_SLOT_CLOAK; }
 	if ( n == "EQUIPPABLE_IN_SLOT_AMULET" ) { return EQUIPPABLE_IN_SLOT_AMULET; }
 	if ( n == "EQUIPPABLE_IN_SLOT_RING" ) { return EQUIPPABLE_IN_SLOT_RING; }
+	// NO_EQUIP is a real, declarable slot meaning "cannot be worn", and it is the DEFAULT for any
+	// item that does not name one (see the loader). It has to be accepted by name -- rejecting it
+	// made every non-equippable item log an error on every load.
+	if ( n == "NO_EQUIP" ) { return NO_EQUIP; }
+	// Anything else is NOT a slot. This used to fall back to NO_EQUIP, which is a real value, so
+	// a typo in a patch silently made the item unequippable and the call still answered true.
+	return (ItemEquippableSlot)(-1);
+}
+
+// The registration sites all want the same thing: keep working, but stop being silent.
+// Returns the default and logs once per bad value, naming the field and the item.
+static Category categoryOrDefault(const std::string& n, const std::string& who)
+{
+	const Category c = categoryFromName(n);
+	if ( (int)c >= 0 ) { return c; }
+	// An item that declares NO category at all is not a typo, it is a JSON that left the field
+	// out. Keep the old default quietly for that; only a value that was actually WRITTEN and is
+	// wrong deserves the complaint below.
+	if ( n.empty() ) { return WEAPON; }
+	SAM_ERROR(MOD, "Item [" + who + "] declares category '" + n + "', which is not one of the"
+		" valid categories. Treating it as WEAPON, which is probably not what you meant --"
+		" fix the category and the tooltip and the equip slot will follow.");
+	return WEAPON;
+}
+
+static ItemEquippableSlot slotOrDefault(const std::string& n, const std::string& who)
+{
+	const ItemEquippableSlot s = slotFromName(n);
+	if ( (int)s >= 0 ) { return s; }
+	SAM_ERROR(MOD, "Item [" + who + "] declares slot '" + n + "', which is not one of the valid"
+		" EQUIPPABLE_IN_SLOT_* names. Treating it as not equippable.");
 	return NO_EQUIP;
 }
+
 
 static std::string samLower(const std::string& in)
 {
@@ -394,8 +445,8 @@ static std::string samTooltipKeyFor(const std::string& srcKey, const std::string
 // AND re-called after any vanilla tooltip reload (readTooltipsFromFile) clears the map.
 static void injectCustomTooltip(int id, const SAMItemDef& def)
 {
-	const Category cat = categoryFromName(def.category);
-	const ItemEquippableSlot eslot = slotFromName(def.slot);
+	const Category cat = categoryOrDefault(def.category, def.id);
+	const ItemEquippableSlot eslot = slotOrDefault(def.slot, def.id);
 	// A declared weapon skill wins over both, because it decides the tooltip key and so the
 	// skill the tooltip names. Falls back to the slot/category pick when nothing is declared.
 	// Gated on the equip slot: weapon_skill means nothing on a shield or a helm, and letting
@@ -453,8 +504,8 @@ static bool registerItemAt(int id, SAMItemDef def)
 {
 	def.numericId = id;
 
-	const Category cat = categoryFromName(def.category);
-	const ItemEquippableSlot eslot = slotFromName(def.slot);
+	const Category cat = categoryOrDefault(def.category, def.id);
+	const ItemEquippableSlot eslot = slotOrDefault(def.slot, def.id);
 	ItemGeneric& slot = items[id];
 
 	// Placeholder visuals cloned from a vanilla item. For an EQUIPPABLE item pick
@@ -946,8 +997,8 @@ void SAMItems::reapplyAfterDataReload()
 		slot.weight = def.weight;
 		slot.gold_value = def.goldValue;
 		slot.level = def.level;
-		slot.category = categoryFromName(def.category);
-		slot.item_slot = slotFromName(def.slot);
+		slot.category = categoryOrDefault(def.category, def.id);
+		slot.item_slot = slotOrDefault(def.slot, def.id);
 		slot.attributes.clear();
 		for ( const auto& a : def.attributes ) { slot.attributes[a.first] = a.second; }
 		injectCustomTooltip(id, def);
@@ -1046,6 +1097,30 @@ bool SAMItems::patchItem(int id, const SAMItemPatch& p)
 		s_itemPatches[id] = s;
 	}
 
+	// EVERY CHECK BEFORE THE FIRST WRITE. These two guards used to sit BELOW the weight,
+	// gold_value and level assignments, so the message "Nothing was patched on this item" was
+	// printed after three things had been patched on the item -- permanently, for the rest of the
+	// session -- and the false it returned told the script the same untruth. A function that
+	// validates has to finish validating before it touches anything.
+	//
+	// A patch names a field on an item that ALREADY WORKS, so an unrecognised value must not be
+	// written. The old fallbacks turned an unknown category into WEAPON and an unknown slot into
+	// NO_EQUIP -- both real values, both applied, and the call still returned true. So a typo
+	// quietly made armour a weapon, or made an item permanently unequippable, and reported
+	// success. Refuse the whole patch and name the field instead.
+	if ( p.hasCategory && (int)categoryFromName(p.category) < 0 )
+	{
+		SAM_ERROR(MOD, "patch_item: '" + p.category + "' is not a valid category. Nothing was"
+			" patched on this item.");
+		return false;
+	}
+	if ( p.hasSlot && (int)slotFromName(p.slot) < 0 )
+	{
+		SAM_ERROR(MOD, "patch_item: '" + p.slot + "' is not a valid EQUIPPABLE_IN_SLOT_* name."
+			" Nothing was patched on this item.");
+		return false;
+	}
+
 	if ( p.hasWeight )   { slot.weight = p.weight; }
 	if ( p.hasValue )    { slot.gold_value = p.value; }
 	if ( p.hasLevel )    { slot.level = p.level; }
@@ -1071,7 +1146,14 @@ int SAMItems::itemIdForIdString(const std::string& idString)
 {
 	for ( const auto& kv : s_registry )
 	{
-		if ( kv.second.id == idString )
+		// Case-INSENSITIVE. The vanilla-name branch beside every caller of this lowercases, so an
+		// exact match here meant "MyMod:Sword" missed a declared "mymod:sword" while "Steel_Sword"
+		// resolved fine. Ids are stored exactly as the mod wrote them, so the fold happens here.
+		auto samFold = [](std::string v) {
+			for ( char& c : v ) { c = (char)std::tolower((unsigned char)c); }
+			return v;
+		};
+		if ( samFold(kv.second.id) == samFold(idString) )
 		{
 			return kv.first;
 		}

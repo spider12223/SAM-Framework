@@ -44,6 +44,7 @@ extern "C" {
 #include <cmath>    // lround — move-speed fixed-point encoding
 #include <string>
 #include <type_traits>   // the ItemType assertion on the appearance guard
+#include <set>      // the damage-immunity set, checked from Entity::modHP
 #include <vector>
 #include <map>
 #include <fstream>
@@ -134,6 +135,352 @@ namespace
 	// top-level load so host APIs (sam_save_data, custom hooks, timers) can attribute
 	// a call to the mod that made it.
 	std::string g_currentNs;
+
+	// ---- the engine's `hit` global, borrowed and put back -------------------------------
+	//
+	// `hit` is ONE global with six fields and the engine is often mid-way through using it when
+	// a script runs. clipMove's first statement is `hit.entity = NULL;` and it writes hit.side on
+	// every success path, so any SAM call that moves something stamps on it. The engine's own
+	// attempt to be careful saves a single field (entity.cpp:17923 `Entity* ohit = hit.entity;`),
+	// which is not enough -- so this saves the whole struct, and being RAII it cannot be forgotten
+	// on an early return.
+	struct SAMHitGuard
+	{
+		hit_t saved;
+		SAMHitGuard() : saved(hit) {}
+		~SAMHitGuard() { hit = saved; }
+	};
+
+	// ---- damage immunity, declared by a script ------------------------------------------
+	//
+	// Checked at the top of Entity::modHP, which is the single choke point every point of damage
+	// in the game goes through -- both S.A.M damage events already fire from there.
+	//
+	// Held by UID, and CLEARED ON EVERY FLOOR AND EVERY NEW RUN -- but NOT for the reason this
+	// comment first gave. I wrote that uids restart from 1 on each level. They do not: entity_uids
+	// is reset only when a run starts (menu.cpp:8715, 9486) and otherwise counts up for the whole
+	// game. The real reason is better: the engine ROLLS THE COUNTER BACK for throwaway particles
+	// it does not want to spend a uid on (`entity_uids--` at entity.cpp:17172 and :23988,
+	// game.cpp:1443 and :3341), so the very next entity created takes that number. A uid a script
+	// remembered can therefore name something else entirely, within a single floor. Clearing on
+	// every boundary bounds how long a stale entry can survive to do it.
+	//
+	// Empty in a vanilla game, so the cost on the engine's hot path is one empty() test.
+	std::set<Uint32> g_damageImmune;
+
+	// ---- the entity flag table, shared by both runtimes ----------------------------------
+	//
+	// Barony's flags are a bool[24] indexed by the #defines in entity.hpp:21-40. Scripts name
+	// them; nothing in the API takes the index, because the array's neighbours in the class are
+	// `char* string`, `light_t* light` and `list_t children`, so an out-of-range index is a write
+	// over live pointers. That exact hole shipped on the wire once (net.cpp:3158, now closed).
+	//
+	// `settable` is false where the flag is not a script's to own. Two of those have a proper
+	// function instead and the refusal names it; two are the network sweep's own bookkeeping.
+#ifdef SAM_LUA_HAVE_BARONY
+	struct SAMEntityFlag
+	{
+		const char* name;
+		int index;
+		bool settable;
+		const char* instead;   // the function that owns this flag, if one does
+		const char* why;       // said to the modder when settable is false and instead is null
+	};
+
+	static const SAMEntityFlag g_entityFlags[] =
+	{
+		{ "BRIGHT",              BRIGHT,              true,  nullptr, nullptr },
+		{ "INVISIBLE",           INVISIBLE,           false, "sam_set_visible",
+			nullptr },
+		{ "NOUPDATE",            NOUPDATE,            false, nullptr,
+			"it is how the network sweep decides an entity needs no further updates, so owning it"
+			" can freeze the thing on every client while the host watches it move normally" },
+		{ "UPDATENEEDED",        UPDATENEEDED,        false, nullptr,
+			"it is the network sweep's own dirty bit, and every function that changes an entity"
+			" already sets it for you" },
+		{ "GENIUS",              GENIUS,              true,  nullptr, nullptr },
+		{ "OVERDRAW",            OVERDRAW,            true,  nullptr, nullptr },
+		{ "SPRITE",              SPRITE,              true,  nullptr, nullptr },
+		{ "BLOCKSIGHT",          BLOCKSIGHT,          true,  nullptr, nullptr },
+		{ "BURNING",             BURNING,             false, "sam_set_on_fire",
+			nullptr },
+		{ "BURNABLE",            BURNABLE,            true,  nullptr, nullptr },
+		{ "UNCLICKABLE",         UNCLICKABLE,         true,  nullptr, nullptr },
+		{ "PASSABLE",            PASSABLE,            true,  nullptr, nullptr },
+		{ "USERFLAG1",           USERFLAG1,           true,  nullptr, nullptr },
+		{ "USERFLAG2",           USERFLAG2,           true,  nullptr, nullptr },
+		{ "INVISIBLE_DITHER",    INVISIBLE_DITHER,    true,  nullptr, nullptr },
+		{ "NOCLIP_WALLS",        NOCLIP_WALLS,        true,  nullptr, nullptr },
+		{ "NOCLIP_CREATURES",    NOCLIP_CREATURES,    true,  nullptr, nullptr },
+		{ "ENTITY_SKIP_CULLING", ENTITY_SKIP_CULLING, true,  nullptr, nullptr },
+		{ "STASIS_DITHER",       STASIS_DITHER,       false, nullptr,
+			"Entity::handleEffects rewrites it from the stasis effect on every frame, so setting it"
+			" here would be undone before the next one drew" },
+	};
+
+	static std::string samEntityFlagList()
+	{
+		std::string out;
+		for ( const SAMEntityFlag& f : g_entityFlags )
+		{
+			if ( !out.empty() ) { out += ", "; }
+			out += f.name;
+		}
+		return out;
+	}
+
+	// -1 for an unknown name, or for a read-only flag when forWrite is true. Warns in both cases,
+	// because a silent -1 would be as useless as the wrong answer.
+	int samResolveEntityFlag(const char* name, bool forWrite, const char* who)
+	{
+		const std::string want = name ? name : "";
+		for ( const SAMEntityFlag& f : g_entityFlags )
+		{
+			if ( want != f.name ) { continue; }
+			if ( forWrite && !f.settable )
+			{
+				if ( f.instead )
+				{
+					SAM_WARN("LUA", std::string(who) + ": " + f.name + " is not set through this"
+						" function. Use " + f.instead + ", which knows the extra rules that go"
+						" with it.");
+				}
+				else
+				{
+					SAM_WARN("LUA", std::string(who) + ": " + f.name + " is not a script's to set,"
+						" because " + (f.why ? f.why : "the engine owns it") + ".");
+				}
+				return -1;
+			}
+			return f.index;
+		}
+		SAM_WARN("LUA", std::string(who) + ": there is no entity flag called \"" + want + "\"."
+			" The flags are: " + samEntityFlagList() + ".");
+		return -1;
+	}
+#else
+	int samResolveEntityFlag(const char*, bool, const char*) { return -1; }
+#endif
+
+	// ---- one entity resolver, for every function that WRITES to an entity ----------------
+	//
+	// uidToEntity is a bare map lookup with no validation (entity.cpp:3318). Two things get
+	// through it that no script should ever be allowed to write to.
+	//
+	// A SENTINEL uid. Real uids start at 1, but the engine hands out 0, -2, -3 and -4 as shared
+	// markers -- gibs, sparks, leaves, torch flames, dozens of live entities carrying the same
+	// number at once. Writing through one mutates whichever the map currently points at, and
+	// list.cpp erases the map entry by uid, so the first of them to die evicts the entry for all.
+	//
+	// A LIMB. A bodypart's position, size and flags are rewritten from its owner every frame, so
+	// a write to one vanishes without a word. Detected BY POINTER against the owner's bodyparts
+	// vector: comparing by value cannot tell two limbs apart, which is the same lesson itemCompare
+	// taught when destroying a spare sword unequipped the worn one.
+	bool samIsBodypart(const Entity* e)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( !e ) { return false; }
+		// A limb does not always know its owner: the player's HUD limbs and the death-ghost limbs
+		// are pushed onto bodyparts with parent left at 0, so the parent lookup below misses them
+		// entirely and they resolved as ordinary writable entities. Check the players directly
+		// first -- there are at most four, so this costs nothing.
+		for ( int samP = 0; samP < MAXPLAYERS; ++samP )
+		{
+			if ( !players[samP] || !players[samP]->entity ) { continue; }
+			for ( const Entity* bp : players[samP]->entity->bodyparts )
+			{
+				if ( bp == e ) { return true; }
+			}
+		}
+		if ( e->parent == 0 ) { return false; }
+		Entity* p = uidToEntity((Sint32)e->parent);
+		if ( !p ) { return false; }
+		for ( const Entity* bp : p->bodyparts ) { if ( bp == e ) { return true; } }
+#else
+		(void)e;
+#endif
+		return false;
+	}
+
+	Entity* samResolveEntityRead(long long uid, const char* who)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		// The upper bound is not decoration. A uid is a Uint32, so the sentinel -3 IS the value
+		// 4294967293 -- which sails past `uid <= 0` on a long long and is turned straight back
+		// into -3 by the (Sint32) cast below. sam_remove_entity(4294967293) therefore walked
+		// through this guard, freed whichever gib held the shared marker, and list_RemoveNode
+		// then erased map.entities_map[-3] for every other -3 entity alive. Real uids come from
+		// a counter that starts at 1 and never approaches 2^31, so nothing legitimate is refused.
+		if ( uid <= 0 || uid > 0x7FFFFFFFLL )
+		{
+			SAM_WARN("LUA", std::string(who) + ": uid " + std::to_string(uid) + " is not one entity."
+				" 0 and the negatives are shared engine markers that dozens of gibs and sparks hold"
+				" at once, and anything past 2147483647 is the same markers written unsigned.");
+			return nullptr;
+		}
+		return uidToEntity((Sint32)uid);
+#else
+		(void)uid; (void)who; return nullptr;
+#endif
+	}
+
+	// The same guard for READERS, without the warning. A writer that is handed a sentinel uid has
+	// made a mistake worth saying out loud; a reader has usually just been handed this API's own
+	// "no entity" value back -- sam_get_monster_target answers 0 for a monster chasing nobody --
+	// so nil is the true answer to "where is nothing", and a log line would be noise once a frame.
+	Entity* samResolveEntityQuiet(long long uid)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		// Bounded above as well as below; see samResolveEntityRead for why 4294967293 is -3.
+		if ( uid <= 0 || uid > 0x7FFFFFFFLL ) { return nullptr; }
+		return uidToEntity((Sint32)uid);
+#else
+		(void)uid; return nullptr;
+#endif
+	}
+
+	Entity* samResolveWritable(long long uid, const char* who)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT )
+		{
+			SAM_WARN("LUA", std::string(who) + " refused: host only.");
+			return nullptr;
+		}
+		Entity* e = samResolveEntityRead(uid, who);
+		if ( !e ) { return nullptr; }
+		if ( samIsBodypart(e) )
+		{
+			SAM_WARN("LUA", std::string(who) + ": uid " + std::to_string(uid) + " is a limb. Its"
+				" position, size and flags are rewritten from its owner every frame, so this would"
+				" have no lasting effect. Pass the owner's uid.");
+			return nullptr;
+		}
+		return e;
+#else
+		(void)uid; (void)who; return nullptr;
+#endif
+	}
+
+	// ---- entity removal, deferred ---------------------------------------------------------
+	//
+	// Freeing an Entity while a script runs is a use-after-free, for the same reason freeing an
+	// Item was: the script only runs because the engine called into it, and the caller is still
+	// holding the pointer. Entity::attack calls modHP and then keeps dereferencing hit.entity for
+	// another ~160 lines; modHP is what fires the damage events a mod handles.
+	//
+	// Queued by UID, never by pointer -- a stale pointer is undetectable where a stale uid simply
+	// fails to resolve. Re-resolved and re-checked on drain, exactly as the item queue does.
+	std::vector<Uint32> g_pendingRemove;
+
+	bool samQueueRemoveEntity(Uint32 uid, const char* who)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		Entity* e = samResolveWritable((long long)uid, who);
+		if ( !e ) { return false; }
+		if ( e->behavior == &actPlayer )
+		{
+			SAM_WARN("LUA", std::string(who) + " refused: cannot remove a player.");
+			return false;
+		}
+		for ( Uint32 q : g_pendingRemove ) { if ( q == uid ) { return true; } }   // already queued
+		g_pendingRemove.push_back(uid);
+		return true;
+#else
+		(void)uid; (void)who; return false;
+#endif
+	}
+
+
+
+
+	// A REQUIRED flag. Batch 2 settled what a missing flag means: sam_set_item_droppable(uid)
+	// refuses rather than guessing, because guessing wrong on a flag is invisible until the
+	// wrong thing is on screen. Same rule here.
+	static bool samBoolReq(lua_State* Ls, int idx, const char* who, bool* out)
+	{
+		if ( lua_isnoneornil(Ls, idx) )
+		{
+			SAM_ERROR("LUA", std::string(who) + ": argument " + std::to_string(idx)
+				+ " (true or false) is required.");
+			return false;
+		}
+		// lua_type, NOT lua_isnumber. lua_isnumber answers TRUE for a STRING that converts to a
+		// number, so the string "0" took the numeric branch and came out false here while
+		// JS_ToBool("0") is true -- every non-empty string is truthy in JavaScript. These helpers
+		// exist to give the two runtimes ONE rule, and gating on lua_isnumber quietly broke that
+		// on the very argument type they were written to unify. lua_type never coerces.
+		if ( lua_type(Ls, idx) == LUA_TNUMBER )
+		{
+			const double d = lua_tonumber(Ls, idx);
+			*out = ( d != 0.0 && d == d );   // d == d excludes NaN, which JS_ToBool calls false
+			return true;
+		}
+		if ( lua_type(Ls, idx) == LUA_TSTRING )
+		{
+			size_t n = 0; lua_tolstring(Ls, idx, &n);
+			*out = ( n != 0 );               // JavaScript: "" is false, every other string true
+			return true;
+		}
+		*out = lua_toboolean(Ls, idx) != 0;
+		return true;
+	}
+
+	// A flag argument, matching the JS twin exactly. lua_toboolean answers TRUE for the number
+	// 0, which JS_ToBool does not, so a script passing 0 meaning "off" got "on" in Lua and "off"
+	// in JavaScript -- a divergence that is live in shipped code (sam_set_visible).
+	static bool samBoolArg(lua_State* Ls, int idx, bool dflt)
+	{
+		if ( lua_isnoneornil(Ls, idx) ) { return dflt; }
+		// See samBoolReq: lua_isnumber is true for a numeric STRING, which put "0" on the numeric
+		// branch and disagreed with JS_ToBool. Branch on the real type instead.
+		if ( lua_type(Ls, idx) == LUA_TNUMBER )
+		{
+			const double d = lua_tonumber(Ls, idx);
+			return ( d != 0.0 && d == d );
+		}
+		if ( lua_type(Ls, idx) == LUA_TSTRING )
+		{
+			size_t n = 0; lua_tolstring(Ls, idx, &n);
+			return ( n != 0 );
+		}
+		return lua_toboolean(Ls, idx) != 0;
+	}
+
+
+
+	// A bare asset id means "one of mine". sam_show_image has always accepted that and
+	// namespaced it to the calling mod; models and sounds demanded the full "ns:id", so inside a
+	// single mod sam_show_image(p, "banner") worked and sam_set_model(uid, "myship") did not.
+	//
+	// Tried as a FALLBACK, after the id exactly as written, so a vanilla model path or an id that
+	// already resolves is never shadowed by a same-named asset of the calling mod.
+	// WHOSE namespace is an argument, defaulting to the Lua runtime's own. Reading g_currentNs
+	// unconditionally meant this fallback never fired for a JavaScript mod (that runtime keeps a
+	// separate current-namespace global), and that in the three spawn functions both runtimes
+	// share, a JS callback invoked from a Lua event resolved ITS bare id inside the firing LUA
+	// mod's namespace -- one mod's asset name answered out of another mod's registry.
+	int samResolveModelAsset(const std::string& id, const std::string& nsIn = std::string())
+	{
+		const std::string& ns = nsIn.empty() ? g_currentNs : nsIn;
+		int idx = SAMModels::modelIndexForId(id);
+		if ( idx < 0 && id.find(':') == std::string::npos && !ns.empty() )
+		{
+			idx = SAMModels::modelIndexForId(ns + ":" + id);
+		}
+		return idx;
+	}
+	int samResolveSoundAsset(const std::string& id, const std::string& nsIn = std::string())
+	{
+		const std::string& ns = nsIn.empty() ? g_currentNs : nsIn;
+		int idx = SAMSounds::soundIndexForId(id);
+		if ( idx < 0 && id.find(':') == std::string::npos && !ns.empty() )
+		{
+			idx = SAMSounds::soundIndexForId(ns + ":" + id);
+		}
+		return idx;
+	}
+
 
 	// Part 4 timers — per-script, keyed by (ns,id). Ticked once per game tick (host).
 	struct Timer
@@ -394,13 +741,10 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		{
 			resolvedType = SAMItems::itemIdForIdString(itemName);
 		}
-		if ( resolvedType < 0 )
-		{
-			std::string lower = itemName;
-			for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
-			auto it = ItemTooltips.itemNameStringToItemID.find(lower);
-			if ( it != ItemTooltips.itemNameStringToItemID.end() ) { resolvedType = it->second; }
-		}
+		// One resolver, shared with every other name-taking call: digits, "ns:id", the internal
+		// name, then the DISPLAYED name -- which is what sam_list_items and sam_get_container_items
+		// hand out, and what this used to refuse.
+		if ( resolvedType < 0 ) { resolvedType = SAMCatalog::itemTypeFor(itemName); }
 		if ( resolvedType < 0 )
 		{
 			SAM_ERROR("LUA", "sam_grant_item: unknown item '" + itemName
@@ -1050,13 +1394,10 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		{
 			resolvedType = SAMItems::itemIdForIdString(itemName);
 		}
-		if ( resolvedType < 0 )
-		{
-			std::string lower = itemName;
-			for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
-			auto it = ItemTooltips.itemNameStringToItemID.find(lower);
-			if ( it != ItemTooltips.itemNameStringToItemID.end() ) { resolvedType = it->second; }
-		}
+		// One resolver, shared with every other name-taking call: digits, "ns:id", the internal
+		// name, then the DISPLAYED name -- which is what sam_list_items and sam_get_container_items
+		// hand out, and what this used to refuse.
+		if ( resolvedType < 0 ) { resolvedType = SAMCatalog::itemTypeFor(itemName); }
 		if ( resolvedType < 0 )
 		{
 			SAM_ERROR("LUA", "sam_spawn_item: unknown item '" + itemName
@@ -1103,13 +1444,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		{
 			id = SAMItems::itemIdForIdString(name);
 		}
-		else
-		{
-			std::string lower = name;
-			for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
-			auto it = ItemTooltips.itemNameStringToItemID.find(lower);
-			if ( it != ItemTooltips.itemNameStringToItemID.end() ) { id = it->second; }
-		}
+		else { id = SAMCatalog::itemTypeFor(name); }   // shared resolver; accepts a displayed name too
 		if ( id < 0 ) { lua_pushnil(Ls); return 1; }
 		lua_pushinteger(Ls, (lua_Integer)id);
 		return 1;
@@ -1138,7 +1473,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		if ( lua_type(Ls, idx) == LUA_TSTRING )
 		{
 			const char* nm = lua_tostring(Ls, idx);
-			return SAMSounds::soundIndexForId(nm ? nm : "");
+			return samResolveSoundAsset(nm ? nm : "");
 		}
 		return (int)luaL_checkinteger(Ls, idx);
 	}
@@ -1150,7 +1485,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		if ( lua_type(Ls, 1) == LUA_TSTRING )
 		{
 			const char* nm = lua_tostring(Ls, 1);
-			soundId = SAMSounds::soundIndexForId(nm ? nm : "");
+			soundId = samResolveSoundAsset(nm ? nm : "");
 			if ( soundId < 0 )
 			{ SAM_ERROR("LUA", std::string("sam_play_sound: unknown sound name '") + (nm ? nm : "") + "'."); lua_pushboolean(Ls, 0); return 1; }
 		}
@@ -1280,7 +1615,10 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		Stat* s = stats[player];
 		if ( slot == "WEAPON" )                          { return s->weapon; }
 		if ( slot == "SHIELD" )                          { return s->shield; }
-		if ( slot == "HELMET" )                          { return s->helmet; }
+		// "HELM" as well: sam_get_item_slot emits HELM, and one S.A.M call's output must be
+		// accepted by the next. The monster twin (samMonsterSlot) already took both, which is
+		// what makes this an oversight rather than a deliberate second vocabulary.
+		if ( slot == "HELMET" || slot == "HELM" )        { return s->helmet; }
 		if ( slot == "ARMOR" || slot == "BREASTPLATE" )  { return s->breastplate; }
 		if ( slot == "GLOVES" )                          { return s->gloves; }
 		if ( slot == "BOOTS" || slot == "SHOES" )        { return s->shoes; }
@@ -1361,13 +1699,18 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		const int player = (int)luaL_checkinteger(Ls, 1);
 		const char* nameC = luaL_checkstring(Ls, 2);
 		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { lua_pushinteger(Ls, 0); return 1; }
-		std::string lower = nameC ? nameC : "";
-		for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
-		int wantType = -1;
-		auto mit = ItemTooltips.itemNameStringToItemID.find(lower);
-		if ( mit != ItemTooltips.itemNameStringToItemID.end() ) { wantType = mit->second; }
-		else { const int cid = SAMItems::itemIdForIdString(nameC ? nameC : ""); if ( cid >= 0 ) { wantType = cid; } }
-		if ( wantType < 0 ) { lua_pushinteger(Ls, 0); return 1; }
+		// Through the shared resolver, so this accepts everything sam_grant_item does.
+		const int wantType = SAMCatalog::itemTypeFor(nameC ? nameC : "");
+		// An unresolvable name is NOT "you have none of them". This answered 0 either way, with
+		// no log, so a typo was indistinguishable from an empty bag -- the only call in this
+		// family that failed in complete silence.
+		if ( wantType < 0 )
+		{
+			SAM_ERROR("LUA", "sam_get_inventory_count: unknown item '" + std::string(nameC ? nameC : "")
+				+ "'. Returning 0, which is NOT the same as owning none -- check the name.");
+			lua_pushinteger(Ls, 0);
+			return 1;
+		}
 		long long total = 0;
 		for ( node_t* node = stats[player]->inventory.first; node != nullptr; node = node->next )
 		{
@@ -1444,7 +1787,12 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		for ( int id = 135; id < NUMEFFECTS; ++id ) // custom pseudo-effect slots, if any are live
 		{
 			const Uint8 s = stats[player]->getEffectActive(id);
-			if ( s != 0 ) { pushEntry("CUSTOM:" + std::to_string(id), id, s); }
+			// effectNameFromId, not a hand-built "CUSTOM:<id>". That function was rewritten this
+			// batch to answer the lowercase vanilla name and the mod's own "ns:effect" id, so a
+			// script's effect list matches what player.on_effect_applied emits -- and both
+			// JavaScript consumers were moved onto it while these two Lua ones were not, leaving
+			// the divergence live in the half the change was written to fix.
+			if ( s != 0 ) { pushEntry(SAMLua::effectNameFromId(id), id, s); }
 		}
 		return 1;
 	}
@@ -1532,13 +1880,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		{
 			const std::string name = lua_tostring(Ls, 1);
 			if ( name.find(':') != std::string::npos ) { type = SAMItems::itemIdForIdString(name); }
-			if ( type < 0 )
-			{
-				std::string lower = name;
-				for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
-				auto it = ItemTooltips.itemNameStringToItemID.find(lower);
-				if ( it != ItemTooltips.itemNameStringToItemID.end() ) { type = it->second; }
-			}
+			if ( type < 0 ) { type = SAMCatalog::itemTypeFor(name); }   // shared resolver
 		}
 		if ( type < 0 || type >= NUM_ITEM_SLOTS ) { lua_pushnil(Ls); return 1; }
 		const std::string cat = SAMItems::categoryName((int)items[type].category);
@@ -1560,8 +1902,14 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		if ( cls >= SAM_CLASS_ID_BASE )
 		{
 			const SAMClassDef* def = SAMClasses::getClass(cls);
-			return def ? def->name.c_str() : "";
+			// The class's ID, not its display name. `name` is "Blood Knight" and resolved
+			// NOWHERE -- every class consumer (patch_class, add_class_passive, ...) matches on
+			// `id`, so the old value could not be fed back into anything. sam_get_race has
+			// always done it this way; this is the same shape.
+			return def ? def->id.c_str() : "";
 		}
+		// Vanilla stays the lowercase engine name ("barbarian"), which classIdForIdString now
+		// accepts, so both halves of this function round-trip.
 		return playerClassLangEntry(cls, player);
 	}
 
@@ -1869,7 +2217,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		const int w = (int)luaL_checkinteger(Ls, 4);
 		const int h = (int)luaL_checkinteger(Ls, 5);
 		const char* title = lua_isnoneornil(Ls, 6) ? "" : luaL_checkstring(Ls, 6);
-		const bool modal = lua_isnoneornil(Ls, 7) ? false : (lua_toboolean(Ls, 7) != 0);
+		const bool modal = samBoolArg(Ls, 7, false);   // one boolean rule: 0 is false in both runtimes
 		lua_pushboolean(Ls, SAMUi::open(g_currentNs, panel ? panel : "", x, y, w, h,
 			title ? title : "", modal) ? 1 : 0);
 		return 1;
@@ -2308,7 +2656,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		const double y1 = (double)luaL_checknumber(Ls, 2);
 		const double x2 = (double)luaL_checknumber(Ls, 3);
 		const double y2 = (double)luaL_checknumber(Ls, 4);
-		const bool ents = lua_isnoneornil(Ls, 5) ? false : (lua_toboolean(Ls, 5) != 0);
+		const bool ents = samBoolArg(Ls, 5, false);   // one boolean rule: 0 is false in both runtimes
 		int bx = -1, by = -1;
 		const bool ok = SAMWorld::lineOfSight(x1, y1, x2, y2, ents, bx, by);
 		lua_pushboolean(Ls, ok ? 1 : 0);
@@ -2324,7 +2672,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		SAMLogger::noteApiCall();
 		const int x1 = (int)luaL_checkinteger(Ls, 1), y1 = (int)luaL_checkinteger(Ls, 2);
 		const int x2 = (int)luaL_checkinteger(Ls, 3), y2 = (int)luaL_checkinteger(Ls, 4);
-		const bool fly = lua_isnoneornil(Ls, 5) ? false : (lua_toboolean(Ls, 5) != 0);
+		const bool fly = samBoolArg(Ls, 5, false);   // one boolean rule: 0 is false in both runtimes
 		lua_pushboolean(Ls, SAMWorld::connected(x1, y1, x2, y2, fly) ? 1 : 0);
 		return 1;
 	}
@@ -2385,7 +2733,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 	{
 		SAMLogger::noteApiCall();
 		const long long uid = (long long)luaL_checkinteger(Ls, 1);
-		lua_pushboolean(Ls, SAMWorld::setDoor((uint32_t)uid, lua_toboolean(Ls, 2) != 0) ? 1 : 0);
+		lua_pushboolean(Ls, SAMWorld::setDoor((uint32_t)uid, samBoolArg(Ls, 2, false)) ? 1 : 0);
 		return 1;
 	}
 
@@ -2393,7 +2741,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 	{
 		SAMLogger::noteApiCall();
 		const long long uid = (long long)luaL_checkinteger(Ls, 1);
-		lua_pushboolean(Ls, SAMWorld::setDoorLocked((uint32_t)uid, lua_toboolean(Ls, 2) != 0) ? 1 : 0);
+		lua_pushboolean(Ls, SAMWorld::setDoorLocked((uint32_t)uid, samBoolArg(Ls, 2, false)) ? 1 : 0);
 		return 1;
 	}
 
@@ -2401,7 +2749,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 	{
 		SAMLogger::noteApiCall();
 		const long long uid = (long long)luaL_checkinteger(Ls, 1);
-		lua_pushboolean(Ls, SAMWorld::powerEntity((uint32_t)uid, lua_toboolean(Ls, 2) != 0) ? 1 : 0);
+		lua_pushboolean(Ls, SAMWorld::powerEntity((uint32_t)uid, samBoolArg(Ls, 2, false)) ? 1 : 0);
 		return 1;
 	}
 
@@ -2501,7 +2849,10 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		SAMLogger::noteApiCall();
 		const long long uid = (long long)luaL_checkinteger(Ls, 1);
 		const char* nameC = luaL_checkstring(Ls, 2);
-		const bool eff = lua_isnoneornil(Ls, 3) ? true : (lua_toboolean(Ls, 3) != 0);
+		// samBoolArg, not lua_toboolean: the number 0 is TRUE to lua_toboolean and FALSE to
+		// JS_ToBool, so sam_get_skill(uid, "sword", 0) returned the gear-modified proficiency in
+		// Lua and the raw trained rank in JavaScript -- different numbers, neither flagged.
+		const bool eff = samBoolArg(Ls, 3, true);
 #ifdef SAM_LUA_HAVE_BARONY
 		const int skill = samSkillFromName(nameC);
 		if ( skill < 0 )
@@ -2622,7 +2973,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		int vol = (int)luaL_optinteger(Ls, 3, 128);
 #ifdef SAM_LUA_HAVE_BARONY
 		if ( snd < 0 || snd >= (int)numsounds ) { lua_pushboolean(Ls, 0); return 1; }
-		Entity* e = uidToEntity((Sint32)uid);
+		Entity* e = samResolveEntityQuiet((long long)uid);
 		if ( !e ) { lua_pushboolean(Ls, 0); return 1; }
 		if ( vol < 0 ) { vol = 0; }
 		if ( vol > 255 ) { vol = 255; }
@@ -2680,7 +3031,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		const int gibType = (int)luaL_optinteger(Ls, 3, 0);
 #ifdef SAM_LUA_HAVE_BARONY
 		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_damage_number refused: host only."); lua_pushboolean(Ls, 0); return 1; }
-		Entity* e = uidToEntity((Sint32)uid);
+		Entity* e = samResolveEntityQuiet((long long)uid);
 		if ( !e ) { lua_pushboolean(Ls, 0); return 1; }
 		spawnDamageGib(e, amount, gibType, 0, true);
 		lua_pushboolean(Ls, 1);
@@ -2702,6 +3053,51 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 	// JSON under <savegames>/sam_mod_data/<namespace>/<key>.json. Namespace comes
 	// from the currently-executing script (g_currentNs).
 
+	// A mod-data key becomes a FILENAME, so the characters a filesystem refuses have to go.
+	// This used to map '/', '\\', ':' and '.' all onto '_', which broke two ways: the key could
+	// not be listed back (sam_list_data_keys returned "quest_main" for "quest.main", and the
+	// script's own comparison never matched), and the mapping was many-to-one, so "a.b" and
+	// "a_b" shared one file and the second silently destroyed the first.
+	//
+	// Percent-encoding is one-to-one and decodable, so the key survives the round trip and two
+	// different keys can never collide. Anything outside [A-Za-z0-9_-] is escaped, '%' included.
+	std::string samEncodeKey(const std::string& s)
+	{
+		static const char* kHex = "0123456789ABCDEF";
+		std::string o;
+		for ( unsigned char c : s )
+		{
+			const bool plain = ( c >= 'A' && c <= 'Z' ) || ( c >= 'a' && c <= 'z' )
+				|| ( c >= '0' && c <= '9' ) || c == '_' || c == '-';
+			if ( plain ) { o += (char)c; }
+			else { o += '%'; o += kHex[(c >> 4) & 0xF]; o += kHex[c & 0xF]; }
+		}
+		return o.empty() ? std::string("_") : o;
+	}
+
+	// The inverse. A filename with no '%' is either a plain key or one written by an older
+	// build, and comes back unchanged -- which is exactly what that build would have returned.
+	std::string samDecodeKey(const std::string& s)
+	{
+		std::string o;
+		for ( size_t i = 0; i < s.size(); ++i )
+		{
+			if ( s[i] == '%' && i + 2 < s.size() )
+			{
+				auto hex = [](char c) -> int {
+					if ( c >= '0' && c <= '9' ) { return c - '0'; }
+					if ( c >= 'A' && c <= 'F' ) { return c - 'A' + 10; }
+					if ( c >= 'a' && c <= 'f' ) { return c - 'a' + 10; }
+					return -1;
+				};
+				const int hi = hex(s[i + 1]), lo = hex(s[i + 2]);
+				if ( hi >= 0 && lo >= 0 ) { o += (char)((hi << 4) | lo); i += 2; continue; }
+			}
+			o += s[i];
+		}
+		return o;
+	}
+
 	std::string samSanitize(const std::string& s)
 	{
 		std::string o;
@@ -2720,6 +3116,41 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		return base + "/" + samSanitize(ns);
 	}
 
+	// A saved key's FILENAME changed in this batch, and the files already on disk did not.
+	//
+	// The old scheme rewrote only / \ : and . to '_' and passed everything else through; the new
+	// one percent-escapes every byte outside [A-Za-z0-9_-] so the mapping is REVERSIBLE and
+	// sam_list_data_keys can show the key a mod actually used. That codec is right. What was
+	// missing is that a mod shipped on 2.6.1 wrote "high.score" to high_score.json, and after the
+	// change it would look under high%2Escore.json, find nothing, and be told nil -- which is also
+	// exactly what "never saved" looks like, so it would quietly start over with the player's
+	// progress gone and nothing in any log.
+	//
+	// So the legacy file is RENAMED into place the first time the key is touched. A rename rather
+	// than a copy means it happens once and sam_list_data_keys stops reporting the orphan under a
+	// mangled name.
+	//
+	// The old scheme was many-to-one -- "high.score" and "high_score" shared one file -- so two
+	// keys can compete for the same legacy file and whichever is touched first claims it. That
+	// ambiguity is pre-existing and is the very reason the codec was replaced; the distinction was
+	// never written to disk, so nothing here can recover it.
+	void samMigrateLegacyDataFile(const std::string& dir, const std::string& key)
+	{
+		const std::string legacyStem = samSanitize(key);
+		const std::string modernStem = samEncodeKey(key);
+		if ( legacyStem == modernStem ) { return; }   // this key's filename did not change
+		std::error_code ec;
+		const std::filesystem::path modern = std::filesystem::path(dir) / (modernStem + ".json");
+		if ( std::filesystem::exists(modern, ec) ) { return; }
+		const std::filesystem::path legacy = std::filesystem::path(dir) / (legacyStem + ".json");
+		if ( !std::filesystem::exists(legacy, ec) ) { return; }
+		std::filesystem::rename(legacy, modern, ec);
+		if ( !ec )
+		{
+			SAM_INFO("SAM", "Moved saved data for key '" + key + "' onto the new file name.");
+		}
+	}
+
 	std::string samModDataFile(const std::string& ns, const std::string& key)
 	{
 #ifdef SAM_LUA_HAVE_BARONY
@@ -2727,7 +3158,9 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 #else
 		const std::string base = "./sam_mod_data";
 #endif
-		return base + "/" + samSanitize(ns) + "/" + samSanitize(key) + ".json";
+		const std::string dir = base + "/" + samSanitize(ns);
+		samMigrateLegacyDataFile(dir, key);   // rescue anything an older build wrote under this key
+		return dir + "/" + samEncodeKey(key) + ".json";
 	}
 
 	nlohmann::json luaToJson(lua_State* Ls, int idx, int depth)
@@ -2853,7 +3286,10 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 			std::string fn = entry.path().filename().string();
 			if ( fn.size() <= 5 || fn.substr(fn.size() - 5) != ".json" ) { continue; }
 			fn.erase(fn.size() - 5);
-			lua_pushstring(Ls, fn.c_str());
+			// Decoded, so this returns the key sam_save_data was CALLED with. It used to return
+			// the mangled filename, which is why `k == "quest.main"` never matched.
+			const std::string decoded = samDecodeKey(fn);
+			lua_pushstring(Ls, decoded.c_str());
 			lua_rawseti(Ls, -2, idx++);
 		}
 		return 1;
@@ -3080,9 +3516,10 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		const long long uid = (long long)luaL_checkinteger(Ls, 1);
 		const int amount = (int)luaL_checkinteger(Ls, 2);
 #ifdef SAM_LUA_HAVE_BARONY
-		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_deal_damage refused: host only."); lua_pushboolean(Ls, 0); return 1; }
-		Entity* e = uidToEntity((Uint32)uid);
-		if ( !e ) { SAM_WARN("LUA", "sam_deal_damage: no entity with uid " + std::to_string(uid) + "."); lua_pushboolean(Ls, 0); return 1; }
+		// The writer's resolver: this deals real damage, and it was still resolving a shared
+		// sentinel uid to whichever gib the map happened to be holding under it.
+		Entity* e = samResolveWritable(uid, "sam_deal_damage");
+		if ( !e ) { lua_pushboolean(Ls, 0); return 1; }
 		const int dmg = ( amount < 0 ) ? amount : -amount; // positive request => negative modHP
 		e->modHP(dmg);
 		SAM_INFO("SAM", "sam_deal_damage: " + std::to_string(-dmg) + " damage to uid " + std::to_string(uid));
@@ -3161,7 +3598,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 	{
 		SAMLogger::noteApiCall();
 		const long long uid = (long long)luaL_checkinteger(Ls, 1);
-		Entity* e = uidToEntity((Sint32)uid);
+		Entity* e = samResolveEntityQuiet((long long)uid);
 		if ( !e ) { lua_pushnil(Ls); return 1; }
 		lua_pushnumber(Ls, (lua_Number)e->x);
 		lua_pushnumber(Ls, (lua_Number)e->y);
@@ -3173,8 +3610,8 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 	int lua_sam_get_distance(lua_State* Ls)
 	{
 		SAMLogger::noteApiCall();
-		Entity* a = uidToEntity((Sint32)luaL_checkinteger(Ls, 1));
-		Entity* b = uidToEntity((Sint32)luaL_checkinteger(Ls, 2));
+		Entity* a = samResolveEntityQuiet((long long)luaL_checkinteger(Ls, 1));
+		Entity* b = samResolveEntityQuiet((long long)luaL_checkinteger(Ls, 2));
 		if ( !a || !b ) { lua_pushnil(Ls); return 1; }
 		lua_pushnumber(Ls, (lua_Number)(entityDist(a, b) / 16.0));
 		return 1;
@@ -3185,7 +3622,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 	int lua_sam_get_distance_to(lua_State* Ls)
 	{
 		SAMLogger::noteApiCall();
-		Entity* e = uidToEntity((Sint32)luaL_checkinteger(Ls, 1));
+		Entity* e = samResolveEntityQuiet((long long)luaL_checkinteger(Ls, 1));
 		const int tx = (int)luaL_checkinteger(Ls, 2);
 		const int ty = (int)luaL_checkinteger(Ls, 3);
 		if ( !e ) { lua_pushnil(Ls); return 1; }
@@ -3200,7 +3637,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 	int lua_sam_get_entity_type(lua_State* Ls)
 	{
 		SAMLogger::noteApiCall();
-		Entity* e = uidToEntity((Sint32)luaL_checkinteger(Ls, 1));
+		Entity* e = samResolveEntityQuiet((long long)luaL_checkinteger(Ls, 1));
 		if ( !e ) { lua_pushnil(Ls); return 1; }
 		const char* kind = "other";
 		if ( e->behavior == &actPlayer )            { kind = "player"; }
@@ -3216,6 +3653,9 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		else if ( e->behavior == &actSink )         { kind = "sink"; }
 		else if ( e->behavior == &actBoulder )      { kind = "boulder"; }
 		else if ( e->behavior == &actGib )          { kind = "gib"; }
+		// "gold" was accepted by sam_find_entities and produced by nothing, so a uid it had just
+		// handed back described itself as "other".
+		else if ( e->behavior == &actGoldBag )      { kind = "gold"; }
 		lua_pushstring(Ls, kind);
 		return 1;
 	}
@@ -3224,7 +3664,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 	int lua_sam_get_scale(lua_State* Ls)
 	{
 		SAMLogger::noteApiCall();
-		Entity* e = uidToEntity((Sint32)luaL_checkinteger(Ls, 1));
+		Entity* e = samResolveEntityQuiet((long long)luaL_checkinteger(Ls, 1));
 		if ( !e ) { lua_pushnil(Ls); return 1; }
 		lua_pushnumber(Ls, (lua_Number)e->scalex);
 		lua_pushnumber(Ls, (lua_Number)e->scaley);
@@ -3236,7 +3676,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 	int lua_sam_is_visible(lua_State* Ls)
 	{
 		SAMLogger::noteApiCall();
-		Entity* e = uidToEntity((Sint32)luaL_checkinteger(Ls, 1));
+		Entity* e = samResolveEntityQuiet((long long)luaL_checkinteger(Ls, 1));
 		if ( !e ) { lua_pushnil(Ls); return 1; }
 		lua_pushboolean(Ls, e->flags[INVISIBLE] ? 0 : 1);
 		return 1;
@@ -3246,7 +3686,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 	int lua_sam_get_velocity(lua_State* Ls)
 	{
 		SAMLogger::noteApiCall();
-		Entity* e = uidToEntity((Sint32)luaL_checkinteger(Ls, 1));
+		Entity* e = samResolveEntityQuiet((long long)luaL_checkinteger(Ls, 1));
 		if ( !e ) { lua_pushnil(Ls); return 1; }
 		lua_pushnumber(Ls, (lua_Number)e->vel_x);
 		lua_pushnumber(Ls, (lua_Number)e->vel_y);
@@ -3259,7 +3699,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 	int lua_sam_get_entity_size(lua_State* Ls)
 	{
 		SAMLogger::noteApiCall();
-		Entity* e = uidToEntity((Sint32)luaL_checkinteger(Ls, 1));
+		Entity* e = samResolveEntityQuiet((long long)luaL_checkinteger(Ls, 1));
 		if ( !e ) { lua_pushnil(Ls); return 1; }
 		lua_pushinteger(Ls, (lua_Integer)e->sizex);
 		lua_pushinteger(Ls, (lua_Integer)e->sizey);
@@ -3270,7 +3710,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 	int lua_sam_get_entity_sprite(lua_State* Ls)
 	{
 		SAMLogger::noteApiCall();
-		Entity* e = uidToEntity((Sint32)luaL_checkinteger(Ls, 1));
+		Entity* e = samResolveEntityQuiet((long long)luaL_checkinteger(Ls, 1));
 		if ( !e ) { lua_pushnil(Ls); return 1; }
 		lua_pushinteger(Ls, (lua_Integer)e->sprite);
 		return 1;
@@ -3280,7 +3720,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 	int lua_sam_get_entity_ticks(lua_State* Ls)
 	{
 		SAMLogger::noteApiCall();
-		Entity* e = uidToEntity((Sint32)luaL_checkinteger(Ls, 1));
+		Entity* e = samResolveEntityQuiet((long long)luaL_checkinteger(Ls, 1));
 		if ( !e ) { lua_pushnil(Ls); return 1; }
 		lua_pushinteger(Ls, (lua_Integer)e->ticks);
 		return 1;
@@ -4135,14 +4575,31 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		for ( const char* c = traitC; c && *c; ++c ) { u += (char)toupper((unsigned char)*c); }
 		if ( t < 0 || t >= NUM_ITEM_SLOTS ) { lua_pushboolean(Ls, 0); return 1; }
 		const ItemType ty = (ItemType)t;
+		// All ELEVEN traits a mod may declare, not the four this used to know. Two sources, asked
+		// in this order: the bit a custom item declared (ItemGeneric::samTraits, set from
+		// kTraitNames in sam_items.cpp), then the engine's own predicate for a vanilla item.
+		// Four of these -- automaton_food, tinker_throwable, usable, beatitude_ac -- had no
+		// reader anywhere before this.
+		const Uint64 declared = ( t >= 0 && t < NUM_ITEM_SLOTS ) ? ::items[t].samTraits : 0ULL;
 		bool v = false;
-		if ( u == "QUIVER" )           { v = itemTypeIsQuiver(ty); }
-		else if ( u == "FOCI" )        { v = itemTypeIsFoci(ty); }
-		else if ( u == "INSTRUMENT" )  { v = itemTypeIsInstrument(ty); }
-		else if ( u == "THROWN_BALL" ) { v = itemTypeIsThrownBall(ty); }
-		else
+		bool known = true;
+		if      ( u == "RANGED" )           { v = ( declared & SAMItemTrait::RANGED ) || isRangedWeapon(ty); }
+		else if ( u == "QUIVER" )           { v = ( declared & SAMItemTrait::QUIVER ) || itemTypeIsQuiver(ty); }
+		else if ( u == "FOCI" )             { v = ( declared & SAMItemTrait::FOCI ) || itemTypeIsFoci(ty); }
+		else if ( u == "INSTRUMENT" )       { v = ( declared & SAMItemTrait::INSTRUMENT ) || itemTypeIsInstrument(ty); }
+		else if ( u == "THROWN_BALL" )      { v = ( declared & SAMItemTrait::THROWN_BALL ) || itemTypeIsThrownBall(ty); }
+		else if ( u == "SHIELD_SLOT" )      { v = ( declared & SAMItemTrait::SHIELD_SLOT ) != 0; }
+		else if ( u == "POTION_BAD" )       { v = ( declared & SAMItemTrait::POTION_BAD ) != 0; }
+		else if ( u == "AUTOMATON_FOOD" )   { v = ( declared & SAMItemTrait::AUTOMATON_FOOD ) != 0; }
+		else if ( u == "TINKER_THROWABLE" ) { v = ( declared & SAMItemTrait::TINKER_THROWABLE ) != 0; }
+		else if ( u == "USABLE" )           { v = ( declared & SAMItemTrait::USABLE ) != 0; }
+		else if ( u == "BEATITUDE_AC" )     { v = ( declared & SAMItemTrait::BEATITUDE_AC ) != 0; }
+		else                                { known = false; }
+		if ( !known )
 		{
-			SAM_ERROR("LUA", "sam_item_has_trait: unknown trait. Valid: QUIVER, FOCI, INSTRUMENT, THROWN_BALL.");
+			SAM_ERROR("LUA", "sam_item_has_trait: unknown trait '" + u + "'. Valid: RANGED, QUIVER,"
+				" FOCI, INSTRUMENT, THROWN_BALL, SHIELD_SLOT, POTION_BAD, AUTOMATON_FOOD,"
+				" TINKER_THROWABLE, USABLE, BEATITUDE_AC.");
 			lua_pushboolean(Ls, 0); return 1;
 		}
 		lua_pushboolean(Ls, v ? 1 : 0);
@@ -4319,7 +4776,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 	{
 		SAMLogger::noteApiCall();
 		const long long uid = (long long)luaL_checkinteger(Ls, 1);
-		Entity* e = uidToEntity((Sint32)uid);
+		Entity* e = samResolveEntityQuiet((long long)uid);
 		if ( !e ) { lua_pushnil(Ls); return 1; }
 		lua_pushinteger(Ls, (lua_Integer)((int)e->x >> 4)); // pixel -> tile
 		lua_pushinteger(Ls, (lua_Integer)((int)e->y >> 4));
@@ -4330,15 +4787,62 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 	// teleport() path (obstacle + MFLAG_DISABLETELEPORT guards + TELE packet) so they
 	// can't tunnel into walls; other entities move by x/y + UPDATENEEDED (the server's
 	// per-frame broadcast picks it up — no new packet). Host only.
+	// sam_can_stand(uid, tileX, tileY) -> boolean
+	//
+	// "Would the engine accept THIS entity at that tile?" -- which is a different question from
+	// sam_is_spawnable, whose whole body is `t.valid && t.walkable`: a map read that cannot see
+	// entities, and cannot see the asker's own collision profile. checkObstacle can: levitation,
+	// size, and the pass-through set all change the answer, and no script can compute those.
+	//
+	// THE BOUNDS TEST IS NOT OPTIONAL. checkObstacle returns 0 -- meaning CLEAR -- for every
+	// coordinate outside the map, because its body sits inside a bounds check and falls through
+	// to a final `return 0;` when that fails. Without the test below this function would
+	// confidently green-light a teleport into the void, which is the fallback-returns-a-real-value
+	// shape this batch exists to stop repeating.
+	//
+	// True is NECESSARY, not SUFFICIENT: Entity::teleport applies further rules of its own
+	// (entityInsideSomething, the Minotaur-level ban, MFLAG_DISABLETELEPORT for players).
+	int lua_sam_can_stand(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const int tx = (int)luaL_checkinteger(Ls, 2);
+		const int ty = (int)luaL_checkinteger(Ls, 3);
+#ifdef SAM_LUA_HAVE_BARONY
+		Entity* e = samResolveEntityRead(uid, "sam_can_stand");
+		if ( !e ) { lua_pushboolean(Ls, 0); return 1; }
+		if ( tx < 0 || tx >= (int)map.width || ty < 0 || ty >= (int)map.height )
+		{ lua_pushboolean(Ls, 0); return 1; }
+		// On a CLIENT this cannot answer the question it exists to answer. checkObstacle's entity
+		// pass walks TileEntityList, and that grid is filled only by the host's entity loop -- the
+		// client never calls addEntity, which is why barony_clear has an explicit CLIENT branch
+		// and checkObstacle has none. Walls and floors still test correctly, so the answer LOOKS
+		// right while every creature standing there is invisible to it. Say so rather than hand
+		// back a confident half-answer.
+		if ( multiplayer == CLIENT )
+		{
+			SAM_WARN("LUA", "sam_can_stand: on a connected client this only sees walls and floor,"
+				" not creatures, because the client does not keep the entity grid the test reads."
+				" Ask the host if the answer has to include who is standing there.");
+		}
+		SAMHitGuard samHit;   // checkObstacle writes the engine's `hit` global
+		lua_pushboolean(Ls, checkObstacle((tx << 4) + 8, (ty << 4) + 8, e, nullptr) == 0 ? 1 : 0);
+		return 1;
+#else
+		(void)uid; (void)tx; (void)ty; lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
 	int lua_sam_set_position(lua_State* Ls)
 	{
 		SAMLogger::noteApiCall();
 		const long long uid = (long long)luaL_checkinteger(Ls, 1);
 		const int tx = (int)luaL_checkinteger(Ls, 2);
 		const int ty = (int)luaL_checkinteger(Ls, 3);
-		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_set_position refused: host only."); lua_pushboolean(Ls, 0); return 1; }
-		Entity* e = uidToEntity((Sint32)uid);
-		if ( !e ) { SAM_WARN("LUA", "sam_set_position: no entity uid " + std::to_string(uid) + "."); lua_pushboolean(Ls, 0); return 1; }
+		// The shared resolver, not uidToEntity: this is the world function every mod uses and it
+		// was still the one accepting a shared sentinel uid and a limb.
+		Entity* e = samResolveWritable(uid, "sam_set_position");
+		if ( !e ) { lua_pushboolean(Ls, 0); return 1; }
 		if ( tx < 0 || tx >= (int)map.width || ty < 0 || ty >= (int)map.height )
 		{ SAM_ERROR("LUA", "sam_set_position: tile (" + std::to_string(tx) + "," + std::to_string(ty) + ") out of bounds."); lua_pushboolean(Ls, 0); return 1; }
 		if ( e->behavior == &actPlayer )
@@ -4346,6 +4850,37 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 			const bool ok = e->teleport(tx, ty); // may refuse (walls / minotaur level / map flag)
 			lua_pushboolean(Ls, ok ? 1 : 0);
 			return 1;
+		}
+		// A GROUND ITEM CANNOT BE MOVED FOR ANYBODY BUT THE HOST, and nothing used to say so.
+		// ENTU's flag block only ever sets a flag TRUE (net.cpp:2024-2037), so the
+		// `flags[NOUPDATE] = false` below is unrepresentable on the wire; meanwhile actItem
+		// re-asserts NOUPDATE on the CLIENT every single tick (actitem.cpp:418), the client
+		// bounces our update back as NOUP, and the host's handler clears UPDATENEEDED, so the
+		// sweep stops trying. ENTF cannot rescue it either: that would race a 50 Hz re-assert
+		// against an 8 Hz sweep over unreliable UDP. So this warns and still moves -- the same
+		// shape as the blocked-tile warning -- because the move IS real on the host.
+		if ( multiplayer == SERVER
+			&& ( e->behavior == &actItem || e->behavior == &actGoldBag
+				|| e->behavior == &actFlame || e->behavior == &actGate ) )
+		{
+			SAM_WARN("LUA", "sam_set_position: this kind of entity refuses position updates on a client, so"
+				" other players will keep seeing it at the old tile. The move is real on the host"
+				" only. Remove it and spawn a new one at the destination if everyone must see it.");
+		}
+		// Everything that is not a player is placed wherever it is told, walls included, because
+		// putting a decoration inside a wall alcove is a real thing mods do on purpose. But a
+		// monster dropped into one is stuck for good, and until now nothing said a word about it.
+		// So this WARNS and still places: refusing would break the deliberate case, and
+		// sam_can_stand is the test to run first when the answer matters.
+		{
+			SAMHitGuard samHit;   // checkObstacle writes the engine's `hit` global
+			if ( checkObstacle((tx << 4) + 8, (ty << 4) + 8, e, nullptr) != 0 )
+			{
+				SAM_WARN("LUA", "sam_set_position: tile (" + std::to_string(tx) + ","
+					+ std::to_string(ty) + ") is blocked for this entity, so it is being placed"
+					" inside something. Fine for a decoration; a monster put there cannot get out."
+					" sam_can_stand(uid, x, y) answers this before you move anything.");
+			}
 		}
 		e->x = (double)(tx * 16 + 8);
 		e->y = (double)(ty * 16 + 8);
@@ -4356,12 +4891,13 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		return 1;
 	}
 
-	// sam_spawn_monster(tileX, tileY, "name" [, shopType]) -> uid | nil. Whitelisted to
-	// the Monster enum (name resolved case-insensitively). shopType (0-14) only applies
-	// to "shopkeeper" and picks the store kind. Host only; net replication is done by
-	// summonMonster itself (the SUMM packet). Returns the new monster's uid so scripts
-	// can move / query it afterwards.
-	// Summon a mod-declared monster variant by its "ns:slug" id; nullptr if never declared.
+	// samSummonCustomVariant: summon a mod-declared monster variant by its "ns:slug" id, or
+	// nullptr if that id was never declared.
+	//
+	// (The five lines that used to open this comment described sam_spawn_monster and its SUMM
+	// packet. They ended up here when this helper was inserted between the comment and the
+	// function it belonged to, so the file documented a network packet on a routine that sends
+	// none. sam_spawn_monster's own description now lives on sam_spawn_monster, below.)
 	// Hands off to createMonsterFromFile -- the SAME routine level generation uses
 	// (maps.cpp:8003) -- so stats, equipment, traits, body model and followers are applied
 	// exactly as on a generated one. Before this a script could only summon a vanilla
@@ -4439,22 +4975,594 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		SAMLogger::noteApiCall();
 		const long long uid = (long long)luaL_checkinteger(Ls, 1);
 		double sc = (double)luaL_checknumber(Ls, 2);
-		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_set_scale refused: host only."); lua_pushboolean(Ls, 0); return 1; }
-		Entity* e = uidToEntity((Uint32)uid);
+		Entity* e = samResolveWritable(uid, "sam_set_scale");
 		if ( !e ) { lua_pushboolean(Ls, 0); return 1; }
 		if ( !std::isfinite(sc) )
 		{
 			SAM_ERROR("LUA", "sam_set_scale: scale must be a finite number.");
 			lua_pushboolean(Ls, 0); return 1;
 		}
-		if ( sc <= 0.0 ) { sc = 1.0; }
-		if ( sc > 1.99 && multiplayer != SINGLE )
+		// A scale of 0 or less used to become 1.0 -- FULL SIZE, silently, with a true return,
+		// while the clamp below warns. A script easing a model down to nothing popped it back to
+		// full on the last frame. Refused instead: it is not a value this function can honour.
+		if ( !(sc > 0.0) )
+		{
+			SAM_ERROR("LUA", "sam_set_scale: scale must be greater than 0 (was "
+				+ std::to_string(sc) + "). To make something disappear use sam_set_visible.");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		// And the bottom of the range needs the same guard as the top: the wire packs scale as
+		// (Uint8)(scale * 128) (net.cpp:552), so anything under 1/128 arrives on every other
+		// machine as 0 and the model vanishes there while the host draws a speck.
+		if ( sc < 1.0 / 128.0 )
+		{
+			SAM_WARN("LUA", "sam_set_scale: " + std::to_string(sc) + " is below the 1/128 the"
+				" network can carry, so other players would see it disappear. Clamped.");
+			sc = 1.0 / 128.0;
+		}
+		// Clamped ALWAYS, not just when `multiplayer != SINGLE`. The old guard meant a mod
+		// authored in singleplayer at 3.0 worked for its author and was silently wrong for
+		// everyone else, because the wire cannot carry past 1.99 -- the mod is written once and
+		// played in both modes, so the limit has to be the same in both.
+		if ( sc > 1.99 )
 		{
 			SAM_WARN("LUA", "sam_set_scale: " + std::to_string(sc) + " is past the 1.99 the network"
 				" can carry, so other players would not see it. Clamped.");
 			sc = 1.99;
 		}
 		e->scalex = sc; e->scaley = sc; e->scalez = sc;
+		// Without this the 8 Hz sweep that tells clients never fires, so the host sees the new
+		// size and nobody else ever does.
+		e->flags[UPDATENEEDED] = true;
+		lua_pushboolean(Ls, 1);
+		return 1;
+	}
+
+	// sam_set_damage_immune(uid, on) -> boolean
+	//
+	// Stops a PLAYER OR A MONSTER taking damage at Entity::modHP, beside the engine's own three
+	// immunities (godmode, EFF_STASIS and the salamander heart). It does not stop the hit landing,
+	// the sound, or the knockback -- only the loss of health -- which is exactly what
+	// "invulnerable" means everywhere else in Barony.
+	//
+	// Refused on anything else, and the refusal says why. modHP is every point of damage to a
+	// CREATURE, but a breakable decoration is not a creature: it carries colliderCurrentHP, which
+	// five gameplay sites decrement directly. Accepting one would have been a success return and
+	// a matching reader both agreeing about a protection that does not exist.
+	//
+	// A mod could already do this from an on_before_damage handler. The difference is that this
+	// costs nothing per hit and needs no bookkeeping.
+	//
+	// SESSION STATE. It is not saved, and it is cleared on every floor, because uids restart from
+	// 1 on each level and a leftover entry would hand a boss's invulnerability to a rat.
+	int lua_sam_set_damage_immune(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		bool on = false;
+		if ( !samBoolReq(Ls, 2, "sam_set_damage_immune", &on) ) { lua_pushboolean(Ls, 0); return 1; }
+#ifdef SAM_LUA_HAVE_BARONY
+		Entity* e = samResolveWritable(uid, "sam_set_damage_immune");
+		if ( !e ) { lua_pushboolean(Ls, 0); return 1; }
+		// Only a PLAYER OR A MONSTER takes damage through Entity::modHP, which is where this
+		// immunity lives. Chests, doors, furniture and breakable decorations carry separate
+		// health pools -- colliderCurrentHP is decremented directly at five gameplay sites
+		// (actgeneral.cpp:2357/3786, actmonster.cpp:6679/7949) and never passes through modHP --
+		// so protecting one used to return true, read back true, and let the next arrow destroy
+		// it anyway. Guarded on behaviour rather than getStats(), because a monster's Stat hangs
+		// off its children and can momentarily be absent.
+		if ( !(e->behavior == &actPlayer || e->behavior == &actMonster) )
+		{
+			SAM_WARN("LUA", "sam_set_damage_immune refused: uid " + std::to_string(uid) + " is not"
+				" a player or a monster. Only those take damage through the one place this"
+				" immunity lives. Chests, doors, furniture and breakable props carry their own"
+				" health that nothing here can reach.");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		if ( on ) { g_damageImmune.insert((Uint32)uid); }
+		else      { g_damageImmune.erase((Uint32)uid); }
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)uid; (void)on; lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_is_damage_immune(uid) -> boolean. Shipped with the setter on purpose: sam_set_scale and
+	// sam_set_visible both went out without a reader and both needed one adding later.
+	int lua_sam_is_damage_immune(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		lua_pushboolean(Ls, ( uid > 0 && g_damageImmune.count((Uint32)uid) > 0 ) ? 1 : 0);
+		return 1;
+#else
+		(void)uid; lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// The shared body of sam_apply_force, so the two runtimes cannot drift on the part that took
+	// the reading to get right. Returns false whenever nothing would actually consume the push --
+	// which is a stronger promise than it first looks, because two kinds of entity accept a
+	// velocity and then ignore it: one whose act function never reads vel_x at all (actPortal),
+	// and a ground item that has come to rest and short-circuits before the physics.
+	//
+	// EFF_KNOCKBACK FIRST, ALWAYS. Both act functions discard velocity without it -- actMonster
+	// zeroes vel_x/vel_y (actmonster.cpp:5378) and actPlayer zeroes the knockback fields
+	// (actplayer.cpp:4776) -- so every knockback site in the engine sets the effect before it
+	// writes anything, and so does this.
+	bool samApplyForce(Entity* e, double force, double angle, int ticks)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		// The effect's OWN ANSWER decides whether the shove happens, because setEffect refuses
+		// EFF_KNOCKBACK outright for a whole band of species (entity.cpp:24740-24753), and for an
+		// entity with no Stat at all. Both act functions then zero the velocity on the very next
+		// frame, so pushing on regardless would be a function that reports success and moves
+		// nothing -- exactly what this batch exists to stop.
+		if ( ( e->behavior == &actPlayer || e->behavior == &actMonster )
+			&& !e->setEffect(EFF_KNOCKBACK, true, ticks, false) )
+		{
+			// The species named here are the ones setEffect actually refuses:
+			// `type >= LICH && type < KOBOLD` (entity.cpp:24746), and the enum runs LICH,
+			// MINOTAUR, DEVIL, SHOPKEEPER, KOBOLD (monster.hpp:41-45), plus LICH_FIRE and
+			// LICH_ICE. This message used to say "shadows", which are enum 50 and not immune at
+			// all, and never mentioned the minotaur, which is the one boss anybody would try
+			// this on.
+			SAM_WARN("LUA", "sam_apply_force: this creature refuses to be knocked back, so nothing"
+				" would have moved. Liches, minotaurs, the devil and shopkeepers are immune, and"
+				" the engine's own knockback does nothing to them either.");
+			return false;
+		}
+		if ( e->behavior == &actPlayer )
+		{
+			// A player takes the impulse as the knockback SPEED itself; actPlayer converts it
+			// through the tangent every frame. Writing vel_x on a player does nothing at all.
+			e->monsterKnockbackVelocity = force;
+			e->monsterKnockbackTangentDir = angle;
+			// A remote player's own machine is drawing the shove, so it has to be told. fskill 9
+			// is monsterKnockbackVelocity and 11 is the tangent (entity.hpp:279, 288); the engine
+			// sends exactly this pair at actarrow.cpp:1541.
+			const int pn = e->skill[2];
+			if ( multiplayer == SERVER && pn >= 0 && pn < MAXPLAYERS
+				&& players[pn] && !players[pn]->isLocalPlayer() )
+			{
+				serverUpdateEntityFSkill(e, 9);
+				serverUpdateEntityFSkill(e, 11);
+			}
+			return true;
+		}
+		if ( e->behavior == &actMonster )
+		{
+			// A monster takes it as a real velocity, and monsterKnockbackVelocity is the RECOVERY
+			// rate the engine uses afterwards to accelerate it back to its walking speed -- 0.01
+			// is what every engine site uses, so the stagger lasts as long as the engine's own.
+			e->vel_x = std::cos(angle) * force;
+			e->vel_y = std::sin(angle) * force;
+			e->monsterKnockbackVelocity = 0.01;
+			e->monsterKnockbackTangentDir = angle;
+			e->flags[UPDATENEEDED] = true;
+			return true;
+		}
+		// Everything else has to be on an ALLOWLIST, not merely have a behaviour. The old guard
+		// was `if ( !e->behavior )` -- a null pointer, which virtually never happens -- so every
+		// prop got a velocity write and an unconditional true. actPortal, which is the entity
+		// sam_spawn_portal creates for scripts, contains no reference to vel_ anywhere in
+		// actladder.cpp: the one decorative type this API hands out was guaranteed to be a
+		// silent no-op. An allowlist means a prop type added later defaults to an honest
+		// refusal rather than a false success.
+		const bool samCanBePushed = e->behavior == &actItem || e->behavior == &actArrow
+			|| e->behavior == &actThrown || e->behavior == &actBoulder
+			|| e->behavior == &actGoldBag || e->behavior == &actGib;
+		if ( !samCanBePushed )
+		{
+			SAM_WARN("LUA", "sam_apply_force: nothing reads this entity's velocity, so a shove"
+				" would not move it. It works on players, monsters, ground items, arrows, thrown"
+				" weapons, boulders, gold and gibs. For anything else use sam_move_entity, which"
+				" moves it directly.");
+			return false;
+		}
+		// A ground item that has come to rest is SWITCHED OFF: actItem returns at
+		// actitem.cpp:1063 before it ever reaches the physics at 1352 that reads vel_x. So the
+		// velocity had to be woken as well as written, exactly as the engine's own push sites do
+		// (actitem.cpp:728, 1014). Without this the item never moved a single pixel, for ever,
+		// while the call returned true.
+		if ( e->behavior == &actItem )
+		{
+			e->itemNotMoving = 0;
+			e->itemNotMovingClient = 0;
+			if ( multiplayer == SERVER )
+			{
+				serverUpdateEntitySkill(e, 18);   // itemNotMoving
+				serverUpdateEntitySkill(e, 19);   // itemNotMovingClient
+			}
+		}
+		e->vel_x = std::cos(angle) * force;
+		e->vel_y = std::sin(angle) * force;
+		e->flags[UPDATENEEDED] = true;
+		return true;
+#else
+		(void)e; (void)force; (void)angle; (void)ticks; return false;
+#endif
+	}
+
+	// sam_move_entity(uid, dxTiles, dyTiles) -> tiles actually moved | nil
+	//
+	// A relative move that RESPECTS WALLS, through the engine's own clipMove, which slides along
+	// whatever it hits instead of stopping dead. It returns the distance it managed, and so does
+	// this: a bare true would hide the difference between a clear corridor and a wall two inches
+	// away, which is the whole thing a script pushing something needs to know.
+	//
+	// DISTANCES ARE IN TILES, like every other spatial call in this API. The engine works in
+	// world units, 16 to a tile, and mixing the two silently is a worse trap than converting.
+	int lua_sam_move_entity(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const double dx = (double)luaL_checknumber(Ls, 2);
+		const double dy = (double)luaL_checknumber(Ls, 3);
+#ifdef SAM_LUA_HAVE_BARONY
+		Entity* e = samResolveWritable(uid, "sam_move_entity");
+		if ( !e ) { lua_pushnil(Ls); return 1; }
+		if ( !std::isfinite(dx) || !std::isfinite(dy) )
+		{
+			SAM_ERROR("LUA", "sam_move_entity: the distance must be two finite numbers.");
+			lua_pushnil(Ls); return 1;
+		}
+		if ( e->behavior == &actPlayer )
+		{
+			// Only a REMOTE one is a problem: a connected client owns its own position and
+			// reports it back, so a nudge from here is overwritten within a frame or two. The
+			// host's own character has nobody arguing with it.
+			const int pn = e->skill[2];
+			if ( multiplayer == SERVER && pn >= 0 && pn < MAXPLAYERS
+				&& players[pn] && !players[pn]->isLocalPlayer() )
+			{
+				SAM_WARN("LUA", "sam_move_entity: that player is on another machine, which owns its"
+					" own position and will report it back over this within a frame or two. Use"
+					" sam_set_position, which teleports properly, or sam_apply_force to shove them.");
+			}
+		}
+		// A GROUND ITEM CANNOT BE MOVED FOR ANYBODY BUT THE HOST, and nothing used to say so.
+		// ENTU's flag block only ever sets a flag TRUE (net.cpp:2024-2037), so the
+		// `flags[NOUPDATE] = false` below is unrepresentable on the wire; meanwhile actItem
+		// re-asserts NOUPDATE on the CLIENT every single tick (actitem.cpp:418), the client
+		// bounces our update back as NOUP, and the host's handler clears UPDATENEEDED, so the
+		// sweep stops trying. ENTF cannot rescue it either: that would race a 50 Hz re-assert
+		// against an 8 Hz sweep over unreliable UDP. So this warns and still moves -- the same
+		// shape as the blocked-tile warning -- because the move IS real on the host.
+		if ( multiplayer == SERVER
+			&& ( e->behavior == &actItem || e->behavior == &actGoldBag
+				|| e->behavior == &actFlame || e->behavior == &actGate ) )
+		{
+			SAM_WARN("LUA", "sam_move_entity: this kind of entity refuses position updates on a client, so"
+				" other players will keep seeing it at the old tile. The move is real on the host"
+				" only. Remove it and spawn a new one at the destination if everyone must see it.");
+		}
+		// SUB-STEPPED, because clipMove is not a sweep. Its entire collision test is
+		// barony_clear() on the DESTINATION POINT (collision.cpp:1768) -- so one big step over a
+		// one-tile wall lands on the far side, finds it clear, and returns the full distance as
+		// though the path had been open. Every engine caller escapes this by passing a single
+		// frame of velocity; a script can pass any number at all. sam_apply_force clamps for
+		// exactly this reason sixty lines below, and this is the same rule, applied as steps so
+		// that a legitimate long move still slides along walls instead of being truncated.
+		real_t samVx = (real_t)(dx * 16.0), samVy = (real_t)(dy * 16.0);
+		if ( std::fabs(samVx) > 16.0 * 1024.0 || std::fabs(samVy) > 16.0 * 1024.0 )
+		{
+			SAM_ERROR("LUA", "sam_move_entity: that distance is past the end of any map. Use"
+				" sam_set_position to place something somewhere far away.");
+			lua_pushnil(Ls); return 1;
+		}
+		// 7.0 is this project's tunnel-safe step: two samples 7 apart cannot both miss a wall
+		// 16 wide, so nothing can be stepped over.
+		const int samSteps = std::max(1, (int)std::ceil(std::sqrt(samVx * samVx + samVy * samVy) / 7.0));
+		samVx /= (real_t)samSteps;
+		samVy /= (real_t)samSteps;
+		SAMHitGuard samHit;   // clipMove's first statement is `hit.entity = NULL;`
+		real_t moved = 0.0;
+		for ( int samI = 0; samI < samSteps; ++samI )
+		{
+			const real_t samGot = clipMove(&e->x, &e->y, samVx, samVy, e);
+			moved += samGot;
+			if ( samGot <= 0.0 ) { break; }   // wedged against something; further steps cannot help
+		}
+		e->flags[UPDATENEEDED] = true;
+		e->flags[NOUPDATE] = false;
+		TileEntityList.updateEntity(*e);
+		lua_pushnumber(Ls, (lua_Number)(moved / 16.0));
+		return 1;
+#else
+		(void)uid; (void)dx; (void)dy; lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_apply_force(uid, force, angle [, ticks]) -> boolean
+	//
+	// A shove, in the engine's own knockback terms. The angle is a Barony yaw in radians, the same
+	// number sam_get_facing hands back, so "away from me" is atan2(theirY - myY, theirX - myX).
+	// Force is on the engine's scale: an arrow is 0.6 and a strong hit about 1.4
+	// (actarrow.cpp:1498).
+	//
+	// This is NOT a velocity write, and that is the point -- see samApplyForce above for why a
+	// velocity write does nothing at all to a player or a monster.
+	int lua_sam_apply_force(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		double force = (double)luaL_checknumber(Ls, 2);
+		double angle = (double)luaL_checknumber(Ls, 3);
+		int ticks = (int)luaL_optinteger(Ls, 4, 30);   // 30 is what the engine's own sites use
+#ifdef SAM_LUA_HAVE_BARONY
+		Entity* e = samResolveWritable(uid, "sam_apply_force");
+		if ( !e ) { lua_pushboolean(Ls, 0); return 1; }
+		if ( !std::isfinite(force) || !std::isfinite(angle) )
+		{
+			SAM_ERROR("LUA", "sam_apply_force: force and angle must be finite numbers.");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		// 7.0 is this project's established tunnel-safe ceiling, the same number the move-speed
+		// cap uses: collision is tested at the destination point, so a big enough single step
+		// steps straight over a wall instead of into it.
+		if ( force > 7.0 || force < -7.0 )
+		{
+			SAM_WARN("LUA", "sam_apply_force: force is clamped to 7, past which a single step can"
+				" jump clean over a wall instead of hitting it.");
+			force = ( force > 0.0 ) ? 7.0 : -7.0;
+		}
+		if ( ticks < 1 ) { ticks = 1; }
+		if ( ticks > 3600 ) { ticks = 3600; }
+		// The angle goes to a remote player as monsterKnockbackTangentDir, and ENFS packs an
+		// fskill as (Sint16)(value * 256) (net.cpp:916) -- about +/-128 radians. A modder who
+		// passes degrees by mistake sends 180, which wraps to -76.0 on the shoved player's own
+		// machine, and that is the machine that renders the shove. Wrapping into [0, 2*PI) is
+		// exact for a direction and puts every value inside the wire's range.
+		angle = std::fmod(angle, 2.0 * PI);
+		if ( angle < 0.0 ) { angle += 2.0 * PI; }
+		lua_pushboolean(Ls, samApplyForce(e, force, angle, ticks) ? 1 : 0);
+		return 1;
+#else
+		(void)uid; (void)force; (void)angle; (void)ticks; lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_set_on_fire(uid [, on]) -> boolean
+	//
+	// Returns whether the entity is ON FIRE once the call is done, which is not what
+	// Entity::SetEntityOnFire returns. Its false covers three different situations and one of them
+	// is "it was already burning" -- the inner `if ( !flags[BURNING] )` simply falls out of the
+	// bottom of the function -- so passing that boolean along would report failure about something
+	// that is visibly alight, and a script retrying on false would retry for ever.
+	//
+	// The two real failures each get their own warning, because "nothing happened" with no reason
+	// is the thing that makes a modder rewrite working code.
+	//
+	// The flag defaults to true. That is not a contradiction of sam_set_visible refusing a missing
+	// flag: the test is whether the name already answers the question. "set on fire" does.
+	int lua_sam_set_on_fire(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const bool on = samBoolArg(Ls, 2, true);
+#ifdef SAM_LUA_HAVE_BARONY
+		Entity* e = samResolveWritable(uid, "sam_set_on_fire");
+		if ( !e ) { lua_pushboolean(Ls, 0); return 1; }
+
+		if ( !on )
+		{
+			// Putting it out is the whole reason this takes a flag at all. The burn timer lives
+			// in Entity::handleEffects, which runs from actMonster and actPlayer and nowhere else
+			// -- so an entity with no Stat that gets lit stays lit for the rest of the level with
+			// nothing in the engine able to stop it. This is the way back.
+			if ( e->flags[BURNING] )
+			{
+				e->flags[BURNING] = false;
+				e->char_fire = 0;
+				if ( multiplayer == SERVER ) { serverUpdateEntityFlag(e, BURNING); }
+				// The same line the engine prints when a fire burns itself out, for the same
+				// reason: a player whose character stops burning should be told.
+				if ( e->behavior == &actPlayer )
+				{
+					messagePlayer(e->skill[2], MESSAGE_STATUS, "%s", Language::get(647));
+				}
+			}
+			lua_pushboolean(Ls, 0);   // asked for not-burning, and it is not burning
+			return 1;
+		}
+
+		if ( e->flags[BURNING] ) { lua_pushboolean(Ls, 1); return 1; }   // already, and that is a yes
+		if ( !e->flags[BURNABLE] )
+		{
+			// A monster gets BURNABLE from its own species init (initRat sets it, monster_rat.cpp:26),
+			// and that runs on its FIRST actMonster tick, under MONSTER_INIT = skill[3]. So a
+			// monster spawned by a script this frame is not burnable yet, and telling the modder
+			// "a rat is not BURNABLE" would send them hunting for a bug that is not there.
+			if ( e->behavior == &actMonster && e->skill[3] == 0 )
+			{
+				SAM_WARN("LUA", "sam_set_on_fire: this monster was spawned this frame and has not run"
+					" its own setup yet, so it is not burnable YET. Wait a frame (sam_set_timer with"
+					" a short delay) and it will light normally.");
+			}
+			else
+			{
+				SAM_WARN("LUA", "sam_set_on_fire: this entity is not BURNABLE, so the engine will"
+					" never light it. sam_set_entity_flag(uid, \"BURNABLE\", true) first if that is"
+					" what you want.");
+			}
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		const bool lit = e->SetEntityOnFire(nullptr);
+		if ( !lit )
+		{
+			SAM_WARN("LUA", "sam_set_on_fire: this creature resists fire. Skeletons and automatons"
+				" never burn, and neither does anyone wearing a machinist apron or an amulet of"
+				" burning resistance.");
+		}
+		else if ( !e->getStats() )
+		{
+			SAM_WARN("LUA", "sam_set_on_fire: this entity has no stats, and the burn timer only"
+				" runs for players and monsters, so it will burn for ever and hurt nothing. That is"
+				" fine for a brazier. Call sam_set_on_fire(uid, false) to put it out.");
+		}
+		lua_pushboolean(Ls, lit ? 1 : 0);
+		return 1;
+#else
+		(void)uid; (void)on; lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_get_entity_flag(uid, "FLAG") -> boolean | nil
+	//
+	// nil, not false, for an unknown flag name. false is a real answer to "is this passable", so
+	// handing it back for a typo would send the script down the "no" branch believing it had
+	// asked a real question.
+	//
+	// Readable on a client, with the usual caveat: a client's copy of a flag is only as fresh as
+	// the last update the host sent about that entity.
+	int lua_sam_get_entity_flag(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const char* flagName = luaL_checkstring(Ls, 2);
+#ifdef SAM_LUA_HAVE_BARONY
+		const int idx = samResolveEntityFlag(flagName, false, "sam_get_entity_flag");
+		if ( idx < 0 ) { lua_pushnil(Ls); return 1; }
+		Entity* e = samResolveEntityRead(uid, "sam_get_entity_flag");
+		if ( !e ) { lua_pushnil(Ls); return 1; }
+		lua_pushboolean(Ls, e->flags[idx] ? 1 : 0);
+		return 1;
+#else
+		(void)uid; (void)flagName; lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_set_entity_flag(uid, "FLAG", on) -> boolean
+	//
+	// PASSABLE for a decoration nobody should bump into, BLOCKSIGHT for a prop that should cast a
+	// shadow, UNCLICKABLE for scenery, BRIGHT for something that glows. The flag is REQUIRED and
+	// so is the value; neither is guessed.
+	//
+	// Four flags are read-only through here and say why. INVISIBLE and BURNING have their own
+	// functions that know rules this one does not: sam_set_visible refuses custom-bodied monsters
+	// because the draw pass keeps those visible on purpose, and sam_set_on_fire has to start the
+	// burn timer the flag is only the shadow of. NOUPDATE and UPDATENEEDED are the network sweep's
+	// own state.
+	int lua_sam_set_entity_flag(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const char* flagName = luaL_checkstring(Ls, 2);
+		bool on = false;
+		if ( !samBoolReq(Ls, 3, "sam_set_entity_flag", &on) ) { lua_pushboolean(Ls, 0); return 1; }
+#ifdef SAM_LUA_HAVE_BARONY
+		const int idx = samResolveEntityFlag(flagName, true, "sam_set_entity_flag");
+		if ( idx < 0 ) { lua_pushboolean(Ls, 0); return 1; }
+		Entity* e = samResolveWritable(uid, "sam_set_entity_flag");
+		if ( !e ) { lua_pushboolean(Ls, 0); return 1; }
+		e->flags[idx] = on;
+		// ENTF carries one flag by index and the client applies it directly, so this is the
+		// whole of the sync. Without it the host alone would believe the wall is walk-through.
+		if ( multiplayer == SERVER ) { serverUpdateEntityFlag(e, idx); }
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)uid; (void)flagName; (void)on; lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_set_entity_size(uid, size [, sizeY]) -> boolean
+	//
+	// The collision half-extent, in world units, 16 to a tile. It is what the engine actually
+	// tests against: collision.cpp:443 compares `x + sizex > x2 - sizex`, and a size of 0 means
+	// "nothing collides with this".
+	//
+	// CLAMPED TO 0..127, ALWAYS. sizex is a Sint32 in memory but crosses the wire as
+	// `(Sint8)entity->sizex` (net.cpp:551), so 200 arrives on a client as -56 and the comparison
+	// above inverts: that client believes the hitbox is inside-out, while the host sees nothing
+	// wrong at all. Clamping only in multiplayer would mean a mod authored in singleplayer was
+	// broken for everyone else, which is the same trap sam_set_scale shipped with.
+	//
+	// Unlike elevation, this one STICKS: every engine write to sizex is behind a spawn-time INIT
+	// gate (actmonster.cpp:2930 is SAM's own custom-body hitbox, under MONSTER_INIT), so nothing
+	// overwrites it on the next frame.
+	int lua_sam_set_entity_size(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		long long sx = (long long)luaL_checkinteger(Ls, 2);
+		long long sy = (long long)luaL_optinteger(Ls, 3, (lua_Integer)sx);
+		Entity* e = samResolveWritable(uid, "sam_set_entity_size");
+		if ( !e ) { lua_pushboolean(Ls, 0); return 1; }
+		if ( sx < 0 || sx > 127 || sy < 0 || sy > 127 )
+		{
+			SAM_WARN("LUA", "sam_set_entity_size: sizes are clamped to 0..127, because the network"
+				" carries them as one signed byte and a larger number arrives negative, which turns"
+				" the hitbox inside-out on every other player's machine.");
+		}
+		if ( sx < 0 ) { sx = 0; } if ( sx > 127 ) { sx = 127; }
+		if ( sy < 0 ) { sy = 0; } if ( sy > 127 ) { sy = 127; }
+		e->sizex = (Sint32)sx;
+		e->sizey = (Sint32)sy;
+		e->flags[UPDATENEEDED] = true;   // ENTU carries both, but only for an entity marked dirty
+		lua_pushboolean(Ls, 1);
+		return 1;
+	}
+
+	// sam_set_elevation(uid, z) -> boolean
+	//
+	// Height, as the ENGINE means it: the same z sam_get_position_precise hands back, so the two
+	// round-trip. Barony's z grows DOWNWARD -- gravity is `vel_z += 0.04; z += vel_z;`
+	// (actplayer.cpp:1705) -- so NEGATIVE IS UP. Flipping the sign for comfort would have made
+	// sam_set_elevation(uid, sam_get_position_precise(uid)) move the thing.
+	//
+	// REFUSES PLAYERS AND MONSTERS, and that is the whole reason this function is small. A
+	// creature's height is rewritten from scratch every single frame by its own species code:
+	// humanMoveBodyparts contains a bare `my->z = -1;` (monster_human.cpp:1058), the goatman does
+	// the same (monster_g.cpp:648), the skeleton (monster_skeleton.cpp:856), the bat
+	// (monster_bat.cpp:297), and actPlayer (actplayer.cpp:9393). Allowing it would return true and
+	// be erased before the next frame drew -- the same silent nothing that got limbs refused, so
+	// it gets refused the same way. Lifting a creature needs an effect the engine already drives
+	// (EFF_LEVITATION, EFF_LIFT), not a one-off write.
+	//
+	// So it is for what it is genuinely for: props, ground items and spawned portals. NOT
+	// companions -- their own hover curve rewrites z every tick, so they are refused with the
+	// creatures. An entity a script owns through sam_register_behavior is allowed, but if that
+	// script's own handler writes z it will win, for the same reason.
+	int lua_sam_set_elevation(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		double z = (double)luaL_checknumber(Ls, 2);
+		Entity* e = samResolveWritable(uid, "sam_set_elevation");
+		if ( !e ) { lua_pushboolean(Ls, 0); return 1; }
+		if ( !std::isfinite(z) )
+		{
+			SAM_ERROR("LUA", "sam_set_elevation: z must be a finite number.");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		// The COMPANION belongs in this list and was missing from it, which made this function's
+		// own documentation recommend the case it silently fails on: actSamCompanion writes
+		// `my->z = p->z - SAM_COMPANION_RISE + ...` unconditionally every tick, which is exactly
+		// what players and monsters are refused for.
+		if ( e->behavior == &actPlayer || e->behavior == &actMonster || SAMLua::isCompanionEntity(e) )
+		{
+			SAM_WARN("LUA", "sam_set_elevation refused: a player's, a monster's or a companion's"
+				" height is rewritten every frame by code that owns it (a companion by its own"
+				" hover curve), so this would be erased before the next frame drew. Use a"
+				" levitation effect for a creature; a companion's float height is fixed.");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		// The wire carries z as (Sint16)(z * 32), so |z| must stay under 1024 or it wraps and the
+		// entity appears at the opposite extreme on every client. Clamped in every mode, for the
+		// same reason as scale and size.
+		if ( z < -1023.0 || z > 1023.0 )
+		{
+			SAM_WARN("LUA", "sam_set_elevation: z is clamped to -1023..1023, which is what the"
+				" network can carry. Negative is up.");
+			z = ( z < 0.0 ) ? -1023.0 : 1023.0;
+		}
+		e->z = z;
+		e->new_z = z;                    // the client's interpolation target, or it slides back
+		e->flags[UPDATENEEDED] = true;
 		lua_pushboolean(Ls, 1);
 		return 1;
 	}
@@ -4465,9 +5573,13 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 	{
 		SAMLogger::noteApiCall();
 		const long long uid = (long long)luaL_checkinteger(Ls, 1);
-		const bool vis = lua_toboolean(Ls, 2) != 0;
-		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_set_visible refused: host only."); lua_pushboolean(Ls, 0); return 1; }
-		Entity* e = uidToEntity((Uint32)uid);
+		// Two things were wrong here and both are fixed together. lua_toboolean says TRUE for the
+		// number 0 while the JS twin's JS_ToBool says FALSE, so sam_set_visible(uid, 0) meant
+		// opposite things in the two runtimes; and a MISSING flag was read as "hide", which is a
+		// guess. One numeric rule now, JavaScript's, and no guess at all.
+		bool vis = false;
+		if ( !samBoolReq(Ls, 2, "sam_set_visible", &vis) ) { lua_pushboolean(Ls, 0); return 1; }
+		Entity* e = samResolveWritable(uid, "sam_set_visible");
 		if ( !e ) { lua_pushboolean(Ls, 0); return 1; }
 		// A custom-bodied monster is deliberately UN-skipped in the draw pass so the six
 		// species that hide their main entity stay visible, which means clearing INVISIBLE on
@@ -4485,6 +5597,11 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		return 1;
 	}
 
+	// sam_spawn_monster(tileX, tileY, "name" [, shopType]) -> uid | nil. Whitelisted to the Monster
+	// enum (the name resolves case-insensitively), or a mod-declared "ns:slug" variant. shopType
+	// (0-14) only applies to "shopkeeper" and picks the store kind. Host only; net replication is
+	// done by summonMonster itself (the SUMM packet). Returns the new monster's uid so scripts can
+	// move or query it afterwards.
 	int lua_sam_spawn_monster(lua_State* Ls)
 	{
 		SAMLogger::noteApiCall();
@@ -4899,13 +6016,10 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		// vanilla name, so modded gear works exactly like vanilla gear.
 		int resolvedType = -1;
 		if ( itemName.find(':') != std::string::npos ) { resolvedType = SAMItems::itemIdForIdString(itemName); }
-		if ( resolvedType < 0 )
-		{
-			std::string lower = itemName;
-			for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
-			auto it = ItemTooltips.itemNameStringToItemID.find(lower);
-			if ( it != ItemTooltips.itemNameStringToItemID.end() ) { resolvedType = it->second; }
-		}
+		// One resolver, shared with every other name-taking call: digits, "ns:id", the internal
+		// name, then the DISPLAYED name -- which is what sam_list_items and sam_get_container_items
+		// hand out, and what this used to refuse.
+		if ( resolvedType < 0 ) { resolvedType = SAMCatalog::itemTypeFor(itemName); }
 		if ( resolvedType < 0 )
 		{
 			SAM_ERROR("LUA", "sam_monster_equip: unknown item '" + itemName
@@ -5091,7 +6205,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		for ( int id = 135; id < NUMEFFECTS; ++id )
 		{
 			const Uint8 st = s->getEffectActive(id);
-			if ( st != 0 ) { pushEntry("CUSTOM:" + std::to_string(id), id, st); }
+			if ( st != 0 ) { pushEntry(SAMLua::effectNameFromId(id), id, st); }   // see sam_get_effects
 		}
 		return 1;
 #else
@@ -5486,20 +6600,14 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		SAMLogger::noteApiCall();
 		const long long uid = (long long)luaL_checkinteger(Ls, 1);
 #ifdef SAM_LUA_HAVE_BARONY
-		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_remove_entity refused: host only."); lua_pushboolean(Ls, 0); return 1; }
-		Entity* e = uidToEntity((Sint32)uid);
-		if ( !e ) { lua_pushboolean(Ls, 0); return 1; }
-		if ( e->behavior == &actPlayer ) { SAM_WARN("LUA", "sam_remove_entity refused: cannot remove a player."); lua_pushboolean(Ls, 0); return 1; }
-		// A chest that is open right now is ALSO stored in openedChest[], and neither
-		// list_RemoveNode nor ~Entity clears that array -- so deleting the entity here left
-		// a dangling pointer behind for the still-open chest UI to read on its next frame.
-		// Reachable without trying: a script tidying up its hub while a player is standing
-		// in it with the chest open. closeChest() is itself guarded by `if (chestStatus)`,
-		// so this is a no-op for a chest nobody has open.
-		if ( e->behavior == &actChest ) { e->closeChest(); }
-		e->removeLightField();              // drop any light it owns (e.g. a decorative portal)
-		if ( e->mynode ) { list_RemoveNode(e->mynode); }
-		lua_pushboolean(Ls, 1);
+		// QUEUED, not freed here. This used to call list_RemoveNode inline, which frees the
+		// Entity -- and a script only runs because the engine called into it. Entity::attack
+		// calls modHP and then keeps dereferencing hit.entity for another ~160 lines; modHP is
+		// what fires the damage events a mod handles. So a three-line mod that removes the
+		// monster it was just told about freed it out from under the attack in progress.
+		// The removal happens on the next frame instead; sam_get_entity_type still resolves the
+		// uid in between.
+		lua_pushboolean(Ls, samQueueRemoveEntity((Uint32)uid, "sam_remove_entity") ? 1 : 0);
 		return 1;
 #else
 		(void)uid; lua_pushboolean(Ls, 0); return 1;
@@ -5535,10 +6643,12 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 	{
 		SAMLogger::noteApiCall();
 		const long long uid = (long long)luaL_checkinteger(Ls, 1);
-		const bool on = lua_isnoneornil(Ls, 2) ? true : lua_toboolean(Ls, 2) != 0;
+		// samBoolArg, not lua_toboolean: 0 is TRUE to Lua and FALSE to JavaScript, so
+		// sam_set_chest_stash(uid, 0) meant opposite things in the two runtimes.
+		const bool on = samBoolArg(Ls, 2, true);
 #ifdef SAM_LUA_HAVE_BARONY
 		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_set_chest_stash refused: host only."); lua_pushboolean(Ls, 0); return 1; }
-		Entity* e = uidToEntity((Sint32)uid);
+		Entity* e = samResolveEntityQuiet((long long)uid);
 		if ( !e ) { SAM_WARN("LUA", "sam_set_chest_stash: no entity with uid " + std::to_string(uid) + "."); lua_pushboolean(Ls, 0); return 1; }
 		if ( e->behavior != &actChest )
 		{
@@ -5702,7 +6812,11 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_attach_behavior refused: host only."); lua_pushboolean(Ls, 0); return 1; }
 		Entity* e = samResolveMonster(uid);
 		if ( !e ) { SAM_WARN("LUA", "sam_attach_behavior: no monster uid " + std::to_string(uid)); lua_pushboolean(Ls, 0); return 1; }
-		const std::string full = g_currentNs + ":" + (nameC ? nameC : "");
+		// The same ':' rule sam_register_behavior uses. Prefixing unconditionally meant the
+		// "mymod:sentry" the docs tell you to register with became "mymod:mymod:sentry" here, so
+		// only the bare form ever survived the round trip.
+		std::string full = nameC ? nameC : "";
+		if ( full.find(':') == std::string::npos ) { full = g_currentNs + ":" + full; }
 		const int idx = SAMLua::behaviorIndexFor(full);
 		if ( idx < 0 )
 		{
@@ -6219,6 +7333,20 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 	// v1.5.0: resolve a spell reference (vanilla internalName or custom "ns:spell") to an engine id, or -1.
 	static int samResolveSpellId(const std::string& spell)
 	{
+		// A numeric id as text. sam_get_tome_spell hands back a NUMBER, and every consumer here
+		// is string-only, so "read what this spellbook teaches, then grant it" -- the stated
+		// purpose of that function -- resolved nothing. Lua stringifies the integer to "4" on
+		// the way in, which matched no internalName.
+		{
+			bool digits = !spell.empty();
+			for ( char c : spell ) { if ( c < '0' || c > '9' ) { digits = false; break; } }
+			if ( digits )
+			{
+				const int id = (int)strtol(spell.c_str(), nullptr, 10);
+				if ( ItemTooltips.spellItems.find(id) != ItemTooltips.spellItems.end() ) { return id; }
+				return -1;
+			}
+		}
 		if ( spell.find(':') != std::string::npos )
 		{
 			const SAMSpellDef* d = SAMSpells::getSpellByName(spell);
@@ -6257,7 +7385,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_cast_spell_at refused: host only."); lua_pushnil(Ls); return 1; }
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity )
 		{ SAM_ERROR("LUA", "sam_cast_spell_at: invalid player index " + std::to_string(player) + "."); lua_pushnil(Ls); return 1; }
-		Entity* target = uidToEntity((Sint32)targetUid);
+		Entity* target = samResolveEntityQuiet((long long)targetUid);
 		if ( !target ) { SAM_WARN("LUA", "sam_cast_spell_at: no entity uid " + std::to_string(targetUid)); lua_pushnil(Ls); return 1; }
 		const int id = samResolveSpellId(spell);
 		if ( id < 0 ) { SAM_ERROR("LUA", "sam_cast_spell_at: unknown spell '" + spell + "'."); lua_pushnil(Ls); return 1; }
@@ -6329,7 +7457,16 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		for ( node_t* node = players[player]->magic.spellList.first; node; node = node->next )
 		{
 			spell_t* sp = (spell_t*)node->element;
-			if ( sp ) { lua_pushstring(Ls, sp->spell_internal_name); lua_rawseti(Ls, -2, ++n); }
+			if ( sp )
+			{
+				// See sam_catalog.cpp: a custom spell reports the id its mod declared, so a script
+				// can compare this against its own JSON rather than against a mangled internal name.
+				const SAMSpellDef* samDef = SAMSpells::getSpell(sp->ID);
+				const std::string nm = ( samDef && !samDef->id.empty() )
+					? samDef->id : std::string(sp->spell_internal_name);
+				lua_pushstring(Ls, nm.c_str());
+				lua_rawseti(Ls, -2, ++n);
+			}
 		}
 		return 1;
 #else
@@ -6489,6 +7626,15 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		lua_pushcfunction(L, lua_sam_clear_model);         lua_setglobal(L, "sam_clear_model");
 		lua_pushcfunction(L, lua_sam_get_model);           lua_setglobal(L, "sam_get_model");
 		lua_pushcfunction(L, lua_sam_set_scale);           lua_setglobal(L, "sam_set_scale");
+		lua_pushcfunction(L, lua_sam_set_entity_size);     lua_setglobal(L, "sam_set_entity_size");
+		lua_pushcfunction(L, lua_sam_set_damage_immune);   lua_setglobal(L, "sam_set_damage_immune");
+		lua_pushcfunction(L, lua_sam_is_damage_immune);    lua_setglobal(L, "sam_is_damage_immune");
+		lua_pushcfunction(L, lua_sam_move_entity);         lua_setglobal(L, "sam_move_entity");
+		lua_pushcfunction(L, lua_sam_apply_force);         lua_setglobal(L, "sam_apply_force");
+		lua_pushcfunction(L, lua_sam_set_on_fire);         lua_setglobal(L, "sam_set_on_fire");
+		lua_pushcfunction(L, lua_sam_get_entity_flag);     lua_setglobal(L, "sam_get_entity_flag");
+		lua_pushcfunction(L, lua_sam_set_entity_flag);     lua_setglobal(L, "sam_set_entity_flag");
+		lua_pushcfunction(L, lua_sam_set_elevation);       lua_setglobal(L, "sam_set_elevation");
 		lua_pushcfunction(L, lua_sam_set_visible);         lua_setglobal(L, "sam_set_visible");
 		lua_pushcfunction(L, lua_sam_monster_equip);       lua_setglobal(L, "sam_monster_equip");
 		lua_pushcfunction(L, lua_sam_monster_unequip);     lua_setglobal(L, "sam_monster_unequip");
@@ -6661,6 +7807,8 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		lua_setglobal(L, "sam_get_player_uid");
 		lua_pushcfunction(L, lua_sam_get_position);
 		lua_setglobal(L, "sam_get_position");
+		lua_pushcfunction(L, lua_sam_can_stand);
+		lua_setglobal(L, "sam_can_stand");
 		lua_pushcfunction(L, lua_sam_set_position);
 		lua_setglobal(L, "sam_set_position");
 		lua_pushcfunction(L, lua_sam_spawn_monster);
@@ -7276,7 +8424,7 @@ namespace SAMLua
 		int sprite = 0;
 		if ( !modelId.empty() )
 		{
-			sprite = SAMModels::modelIndexForId(modelId);
+			sprite = samResolveModelAsset(modelId, ns);
 			if ( sprite < 0 )
 			{
 				char* end = nullptr;
@@ -7613,6 +8761,27 @@ namespace SAMLua
 			if ( c >= 'a' && c <= 'z' ) { return (SDL_Keycode)(SDLK_a + (c - 'a')); }
 			if ( c >= '0' && c <= '9' ) { return (SDL_Keycode)(SDLK_0 + (c - '0')); }
 		}
+		// SDL already parses the whole keyboard vocabulary -- "Space", "Left Shift", "Return",
+		// "Escape" -- which is exactly the set sam_get_action_binding hands back. Without this,
+		// anything longer than one character that was not an F-key silently answered false, so
+		// feeding one S.A.M call's output into another never worked for most bindings.
+		{
+			const SDL_Keycode sdl = SDL_GetKeyFromName(name.c_str());
+			if ( sdl != SDLK_UNKNOWN ) { return sdl; }
+		}
+		// A MOUSE binding has no keycode at all, so this can never answer for one. Say that
+		// rather than returning false forever: sam_is_action_held is the call that works, and it
+		// is what sam_get_action_binding was meant to pair with.
+		if ( name.size() > 5 && ( name.compare(0, 5, "Mouse") == 0 || name.compare(0, 5, "mouse") == 0 ) )
+		{
+			static bool toldOnce = false;
+			if ( !toldOnce )
+			{
+				toldOnce = true;
+				SAM_WARN("LUA", "sam_is_key_held cannot answer for a mouse binding ('" + name
+					+ "'). Use sam_is_action_held(player, action), which handles every binding kind.");
+			}
+		}
 		return SDLK_UNKNOWN;
 	}
 
@@ -7751,6 +8920,77 @@ namespace SAMLua
 		return "";
 #endif
 	}
+
+	Entity* resolveWritableEntity(long long uid, const char* who) { return samResolveWritable(uid, who); }
+	int resolveEntityFlag(const char* name, bool forWrite, const char* who) { return samResolveEntityFlag(name, forWrite, who); }
+	bool isCompanionEntity(const Entity* e)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		return e && e->behavior == &samCompanionBehavior;
+#else
+		(void)e; return false;
+#endif
+	}
+	bool applyForceTo(Entity* e, double force, double angle, int ticks) { return e ? samApplyForce(e, force, angle, ticks) : false; }
+	bool isDamageImmune(unsigned int uid)
+	{
+		if ( g_damageImmune.empty() ) { return false; }   // the vanilla path, one comparison
+		return g_damageImmune.count((Uint32)uid) > 0;
+	}
+	void clearDamageImmune()
+	{
+		g_damageImmune.clear();
+		// The behaviour map is keyed by uid too, and it does something stronger than block damage:
+		// it runs mod script against whatever owns that uid, every frame. This batch taught one
+		// uid-keyed store to clear on a floor boundary and left its neighbour alone.
+		clearMonsterBehaviors();
+		// The removal queue goes with it. It is normally drained on the very next frame, but a
+		// level change between the queue and the drain would leave a uid naming whatever entity
+		// inherits that number on the new floor -- and the engine hands numbers back out (see the
+		// rollback sites named above). One line, and the window closes.
+		g_pendingRemove.clear();
+	}
+	void setDamageImmune(unsigned int uid, bool on)
+	{
+		if ( on ) { g_damageImmune.insert((Uint32)uid); } else { g_damageImmune.erase((Uint32)uid); }
+	}
+
+	bool queueRemoveEntity(unsigned int uid, const char* who) { return samQueueRemoveEntity((Uint32)uid, who); }
+
+	void drainRemoveQueue()
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( g_pendingRemove.empty() ) { return; }
+		// Swapped out first: a removal can run engine code, and anything queued during this pass
+		// belongs to the next frame rather than to an unbounded loop here.
+		std::vector<Uint32> batch;
+		batch.swap(g_pendingRemove);
+		for ( Uint32 uid : batch )
+		{
+			Entity* e = uidToEntity((Sint32)uid);
+			if ( !e ) { continue; }                       // ordinary gameplay got there first
+			if ( e->behavior == &actPlayer ) { continue; } // became a player between queue and drain
+			// A chest open RIGHT NOW is also in openedChest[], which neither list_RemoveNode nor
+			// ~Entity clears, so deleting it left the still-open UI reading freed memory.
+			if ( e->behavior == &actChest ) { e->closeChest(); }
+			e->removeLightField();
+			// Drop any script behaviour attached to this uid BEFORE the entity goes away. The map
+			// is keyed by uid and the engine hands uids back out -- it rolls the counter back for
+			// throwaway particles -- so leaving the row meant a later monster could inherit a dead
+			// boss's per-frame script and run it once a tick against the wrong creature.
+			detachMonsterBehavior((unsigned long long)uid);
+			if ( e->mynode ) { list_RemoveNode(e->mynode); }
+		}
+#endif
+	}
+	Entity* resolveReadableEntity(long long uid, const char* who) { return samResolveEntityRead(uid, who); }
+	Entity* resolveEntityQuiet(long long uid) { return samResolveEntityQuiet(uid); }
+
+	void migrateLegacyDataFile(const std::string& dir, const std::string& key) { samMigrateLegacyDataFile(dir, key); }
+	int resolveModelAssetIn(const std::string& id, const std::string& ns) { return samResolveModelAsset(id, ns); }
+	int resolveSoundAssetIn(const std::string& id, const std::string& ns) { return samResolveSoundAsset(id, ns); }
+	std::string encodeDataKey(const std::string& key) { return samEncodeKey(key); }
+	std::string decodeDataKey(const std::string& fileStem) { return samDecodeKey(fileStem); }
 
 	std::string modDataDir(const std::string& ns)
 	{
@@ -8144,8 +9384,26 @@ namespace SAMLua
 	// so the JS runtime's sam_get_effects can label effects without its own table.
 	std::string effectNameFromId(int id)
 	{
-		for ( const auto& e : samEffectNames ) { if ( e.id == id ) { return e.name; } }
-		if ( id >= 135 && id < NUMEFFECTS ) { return "CUSTOM:" + std::to_string(id); }
+		// The SAME strings the engine's effect_name event emits: lowercase for a vanilla effect,
+		// the mod's "ns:effect" id for a custom one. This used to answer UPPERCASE "POISONED" and
+		// "CUSTOM:135" while the event said "poisoned" and "mymod:frostbite". Both forms resolve
+		// on the way back IN, so nothing ever failed -- but a script comparing its own
+		// sam_get_effects() against the event it had just been handed never matched.
+#ifdef SAM_LUA_HAVE_BARONY
+		{
+			const std::string custom = SAMEffects::nameForSlot(id);
+			if ( !custom.empty() ) { return custom; }
+		}
+#endif
+		for ( const auto& e : samEffectNames )
+		{
+			if ( e.id == id )
+			{
+				std::string n = e.name;
+				for ( char& c : n ) { c = (char)std::tolower((unsigned char)c); }
+				return n;
+			}
+		}
 		return std::string();
 	}
 
@@ -8199,13 +9457,14 @@ namespace SAMLua
 	// The behavior function samCompanionBehavior + its constants live in the anonymous
 	// namespace above (they need Barony types); these public entry points just drive them.
 
-	unsigned long long spawnCompanion(int player, const std::string& modelId, double scale)
+	unsigned long long spawnCompanion(int player, const std::string& modelId, double scale,
+		const std::string& assetNs)
 	{
 #ifdef SAM_LUA_HAVE_BARONY
 		if ( multiplayer == CLIENT ) { SAM_WARN("SAM", "spawnCompanion refused: host only."); return 0; }
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity )
 		{ SAM_ERROR("SAM", "spawnCompanion: invalid player index " + std::to_string(player) + "."); return 0; }
-		const int modelIdx = SAMModels::modelIndexForId(modelId);
+		const int modelIdx = samResolveModelAsset(modelId, assetNs);
 		if ( modelIdx < 0 )
 		{ SAM_ERROR("SAM", "spawnCompanion: no registered model '" + modelId + "' (is it in the mod's models[]?)."); return 0; }
 		Entity* owner = players[player]->entity;
@@ -8239,7 +9498,8 @@ namespace SAMLua
 	}
 
 	unsigned long long spawnProjectile(int owner, double tileX, double tileY, double angle,
-		double speed, int damage, int lifetimeTicks, const std::string& modelId)
+		double speed, int damage, int lifetimeTicks, const std::string& modelId,
+		const std::string& assetNs)
 	{
 #ifdef SAM_LUA_HAVE_BARONY
 		if ( multiplayer == CLIENT )
@@ -8275,7 +9535,7 @@ namespace SAMLua
 		int sprite = 0;
 		if ( !modelId.empty() )
 		{
-			sprite = SAMModels::modelIndexForId(modelId);
+			sprite = samResolveModelAsset(modelId, assetNs);
 			if ( sprite < 0 )
 			{
 				char* end = nullptr;

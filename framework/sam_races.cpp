@@ -893,6 +893,18 @@ int SAMRaces::raceIdForKey(uint32_t key)
 	return ( it != s_byKey.end() ) ? it->second : -1;
 }
 
+std::string SAMRaces::canonicalName(int raceId)
+{
+	if ( raceId >= SAM_RACE_ID_BASE )
+	{
+		const SAMRaceDef* def = get(raceId);
+		return def ? def->id : std::string();
+	}
+	const int mon = (int)getMonsterFromPlayerRace(raceId);
+	if ( mon >= 0 && mon < NUMMONSTERS ) { return std::string(monstertypename[mon]); }
+	return std::string();
+}
+
 int SAMRaces::raceIdForIdString(const std::string& idString)
 {
 	auto it = s_byIdString.find(idString);
