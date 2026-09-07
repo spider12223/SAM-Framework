@@ -118,7 +118,12 @@ for (const f of FUNCS) {
   if (!byCat.has(c)) byCat.set(c, [])
   byCat.get(c).push(f)
 }
-const sig = f => `${f.name}(${(f.params || []).map(p => p.name).join(', ')})`
+// `optional: true` is what samApi.js actually marks a parameter with, and the markdown ignored it
+// exactly as the .d.ts line did -- so the reference on GitHub, the page a mod author actually reads,
+// showed `sam_apply_force(uid, force, angle, ticks)` with no hint that ticks can be left out.
+// Brackets are the convention a reader already knows from any CLI or man page, so it needs no legend.
+const samOptional = p => !!(p.optional || /optional/i.test(p.type || ''))
+const sig = f => `${f.name}(${(f.params || []).map(p => samOptional(p) ? `[${p.name}]` : p.name).join(', ')})`
 
 let md = `# S.A.M function reference
 
@@ -148,7 +153,7 @@ for (const cat of [...byCat.keys()].sort()) {
     md += `${f.desc || ''}\n\n`
     if ((f.params || []).length) {
       md += `| argument | type |\n|---|---|\n`
-      for (const p of f.params) md += `| \`${p.name}\` | ${p.type}${p.values ? ` — one of: ${p.values.map(v => `\`${v}\``).join(', ')}` : ''} |\n`
+      for (const p of f.params) md += `| \`${p.name}\`${samOptional(p) ? ' *(optional)*' : ''} | ${p.type}${p.values ? ` — one of: ${p.values.map(v => `\`${v}\``).join(', ')}` : ''} |\n`
       md += `\n`
     }
     md += `**Returns:** ${f.returns || 'nothing'}\n\n`

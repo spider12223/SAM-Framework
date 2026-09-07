@@ -47,7 +47,7 @@ For guides and worked examples, see [scripting-reference.md](scripting-reference
 
 ## Combat
 
-### `sam_spawn_projectile(tile_x, tile_y, angle, speed, damage, lifetime, model, owner)`
+### `sam_spawn_projectile(tile_x, tile_y, angle, speed, [damage], [lifetime], [model], [owner])`
 
 > Host-only.
 
@@ -59,10 +59,10 @@ Fire a moving projectile with its own speed, model, damage and lifetime. Until t
 | `tile_y` | number |
 | `angle` | number (radians — sam_get_facing returns one) |
 | `speed` | number (world pixels per tick; must be > 0) |
-| `damage` | int (optional, default 0) |
-| `lifetime` | int ticks (optional, default 100 ≈ 2s, max 1000) |
-| `model` | string (optional — a model from your mod's "models", or a vanilla model index) |
-| `owner` | int player 0..3 (optional, default -1 = unowned) |
+| `damage` *(optional)* | int (optional, default 0) |
+| `lifetime` *(optional)* | int ticks (optional, default 100 ≈ 2s, max 1000) |
+| `model` *(optional)* | string (optional — a model from your mod's "models", or a vanilla model index) |
+| `owner` *(optional)* | int player 0..3 (optional, default -1 = unowned) |
 
 **Returns:** the projectile's entity uid (int), or nil/null if it could not be spawned
 
@@ -142,7 +142,7 @@ Whether the player has the game paused. Each machine has its own answer in multi
 
 ## Custom events
 
-### `sam_fire_hook(name, event)`
+### `sam_fire_hook(name, [event])`
 
 > Host-only.
 
@@ -151,7 +151,7 @@ Fire a custom event to ALL Lua + JS/TS scripts cross-runtime. Only number/bool/s
 | argument | type |
 |---|---|
 | `name` | string |
-| `event` | table |
+| `event` *(optional)* | table |
 
 **Returns:** the number of scripts the event reached (number)
 
@@ -326,13 +326,13 @@ Look up one item by type number or by name. The attributes sub-table is where a 
 
 **Returns:** { type, name, unidentified, category, level, weight, value, custom, attributes } or nil/null if unknown
 
-### `sam_list_items(category)`
+### `sam_list_items([category])`
 
 List every item the game knows about, including items added by mods (those have custom = true). This is what a recipe browser, a shop's stock list or a bestiary of loot is built from. The name it gives you is accepted by sam_grant_item, sam_spawn_item, sam_item_id and the rest, so listing and then granting works; if two items happen to share a displayed name the call refuses and names both rather than guessing.
 
 | argument | type |
 |---|---|
-| `category` | string (optional filter, e.g. "WEAPON"; omit for everything) |
+| `category` *(optional)* | string (optional filter, e.g. "WEAPON"; omit for everything) |
 
 **Returns:** array of { type, name, unidentified, category, level, weight, value, custom }
 
@@ -351,7 +351,7 @@ List the spells a player can actually be given, with their mana cost. Spells the
 
 ## HUD
 
-### `sam_hud_bar(id, x, y, w, h, frac, color)`
+### `sam_hud_bar(id, x, y, w, h, frac, [color])`
 
 Show or update a horizontal bar — a custom resource, a charge meter, a boss health track. frac is clamped to 0..1; 0 draws as empty rather than a sliver.
 
@@ -363,21 +363,21 @@ Show or update a horizontal bar — a custom resource, a charge meter, a boss he
 | `w` | int |
 | `h` | int |
 | `frac` | number (0..1) |
-| `color` | int (0xRRGGBBAA) |
+| `color` *(optional)* | int (0xRRGGBBAA) |
 
 **Returns:** true on success (boolean)
 
-### `sam_hud_clear(id)`
+### `sam_hud_clear([id])`
 
 Remove one HUD element. No id removes the whole script HUD. The HUD is also dropped automatically when the mod unloads, so it can never outlive the mod that drew it.
 
 | argument | type |
 |---|---|
-| `id` | string |
+| `id` *(optional)* | string |
 
 **Returns:** true if that id was showing (boolean)
 
-### `sam_hud_text(id, x, y, text, color)`
+### `sam_hud_text(id, x, y, text, [color])`
 
 Show or update a line of text on screen. Calling again with the same id moves/retitles the existing line rather than stacking a new one.
 
@@ -387,7 +387,7 @@ Show or update a line of text on screen. Calling again with the same id moves/re
 | `x` | int |
 | `y` | int |
 | `text` | string |
-| `color` | int (0xRRGGBBAA) |
+| `color` *(optional)* | int (0xRRGGBBAA) |
 
 **Returns:** true on success (boolean)
 
@@ -522,25 +522,25 @@ Everything plain about one item in a single call, rather than a dozen separate g
 
 **Returns:** a table/object with type, count, beatitude, status, status_name, identified, appearance, owner_uid, droppable, grid_x, grid_y, or nil
 
-### `sam_get_item_ac(uid, player)`
+### `sam_get_item_ac(uid, [player])`
 
 The armour value. Same caveat as sam_get_item_attack: the optional wearer only matters for cursed-item inversion, not for their skill or stats.
 
 | argument | type |
 |---|---|
 | `uid` | int |
-| `player` | int (optional) |
+| `player` *(optional)* | int (optional) |
 
 **Returns:** the armour value (number), or nil
 
-### `sam_get_item_attack(uid, player)`
+### `sam_get_item_attack(uid, [player])`
 
 The weapon's attack value. The optional player is passed to the engine, but it only affects a few special cases such as shapeshifting and cursed-item inversion: it does NOT add that character's skill or strength, so two ordinary humans get the same number. For a real to-hit you still need the character's own stats.
 
 | argument | type |
 |---|---|
 | `uid` | int |
-| `player` | int (optional) |
+| `player` *(optional)* | int (optional) |
 
 **Returns:** the weapon's attack value (number), or nil
 
@@ -628,25 +628,25 @@ Whether the bag has room. This one is genuinely local-only: the inventory grid e
 
 **Returns:** true if there is a free slot (boolean), or nil for a remote player
 
-### `sam_is_better_armor(uid_new, uid_current)`
+### `sam_is_better_armor(uid_new, [uid_current])`
 
 The armour counterpart of sam_is_better_weapon, covering shields, helmets, breastplates, cloaks, boots, gloves and masks. Omit the second item to ask whether it is worth wearing at all, which is only ever true for something that actually goes in one of those slots.
 
 | argument | type |
 |---|---|
 | `uid_new` | int |
-| `uid_current` | int (optional) |
+| `uid_current` *(optional)* | int (optional) |
 
 **Returns:** true if the first is an upgrade (boolean)
 
-### `sam_is_better_weapon(uid_new, uid_current)`
+### `sam_is_better_weapon(uid_new, [uid_current])`
 
 The same comparison monsters use when deciding what to pick up. Omit the second item to ask whether it is worth taking at all, which is only ever true for an actual weapon.
 
 | argument | type |
 |---|---|
 | `uid_new` | int |
-| `uid_current` | int (optional; omit to compare against nothing) |
+| `uid_current` *(optional)* | int (optional; omit to compare against nothing) |
 
 **Returns:** true if the first is an upgrade (boolean)
 
@@ -1062,7 +1062,7 @@ Whether a creature's AI knows how to use a kind of item. Only five species have 
 
 **Returns:** true if that creature's AI will pick up and use the item (boolean)
 
-### `sam_monster_charge(uid, ticks)`
+### `sam_monster_charge(uid, [ticks])`
 
 > Host-only.
 
@@ -1071,7 +1071,7 @@ Send a monster into a straight-line charge for N ticks (50 = 1 second, default 5
 | argument | type |
 |---|---|
 | `uid` | uid |
-| `ticks` | int |
+| `ticks` *(optional)* | int |
 
 **Returns:** true on success (boolean)
 
@@ -1285,13 +1285,13 @@ Remove every widget from a panel but leave the panel itself open. This is how yo
 
 **Returns:** true, or false if the panel is not open (boolean)
 
-### `sam_ui_close(panel)`
+### `sam_ui_close([panel])`
 
 Close one panel, or every panel your mod has open if you pass nothing. Closing the last modal panel restores the player's camera control. Always close your panels on player.on_death and game.on_game_start so a leftover window cannot follow the player into the next run.
 
 | argument | type |
 |---|---|
-| `panel` | string (optional — omit to close ALL of your mod's panels) |
+| `panel` *(optional)* | string (optional — omit to close ALL of your mod's panels) |
 
 **Returns:** true, or false if that panel was not open (boolean)
 
@@ -1307,7 +1307,7 @@ Change the font of one widget, or of an entire panel by passing an empty id -- w
 
 **Returns:** true, or false if that panel or widget does not exist (boolean)
 
-### `sam_ui_image(panel, id, x, y, w, h, image, color)`
+### `sam_ui_image(panel, id, x, y, w, h, image, [color])`
 
 Put one of your mod's pictures in a panel, scaled to w by h. Resolves the same way sam_show_image does. The colour argument tints the picture and its alpha fades it, so the same file can be reused greyed-out for a locked entry.
 
@@ -1320,11 +1320,11 @@ Put one of your mod's pictures in a panel, scaled to w by h. Resolves the same w
 | `w` | int |
 | `h` | int |
 | `image` | string ("ns:id", a bare name, or a path inside your mod) |
-| `color` | colour (optional, default white = untinted) |
+| `color` *(optional)* | colour (optional, default white = untinted) |
 
 **Returns:** true, or false if the picture could not be resolved (boolean)
 
-### `sam_ui_input(panel, id, x, y, w, h, text)`
+### `sam_ui_input(panel, id, x, y, w, h, [text])`
 
 Put an editable text box in a panel — a search field, a name entry, a price offer. Read what the player typed with sam_ui_input_text. Place the box clear of any label: a label wide enough to overlap the box will sit on top of it.
 
@@ -1336,7 +1336,7 @@ Put an editable text box in a panel — a search field, a name entry, a price of
 | `y` | int |
 | `w` | int |
 | `h` | int |
-| `text` | string (optional starting contents) |
+| `text` *(optional)* | string (optional starting contents) |
 
 **Returns:** true, or false if that panel is not open (boolean)
 
@@ -1361,7 +1361,7 @@ Ask whether one of your panels is on screen. Useful to make a key or an item tog
 
 **Returns:** true if that panel is currently open (boolean)
 
-### `sam_ui_label(panel, id, x, y, w, text, color)`
+### `sam_ui_label(panel, id, x, y, w, text, [color])`
 
 Put a line of text in a panel. x/y are measured from the panel's top-left corner, not the screen. Give w enough room for the text or it will be cut off — sam_ui_text_size measures a string before you place it. Re-declaring the same id replaces the text, which is how you update a running total.
 
@@ -1373,7 +1373,7 @@ Put a line of text in a panel. x/y are measured from the panel's top-left corner
 | `y` | int |
 | `w` | int |
 | `text` | string |
-| `color` | colour (optional, default warm parchment) |
+| `color` *(optional)* | colour (optional, default warm parchment) |
 
 **Returns:** true, or false if that panel is not open (boolean)
 
@@ -1392,7 +1392,7 @@ Create an empty scrolling list in a panel. Fill it with sam_ui_list_add. This is
 
 **Returns:** true, or false if that panel is not open (boolean)
 
-### `sam_ui_list_add(panel, id, row_id, text, color)`
+### `sam_ui_list_add(panel, id, row_id, text, [color])`
 
 Append one row to a list. Clicking a row fires "ui.on_select" with .panel, .widget set to the list and .value set to the row_id you chose here — so make row_id something you can act on, like an item id, rather than a display string.
 
@@ -1402,7 +1402,7 @@ Append one row to a list. Clicking a row fires "ui.on_select" with .panel, .widg
 | `id` | string (the list's id) |
 | `row_id` | string (your id for this row) |
 | `text` | string |
-| `color` | colour (optional) |
+| `color` *(optional)* | colour (optional) |
 
 **Returns:** true, or false if that panel or list does not exist (boolean)
 
@@ -1429,7 +1429,7 @@ Set how tall each row of a list is. Raise it if you switched that list to a larg
 
 **Returns:** true, or false if that panel or list does not exist (boolean)
 
-### `sam_ui_open(panel, x, y, w, h, title, modal)`
+### `sam_ui_open(panel, x, y, w, h, [title], [modal])`
 
 Open one of your mod's panels at a position and size given in VIRTUAL screen units (1280x720 at the default UI scale, not your monitor's pixels). modal = true frees the mouse cursor so the player can click your widgets, and hands camera control back when the panel closes — use it for anything with buttons. A non-modal panel is display-only and leaves the player in normal look-around mode. Opening a panel id that is already open re-positions it instead of opening a second one.
 
@@ -1440,12 +1440,12 @@ Open one of your mod's panels at a position and size given in VIRTUAL screen uni
 | `y` | int |
 | `w` | int |
 | `h` | int |
-| `title` | string (optional, "" for none) |
-| `modal` | boolean (optional, default false) |
+| `title` *(optional)* | string (optional, "" for none) |
+| `modal` *(optional)* | boolean (optional, default false) |
 
 **Returns:** true if the panel opened (boolean)
 
-### `sam_ui_panel_style(panel, background, border, border_width)`
+### `sam_ui_panel_style(panel, background, border, [border_width])`
 
 Recolour a panel's background and border. Nothing about a panel's look is fixed by the framework — set the background fully transparent for a bare overlay, or opaque for a solid window. Colours accept the same forms as the HUD calls.
 
@@ -1454,18 +1454,18 @@ Recolour a panel's background and border. Nothing about a panel's look is fixed 
 | `panel` | string |
 | `background` | colour (0 = leave unchanged) |
 | `border` | colour (0 = leave unchanged) |
-| `border_width` | int (optional, omit to leave unchanged) |
+| `border_width` *(optional)* | int (optional, omit to leave unchanged) |
 
 **Returns:** true, or false if that panel is not open (boolean)
 
-### `sam_ui_text_size(text, font)`
+### `sam_ui_text_size(text, [font])`
 
 Measure a string before you place it. This is how you lay a panel out properly instead of guessing: size a label to its own text so it cannot overlap the widget beside it, right-align a column of numbers, or centre a heading in a panel of known width.
 
 | argument | type |
 |---|---|
 | `text` | string |
-| `font` | string (optional; defaults to the standard panel face, NOT whatever font you set on a particular panel — this call takes no panel) |
+| `font` *(optional)* | string (optional; defaults to the standard panel face, NOT whatever font you set on a particular panel — this call takes no panel) |
 
 **Returns:** width, height in pixels (two ints), or nil/null if the font could not be loaded
 
@@ -1647,17 +1647,17 @@ Read an entity's scale. The counterpart to sam_set_scale, which shipped without 
 
 **Returns:** x, y, z scale (numbers), or nil
 
-### `sam_hide_image(player)`
+### `sam_hide_image([player])`
 
 Take the overlay away early. No player clears every player's.
 
 | argument | type |
 |---|---|
-| `player` | int |
+| `player` *(optional)* | int |
 
 **Returns:** true if something was showing (boolean)
 
-### `sam_hud_image(id, x, y, w, h, image, color)`
+### `sam_hud_image(id, x, y, w, h, image, [color])`
 
 A PERSISTENT picture in the script HUD — a portrait, a custom gauge, a marker. Stays until sam_hud_clear(id) or the mod unloads, unlike the overlay. w/h of 0 means the picture's own pixel size. The colour is MIXED into the art, so white (the default) leaves it untouched and the alpha byte fades it.
 
@@ -1669,7 +1669,7 @@ A PERSISTENT picture in the script HUD — a portrait, a custom gauge, a marker.
 | `w` | int |
 | `h` | int |
 | `image` | string |
-| `color` | int (0xRRGGBBAA) |
+| `color` *(optional)* | int (0xRRGGBBAA) |
 
 **Returns:** true on success (boolean)
 
@@ -1710,7 +1710,7 @@ Turn one of Barony's entity flags on or off, and tell the other players about it
 
 **Returns:** true on success (boolean); false for an unknown or read-only flag, or an entity you may not write to
 
-### `sam_set_entity_size(uid, size, size_y)`
+### `sam_set_entity_size(uid, size, [size_y])`
 
 > Host-only.
 
@@ -1720,7 +1720,7 @@ Set an entity's collision box. The number is a half-extent in world units, 16 to
 |---|---|
 | `uid` | int |
 | `size` | int (0-127, half-width in world units; 16 is one tile) |
-| `size_y` | int |
+| `size_y` *(optional)* | int |
 
 **Returns:** true on success (boolean)
 
@@ -1763,7 +1763,7 @@ Show or hide an entity. The flag is REQUIRED: leaving it out is refused rather t
 
 **Returns:** true on success (boolean)
 
-### `sam_show_image(player, image, duration_ms, alpha, fit)`
+### `sam_show_image(player, image, [duration_ms], [alpha], [fit])`
 
 Cover a player's screen with one of the mod's pictures, over the world AND the HUD, for duration_ms (0 or omitted = until sam_hide_image). This is the jumpscare / title-card / death-splash layer: it removes itself, so there is nothing to clean up. alpha is 0..255 (default 255). "contain" keeps the picture's aspect ratio; "stretch" (default) fills the view. In multiplayer the host forwards the image NAME to the owning client, which draws it from its own copy of the mod.
 
@@ -1771,13 +1771,13 @@ Cover a player's screen with one of the mod's pictures, over the world AND the H
 |---|---|
 | `player` | int |
 | `image` | string |
-| `duration_ms` | int |
-| `alpha` | int |
-| `fit` | string — one of: `stretch`, `contain` |
+| `duration_ms` *(optional)* | int |
+| `alpha` *(optional)* | int |
+| `fit` *(optional)* | string — one of: `stretch`, `contain` |
 
 **Returns:** true if the picture resolved (boolean)
 
-### `sam_show_image_at(player, image, x, y, w, h, duration_ms, alpha)`
+### `sam_show_image_at(player, image, x, y, w, h, [duration_ms], [alpha])`
 
 The same overlay, placed rather than full-screen. Coordinates are virtual screen pixels (the space sam_hud_text uses), so a fixed layout survives any resolution. w or h of 0 means the picture's own size on that axis. Still drawn over the HUD — for a picture that sits IN the HUD, use sam_hud_image.
 
@@ -1789,8 +1789,8 @@ The same overlay, placed rather than full-screen. Coordinates are virtual screen
 | `y` | int |
 | `w` | int |
 | `h` | int |
-| `duration_ms` | int |
-| `alpha` | int |
+| `duration_ms` *(optional)* | int |
+| `alpha` *(optional)* | int |
 
 **Returns:** true if the picture resolved (boolean)
 
@@ -1885,7 +1885,7 @@ Whether the player is actually blocking right now — the real engine state, not
 
 **Returns:** whether the player is blocking (boolean)
 
-### `sam_level_up(player, count)`
+### `sam_level_up(player, [count])`
 
 > Host-only.
 
@@ -1894,11 +1894,11 @@ Level a player up count times (default 1) through the real engine path: attribut
 | argument | type |
 |---|---|
 | `player` | int |
-| `count` | int |
+| `count` *(optional)* | int |
 
 **Returns:** true on success (boolean)
 
-### `sam_play_sound(sound_id, vol)`
+### `sam_play_sound(sound_id, [vol])`
 
 > Host-only.
 
@@ -1907,7 +1907,7 @@ Play a sound for all connected players. sound_id is a vanilla numeric index OR t
 | argument | type |
 |---|---|
 | `sound_id` | int|string |
-| `vol` | int |
+| `vol` *(optional)* | int |
 
 **Returns:** true on success (boolean)
 
@@ -1952,7 +1952,7 @@ Shake a player's camera. 1 is a nudge, ~10 a solid hit, 20+ violent. Feeds Baron
 
 **Returns:** true if accepted (boolean)
 
-### `sam_damage_number(uid, amount, type)`
+### `sam_damage_number(uid, amount, [type])`
 
 > Host-only.
 
@@ -1962,7 +1962,7 @@ The floating combat number the game shows on a hit. Lets a mod's custom damage r
 |---|---|
 | `uid` | uid |
 | `amount` | int |
-| `type` | int |
+| `type` *(optional)* | int |
 
 **Returns:** true on success (boolean)
 
@@ -1978,7 +1978,7 @@ Briefly freeze enemy and projectile logic — a freeze-frame — for duration_ms
 
 **Returns:** true if accepted (boolean)
 
-### `sam_impact_frame(player, r, g, b, intensity, duration_ms, lines)`
+### `sam_impact_frame(player, r, g, b, [intensity], [duration_ms], [lines])`
 
 The EXAGGERATED version of the flash: a colour pop PLUS manga speed lines converging on screen centre PLUS a bright core flare. Pair it with sam_camera_shake and sam_hitstop for a full impact beat. lines is the speed-line count (0 = a plain flash).
 
@@ -1988,13 +1988,13 @@ The EXAGGERATED version of the flash: a colour pop PLUS manga speed lines conver
 | `r` | int |
 | `g` | int |
 | `b` | int |
-| `intensity` | number (0..1) |
-| `duration_ms` | int |
-| `lines` | int |
+| `intensity` *(optional)* | number (0..1) |
+| `duration_ms` *(optional)* | int |
+| `lines` *(optional)* | int |
 
 **Returns:** true if accepted (boolean)
 
-### `sam_play_sound_at(sound, tileX, tileY, volume)`
+### `sam_play_sound_at(sound, tileX, tileY, [volume])`
 
 > Host-only.
 
@@ -2005,11 +2005,11 @@ Positional audio: it attenuates with distance and pans, so a trap firing across 
 | `sound` | int | string ("ns:sound") |
 | `tileX` | int |
 | `tileY` | int |
-| `volume` | int |
+| `volume` *(optional)* | int |
 
 **Returns:** true on success (boolean)
 
-### `sam_play_sound_entity(sound, uid, volume)`
+### `sam_play_sound_entity(sound, uid, [volume])`
 
 > Host-only.
 
@@ -2019,11 +2019,11 @@ The same, but the sound follows the entity as it moves.
 |---|---|
 | `sound` | int | string ("ns:sound") |
 | `uid` | uid |
-| `volume` | int |
+| `volume` *(optional)* | int |
 
 **Returns:** true on success (boolean)
 
-### `sam_screen_flash(player, r, g, b, intensity, duration_ms)`
+### `sam_screen_flash(player, r, g, b, [intensity], [duration_ms])`
 
 Flash a player's whole screen in an RGB colour that fades to nothing — the anime "impact frame". intensity 0..1 is the peak opacity. Drawn on the machine the player lives on.
 
@@ -2033,12 +2033,12 @@ Flash a player's whole screen in an RGB colour that fades to nothing — the ani
 | `r` | int |
 | `g` | int |
 | `b` | int |
-| `intensity` | number (0..1) |
-| `duration_ms` | int |
+| `intensity` *(optional)* | number (0..1) |
+| `duration_ms` *(optional)* | int |
 
 **Returns:** true if accepted (boolean)
 
-### `sam_spawn_particle(kind, tileX, tileY, z, scale)`
+### `sam_spawn_particle(kind, tileX, tileY, [z], [scale])`
 
 > Host-only.
 
@@ -2049,8 +2049,8 @@ A vanilla particle burst at a tile, so a mod's own effect looks like part of the
 | `kind` | string — one of: `poof`, `explosion`, `bang`, `sleep` |
 | `tileX` | int |
 | `tileY` | int |
-| `z` | number |
-| `scale` | number |
+| `z` *(optional)* | number |
+| `scale` *(optional)* | number |
 
 **Returns:** true on success (boolean)
 
@@ -2103,7 +2103,7 @@ Resolve an item's numeric type id — compare it against event fields like on_bl
 
 **Returns:** the item's numeric type id (int), or nil/null if unknown
 
-### `sam_spawn_item(x, y, item_name, status, beatitude, count)`
+### `sam_spawn_item(x, y, item_name, [status], [beatitude], [count])`
 
 > Host-only.
 
@@ -2114,9 +2114,9 @@ Spawn a ground item at a map tile. status, beatitude and count let you put an it
 | `x` | int |
 | `y` | int |
 | `item_name` | string (a vanilla name, or a custom "namespace:item") |
-| `status` | int (optional, default EXCELLENT; clamped BROKEN..EXCELLENT) |
-| `beatitude` | int (optional, default 0; negative is cursed, positive blessed; clamped -100..100) |
-| `count` | int (optional, default 1; clamped 1..1000) |
+| `status` *(optional)* | int (optional, default EXCELLENT; clamped BROKEN..EXCELLENT) |
+| `beatitude` *(optional)* | int (optional, default 0; negative is cursed, positive blessed; clamped -100..100) |
+| `count` *(optional)* | int (optional, default 1; clamped 1..1000) |
 
 **Returns:** the spawned item's entity uid (int), or nil/null if the tile was invalid
 
@@ -2238,7 +2238,7 @@ Un-learn a spell from a player's known list (local player). The counterpart to s
 
 ## Status effects
 
-### `sam_apply_effect(player, effect, ticks, strength)`
+### `sam_apply_effect(player, effect, ticks, [strength])`
 
 > Host-only.
 
@@ -2249,7 +2249,7 @@ Apply a status effect to a player for N ticks (50 ticks = 1s). Optional strength
 | `player` | int |
 | `effect` | string — one of: `ASLEEP`, `POISONED`, `STUNNED`, `CONFUSED`, `DRUNK`, `INVISIBLE`, `BLIND`, `GREASY`, `MESSY`, `FAST`, `PARALYZED`, `LEVITATING`, `TELEPATH`, `VOMITING`, `BLEEDING`, `SLOW`, `MAGICRESIST`, `MAGICREFLECT`, `VAMPIRICAURA`, `SHRINE_RED_BUFF`, `SHRINE_GREEN_BUFF`, `SHRINE_BLUE_BUFF`, `HP_REGEN`, `MP_REGEN`, `PACIFY`, `POLYMORPH`, `KNOCKBACK`, `WITHDRAWAL`, `POTION_STR`, `SHAPESHIFT`, `WEBBED`, `FEAR`, `MAGICAMPLIFY`, `DISORIENTED`, `SHADOW_TAGGED`, `TROLLS_BLOOD`, `FLUTTER`, `DASH`, `DISTRACTED_COOLDOWN`, `MIMIC_LOCKED`, `ROOTED`, `NAUSEA_PROTECTION`, `CON_BONUS`, `PWR`, `AGILITY`, `RALLY`, `MARIGOLD`, `ENSEMBLE_FLUTE`, `ENSEMBLE_LYRE`, `ENSEMBLE_DRUM`, `ENSEMBLE_LUTE`, `ENSEMBLE_HORN`, `LIFT`, `GUARD_SPIRIT`, `GUARD_BODY`, `DIVINE_GUARD`, `NIMBLENESS`, `GREATER_MIGHT`, `COUNSEL`, `STURDINESS`, `BLESS_FOOD`, `PINPOINT`, `PENANCE`, `SACRED_PATH`, `DETECT_ENEMY`, `BLOOD_WARD`, `TRUE_BLOOD`, `DIVINE_ZEAL`, `MAXIMISE`, `MINIMISE`, `WEAKNESS`, `INCOHERENCE`, `OVERCHARGE`, `ENVENOM_WEAPON`, `MAGIC_GREASE`, `COMMAND`, `MIMIC_VOID`, `CURSE_FLESH`, `NUMBING_BOLT`, `DELAY_PAIN`, `SEEK_CREATURE`, `TABOO`, `COURAGE`, `COWARDICE`, `SPORES`, `ABUNDANCE`, `GREATER_ABUNDANCE`, `PRESERVE`, `MIST_FORM`, `FORCE_SHIELD`, `LIGHTEN_LOAD`, `ATTRACT_ITEMS`, `RETURN_ITEM`, `DEMESNE_DOOR`, `REFLECTOR_SHIELD`, `DIZZY`, `SPIN`, `CRITICAL_SPELL`, `MAGIC_WELL`, `STATIC`, `ABSORB_MAGIC`, `FLAME_CLOAK`, `DUSTED`, `NOISE_VISIBILITY`, `RATION_SPICY`, `RATION_SOUR`, `RATION_BITTER`, `RATION_HEARTY`, `RATION_HERBAL`, `RATION_SWEET`, `GROWTH`, `THORNS`, `BLADEVINES`, `BASTION_MUSHROOM`, `BASTION_ROOTS`, `FOCI_LIGHT_PEACE`, `FOCI_LIGHT_JUSTICE`, `FOCI_LIGHT_PROVIDENCE`, `FOCI_LIGHT_PURITY`, `FOCI_LIGHT_SANCTUARY`, `STASIS`, `HP_MP_REGEN`, `DISRUPTED`, `FROST`, `MAGICIANS_ARMOR`, `PROJECT_SPIRIT`, `DEFY_FLESH`, `PINPOINT_DAMAGE`, `SALAMANDER_HEART`, `DIVINE_FIRE`, `HEALING_WORD`, `HOLY_FIRE`, `SIGIL`, `SANCTUARY`, `DUCKED` |
 | `ticks` | int |
-| `strength` | int |
+| `strength` *(optional)* | int |
 
 **Returns:** true unless immune/refused (boolean)
 
@@ -2352,7 +2352,7 @@ Change the magnitude/tier of an ALREADY-ACTIVE effect while keeping its remainin
 
 ## Terrain
 
-### `sam_find_entities(x, y, radiusTiles, kind)`
+### `sam_find_entities(x, y, radiusTiles, [kind])`
 
 Entities of a KIND near a tile. This is the gap sam_get_nearby_entities leaves: that one skips anything which is not a monster or a player, so doors, chests, levers, gold and dropped items were invisible to scripts. A kind you spell wrong is logged by name and returns nothing, rather than returning the empty list that looks exactly like "nothing nearby" — each distinct wrong word is reported once.
 
@@ -2361,7 +2361,7 @@ Entities of a KIND near a tile. This is the gap sam_get_nearby_entities leaves: 
 | `x` | int |
 | `y` | int |
 | `radiusTiles` | number |
-| `kind` | string — one of: `any`, `player`, `monster`, `item`, `gold`, `door`, `chest`, `fountain`, `sink`, `switch`, `gate`, `ladder`, `portal`, `boulder`, `gib`, `other` |
+| `kind` *(optional)* | string — one of: `any`, `player`, `monster`, `item`, `gold`, `door`, `chest`, `fountain`, `sink`, `switch`, `gate`, `ladder`, `portal`, `boulder`, `gib`, `other` |
 
 **Returns:** array of uids
 
@@ -2377,7 +2377,7 @@ What is inside a chest, or what a creature is carrying.
 
 **Returns:** array of tables { type, name, count, status, beatitude, identified } or nil
 
-### `sam_get_light_at(x, y, player)`
+### `sam_get_light_at(x, y, [player])`
 
 How lit a tile is, computed exactly the way the engine computes it, so the number you get back is the number monster vision thresholds on rather than an approximation of it. Barony keeps one SHARED lightmap holding light that is there for everyone (a wall torch, a lit room) plus one per camera that also holds that player's own glow. This reads the shared one by default, because that is the one the AI reads. Pass a player index if you want what that player's screen actually shows instead.
 
@@ -2385,7 +2385,7 @@ How lit a tile is, computed exactly the way the engine computes it, so the numbe
 |---|---|
 | `x` | int |
 | `y` | int |
-| `player` | int |
+| `player` *(optional)* | int |
 
 **Returns:** 0..255
 
@@ -2422,7 +2422,7 @@ Whether the map's rules allow digging here: it returns false for water and lava,
 
 **Returns:** true if this tile's terrain permits digging (boolean)
 
-### `sam_line_of_sight(x1, y1, x2, y2, blockedByEntities)`
+### `sam_line_of_sight(x1, y1, x2, y2, [blockedByEntities])`
 
 Can a straight line get from A to B? This is the engine's own trace, so it agrees with what is drawn — unlike plain distance, which sees through solid rock.
 
@@ -2432,7 +2432,7 @@ Can a straight line get from A to B? This is the engine's own trace, so it agree
 | `y1` | int |
 | `x2` | int |
 | `y2` | int |
-| `blockedByEntities` | boolean |
+| `blockedByEntities` *(optional)* | boolean |
 
 **Returns:** visible, blockedX, blockedY (blocked coords are -1 when visible)
 
@@ -2451,7 +2451,7 @@ Write one map tile — dig a passage, wall something in, flood a room. Refuses o
 
 **Returns:** true on success (boolean)
 
-### `sam_tiles_connected(x1, y1, x2, y2, flying)`
+### `sam_tiles_connected(x1, y1, x2, y2, [flying])`
 
 Can something WALK (or fly) from A to B at all? The softlock check: after a mod edits terrain, ask whether the exit is still reachable before committing.
 
@@ -2461,7 +2461,7 @@ Can something WALK (or fly) from A to B at all? The softlock check: after a mod 
 | `y1` | int |
 | `x2` | int |
 | `y2` | int |
-| `flying` | boolean |
+| `flying` *(optional)* | boolean |
 
 **Returns:** boolean
 
@@ -2562,7 +2562,7 @@ Read the seed identifying this run. Pair it with sam_random when you want per-ru
 
 **Returns:** the run's unique game key (number)
 
-### `sam_get_skill(uid, skill, effective)`
+### `sam_get_skill(uid, skill, [effective])`
 
 A proficiency rank. Accepts both spellings — "PRO_SWORD" (the class schema) and "sword" (what player.on_proficiency_increased hands you). effective (default true) includes the equipment bonus the game actually uses; pass false for the raw trained rank. Ranks were completely unreadable before this, even though the framework has always fired the event.
 
@@ -2570,7 +2570,7 @@ A proficiency rank. Accepts both spellings — "PRO_SWORD" (the class schema) an
 |---|---|
 | `uid` | uid |
 | `skill` | string |
-| `effective` | boolean |
+| `effective` *(optional)* | boolean |
 
 **Returns:** 0..100
 
@@ -2685,7 +2685,7 @@ Picks a key with probability proportional to its weight, for loot tables and spa
 
 ## World
 
-### `sam_apply_force(uid, force, angle, ticks)`
+### `sam_apply_force(uid, force, angle, [ticks])`
 
 > Host-only.
 
@@ -2696,7 +2696,7 @@ Shove an entity, using the engine's own knockback. The angle is a Barony yaw in 
 | `uid` | int |
 | `force` | number (0.6 is an arrow hit, 1.4 a strong one, 7 the ceiling) |
 | `angle` | number (radians, same as sam_get_facing) |
-| `ticks` | int |
+| `ticks` *(optional)* | int |
 
 **Returns:** true if something will act on the shove (boolean)
 
@@ -2832,7 +2832,7 @@ Remove a whole item stack from a player's inventory by its uid (from sam_get_inv
 
 **Returns:** true on success (boolean); false if the item is missing or currently equipped
 
-### `sam_set_chest_stash(chest_uid, on)`
+### `sam_set_chest_stash(chest_uid, [on])`
 
 > Host-only.
 
@@ -2841,7 +2841,7 @@ Turn an existing chest into permanent storage. Its contents then live in the pla
 | argument | type |
 |---|---|
 | `chest_uid` | int (from sam_find_entities with kind "chest", or the on_chest_opened event) |
-| `on` | boolean (optional, default true) |
+| `on` *(optional)* | boolean (optional, default true) |
 
 **Returns:** true if the chest was converted (boolean)
 
@@ -2858,7 +2858,7 @@ Make a player or a monster stop taking damage, or let them take damage again. It
 
 **Returns:** true on success (boolean); false for anything that is not a player or a monster
 
-### `sam_set_on_fire(uid, on)`
+### `sam_set_on_fire(uid, [on])`
 
 > Host-only.
 
@@ -2867,7 +2867,7 @@ Set something alight, or put it out with sam_set_on_fire(uid, false). The answer
 | argument | type |
 |---|---|
 | `uid` | int |
-| `on` | boolean (optional, defaults to true) |
+| `on` *(optional)* | boolean (optional, defaults to true) |
 
 **Returns:** true if the entity is on fire once the call finishes (boolean)
 
@@ -2885,7 +2885,7 @@ Move an entity to a map tile. Players go through the safe teleport path and cann
 
 **Returns:** true on success (boolean); false if refused (out of bounds, or a player teleport blocked by a wall)
 
-### `sam_spawn_companion(player, model_id, scale)`
+### `sam_spawn_companion(player, model_id, [scale])`
 
 > Host-only.
 
@@ -2895,11 +2895,11 @@ Spawn a floating COMPANION (a JoJo-style "Stand" / familiar) that renders one of
 |---|---|
 | `player` | int |
 | `model_id` | string — one of: `a registered custom model id, e.g. "mymod:star_platinum"` |
-| `scale` | number |
+| `scale` *(optional)* | number |
 
 **Returns:** the new companion's entity uid (int), or nil/null (bad player / unregistered model / off-host)
 
-### `sam_spawn_monster(tile_x, tile_y, monster_name, shop_type)`
+### `sam_spawn_monster(tile_x, tile_y, monster_name, [shop_type])`
 
 > Host-only.
 
@@ -2910,7 +2910,7 @@ Summon a monster at a map tile. "shopkeeper" makes a working shop; the optional 
 | `tile_x` | int |
 | `tile_y` | int |
 | `monster_name` | string — one of: `vanilla monster name, e.g. "skeleton", "shopkeeper"` |
-| `shop_type` | int |
+| `shop_type` *(optional)* | int |
 
 **Returns:** the new monster's uid (int), or nil/null if the name is unknown or the tile is blocked
 
@@ -2927,7 +2927,7 @@ Spawn a purely-DECORATIVE portal (the swirling vortex) at a map tile — it anim
 
 **Returns:** the new portal's entity uid (int), or nil/null if the tile is out of bounds
 
-### `sam_travel_to_level(floor, opts)`
+### `sam_travel_to_level(floor, [opts])`
 
 > Host-only.
 
@@ -2936,7 +2936,7 @@ Send the party to any floor, including BACK UP, which the game otherwise never d
 | argument | type |
 |---|---|
 | `floor` | int (absolute floor number, 0-100) |
-| `opts` | table/object (optional) — { secret = true } reads the floor from the secret levels list |
+| `opts` *(optional)* | table/object (optional) — { secret = true } reads the floor from the secret levels list |
 
 **Returns:** true if the trip was accepted (boolean)
 
@@ -3015,7 +3015,7 @@ Point an entity at an angle. The primitive under sam_look_at, for when you are c
 
 **Returns:** true if it turned (boolean)
 
-### `sam_spawn_entity(tile_x, tile_y, behaviour, model)`
+### `sam_spawn_entity(tile_x, tile_y, behaviour, [model])`
 
 > Host-only.
 
@@ -3026,7 +3026,7 @@ Put something in the world that runs your behaviour. This is the other half of s
 | `tile_x` | number (fractional tiles allowed) |
 | `tile_y` | number |
 | `behaviour` | string (a name you registered) |
-| `model` | string (optional — a model from your mod's "models", or a vanilla model index) |
+| `model` *(optional)* | string (optional — a model from your mod's "models", or a vanilla model index) |
 
 **Returns:** the new entity's uid (int), or nil/null
 
