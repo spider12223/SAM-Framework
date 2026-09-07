@@ -8,19 +8,17 @@ Barony was never built to be modded. S.A.M is the layer that makes it modded any
 
 [hr][/hr]
 
-[h1]NEW IN 2.6: CUSTOM RACES WORK IN MULTIPLAYER[/h1]
+[h1]NEW IN 2.7: A MOD CAN ACT ON THE WORLD[/h1]
 
-Played a custom race online? Your character looks fine to you and wrong to everyone else: a white body, a limb replaced by a coloured block, a head belonging to something else.
+A script could always look at the world and change numbers in it. It could not push anything.
 
-A race's body was described using numbers that only mean something on the machine that sent them, so the other game drew whatever sat at those slots in its own table. It had already worked the body out correctly, and the host overwrote that right answer a fraction of a second later. If you ever saw a character look right for an instant after a floor loaded and then flip wrong, that was this.
+Now it can. Shove a creature the way an arrow does, and it staggers and recovers exactly as if one had. Nudge something along a wall and find out how far it actually got, not just whether it moved. Ask whether a spot will really take a particular creature before you send it there, because size, levitation and what a thing can walk through all change that answer. Resize a hitbox. Float a prop. Set something alight, or put it out. Make a boss take no damage while it talks.
 
-Now what travels between machines is a name, never a number, and each game picks the model from its own copy of your mod.
-
-[b]Both players need S.A.M and the same mod to see a custom race.[/b] Without it they see the creature it is built on, moving normally rather than frozen in place.
+[b]Each was written against the engine rather than guessed at[/b], because the obvious version of every one does nothing at all: a creature's height is rewritten every frame by its own code, and knockback is ignored unless an effect is set first. Reviewing the batch afterwards turned up thirty eight more problems worth fixing, one of which let a move step clean through a wall and report the path was open.
 
 [h1]71 NEW FUNCTIONS: 184 TO 255[/h1]
 
-All of items and inventory: read an item's real displayed name, what the stack is worth, its attack and armour; change condition, blessing, count, owner and whether it can be dropped; ask what slot it fills and what stacks with what; compare two items the way the game's own creatures do when deciding what to pick up. Plus the world itself: shove a creature the way an arrow does, nudge one along a wall, ask if a spot will take it, float a prop, set it alight, or make a boss invulnerable while it talks.
+All of items and inventory: read an item's real displayed name, what the stack is worth, its attack and armour; change condition, blessing, count, owner and whether it can be dropped; ask what slot it fills and what stacks with what; compare two items the way the game's own creatures do when deciding what to pick up. Plus positions, facing, distances, tile queries, seeded random and run timing.
 
 [b]The complete reference[/b], every function and event with arguments, types, return values and host-only flags:
 https://github.com/spider12223/SAM-Framework/blob/main/docs/function-reference.md
