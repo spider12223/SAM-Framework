@@ -77,4 +77,23 @@ public:
 
 	// Reset all reassembly + comparison state (called on mod load/unload).
 	static void clear();
+
+	// --- who is actually running S.A.M -------------------------------------------------
+	//
+	// A machine without S.A.M cannot report that it lacks S.A.M, so the only evidence is
+	// SILENCE. A client that has it acknowledges the fingerprint; the host records that, and
+	// names whoever stayed quiet at the moment it starts to matter.
+
+	// CLIENT: "I received your fingerprint and I am running S.A.M." Sent once, on a complete
+	// receive. Rides the existing client->host SAMF packet with one extra byte, so an older
+	// host reads it as a re-request and simply answers again.
+	static void acknowledgeFingerprint();
+
+	// HOST: remember that this player answered. Called from the SAMF server handler.
+	static void noteClientAck(int player);
+
+	// BOTH: called once when a game starts. On the host it names every connected player who
+	// never acknowledged; on a client it says so if the host never sent a fingerprint at all.
+	// Silent when nothing is loaded, and silent in singleplayer.
+	static void reportModPresence();
 };

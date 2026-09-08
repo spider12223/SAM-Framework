@@ -55,6 +55,12 @@ static std::string s_mismatchDetails;
 static std::map<std::string, bool> s_seenFingerprints;
 static int s_fpPromptCount = 0;
 
+// --- presence: who answered the fingerprint --------------------------------------------
+// Host-side, indexed by player slot. Only meaningful for a connected client, and only until
+// clear() runs on the next connection.
+static bool s_clientAcked[MAXPLAYERS] = { false };
+static bool s_reportedPresence = false;
+
 /*-------------------------------------------------------------------------------
 	Local helpers
 -------------------------------------------------------------------------------*/
@@ -432,4 +438,89 @@ void SAMSync::clear()
 	s_mismatchDetails.clear();
 	s_seenFingerprints.clear();
 	s_fpPromptCount = 0;
+	for ( int i = 0; i < MAXPLAYERS; ++i ) { s_clientAcked[i] = false; }
+	s_reportedPresence = false;
+}
+
+/*-------------------------------------------------------------------------------
+	Presence -- who in this game is running S.A.M at all
+-------------------------------------------------------------------------------*/
+
+void SAMSync::acknowledgeFingerprint()
+{
+	if ( multiplayer != CLIENT )
+	{
+		return;
+	}
+	// The same packet the re-request uses, with one byte appended. A host on an older build
+	// reads the first five bytes, treats it as a request, and re-sends the fingerprint --
+	// harmless, and the client's receive path already dedups an identical fingerprint.
+	memcpy(net_packet->data, "SAMF", 4);
+	net_packet->data[4] = static_cast<Uint8>(clientnum);
+	net_packet->data[5] = 1;   // 1 == acknowledgement, not a request
+	net_packet->len = 6;
+	net_packet->address.host = net_server.host;
+	net_packet->address.port = net_server.port;
+	sendPacketSafe(net_sock, -1, net_packet, 0);
+	SAM_DEBUG(MOD, "Told the host we are running S.A.M.");
+}
+
+void SAMSync::noteClientAck(int player)
+{
+	if ( player < 0 || player >= MAXPLAYERS )
+	{
+		return;
+	}
+	s_clientAcked[player] = true;
+	SAM_DEBUG(MOD, "Player " + std::to_string(player) + " is running S.A.M.");
+}
+
+void SAMSync::reportModPresence()
+{
+	if ( multiplayer == SINGLE || s_reportedPresence )
+	{
+		return;
+	}
+	s_reportedPresence = true;
+
+	const std::string local = SAMSync::generateFingerprint();
+
+	if ( multiplayer == SERVER )
+	{
+		// Nothing of ours is at stake if we have no mods: a player without S.A.M sees a
+		// perfectly ordinary game, which is the correct outcome and not worth a warning.
+		if ( local.empty() )
+		{
+			return;
+		}
+		for ( int i = 1; i < MAXPLAYERS; ++i )
+		{
+			if ( client_disconnected[i] || s_clientAcked[i] )
+			{
+				continue;
+			}
+			// Silence, and the wait is over: a machine running S.A.M would have answered.
+			SAM_WARN(MOD, "Player " + std::to_string(i) + " is NOT running S.A.M. Anything your"
+				" mods add -- a custom race's body, a custom monster -- will look like whatever"
+				" it was built on to them, and scripts will not run on their machine.");
+			messagePlayer(0, MESSAGE_MISC, "Player %d does not have S.A.M. Your mods will look"
+				" wrong to them.", i);
+		}
+		return;
+	}
+
+	// CLIENT. A vanilla host never sends a fingerprint, and until now that was
+	// indistinguishable from one that had not arrived yet. By the time a game starts, it is
+	// not: the packet is not coming.
+	if ( !s_haveHostFingerprint && !local.empty() )
+	{
+		// Worded as the evidence, not the conclusion. The overwhelmingly likely cause is a host
+		// without S.A.M, but a fingerprint swallowed by the pre-lobby filter would look the same,
+		// and claiming the wrong thing to a player is worse than describing what happened.
+		SAM_WARN(MOD, "Never received a mod list from the host, so the host is almost certainly"
+			" not running S.A.M. None of your mods are active in this game and your character"
+			" will look ordinary to everyone, yourself included.");
+		messagePlayer(clientnum, MESSAGE_MISC, "No mod list from the host: your mods are not"
+			" active in this game.");
+	}
 }
