@@ -55,6 +55,172 @@ Everything else is a notification. Returning `false` from one does nothing.
 
 ---
 
+## New in 2.8: combat
+
+Twenty-nine functions and two hooks, chosen by reading Barony's damage code rather than by
+guessing what a combat API ought to contain. Three of them close gaps that had been quietly
+costing mods real capability.
+
+### Healing was unreachable
+
+`sam_deal_damage` forces its amount negative, so both signs damage. There was no relative heal
+at all: the only route was `sam_set_stat(player, "HP", n)`, which makes you read, add and clamp
+by hand, and does not exist for a monster that is not `actMonster`.
+
+```lua
+local restored = sam_heal(uid, 20)   -- returns what LANDED, not what you asked for
+```
+
+Health is clamped to the maximum, so a 20-point heal on something three short of full restores
+three, and `restored` says so. A lifesteal effect needs the real number.
+
+### Damage that respects what the target is
+
+```lua
+local dealt = sam_deal_damage_typed(uid, 10, "magic")
+```
+
+Ten magic damage is five against something that halves magic and twenty against something that
+doubles it, without your script needing to know which. Both stages the engine applies are
+applied here, in its order: the species damage table, then live effects like blood ward and
+sanctuary.
+
+**Barony's damage types are weapon classes, not elements.** There is no fire, ice or lightning
+axis anywhere in the damage funnel. The seven are `sword`, `mace`, `axe`, `polearm`, `ranged`,
+`magic` and `unarmed`. A mod that wants fire damage picks a class and keeps its own label.
+
+### Reading the combat maths
+
+Every one of these takes a uid, and answers `nil` for anything that is not a creature rather
+than 0, because a door does not have zero health, it has none.
+
+| Function | Answers |
+|---|---|
+| `sam_get_hp` / `sam_get_max_hp` | health, for any creature by uid |
+| `sam_get_mp` / `sam_get_max_mp` | mana, the same way |
+| `sam_get_attack` | the melee attack figure the engine would use |
+| `sam_get_ranged_attack` / `sam_get_thrown_attack` | the same for bows and throws |
+| `sam_get_bonus_attack_vs` | extra attack against one specific target |
+| `sam_get_damage_resist` | the multiplier a creature takes a weapon class at |
+| `sam_get_magic_resist` | the raw magic-resistance point count |
+| `sam_preview_damage` | what a swing would deal, dealing nothing |
+| `sam_get_regen_interval` / `sam_get_healring` | natural regeneration, exposed for the first time |
+
+`sam_get_hp` fills a real gap: `sam_get_stat` takes a player index and `sam_get_monster_stat`
+refuses anything that is not a monster, so a uid out of `sam_find_entities` could not reach
+another player's or a companion's health at all.
+
+`sam_get_stat` now also works on a **client**, for that client's own player. Its refusal used to
+be the whole function, which was stricter than the facts: a client holds a correct
+`stats[clientnum]` because the engine's own health and mana packets write into it. Every other
+player index stays refused, because a client is not sent those at all and would read zeroes.
+
+### Mana, with the verbs health already had
+
+```lua
+sam_mod_mp(uid, -3)        -- relative, returns the new total
+sam_consume_mp(uid, 5)     -- spends ONLY if affordable; false and nothing taken otherwise
+sam_drain_mp(uid, 5)       -- takes what it can, and the rest out of HEALTH
+```
+
+`sam_drain_mp` can kill. That overdraw is the point, it is how a blood-magic cost is expressed,
+and it has its own name rather than hiding inside `sam_mod_mp` behind a negative number.
+
+### Blocking, parrying, and aggro
+
+`sam_is_defending` has existed since 1.2 with no way to cause it. `sam_set_defending` is the
+other half — **and it lasts one frame**. The engine writes that field from the block input every
+single frame, so your value is an override for the current frame, not a latch: set it just
+before reading combat maths, or re-apply it from a per-frame handler. `sam_is_parrying` /
+`sam_set_parry` expose a field nothing could see, though the engine has always used it to
+produce parried damage.
+
+```lua
+sam_set_monster_target_uid(guard_uid, intruder_uid)
+```
+
+`sam_set_monster_target` takes a player **index**, so it can only ever aim a monster at a player.
+Monster-versus-monster aggro was unreachable even though the engine method accepts any entity.
+`sam_get_monster_target_uid` reads it back. The older `sam_get_monster_target` answers a player
+**index** and `-1` for everything else, so it is structurally blind to a monster hunting a
+monster: the new writer had no reader at all until the test mod could not assert its own round
+trip. `sam_clear_monster_target` passes the engine's refusal straight through: `false` means "it would
+not let go", not "nothing happened". `sam_alert_allies` wakes the room.
+
+### Consequences
+
+`sam_break_armor` gives `player.on_item_broken` a cause, and with no slot named it uses the
+engine's own picker, so the odds and exclusions match a real hit. `sam_gib` throws a chunk off a
+creature (the one member of the spawn family `sam_spawn_particle` could not carry: a gib takes a
+parent, not a position). `sam_obituary` gives a scripted kill a proper death message and credits
+the killer, which `sam_kill_monster` never did.
+
+`sam_revive_player` brings a dead player back at half health. **It works for a player whose body
+this machine owns**: singleplayer, and the host's own slot. A remote client is refused and says
+so, because reviving in Barony is client-initiated and driving it the other way leaves that
+machine still rendering a ghost.
+
+### A whole species' resistance
+
+```lua
+sam_set_species_damage_resist("skeleton", "mace", 2.0)   -- maces shatter bone
+sam_set_species_damage_resist("slime", "sword", 0.25)    -- swords barely cut
+```
+
+Every creature of that species, now and later. `1.0` is normal, `2.0` is double. Cleared when your
+mods unload, and undone with `sam_clear_species_damage_resist`.
+
+**It cannot grant immunity.** Your number only seeds the multiplier; the engine runs its own
+bonus pool over it and floors the result at `0.1`, so the least any species can be made to take
+is a tenth. Pass `0` and you get `0.1`. For real immunity use `sam_set_damage_immune`, or veto
+`on_before_damage` or `on_damage_multiplier`.
+
+Host-side and **not synced**: the damage is computed on the host so the game plays correctly for
+everyone, but a client's character sheet reads its own copy of the table and will show vanilla
+numbers while taking modded damage.
+
+### The two new hooks
+
+**`on_damage_multiplier`** is the one to reach for when you want to change how much damage
+something takes as a rule, rather than one hit at a time. It fires at the single point every
+damage path goes through, so melee, arrows and every spell all arrive here.
+
+```lua
+function on_event(e)
+  if e.name == "on_damage_multiplier" then
+    if sam_get_monster_type(e.target_uid) == "skeleton" and e.damage_type == 1 then
+      sam_add_damage_multiplier(1.0)      -- +100% mace damage to skeletons
+    end
+  end
+end
+```
+
+Positives **add** and negatives **multiply**, which is Barony's own rule for its bonus pool: two
+mods each contributing `+0.2` give +40%, and two each contributing `-0.5` give a quarter rather
+than nothing. `e.multiplier_x1000` carries the current value in thousandths (the event bus holds
+whole numbers only) and can be assigned directly for an absolute override; returning `false`
+makes the hit do nothing.
+
+**`player.on_before_hit`** fires when a player's melee swing has connected and the damage is
+decided but not yet applied. It is the only place in the engine where the attacker, the crit
+state and a writable damage figure are all available at once:
+
+```lua
+if e.name == "player.on_before_hit" and e.backstab == 1 then
+  e.damage = e.damage * 3      -- assassin
+end
+```
+
+`e.backstab` and `e.flanking` are Barony's nearest thing to a critical hit and die as stack
+locals everywhere else, so this is the only way to see one. `e.attacker_uid` is real here, unlike
+`on_before_damage` where it is always 0 — the engine's damage funnel carries no attacker, which
+is why every older damage event reports zero and still does.
+
+The order for one melee swing is `on_damage_multiplier`, then `player.on_before_hit`, then
+`on_before_monster_damage`, then `player.on_hit`.
+
+---
+
 ## New in 2.5: models at runtime, and richer bodies
 
 ### Changing a model while the game runs

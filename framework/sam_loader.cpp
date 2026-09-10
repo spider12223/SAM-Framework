@@ -17,7 +17,8 @@
 #include "sam_sounds.hpp"
 #include "sam_recipes.hpp"
 #include "sam_workbench.hpp"
-#include "sam_rooms.hpp"     // prefab rooms injected into vanilla levelsets
+#include "sam_rooms.hpp"
+#include "sam_combat.hpp"     // prefab rooms injected into vanilla levelsets
 #ifndef EDITOR
 #include "sam_hud.hpp"   // script HUD, cleared on unload
 #include "sam_images.hpp" // mod-supplied pictures (overlay + HUD art)
@@ -73,6 +74,7 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 	SAMRecipes::clear(); // drop tinkering recipes -> vanilla craftable grid
 	SAMWorkbench::clear(); // and the built-in bench, so it re-installs this cycle
 	SAMRooms::clear(); // drop injected rooms -> vanilla room pools
+	SAMCombat::clear(); // drop species damage-resistance overrides -> vanilla damagetables
 	SAMHud::clearAll(); // a mod's HUD must never outlive the mod that drew it
 	SAMImages::clear(); // drop the image registry + every live overlay
 	SAMUi::closeAll();  // a panel must never outlive the mod that opened it
@@ -323,6 +325,7 @@ void SAMLoader::unload()
 	SAMSounds::clear();        // drop staged custom sounds
 	SAMRecipes::clear();       // drop tinkering recipes
 	SAMWorkbench::clear();     // drop the built-in bench registration
+	SAMCombat::clear();        // drop species damage-resistance overrides
 #endif
 	SAMMonsterPatch::clear();  // reverts sam_patch_monster overrides (F5)
 	// Rooms are NOT optional to clear. The registry holds ABSOLUTE paths, so unmounting the

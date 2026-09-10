@@ -1,6 +1,6 @@
 # S.A.M function reference
 
-Every script function the framework exposes: **255 functions** and **72 events**.
+Every script function the framework exposes: **287 functions** and **74 events**.
 All of them work identically in Lua, JavaScript and TypeScript.
 
 This page is generated from the API definition, so it cannot fall behind the code. If a
@@ -13,10 +13,10 @@ For guides and worked examples, see [scripting-reference.md](scripting-reference
 
 ## Contents
 
-- [Combat](#combat) (1)
+- [Combat](#combat) (20)
 - [Context](#context) (11)
 - [Custom events](#custom-events) (2)
-- [Damage](#damage) (2)
+- [Damage](#damage) (10)
 - [Entities](#entities) (10)
 - [Game content](#game-content) (5)
 - [HUD](#hud) (3)
@@ -26,14 +26,14 @@ For guides and worked examples, see [scripting-reference.md](scripting-reference
 - [Live patching](#live-patching) (6)
 - [Logging](#logging) (2)
 - [Mechanisms](#mechanisms) (4)
-- [Monsters](#monsters) (22)
+- [Monsters](#monsters) (26)
 - [Multiplayer](#multiplayer) (3)
 - [Networking](#networking) (1)
 - [Panels](#panels) (16)
 - [Persistence](#persistence) (13)
 - [Pictures](#pictures) (16)
 - [Player state](#player-state) (13)
-- [Presentation](#presentation) (8)
+- [Presentation](#presentation) (9)
 - [Rewards](#rewards) (5)
 - [Spells](#spells) (9)
 - [Status effects](#status-effects) (9)
@@ -42,10 +42,229 @@ For guides and worked examples, see [scripting-reference.md](scripting-reference
 - [Truth](#truth) (17)
 - [World](#world) (23)
 - [Your own logic](#your-own-logic) (7)
-- [Events](#events) (72)
+- [Events](#events) (74)
 
 
 ## Combat
+
+### `sam_break_armor(entity_uid, [slot])`
+
+> Host-only.
+
+Degrade a worn piece of armour, possibly breaking it. With no slot named, the engine's own picker chooses, so the odds and the exclusions match a real hit. player.on_item_broken has existed as an event with no verb able to cause it.
+
+| argument | type |
+|---|---|
+| `entity_uid` | uid |
+| `slot` *(optional)* | string — one of: `helmet`, `breastplate`, `armor`, `gloves`, `boots`, `shoes`, `shield`, `cloak`, `mask` |
+
+**Returns:** true if the piece degraded (boolean)
+
+### `sam_consume_mp(entity_uid, amount)`
+
+> Host-only.
+
+Spend mana only if the creature has it. Nothing is taken when it cannot afford the cost, which makes this the right one for a custom ability's cost.
+
+| argument | type |
+|---|---|
+| `entity_uid` | uid |
+| `amount` | int |
+
+**Returns:** true if it could afford it and it was spent (boolean)
+
+### `sam_drain_mp(entity_uid, amount, [notify])`
+
+> Host-only.
+
+Take mana, and take anything you cannot afford out of HEALTH instead. That overdraw is the point — it is how a blood-magic cost is expressed.
+
+| argument | type |
+|---|---|
+| `entity_uid` | uid |
+| `amount` | int |
+| `notify` *(optional)* | boolean |
+
+**Returns:** true if it ran (boolean)
+
+### `sam_get_attack(entity_uid)`
+
+The melee attack figure the engine itself would use for this creature's next swing, weapon and stats included.
+
+| argument | type |
+|---|---|
+| `entity_uid` | uid |
+
+**Returns:** the melee attack value, or nil (int)
+
+### `sam_get_bonus_attack_vs(entity_uid, target_uid)`
+
+How much extra attack this creature gets against that particular target — slayer enchantments and the like.
+
+| argument | type |
+|---|---|
+| `entity_uid` | uid |
+| `target_uid` | uid |
+
+**Returns:** extra attack against that specific target, or nil (int)
+
+### `sam_get_healring(entity_uid)`
+
+The regeneration bonus this creature carries. It is what makes sam_get_regen_interval shorter.
+
+| argument | type |
+|---|---|
+| `entity_uid` | uid |
+
+**Returns:** the regeneration bonus from equipment and effects combined, or nil (int)
+
+### `sam_get_hp(entity_uid)`
+
+Read any creature's health by UID.
+
+| argument | type |
+|---|---|
+| `entity_uid` | uid |
+
+**Returns:** current health, or nil for anything that is not a creature (int)
+
+### `sam_get_max_hp(entity_uid)`
+
+Read any creature's maximum health by UID.
+
+| argument | type |
+|---|---|
+| `entity_uid` | uid |
+
+**Returns:** maximum health, or nil (int)
+
+### `sam_get_max_mp(entity_uid)`
+
+Read any creature's maximum mana by UID.
+
+| argument | type |
+|---|---|
+| `entity_uid` | uid |
+
+**Returns:** maximum mana, or nil (int)
+
+### `sam_get_mp(entity_uid)`
+
+Read any creature's mana by UID.
+
+| argument | type |
+|---|---|
+| `entity_uid` | uid |
+
+**Returns:** current mana, or nil for anything that is not a creature (int)
+
+### `sam_get_ranged_attack(entity_uid, [quiver_bonus])`
+
+The ranged attack figure for this creature, optionally including a quiver bonus.
+
+| argument | type |
+|---|---|
+| `entity_uid` | uid |
+| `quiver_bonus` *(optional)* | int |
+
+**Returns:** the ranged attack value, or nil (int)
+
+### `sam_get_regen_interval(entity_uid)`
+
+How often this creature regenerates health naturally. SMALLER is faster.
+
+| argument | type |
+|---|---|
+| `entity_uid` | uid |
+
+**Returns:** ticks between natural regeneration ticks, or nil (int)
+
+### `sam_get_thrown_attack(entity_uid)`
+
+The attack figure this creature would apply to a thrown weapon.
+
+| argument | type |
+|---|---|
+| `entity_uid` | uid |
+
+**Returns:** the thrown attack value, or nil (int)
+
+### `sam_is_parrying(player)`
+
+Whether a player's parry window is currently open. The engine consumes this in melee resolution to produce parried damage; nothing exposed it before.
+
+| argument | type |
+|---|---|
+| `player` | int |
+
+**Returns:** true while the parry window is open (boolean)
+
+### `sam_mod_mp(entity_uid, amount)`
+
+> Host-only.
+
+Change a creature's mana by a relative amount. Negative takes it away.
+
+| argument | type |
+|---|---|
+| `entity_uid` | uid |
+| `amount` | int |
+
+**Returns:** the MP after the change, or nil (int)
+
+### `sam_obituary(killer_uid, victim_uid, [from_spell])`
+
+> Host-only.
+
+Give a scripted kill a proper death message and credit the killer. sam_kill_monster just sets health to 0, so today a scripted kill produces the generic message and nobody gets credit.
+
+| argument | type |
+|---|---|
+| `killer_uid` | uid |
+| `victim_uid` | uid |
+| `from_spell` *(optional)* | boolean |
+
+**Returns:** true if it was recorded (boolean)
+
+### `sam_revive_player(player, [x], [y])`
+
+> Host-only.
+
+Bring a dead player back with half their health, at a tile you name or at their ghost's own position.
+
+| argument | type |
+|---|---|
+| `player` | int |
+| `x` *(optional)* | int |
+| `y` *(optional)* | int |
+
+**Returns:** true if the player is back on their feet (boolean)
+
+### `sam_set_defending(player, on)`
+
+> Host-only.
+
+Put a player into or out of the blocking stance.
+
+| argument | type |
+|---|---|
+| `player` | int |
+| `on` | boolean |
+
+**Returns:** true if it changed anything (boolean)
+
+### `sam_set_parry(player, ticks)`
+
+> Host-only.
+
+Open a parry window for a number of ticks. 0 closes it.
+
+| argument | type |
+|---|---|
+| `player` | int |
+| `ticks` | int |
+
+**Returns:** true if set (boolean)
 
 ### `sam_spawn_projectile(tile_x, tile_y, angle, speed, [damage], [lifetime], [model], [owner])`
 
@@ -168,6 +387,31 @@ Declare a namespaced custom hook. Name must contain a colon ("namespace:hook_nam
 
 ## Damage
 
+### `sam_add_damage_multiplier(fraction)`
+
+> Host-only.
+
+Contribute to the damage multiplier for the hit currently being resolved. 0.25 is +25%, -0.5 is half.
+
+| argument | type |
+|---|---|
+| `fraction` | number |
+
+**Returns:** true if the contribution was taken (boolean)
+
+### `sam_clear_species_damage_resist([species], [type])`
+
+> Host-only.
+
+Undo sam_set_species_damage_resist. No arguments clears everything, a species alone clears every type for it.
+
+| argument | type |
+|---|---|
+| `species` *(optional)* | string — one of: `human`, `rat`, `goblin`, `slime`, `troll`, `bat`, `spider`, `ghoul`, `skeleton`, `scorpion`, `imp`, `crab`, `gnome`, `demon`, `succubus`, `mimic`, `lich`, `minotaur`, `devil`, `shopkeeper`, `kobold`, `scarab`, `crystalgolem`, `incubus`, `vampire`, `shadow`, `cockatrice`, `insectoid`, `goatman`, `automaton`, `lichice`, `lichfire`, `sentrybot`, `spellbot`, `gyrobot`, `dummybot`, `bugbear`, `dryad`, `myconid`, `salamander`, `gremlin`, `revenant_skull`, `minimimic`, `monster_adorcised_weapon`, `flame_elemental`, `hologram`, `moth`, `earth_elemental`, `duck_small` |
+| `type` *(optional)* | string — one of: `sword`, `mace`, `axe`, `polearm`, `ranged`, `magic`, `unarmed` |
+
+**Returns:** how many overrides were removed (int)
+
 ### `sam_deal_damage(entity_uid, amount)`
 
 > Host-only.
@@ -181,6 +425,54 @@ Deal `amount` damage to any entity by UID (positive = damage); existence-validat
 
 **Returns:** true on success (boolean)
 
+### `sam_deal_damage_typed(entity_uid, amount, type)`
+
+> Host-only.
+
+Deal damage of a particular weapon class, so the target's own resistance applies. 10 magic damage is 5 against something that halves magic and 20 against something that doubles it, without your script needing to know which. Both stages the engine applies are applied here, in its order: the species damage table, then live effects such as blood ward and sanctuary.
+
+| argument | type |
+|---|---|
+| `entity_uid` | uid |
+| `amount` | int |
+| `type` | string — one of: `sword`, `mace`, `axe`, `polearm`, `ranged`, `magic`, `unarmed` |
+
+**Returns:** the damage actually dealt after resistance (int)
+
+### `sam_get_damage_resist(entity_uid, [type])`
+
+How much of a given weapon class this creature actually takes: 1.0 normal, 0.5 half, 2.0 double. Equipment, effects and magic resistance are all included — it is the same call the character sheet makes to draw the number a player sees. Defaults to "magic".
+
+| argument | type |
+|---|---|
+| `entity_uid` | uid |
+| `type` *(optional)* | string — one of: `sword`, `mace`, `axe`, `polearm`, `ranged`, `magic`, `unarmed` |
+
+**Returns:** the damage multiplier this creature takes, or nil (number)
+
+### `sam_get_magic_resist(entity_uid)`
+
+The raw magic-resistance point count. Each point is a separate reduction: this is the input, sam_get_damage_resist(uid, "magic") is the result.
+
+| argument | type |
+|---|---|
+| `entity_uid` | uid |
+
+**Returns:** magic resistance POINTS, or nil (int)
+
+### `sam_heal(entity_uid, amount)`
+
+> Host-only.
+
+Restore health to any player or monster by UID. Returns what actually landed, not what you asked for: health is clamped to the maximum, so a 50-point heal on something three short of full restores three.
+
+| argument | type |
+|---|---|
+| `entity_uid` | uid |
+| `amount` | int |
+
+**Returns:** the HP actually restored, or nil if the uid is not a creature (int)
+
 ### `sam_modify_damage(player, new_value)`
 
 > Host-only.
@@ -193,6 +485,31 @@ Rewrite incoming damage (clamped to >= 0). ONLY valid inside an on_before_damage
 | `new_value` | int |
 
 **Returns:** nothing
+
+### `sam_preview_damage(attacker_uid, target_uid)`
+
+Work out what one creature's melee swing would do to another, dealing nothing. Built from the same three terms the real melee path combines: attack, the target's AC effectiveness, and its AC.
+
+| argument | type |
+|---|---|
+| `attacker_uid` | uid |
+| `target_uid` | uid |
+
+**Returns:** what a melee swing would deal right now, or nil (int)
+
+### `sam_set_species_damage_resist(species, type, multiplier)`
+
+> Host-only.
+
+Change how much of a weapon class an entire species takes. 1.0 normal, 0.5 halves it, 2.0 doubles it. Every creature of that species, now and later.
+
+| argument | type |
+|---|---|
+| `species` | string — one of: `human`, `rat`, `goblin`, `slime`, `troll`, `bat`, `spider`, `ghoul`, `skeleton`, `scorpion`, `imp`, `crab`, `gnome`, `demon`, `succubus`, `mimic`, `lich`, `minotaur`, `devil`, `shopkeeper`, `kobold`, `scarab`, `crystalgolem`, `incubus`, `vampire`, `shadow`, `cockatrice`, `insectoid`, `goatman`, `automaton`, `lichice`, `lichfire`, `sentrybot`, `spellbot`, `gyrobot`, `dummybot`, `bugbear`, `dryad`, `myconid`, `salamander`, `gremlin`, `revenant_skull`, `minimimic`, `monster_adorcised_weapon`, `flame_elemental`, `hologram`, `moth`, `earth_elemental`, `duck_small` |
+| `type` | string — one of: `sword`, `mace`, `axe`, `polearm`, `ranged`, `magic`, `unarmed` |
+| `multiplier` | number |
+
+**Returns:** true if it took (boolean)
 
 
 ## Entities
@@ -947,6 +1264,19 @@ Flip a lever or switch, driving whatever it is wired to.
 
 ## Monsters
 
+### `sam_alert_allies(uid, [attacker_uid])`
+
+> Host-only.
+
+Wake every ally near this monster onto an attacker, the way the engine does when something is hit in a room full of its friends. The attacker may be left out for "alerted by nothing in particular".
+
+| argument | type |
+|---|---|
+| `uid` | uid |
+| `attacker_uid` *(optional)* | uid |
+
+**Returns:** true if the call ran (boolean)
+
 ### `sam_apply_monster_effect(uid, effect, ticks)`
 
 > Host-only.
@@ -960,6 +1290,19 @@ Apply a status effect to a monster by UID for N ticks.
 | `ticks` | int |
 
 **Returns:** true unless immune (boolean)
+
+### `sam_clear_monster_target(uid, [force])`
+
+> Host-only.
+
+Make a monster forget its current target.
+
+| argument | type |
+|---|---|
+| `uid` | uid |
+| `force` *(optional)* | boolean |
+
+**Returns:** true if it let go (boolean)
 
 ### `sam_get_monster_data(uid, key)`
 
@@ -1024,6 +1367,16 @@ Get the player index a monster is currently targeting (if any).
 | `uid` | uid |
 
 **Returns:** the targeted player index, or -1 (number)
+
+### `sam_get_monster_target_uid(uid)`
+
+Read back what a monster is currently hunting, as a uid, whether that is a player, another monster or anything else with a body.
+
+| argument | type |
+|---|---|
+| `uid` | uid |
+
+**Returns:** the uid of whatever this monster is hunting, or 0 for nobody (int)
 
 ### `sam_kill_monster(uid)`
 
@@ -1205,6 +1558,20 @@ Make a monster acquire a player as its attack target.
 | `player` | int |
 
 **Returns:** true on success (boolean)
+
+### `sam_set_monster_target_uid(uid, target_uid, [was_hit])`
+
+> Host-only.
+
+Point a monster at ANY entity, not just a player: another monster, a companion, anything with a body.
+
+| argument | type |
+|---|---|
+| `uid` | uid |
+| `target_uid` | uid |
+| `was_hit` *(optional)* | boolean |
+
+**Returns:** true if the monster took the target (boolean)
 
 ### `sam_spawn_monsters(near_uid, monster_type, count)`
 
@@ -1965,6 +2332,19 @@ The floating combat number the game shows on a hit. Lets a mod's custom damage r
 | `type` *(optional)* | int |
 
 **Returns:** true on success (boolean)
+
+### `sam_gib(entity_uid, [sprite])`
+
+> Host-only.
+
+Throw a chunk of gore off a creature. The optional sprite overrides the model.
+
+| argument | type |
+|---|---|
+| `entity_uid` | uid |
+| `sprite` *(optional)* | int |
+
+**Returns:** true if a chunk was thrown (boolean)
 
 ### `sam_hitstop(duration_ms)`
 
@@ -3123,6 +3503,21 @@ Fires before a monster's HP is reduced.
 
 Rewrite the number with sam_modify_monster_damage(n). Set 0 to negate the hit entirely. Not cancellable by returning false.
 
+### `on_damage_multiplier`
+
+> Cancellable: return `false` to stop it.
+
+Fires while a hit's damage multiplier is being decided, after every vanilla effect has had its say.
+
+| field | type |
+|---|---|
+| `target_uid` | uid |
+| `attacker_uid` | uid |
+| `damage_type` | int |
+| `multiplier_x1000` | int |
+| `projectile_uid` | uid |
+| `spell_id` | int |
+
 ### `on_key_pressed`
 
 Fires a supported RAW key transitions to down (A-Z, 0-9, F1-F12).
@@ -3222,6 +3617,23 @@ Fires before a player equips an item.
 | `item_type` | int |
 
 Return false to refuse the equip. Use it for class or race restrictions the vanilla slot rules cannot express.
+
+### `player.on_before_hit`
+
+> Cancellable: return `false` to stop it.
+
+Fires a player's melee swing has connected and the damage is decided, but not yet applied.
+
+| field | type |
+|---|---|
+| `player` | int |
+| `attacker_uid` | uid |
+| `target_uid` | uid |
+| `target_type` | int |
+| `damage` | int |
+| `backstab` | int |
+| `flanking` | int |
+| `weapon_type` | int |
 
 ### `player.on_before_item_pickup`
 

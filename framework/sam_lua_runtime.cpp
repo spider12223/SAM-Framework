@@ -86,6 +86,7 @@ extern "C" {
 #	include "sam_classes.hpp" // v0.7.0 F5: SAMClasses::patchClass / addClassPassive
 #	include "sam_monster_patches.hpp" // v0.7.0 F5: SAMMonsterPatch::set
 #	include "sam_monsters.hpp" // SAMMonsters::traitBitForName (sam_monster_has_trait)
+#	include "sam_combat.hpp" // species damage resistance + the on_damage_multiplier hook
 #	include "sam_bodies.hpp"   // runtime model control (sam_set_model)
 #	include "sam_spells.hpp"  // custom-spell registry (sam_grant_spell)
 #	include "sam_models.hpp"  // v1.4.0: SAMModels::modelIndexForId (companion custom .vox)
@@ -1095,7 +1096,20 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		SAMLogger::noteApiCall();
 		const int player = (int)luaL_checkinteger(Ls, 1);
 		const char* nameC = luaL_checkstring(Ls, 2);
-		if ( multiplayer == CLIENT ) { SAM_WARN("LUA", "sam_get_stat refused: host only."); lua_pushinteger(Ls, 0); return 1; }
+		// A CLIENT may read ITS OWN player, and nobody else's.
+		//
+		// The old refusal was whole-function and stricter than the facts. A client holds a
+		// correct stats[clientnum]: the 'UPHP' handler writes HP into it and 'UPMP' does the
+		// same for MP, which is exactly what a client-side HUD mod needs and was being refused
+		// data it already had. Every other slot stays refused, because a client is not sent
+		// another player's stats at all -- it would read a zeroed structure and believe it.
+		if ( multiplayer == CLIENT && player != clientnum )
+		{
+			SAM_WARN("LUA", "sam_get_stat: on a client you can read your own player ("
+				+ std::to_string(clientnum) + ") only. Another player's stats are not sent to"
+				" your machine, so the number here would be invented rather than stale.");
+			lua_pushinteger(Ls, 0); return 1;
+		}
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !stats[player] )
 		{ SAM_ERROR("LUA", "sam_get_stat: invalid player index " + std::to_string(player) + "."); lua_pushinteger(Ls, 0); return 1; }
 		const std::string n = samUpper(nameC);
@@ -7524,6 +7538,1025 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 #endif
 	}
 
+	// =====================================================================================
+	//  v2.8 batch 4 — COMBAT
+	//
+	//  Shapes decided by engine facts rather than by symmetry. The recurring one:
+	//  Entity::getStats() answers nullptr for every behavior except actMonster, actPlayer and
+	//  actPlayerLimb, and Entity::getHP() answers 0 rather than -1 in that case. A reader that
+	//  passed that through would tell a script "this door is at zero health", which is a
+	//  different and wronger claim than "a door has no health". So every reader here answers
+	//  nil for anything that is not a creature.
+	// =====================================================================================
+
+#ifdef SAM_LUA_HAVE_BARONY
+	// The seven damage classes the engine has (DamageTableType, monster.hpp). They are WEAPON
+	// CLASSES, not elements — Barony has no fire/ice/lightning axis anywhere in the damage
+	// funnel. The INDEX is the enum value, so the order of this array is load-bearing.
+	static const char* const kSamDamageTypes[] = {
+		"sword", "mace", "axe", "polearm", "ranged", "magic", "unarmed"
+	};
+	static const int kSamDamageTypeCount = 7;
+
+	// The one place that turns a damage-type argument into an enum value, so the refusal is
+	// written once and every function taking one says the same thing.
+	static bool samDamageTypeArg(const char* nameIn, const char* who, int* out)
+	{
+		std::string want = nameIn ? nameIn : "";
+		for ( char& c : want ) { c = (char)std::tolower((unsigned char)c); }
+		for ( int i = 0; i < kSamDamageTypeCount; ++i )
+		{
+			if ( want == kSamDamageTypes[i] ) { *out = i; return true; }
+		}
+		SAM_ERROR("LUA", std::string(who) + ": '" + want + "' is not a damage type. Barony has"
+			" exactly seven and they are weapon classes rather than elements: sword, mace, axe,"
+			" polearm, ranged, magic, unarmed.");
+		return false;
+	}
+
+	// Read-side resolve to an entity that HAS a Stat. Silent, like every other reader — see
+	// samResolveEntityQuiet for why a reader must not warn on this API's own "no entity" value.
+	static Entity* samResolveCombatant(long long uid, Stat** outStats)
+	{
+		Entity* e = samResolveEntityQuiet(uid);
+		if ( !e ) { return nullptr; }
+		Stat* s = e->getStats();
+		if ( !s ) { return nullptr; }
+		if ( outStats ) { *outStats = s; }
+		return e;
+	}
+
+	// Write-side twin: refuses a client, a sentinel uid and a limb (samResolveWritable), then
+	// says out loud that this particular uid has no health to change.
+	static Entity* samResolveCombatantWritable(long long uid, const char* who, Stat** outStats)
+	{
+		Entity* e = samResolveWritable(uid, who);
+		if ( !e ) { return nullptr; }
+		Stat* s = e->getStats();
+		if ( !s )
+		{
+			SAM_WARN("LUA", std::string(who) + ": uid " + std::to_string(uid) + " is not a creature."
+				" Only players and monsters carry the stats this needs — a chest, a door, an arrow"
+				" and a gib have none.");
+			return nullptr;
+		}
+		if ( outStats ) { *outStats = s; }
+		return e;
+	}
+#endif
+
+	// sam_heal(uid, amount) -> the HP actually restored, or nil if the uid is not a creature.
+	//
+	// sam_deal_damage CANNOT do this, which is the whole reason this exists: it forces the sign
+	// negative (`amount < 0 ? amount : -amount`), so BOTH signs damage. Healing was reachable
+	// only through the absolute write sam_set_stat(player, "HP", n), which makes the caller
+	// read, add and clamp by hand and does not exist at all for a creature that is not a
+	// monster.
+	//
+	// Returns what LANDED, not what was asked. Entity::setHP clamps into [0, MAXHP], so a
+	// 50-point heal on a creature three short of full restores three — and a mod building a
+	// lifesteal effect needs the real number, not the one it hoped for.
+	int lua_sam_heal(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const int amount = (int)luaL_checkinteger(Ls, 2);
+#ifdef SAM_LUA_HAVE_BARONY
+		Stat* s = nullptr;
+		Entity* e = samResolveCombatantWritable(uid, "sam_heal", &s);
+		if ( !e || !s ) { lua_pushnil(Ls); return 1; }
+		if ( amount <= 0 )
+		{
+			SAM_WARN("LUA", "sam_heal: the amount has to be positive. To hurt something use"
+				" sam_deal_damage — passing a negative here would have healed it anyway.");
+			lua_pushinteger(Ls, 0); return 1;
+		}
+		const int beforeHP = s->HP;
+		e->modHP(amount);
+		lua_pushinteger(Ls, (lua_Integer)(s->HP - beforeHP));
+		return 1;
+#else
+		(void)uid; (void)amount; lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_deal_damage_typed(uid, amount, type) -> the damage actually dealt, or nil.
+	//
+	// The same hit as sam_deal_damage, run through the target's resistance to that weapon class
+	// first — so "10 magic damage" is 5 against something that halves magic and 20 against
+	// something that doubles it, without the script needing to know which.
+	//
+	// It applies BOTH stages, in the engine's own order: the species damage table
+	// (getDamageTableMultiplier) and then the live effect modifiers such as blood ward and
+	// sanctuary (modifyDamageMultipliersFromEffects). actarrow.cpp is exactly this pair.
+	// Applying only the first would silently ignore every defensive buff in the game and quietly
+	// make those spells not work against scripted damage.
+	//
+	// Returns 0, honestly, when resistance eats the hit. A mod that wants the raw number applied
+	// regardless should use sam_deal_damage.
+	int lua_sam_deal_damage_typed(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const int amount = (int)luaL_checkinteger(Ls, 2);
+		const char* typeC = luaL_checkstring(Ls, 3);
+#ifdef SAM_LUA_HAVE_BARONY
+		int dtype = 0;
+		if ( !samDamageTypeArg(typeC, "sam_deal_damage_typed", &dtype) ) { lua_pushnil(Ls); return 1; }
+		Stat* s = nullptr;
+		Entity* e = samResolveCombatantWritable(uid, "sam_deal_damage_typed", &s);
+		if ( !e || !s ) { lua_pushnil(Ls); return 1; }
+		const int asked = ( amount < 0 ) ? -amount : amount;
+		real_t mult = Entity::getDamageTableMultiplier(e, *s, (DamageTableType)dtype);
+		Entity::modifyDamageMultipliersFromEffects(e, nullptr, mult, (DamageTableType)dtype);
+		int dealt = (int)(asked * mult);
+		if ( dealt < 0 ) { dealt = 0; }
+		if ( dealt > 0 ) { e->modHP(-dealt); }
+		lua_pushinteger(Ls, (lua_Integer)dealt);
+		return 1;
+#else
+		(void)uid; (void)amount; (void)typeC; lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_get_hp(uid) / sam_get_max_hp(uid) -> int, or nil for anything without a Stat.
+	//
+	// Neither existing getter reaches here. sam_get_stat takes a PLAYER INDEX, and
+	// sam_get_monster_stat refuses anything whose behavior is not actMonster — so a script
+	// holding a uid out of sam_find_entities could not read the health of another PLAYER, or of
+	// a companion, at all.
+	int lua_sam_get_hp(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		Stat* s = nullptr;
+		if ( !samResolveCombatant(uid, &s) || !s ) { lua_pushnil(Ls); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)s->HP);
+		return 1;
+#else
+		(void)uid; lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	int lua_sam_get_max_hp(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		Stat* s = nullptr;
+		if ( !samResolveCombatant(uid, &s) || !s ) { lua_pushnil(Ls); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)s->MAXHP);
+		return 1;
+#else
+		(void)uid; lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_get_mp(uid) / sam_get_max_mp(uid) -> int, or nil for anything without a Stat.
+	//
+	// The twins of sam_get_hp, and they exist for the same reason plus one more: this batch added
+	// three verbs that CHANGE mana and, without these, the only way to observe it on anything but
+	// a player was to call one of those mutators and read what it returned. A mutator is not a
+	// reader, and a test built on one cannot tell a working verb from a broken one.
+	int lua_sam_get_mp(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		Stat* s = nullptr;
+		if ( !samResolveCombatant(uid, &s) || !s ) { lua_pushnil(Ls); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)s->MP);
+		return 1;
+#else
+		(void)uid; lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	int lua_sam_get_max_mp(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		Stat* s = nullptr;
+		if ( !samResolveCombatant(uid, &s) || !s ) { lua_pushnil(Ls); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)s->MAXMP);
+		return 1;
+#else
+		(void)uid; lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_get_attack(uid) -> the melee attack value the engine would use, or nil.
+	int lua_sam_get_attack(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		Stat* s = nullptr;
+		Entity* e = samResolveCombatant(uid, &s);
+		if ( !e || !s ) { lua_pushnil(Ls); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)Entity::getAttack(e, s, e->behavior == &actPlayer));
+		return 1;
+#else
+		(void)uid; lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_get_ranged_attack(uid [, quiver_bonus]) -> int, or nil.
+	int lua_sam_get_ranged_attack(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const int quiver = (int)luaL_optinteger(Ls, 2, 0);
+#ifdef SAM_LUA_HAVE_BARONY
+		Stat* s = nullptr;
+		Entity* e = samResolveCombatant(uid, &s);
+		if ( !e || !s ) { lua_pushnil(Ls); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)e->getRangedAttack(quiver));
+		return 1;
+#else
+		(void)uid; (void)quiver; lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_get_thrown_attack(uid) -> int, or nil.
+	int lua_sam_get_thrown_attack(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		Stat* s = nullptr;
+		Entity* e = samResolveCombatant(uid, &s);
+		if ( !e || !s ) { lua_pushnil(Ls); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)e->getThrownAttack());
+		return 1;
+#else
+		(void)uid; lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_get_bonus_attack_vs(uid, target_uid) -> the extra attack this attacker gets against
+	// that particular target (slayer enchantments and the like), or nil.
+	int lua_sam_get_bonus_attack_vs(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const long long tgt = (long long)luaL_checkinteger(Ls, 2);
+#ifdef SAM_LUA_HAVE_BARONY
+		Stat* s = nullptr;
+		Entity* e = samResolveCombatant(uid, &s);
+		if ( !e || !s ) { lua_pushnil(Ls); return 1; }
+		Stat* ts = nullptr;
+		if ( !samResolveCombatant(tgt, &ts) || !ts ) { lua_pushnil(Ls); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)e->getBonusAttackOnTarget(*ts));
+		return 1;
+#else
+		(void)uid; (void)tgt; lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_get_damage_resist(uid [, type]) -> the multiplier this creature takes that damage
+	// class at (1.0 normal, 0.5 half, 2.0 double), or nil. Defaults to "magic", which is the
+	// one the game itself puts on the character sheet.
+	//
+	// This is the FULL figure — equipment, effects and magic resistance included. It is the
+	// same call the character sheet makes to draw the number a player sees.
+	int lua_sam_get_damage_resist(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const char* typeC = luaL_optstring(Ls, 2, "magic");
+#ifdef SAM_LUA_HAVE_BARONY
+		int dtype = 0;
+		if ( !samDamageTypeArg(typeC, "sam_get_damage_resist", &dtype) ) { lua_pushnil(Ls); return 1; }
+		Stat* s = nullptr;
+		Entity* e = samResolveCombatant(uid, &s);
+		if ( !e || !s ) { lua_pushnil(Ls); return 1; }
+		lua_pushnumber(Ls, (lua_Number)Entity::getDamageTableMultiplier(e, *s, (DamageTableType)dtype));
+		return 1;
+#else
+		(void)uid; (void)typeC; lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_get_magic_resist(uid) -> the raw magic-resistance POINT count, or nil. Each point is
+	// a separate reduction inside getDamageTableMultiplier; this is the input,
+	// sam_get_damage_resist(uid, "magic") is the result.
+	int lua_sam_get_magic_resist(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		Stat* s = nullptr;
+		if ( !samResolveCombatant(uid, &s) || !s ) { lua_pushnil(Ls); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)Entity::getMagicResistance(s));
+		return 1;
+#else
+		(void)uid; lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_preview_damage(attacker_uid, target_uid) -> what a melee swing would deal right now,
+	// dealing nothing. nil if either side is not a creature.
+	//
+	// Composed from the same three public terms the melee path combines, in the same
+	// expression: the attacker's attack, the target's AC effectiveness, and its AC. It is a
+	// PREVIEW — the real swing then folds in weapon multipliers, backstab and capstone bonuses,
+	// so treat this as the floor rather than a promise.
+	int lua_sam_preview_damage(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const long long tgt = (long long)luaL_checkinteger(Ls, 2);
+#ifdef SAM_LUA_HAVE_BARONY
+		Stat* as = nullptr;
+		Entity* ae = samResolveCombatant(uid, &as);
+		if ( !ae || !as ) { lua_pushnil(Ls); return 1; }
+		Stat* ts = nullptr;
+		Entity* te = samResolveCombatant(tgt, &ts);
+		if ( !te || !ts ) { lua_pushnil(Ls); return 1; }
+
+		const real_t myAttack = (real_t)Entity::getAttack(ae, as, ae->behavior == &actPlayer);
+		int numBlessings = 0;
+		const real_t acEff = Entity::getACEffectiveness(te, ts, te->behavior == &actPlayer,
+			ae, as, numBlessings);
+		const real_t enemyAC = (real_t)AC(ts);
+		int out = (int)(std::max(0.0, ((myAttack * acEff - enemyAC))) + (1.0 - acEff) * myAttack);
+		if ( out < 0 ) { out = 0; }
+		lua_pushinteger(Ls, (lua_Integer)out);
+		return 1;
+#else
+		(void)uid; (void)tgt; lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_get_regen_interval(uid) -> ticks between natural HP regeneration ticks, or nil.
+	// SMALLER is faster. Nothing in S.A.M exposed regeneration at all before this.
+	int lua_sam_get_regen_interval(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		Stat* s = nullptr;
+		Entity* e = samResolveCombatant(uid, &s);
+		if ( !e || !s ) { lua_pushnil(Ls); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)Entity::getHealthRegenInterval(e, *s, e->behavior == &actPlayer));
+		return 1;
+#else
+		(void)uid; lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_get_healring(uid) -> the regeneration bonus from equipment and effects combined, or
+	// nil. This is what makes the interval above shorter.
+	int lua_sam_get_healring(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		Stat* s = nullptr;
+		Entity* e = samResolveCombatant(uid, &s);
+		if ( !e || !s ) { lua_pushnil(Ls); return 1; }
+		const int fromGear = Entity::getHealringFromEquipment(e, *s, e->behavior == &actPlayer);
+		const int fromEff  = Entity::getHealringFromEffects(e, *s);
+		lua_pushinteger(Ls, (lua_Integer)(fromGear + fromEff));
+		return 1;
+#else
+		(void)uid; lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_mod_mp(uid, amount) -> the MP after the change, or nil. Relative, and negative is
+	// allowed. S.A.M had only the absolute write sam_set_stat(player,"MP",n) before this, which
+	// meant every "spend 5 mana" had to read, subtract and clamp by hand — and could not reach
+	// a creature that was not a monster.
+	int lua_sam_mod_mp(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const int amount = (int)luaL_checkinteger(Ls, 2);
+#ifdef SAM_LUA_HAVE_BARONY
+		Stat* s = nullptr;
+		Entity* e = samResolveCombatantWritable(uid, "sam_mod_mp", &s);
+		if ( !e || !s ) { lua_pushnil(Ls); return 1; }
+		e->modMP(amount, true);   // true: setMP writes its own UPMP packet, so clients keep up
+		lua_pushinteger(Ls, (lua_Integer)s->MP);
+		return 1;
+#else
+		(void)uid; (void)amount; lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_drain_mp(uid, amount [, notify]) -> true if it ran.
+	//
+	// The DANGEROUS one, deliberately: anything drained past the creature's remaining MP comes
+	// out of its HEALTH instead. That overdraw is the point — it is how a blood-magic cost is
+	// expressed — but it can kill, so it gets its own name rather than hiding inside sam_mod_mp
+	// behind a negative number.
+	int lua_sam_drain_mp(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const int amount = (int)luaL_checkinteger(Ls, 2);
+		const bool notify = samBoolArg(Ls, 3, true);
+#ifdef SAM_LUA_HAVE_BARONY
+		Stat* s = nullptr;
+		Entity* e = samResolveCombatantWritable(uid, "sam_drain_mp", &s);
+		if ( !e || !s ) { lua_pushboolean(Ls, 0); return 1; }
+		if ( amount <= 0 )
+		{
+			SAM_WARN("LUA", "sam_drain_mp: the amount has to be positive. To GIVE mana use sam_mod_mp.");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		e->drainMP(amount, notify);
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)uid; (void)amount; (void)notify; lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_consume_mp(uid, amount) -> true if the cost was paid, false if it could not be.
+	//
+	// The safe counterpart to sam_drain_mp and the one a custom ability's cost should use --
+	// with ONE engine exception worth knowing before relying on it. Entity::safeConsumeMP has a
+	// VAMPIRE arm (entity.cpp:3894): a vampire PLAYER who cannot afford the cost has the
+	// shortfall drained out of HEALTH and still gets true back. That is Barony's rule for
+	// vampires, not ours, and overriding it here would make every vampire mod wrong instead.
+	int lua_sam_consume_mp(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const int amount = (int)luaL_checkinteger(Ls, 2);
+#ifdef SAM_LUA_HAVE_BARONY
+		Stat* s = nullptr;
+		Entity* e = samResolveCombatantWritable(uid, "sam_consume_mp", &s);
+		if ( !e || !s ) { lua_pushboolean(Ls, 0); return 1; }
+		if ( amount < 0 )
+		{
+			SAM_WARN("LUA", "sam_consume_mp: the amount cannot be negative. To GIVE mana use sam_mod_mp.");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		lua_pushboolean(Ls, e->safeConsumeMP(amount) ? 1 : 0);
+		return 1;
+#else
+		(void)uid; (void)amount; lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_set_defending(player, on) -> true if it changed anything.
+	//
+	// The read has existed since v1.2 (sam_is_defending) with no way to cause it.
+	//
+	// IT LASTS ONE FRAME, and that is not a defect in this function -- it is what the field is.
+	// actHudShield writes stats[player]->defending from the block input EVERY frame
+	// (acthudweapon.cpp:4460 and :4465), unconditionally, for whichever player that machine is
+	// playing; a remote player's copy is refreshed by their own 'SHLD' packet just as often. So
+	// this is a same-frame override: useful immediately before reading combat maths, or from a
+	// per-frame handler that re-applies it, and useless as a latch you set once. Said out loud
+	// rather than left to be discovered, because a setter the engine quietly undoes is the exact
+	// shape of bug this project keeps finding in its own work.
+	int lua_sam_set_defending(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		bool on = true;
+		if ( !samBoolReq(Ls, 2, "sam_set_defending", &on) ) { lua_pushboolean(Ls, 0); return 1; }
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT )
+		{
+			SAM_WARN("LUA", "sam_set_defending refused: host only.");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { lua_pushboolean(Ls, 0); return 1; }
+		const bool was = stats[player]->defending;
+		stats[player]->defending = on;
+		lua_pushboolean(Ls, ( was != on ) ? 1 : 0);
+		return 1;
+#else
+		(void)player; (void)on; lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_is_parrying(player) -> true while the parry window is open. Exposed nowhere before
+	// this, though the engine consumes it in melee resolution to produce parried damage.
+	int lua_sam_is_parrying(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { lua_pushboolean(Ls, 0); return 1; }
+		lua_pushboolean(Ls, ( stats[player]->parrying > 0 ) ? 1 : 0);
+		return 1;
+#else
+		(void)player; lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_set_parry(player, ticks) -> true if set. 0 closes the window.
+	int lua_sam_set_parry(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		long long ticks = (long long)luaL_checkinteger(Ls, 2);
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT )
+		{
+			SAM_WARN("LUA", "sam_set_parry refused: host only.");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { lua_pushboolean(Ls, 0); return 1; }
+		if ( ticks < 0 ) { ticks = 0; }
+		// The field is a Uint32 counted down by the engine. An hour is already far longer than
+		// any real window, and a script asking for a year is a units mistake rather than an
+		// intention — clamping is the difference between a long parry and a permanent one.
+		if ( ticks > 180000LL ) { ticks = 180000LL; }
+		stats[player]->parrying = (Uint32)ticks;
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)player; (void)ticks; lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_set_monster_target_uid(uid, target_uid [, was_hit]) -> true if the monster took it.
+	//
+	// sam_set_monster_target already exists and takes a PLAYER INDEX, hardcoding
+	// `players[player]->entity` — so monster-versus-monster aggro, which the engine method
+	// itself supports (it takes any Entity), was unreachable from a script. This is the same
+	// call with that restriction removed: point a monster at another monster, at a companion,
+	// or at anything else with a body.
+	int lua_sam_set_monster_target_uid(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const long long tgt = (long long)luaL_checkinteger(Ls, 2);
+		const bool wasHit = samBoolArg(Ls, 3, false);
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT )
+		{
+			SAM_WARN("LUA", "sam_set_monster_target_uid refused: host only. AI lives on the host,"
+				" and a client holds no stats for an ordinary monster.");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		Entity* e = samResolveMonster(uid);
+		if ( !e )
+		{
+			SAM_WARN("LUA", "sam_set_monster_target_uid: uid " + std::to_string(uid) + " is not a"
+				" monster with stats, so it has no AI to point anywhere.");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		Entity* t = samResolveEntityQuiet(tgt);
+		if ( !t ) { lua_pushboolean(Ls, 0); return 1; }
+		if ( t == e )
+		{
+			SAM_WARN("LUA", "sam_set_monster_target_uid: a monster cannot hunt itself.");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		e->monsterAcquireAttackTarget(*t, MONSTER_STATE_PATH, wasHit);
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)uid; (void)tgt; (void)wasHit; lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_get_monster_target_uid(uid) -> the uid of whatever this monster is hunting, or 0.
+	//
+	// sam_get_monster_target answers a PLAYER INDEX and -1 for everything that is not a player,
+	// so the moment sam_set_monster_target_uid could aim a monster at another monster the result
+	// became unreadable. A writer with no reader cannot be verified by anyone, including its own
+	// test. 0 means hunting nobody, which is the value the rest of this API already uses for
+	// "no entity".
+	//
+	// The stored number is RESOLVED rather than returned raw: monsterTarget is not cleared when
+	// its target dies, and the engine rolls the uid counter back for throwaway particles, so a
+	// stale number can come to name something else entirely. Resolving it is the difference
+	// between "hunting entity 4211" and "hunting whatever holds 4211 now".
+	int lua_sam_get_monster_target_uid(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { lua_pushinteger(Ls, 0); return 1; }
+		Entity* t = uidToEntity((Sint32)e->monsterTarget);
+		lua_pushinteger(Ls, t ? (lua_Integer)t->getUID() : 0);
+		return 1;
+#else
+		(void)uid; lua_pushinteger(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_clear_monster_target(uid [, force]) -> true if it let go.
+	//
+	// The engine method can REFUSE — a monster whose AI insists keeps its target unless `force`
+	// is set — and that refusal is passed through rather than swallowed, so a script can tell
+	// "it let go" from "it would not".
+	int lua_sam_clear_monster_target(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const bool force = samBoolArg(Ls, 2, false);
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT )
+		{
+			SAM_WARN("LUA", "sam_clear_monster_target refused: host only.");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { lua_pushboolean(Ls, 0); return 1; }
+		lua_pushboolean(Ls, e->monsterReleaseAttackTarget(force) ? 1 : 0);
+		return 1;
+#else
+		(void)uid; (void)force; lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_alert_allies(uid [, attacker_uid]) -> true if the call ran.
+	//
+	// Wakes every ally near this monster onto the attacker, which is what the engine does when
+	// something is hit in a room full of its friends. attacker_uid may be omitted for "alerted
+	// by nothing in particular".
+	int lua_sam_alert_allies(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const long long att = (long long)luaL_optinteger(Ls, 2, 0);
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT )
+		{
+			SAM_WARN("LUA", "sam_alert_allies refused: host only.");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { lua_pushboolean(Ls, 0); return 1; }
+		Entity* a = ( att != 0 ) ? samResolveEntityQuiet(att) : nullptr;
+		e->alertAlliesOnBeingHit(a);
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)uid; (void)att; lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_break_armor(uid [, slot]) -> true if the piece degraded (and possibly broke).
+	//
+	// player.on_item_broken has existed as an event with no verb able to cause it.
+	//
+	// With no slot named, the engine's OWN picker chooses, so the odds and the exclusions match
+	// what a real hit does. With a slot named, the number passed to degradeArmor is the
+	// engine's equipment numbering (the one net.cpp's 'ARMR' packet uses): 0 helmet,
+	// 1 breastplate, 2 gloves, 3 boots, 4 shield, 6 cloak, 9 mask. It is NOT the equipment-slot
+	// enum and the two disagree, which is why this table is written out rather than cast.
+	//
+	// False is a real answer as well as a failure: degradeArmor refuses shadows and liches
+	// outright, and refuses artifacts, quivers and anything preserved.
+	int lua_sam_break_armor(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const char* slotC = luaL_optstring(Ls, 2, "");
+#ifdef SAM_LUA_HAVE_BARONY
+		Stat* s = nullptr;
+		Entity* e = samResolveCombatantWritable(uid, "sam_break_armor", &s);
+		if ( !e || !s ) { lua_pushboolean(Ls, 0); return 1; }
+
+		std::string want = slotC ? slotC : "";
+		for ( char& c : want ) { c = (char)std::tolower((unsigned char)c); }
+
+		Item* armor = nullptr;
+		int armornum = -1;
+
+		if ( want.empty() )
+		{
+			// The engine's own picker, with the melee path's arguments: no weapon, no jewellery.
+			// It also knows the exclusions a hand-written list would miss — a shapeshifted
+			// creature has nothing to break, and a quiver or a spellbook in the shield slot is
+			// not armour.
+			armornum = s->pickRandomEquippedItemToDegradeOnHit(&armor, true, false, false, true);
+			if ( armornum < 0 || !armor ) { lua_pushboolean(Ls, 0); return 1; }
+		}
+		else
+		{
+			struct SamArmorSlot { const char* name; int armornum; Item** item; };
+			const SamArmorSlot slots[] = {
+				{ "helmet",      0, &s->helmet      },
+				{ "breastplate", 1, &s->breastplate },
+				{ "armor",       1, &s->breastplate },
+				{ "gloves",      2, &s->gloves      },
+				{ "boots",       3, &s->shoes       },
+				{ "shoes",       3, &s->shoes       },
+				{ "shield",      4, &s->shield      },
+				{ "cloak",       6, &s->cloak       },
+				{ "mask",        9, &s->mask        },
+			};
+			const int slotCount = (int)(sizeof(slots) / sizeof(slots[0]));
+			int chosen = -1;
+			for ( int i = 0; i < slotCount; ++i )
+			{
+				if ( want == slots[i].name ) { chosen = i; break; }
+			}
+			if ( chosen < 0 )
+			{
+				SAM_ERROR("LUA", "sam_break_armor: '" + want + "' is not a slot that can degrade."
+					" They are helmet, breastplate, gloves, boots, shield, cloak and mask.");
+				lua_pushboolean(Ls, 0); return 1;
+			}
+			armor = *slots[chosen].item;
+			armornum = slots[chosen].armornum;
+			if ( !armor ) { lua_pushboolean(Ls, 0); return 1; }   // nothing worn there
+		}
+		lua_pushboolean(Ls, e->degradeArmor(*s, *armor, armornum) ? 1 : 0);
+		return 1;
+#else
+		(void)uid; (void)slotC; lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_gib(uid [, sprite]) -> true if a chunk was thrown.
+	//
+	// The one member of the spawn family sam_spawn_particle could not carry: bang, poof,
+	// explosion and sleep all take a POSITION, and a gib takes a PARENT — it inherits the
+	// creature's colour and flies off it. The optional sprite overrides the model.
+	int lua_sam_gib(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const int sprite = (int)luaL_optinteger(Ls, 2, -1);
+#ifdef SAM_LUA_HAVE_BARONY
+		Entity* e = samResolveWritable(uid, "sam_gib");
+		if ( !e ) { lua_pushboolean(Ls, 0); return 1; }
+		Entity* g = spawnGib(e, sprite);
+		lua_pushboolean(Ls, g ? 1 : 0);
+		return 1;
+#else
+		(void)uid; (void)sprite; lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_obituary(killer_uid, victim_uid [, from_spell]) -> true if it was recorded.
+	//
+	// A scripted kill produces no attribution at all today: sam_kill_monster just sets HP to 0,
+	// so the death message is the generic one and nobody gets credit. This writes the killer
+	// and the death text the way the engine does for its own kills.
+	//
+	// ORDER MATTERS. Entity::setHP overwrites the obituary with the generic string on EVERY HP
+	// change, so calling this before the killing blow would have it immediately overwritten.
+	// Call it after.
+	int lua_sam_obituary(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long killer = (long long)luaL_checkinteger(Ls, 1);
+		const long long victim = (long long)luaL_checkinteger(Ls, 2);
+		const bool fromSpell = samBoolArg(Ls, 3, false);
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT )
+		{
+			SAM_WARN("LUA", "sam_obituary refused: host only.");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		Entity* k = samResolveEntityQuiet(killer);
+		Stat* vs = nullptr;
+		Entity* v = samResolveCombatant(victim, &vs);
+		if ( !k || !v || !vs )
+		{
+			SAM_WARN("LUA", "sam_obituary: both sides have to be live entities and the victim has"
+				" to be a creature — the obituary is written into the victim's own stats.");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		k->killedByMonsterObituary(v, fromSpell);
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)killer; (void)victim; (void)fromSpell; lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_revive_player(player [, x, y]) -> true if the player is back on their feet.
+	//
+	// SCOPE, stated rather than discovered. This works for a player whose body THIS MACHINE
+	// owns — singleplayer, and the host's own slot in multiplayer. A remote client is refused,
+	// loudly, and here is why: revival in Barony is client-initiated. The client tears down its
+	// own ghost, builds its own body and tells the host with 'REZZ'. Driving it the other way,
+	// the remote machine keeps rendering its ghost and never adopts the body the host made —
+	// the receive path only reassigns players[n]->entity when that player ALREADY has one,
+	// which a dead player does not. Making it work needs a new packet and a client-side
+	// rebuild, and a version of this that returned true while the other player stayed a ghost
+	// would be worse than one that says so.
+	//
+	// x and y are TILE coordinates. Omitted, the ghost's own tile is used, which is where the
+	// player is looking from.
+	int lua_sam_revive_player(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const int wantX = (int)luaL_optinteger(Ls, 2, -1);
+		const int wantY = (int)luaL_optinteger(Ls, 3, -1);
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT )
+		{
+			SAM_WARN("LUA", "sam_revive_player refused: host only.");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !stats[player] )
+		{
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		if ( players[player]->entity )
+		{
+			SAM_WARN("LUA", "sam_revive_player: player " + std::to_string(player) + " is not dead.");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		if ( multiplayer == SERVER && player != clientnum )
+		{
+			SAM_WARN("LUA", "sam_revive_player: player " + std::to_string(player) + " is on another"
+				" machine, and only that machine can rebuild their body — reviving is"
+				" client-initiated in Barony. Reviving the host's own player works.");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+
+		// Where. The ghost's tile unless the caller named one, and the map's bounds decide
+		// whether either is usable — a body outside the map is not a revive.
+		int tx = wantX, ty = wantY;
+		if ( tx < 0 || ty < 0 )
+		{
+			if ( players[player]->ghost.my )
+			{
+				tx = (int)(players[player]->ghost.my->x / 16);
+				ty = (int)(players[player]->ghost.my->y / 16);
+			}
+			else
+			{
+				SAM_WARN("LUA", "sam_revive_player: player " + std::to_string(player) + " has no"
+					" ghost to revive at, so name a tile: sam_revive_player(n, x, y).");
+				lua_pushboolean(Ls, 0); return 1;
+			}
+		}
+		if ( tx < 0 || ty < 0 || tx >= map.width || ty >= map.height )
+		{
+			SAM_ERROR("LUA", "sam_revive_player: tile " + std::to_string(tx) + "," + std::to_string(ty)
+				+ " is outside this map.");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+
+		// The body, field for field from the engine's own 'REZZ' handler. NOT
+		// Player::Ghost_t::respawn(), which returns nullptr immediately for any non-local
+		// player and would silently do nothing for three of the four slots.
+		if ( players[player]->ghost.my )
+		{
+			list_RemoveNode(players[player]->ghost.my->mynode);
+			players[player]->ghost.my = nullptr;
+		}
+		players[player]->ghost.reset();
+
+		Entity* entity = newEntity(113, 1, map.entities, nullptr);
+		entity->x = (tx * 16) + 8;
+		entity->y = (ty * 16) + 8;
+		entity->new_x = entity->x;
+		entity->new_y = entity->y;
+		entity->z = -1;
+		entity->flags[INVISIBLE] = false;
+		entity->flags[GENIUS] = true;
+		entity->behavior = &actPlayer;
+		entity->skill[2] = player;
+		entity->yaw = 0.0;
+		entity->sizex = 4;
+		entity->sizey = 4;
+		entity->focalx = limbs[HUMAN][0][0];
+		entity->focaly = limbs[HUMAN][0][1];
+		entity->focalz = limbs[HUMAN][0][2];
+		entity->flags[UPDATENEEDED] = true;
+		entity->flags[BLOCKSIGHT] = true;
+		entity->addToCreatureList(map.creatures);
+		players[player]->entity = entity;
+		stats[player]->HP = stats[player]->MAXHP / 2;
+		SAM_INFO("SAM", "sam_revive_player: player " + std::to_string(player) + " revived at tile "
+			+ std::to_string(tx) + "," + std::to_string(ty) + ".");
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)player; (void)wantX; (void)wantY; lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_set_species_damage_resist(species, type, multiplier) -> true if it took.
+	//
+	// Species-wide, not per-creature: every skeleton in the game, now and later. 1.0 is normal,
+	// 0.5 halves what they take, 2.0 doubles it.
+	//
+	// IT CANNOT GRANT IMMUNITY. This number only seeds the multiplier; the engine then runs its
+	// bonus pool and floors the result at 0.1, so the least damage any species can be made to
+	// take is a TENTH, not none. Pass 0 and you get 0.1. For real immunity use
+	// sam_set_damage_immune, or veto on_before_damage or on_damage_multiplier.
+	//
+	// NOT A WRITE TO damagetables. That array is declared `static` inside monster.hpp, so every
+	// translation unit owns a private copy and a write from here would be invisible to the
+	// engine's read — reporting success and changing nothing. The override lives in a table
+	// entity.cpp consults instead. See sam_combat.hpp.
+	//
+	// HOST-SIDE AND NOT SYNCED. The damage it changes is computed on the host, so the game
+	// plays correctly for everyone — but a client's character sheet reads its own local copy of
+	// the table, so a client sees vanilla resistance numbers while taking modded damage.
+	int lua_sam_set_species_damage_resist(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* speciesC = luaL_checkstring(Ls, 1);
+		const char* typeC = luaL_checkstring(Ls, 2);
+		const double mult = (double)luaL_checknumber(Ls, 3);
+#ifdef SAM_LUA_HAVE_BARONY
+		const int species = samMonsterNameToId(speciesC);
+		if ( species < 0 )
+		{
+			SAM_ERROR("LUA", std::string("sam_set_species_damage_resist: '")
+				+ (speciesC ? speciesC : "") + "' is not a creature this game has.");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		int dtype = 0;
+		if ( !samDamageTypeArg(typeC, "sam_set_species_damage_resist", &dtype) )
+		{
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		lua_pushboolean(Ls, SAMCombat::setSpeciesResist(species, dtype, mult) ? 1 : 0);
+		return 1;
+#else
+		(void)speciesC; (void)typeC; (void)mult; lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_clear_species_damage_resist([species [, type]]) -> how many overrides were removed.
+	// No arguments clears everything, which is what a mod's teardown wants.
+	int lua_sam_clear_species_damage_resist(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* speciesC = luaL_optstring(Ls, 1, "");
+		const char* typeC = luaL_optstring(Ls, 2, "");
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( !speciesC || !*speciesC )
+		{
+			lua_pushinteger(Ls, (lua_Integer)SAMCombat::clearAllSpeciesResist());
+			return 1;
+		}
+		const int species = samMonsterNameToId(speciesC);
+		if ( species < 0 )
+		{
+			SAM_ERROR("LUA", std::string("sam_clear_species_damage_resist: '") + speciesC
+				+ "' is not a creature this game has.");
+			lua_pushinteger(Ls, 0); return 1;
+		}
+		// A missing type means every type for that species, which clearSpeciesResist expresses
+		// as an out-of-range type rather than a second entry point.
+		int dtype = -1;
+		if ( typeC && *typeC )
+		{
+			if ( !samDamageTypeArg(typeC, "sam_clear_species_damage_resist", &dtype) )
+			{
+				lua_pushinteger(Ls, 0); return 1;
+			}
+		}
+		lua_pushinteger(Ls, (lua_Integer)SAMCombat::clearSpeciesResist(species, dtype));
+		return 1;
+#else
+		(void)speciesC; (void)typeC; lua_pushinteger(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_add_damage_multiplier(fraction) -> true if the contribution was taken.
+	//
+	// Valid ONLY inside an on_damage_multiplier handler, and it says so rather than silently
+	// dropping the number — a contribution made anywhere else has no window to land in and
+	// would otherwise vanish without a word.
+	//
+	// Positives ADD and negatives MULTIPLY, which is Barony's own rule for the bonus pool it
+	// builds in getDamageTableMultiplier. Two mods each contributing +0.2 give +40%; two each
+	// contributing -0.5 give a quarter rather than nothing.
+	int lua_sam_add_damage_multiplier(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const double f = (double)luaL_checknumber(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( !SAMCombat::multiplierHookActive() )
+		{
+			SAM_WARN("LUA", "sam_add_damage_multiplier: no damage is being resolved right now, so"
+				" there is nothing to contribute to. It works inside an on_damage_multiplier"
+				" handler; to change one specific hit use sam_modify_damage (player) or"
+				" sam_modify_monster_damage (monster).");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		if ( !std::isfinite(f) )
+		{
+			SAM_ERROR("LUA", "sam_add_damage_multiplier: the contribution has to be a finite number.");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		SAMCombat::addMultiplier(f);
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)f; lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
 	int lua_panic(lua_State* Ls)
 	{
 		const char* msg = lua_tostring(Ls, -1);
@@ -7861,6 +8894,39 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		lua_setglobal(L, "sam_camera_shake");
 		lua_pushcfunction(L, lua_sam_hitstop);
 		lua_setglobal(L, "sam_hitstop");
+		// ---- v2.8 batch 4: combat ---------------------------------------------
+		lua_pushcfunction(L, lua_sam_heal);                               lua_setglobal(L, "sam_heal");
+		lua_pushcfunction(L, lua_sam_deal_damage_typed);                  lua_setglobal(L, "sam_deal_damage_typed");
+		lua_pushcfunction(L, lua_sam_get_hp);                             lua_setglobal(L, "sam_get_hp");
+		lua_pushcfunction(L, lua_sam_get_max_hp);                         lua_setglobal(L, "sam_get_max_hp");
+		lua_pushcfunction(L, lua_sam_get_mp);                       lua_setglobal(L, "sam_get_mp");
+		lua_pushcfunction(L, lua_sam_get_max_mp);                   lua_setglobal(L, "sam_get_max_mp");
+		lua_pushcfunction(L, lua_sam_get_attack);                         lua_setglobal(L, "sam_get_attack");
+		lua_pushcfunction(L, lua_sam_get_ranged_attack);                  lua_setglobal(L, "sam_get_ranged_attack");
+		lua_pushcfunction(L, lua_sam_get_thrown_attack);                  lua_setglobal(L, "sam_get_thrown_attack");
+		lua_pushcfunction(L, lua_sam_get_bonus_attack_vs);                lua_setglobal(L, "sam_get_bonus_attack_vs");
+		lua_pushcfunction(L, lua_sam_get_damage_resist);                  lua_setglobal(L, "sam_get_damage_resist");
+		lua_pushcfunction(L, lua_sam_get_magic_resist);                   lua_setglobal(L, "sam_get_magic_resist");
+		lua_pushcfunction(L, lua_sam_preview_damage);                     lua_setglobal(L, "sam_preview_damage");
+		lua_pushcfunction(L, lua_sam_get_regen_interval);                 lua_setglobal(L, "sam_get_regen_interval");
+		lua_pushcfunction(L, lua_sam_get_healring);                       lua_setglobal(L, "sam_get_healring");
+		lua_pushcfunction(L, lua_sam_mod_mp);                             lua_setglobal(L, "sam_mod_mp");
+		lua_pushcfunction(L, lua_sam_drain_mp);                           lua_setglobal(L, "sam_drain_mp");
+		lua_pushcfunction(L, lua_sam_consume_mp);                         lua_setglobal(L, "sam_consume_mp");
+		lua_pushcfunction(L, lua_sam_set_defending);                      lua_setglobal(L, "sam_set_defending");
+		lua_pushcfunction(L, lua_sam_is_parrying);                        lua_setglobal(L, "sam_is_parrying");
+		lua_pushcfunction(L, lua_sam_set_parry);                          lua_setglobal(L, "sam_set_parry");
+		lua_pushcfunction(L, lua_sam_get_monster_target_uid);      lua_setglobal(L, "sam_get_monster_target_uid");
+		lua_pushcfunction(L, lua_sam_set_monster_target_uid);             lua_setglobal(L, "sam_set_monster_target_uid");
+		lua_pushcfunction(L, lua_sam_clear_monster_target);               lua_setglobal(L, "sam_clear_monster_target");
+		lua_pushcfunction(L, lua_sam_alert_allies);                       lua_setglobal(L, "sam_alert_allies");
+		lua_pushcfunction(L, lua_sam_break_armor);                        lua_setglobal(L, "sam_break_armor");
+		lua_pushcfunction(L, lua_sam_gib);                                lua_setglobal(L, "sam_gib");
+		lua_pushcfunction(L, lua_sam_obituary);                           lua_setglobal(L, "sam_obituary");
+		lua_pushcfunction(L, lua_sam_revive_player);                      lua_setglobal(L, "sam_revive_player");
+		lua_pushcfunction(L, lua_sam_set_species_damage_resist);          lua_setglobal(L, "sam_set_species_damage_resist");
+		lua_pushcfunction(L, lua_sam_clear_species_damage_resist);        lua_setglobal(L, "sam_clear_species_damage_resist");
+		lua_pushcfunction(L, lua_sam_add_damage_multiplier);              lua_setglobal(L, "sam_add_damage_multiplier");
 		// ---- v2.6 batch 1: reads and dice -------------------------------------
 		lua_pushcfunction(L, lua_sam_get_position_precise); lua_setglobal(L, "sam_get_position_precise");
 		lua_pushcfunction(L, lua_sam_get_distance);         lua_setglobal(L, "sam_get_distance");
@@ -8985,6 +10051,32 @@ namespace SAMLua
 	}
 	Entity* resolveReadableEntity(long long uid, const char* who) { return samResolveEntityRead(uid, who); }
 	Entity* resolveEntityQuiet(long long uid) { return samResolveEntityQuiet(uid); }
+
+	// ---- batch 4, combat: one decision, both runtimes -------------------------------------
+	Entity* resolveCombatant(long long uid, Stat** outStats)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		return samResolveCombatant(uid, outStats);
+#else
+		(void)uid; (void)outStats; return nullptr;
+#endif
+	}
+	Entity* resolveCombatantWritable(long long uid, const char* who, Stat** outStats)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		return samResolveCombatantWritable(uid, who, outStats);
+#else
+		(void)uid; (void)who; (void)outStats; return nullptr;
+#endif
+	}
+	bool damageTypeFromName(const char* name, const char* who, int* out)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		return samDamageTypeArg(name, who, out);
+#else
+		(void)name; (void)who; (void)out; return false;
+#endif
+	}
 
 	void migrateLegacyDataFile(const std::string& dir, const std::string& key) { samMigrateLegacyDataFile(dir, key); }
 	int resolveModelAssetIn(const std::string& id, const std::string& ns) { return samResolveModelAsset(id, ns); }

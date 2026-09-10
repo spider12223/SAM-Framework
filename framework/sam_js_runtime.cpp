@@ -72,6 +72,7 @@ extern "C" {
 #	include "sam_classes.hpp" // v0.7.0 F5: SAMClasses::patchClass / addClassPassive
 #	include "sam_monster_patches.hpp" // v0.7.0 F5: SAMMonsterPatch::set
 #	include "sam_monsters.hpp" // SAMMonsters::traitBitForName (sam_monster_has_trait)
+#	include "sam_combat.hpp" // species damage resistance + the on_damage_multiplier hook
 #	include "sam_bodies.hpp"   // runtime model control (sam_set_model)
 #	include "sam_spells.hpp"  // custom-spell registry (sam_grant_spell)
 #	include "sam_sounds.hpp"  // custom sounds (resolve "ns:sound" ids in sam_play_sound)
@@ -606,7 +607,17 @@ namespace
 		std::string name;
 		samJsOptI32(ctx, argc, argv, 0, &player, __func__);
 		if ( samHasArg(argc, argv, 1) ) { const char* s = JS_ToCString(ctx, argv[1]); if ( s ) { name = s; JS_FreeCString(ctx, s); } }
-		if ( multiplayer == CLIENT ) { SAM_WARN("JS", "sam_get_stat refused: host only."); return JS_NewInt32(ctx, 0); }
+		// A CLIENT may read ITS OWN player, and nobody else's. Same rule and same reason as the
+		// Lua twin: stats[clientnum] is kept current by the 'UPHP' and 'UPMP' handlers, so a
+		// client-side HUD mod was being refused data its own machine was already holding, while
+		// another player's slot really is not replicated and would read as zeroes.
+		if ( multiplayer == CLIENT && player != clientnum )
+		{
+			SAM_WARN("JS", "sam_get_stat: on a client you can read your own player ("
+				+ std::to_string(clientnum) + ") only. Another player's stats are not sent to"
+				" your machine, so the number here would be invented rather than stale.");
+			return JS_NewInt32(ctx, 0);
+		}
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !stats[player] )
 		{ SAM_ERROR("JS", "sam_get_stat: invalid player index " + std::to_string(player) + "."); return JS_NewInt32(ctx, 0); }
 		const std::string n = samUpper(name.c_str());
@@ -5798,6 +5809,820 @@ namespace
 #endif
 	}
 
+	// =====================================================================================
+	//  v2.8 batch 4 — COMBAT, the JS twins.
+	//
+	//  Same order, same refusals, same reasons. Where a decision could drift — what counts as
+	//  a creature, which seven words name a damage type — both runtimes call ONE shared
+	//  function in SAMLua rather than each keeping a copy. Lua returns nil where these return
+	//  null, which is the same answer in each language's own vocabulary.
+	// =====================================================================================
+
+	// A required string argument, refused rather than guessed. The Lua twins get this from
+	// luaL_checkstring, which raises; here it has to be spelled out.
+	static bool samJsReqStr(JSContext* ctx, int argc, JSValueConst* argv, int i,
+		const char* who, std::string* out)
+	{
+		if ( !samHasArg(argc, argv, i) )
+		{
+			SAM_ERROR("JS", std::string(who) + ": argument " + std::to_string(i + 1) + " is required.");
+			return false;
+		}
+		const char* s = JS_ToCString(ctx, argv[i]);
+		if ( !s ) { return false; }
+		*out = s;
+		JS_FreeCString(ctx, s);
+		return true;
+	}
+
+	static void samJsOptStr(JSContext* ctx, int argc, JSValueConst* argv, int i, std::string* io)
+	{
+		if ( !samHasArg(argc, argv, i) ) { return; }
+		const char* s = JS_ToCString(ctx, argv[i]);
+		if ( !s ) { return; }
+		*io = s;
+		JS_FreeCString(ctx, s);
+	}
+
+	// sam_heal(uid, amount) -> the HP actually restored, or null. See the Lua twin: sam_deal_damage
+	// forces its sign negative, so before this there was no relative heal at all.
+	JSValue js_sam_heal(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0; int32_t amount = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_heal") ) { return JS_NULL; }
+		if ( !samJsReqI32(ctx, argc, argv, 1, &amount, "sam_heal") ) { return JS_NULL; }
+#ifdef SAM_JS_HAVE_BARONY
+		Stat* s = nullptr;
+		Entity* e = SAMLua::resolveCombatantWritable((long long)uid, "sam_heal", &s);
+		if ( !e || !s ) { return JS_NULL; }
+		if ( amount <= 0 )
+		{
+			SAM_WARN("JS", "sam_heal: the amount has to be positive. To hurt something use"
+				" sam_deal_damage — passing a negative here would have healed it anyway.");
+			return JS_NewInt32(ctx, 0);
+		}
+		const int beforeHP = s->HP;
+		e->modHP(amount);
+		return JS_NewInt32(ctx, s->HP - beforeHP);
+#else
+		(void)uid; (void)amount; return JS_NULL;
+#endif
+	}
+
+	// sam_deal_damage_typed(uid, amount, type) -> the damage actually dealt, or null.
+	JSValue js_sam_deal_damage_typed(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0; int32_t amount = 0; std::string type;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_deal_damage_typed") ) { return JS_NULL; }
+		if ( !samJsReqI32(ctx, argc, argv, 1, &amount, "sam_deal_damage_typed") ) { return JS_NULL; }
+		if ( !samJsReqStr(ctx, argc, argv, 2, "sam_deal_damage_typed", &type) ) { return JS_NULL; }
+#ifdef SAM_JS_HAVE_BARONY
+		int dtype = 0;
+		if ( !SAMLua::damageTypeFromName(type.c_str(), "sam_deal_damage_typed", &dtype) ) { return JS_NULL; }
+		Stat* s = nullptr;
+		Entity* e = SAMLua::resolveCombatantWritable((long long)uid, "sam_deal_damage_typed", &s);
+		if ( !e || !s ) { return JS_NULL; }
+		const int asked = ( amount < 0 ) ? -amount : amount;
+		real_t mult = Entity::getDamageTableMultiplier(e, *s, (DamageTableType)dtype);
+		Entity::modifyDamageMultipliersFromEffects(e, nullptr, mult, (DamageTableType)dtype);
+		int dealt = (int)(asked * mult);
+		if ( dealt < 0 ) { dealt = 0; }
+		if ( dealt > 0 ) { e->modHP(-dealt); }
+		return JS_NewInt32(ctx, dealt);
+#else
+		(void)uid; (void)amount; return JS_NULL;
+#endif
+	}
+
+	// sam_get_hp(uid) / sam_get_max_hp(uid) -> number, or null for anything without a Stat.
+	JSValue js_sam_get_hp(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_get_hp") ) { return JS_NULL; }
+#ifdef SAM_JS_HAVE_BARONY
+		Stat* s = nullptr;
+		if ( !SAMLua::resolveCombatant((long long)uid, &s) || !s ) { return JS_NULL; }
+		return JS_NewInt32(ctx, s->HP);
+#else
+		(void)uid; return JS_NULL;
+#endif
+	}
+
+	JSValue js_sam_get_max_hp(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_get_max_hp") ) { return JS_NULL; }
+#ifdef SAM_JS_HAVE_BARONY
+		Stat* s = nullptr;
+		if ( !SAMLua::resolveCombatant((long long)uid, &s) || !s ) { return JS_NULL; }
+		return JS_NewInt32(ctx, s->MAXHP);
+#else
+		(void)uid; return JS_NULL;
+#endif
+	}
+
+	// sam_get_mp(uid) / sam_get_max_mp(uid) -> number, or null. See the Lua twins: without these
+	// the three mana verbs this batch added had no reader at all on anything but a player.
+	JSValue js_sam_get_mp(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_get_mp") ) { return JS_NULL; }
+#ifdef SAM_JS_HAVE_BARONY
+		Stat* s = nullptr;
+		if ( !SAMLua::resolveCombatant((long long)uid, &s) || !s ) { return JS_NULL; }
+		return JS_NewInt32(ctx, s->MP);
+#else
+		(void)uid; return JS_NULL;
+#endif
+	}
+
+	JSValue js_sam_get_max_mp(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_get_max_mp") ) { return JS_NULL; }
+#ifdef SAM_JS_HAVE_BARONY
+		Stat* s = nullptr;
+		if ( !SAMLua::resolveCombatant((long long)uid, &s) || !s ) { return JS_NULL; }
+		return JS_NewInt32(ctx, s->MAXMP);
+#else
+		(void)uid; return JS_NULL;
+#endif
+	}
+
+	// sam_get_attack(uid) -> the melee attack value the engine would use, or null.
+	JSValue js_sam_get_attack(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_get_attack") ) { return JS_NULL; }
+#ifdef SAM_JS_HAVE_BARONY
+		Stat* s = nullptr;
+		Entity* e = SAMLua::resolveCombatant((long long)uid, &s);
+		if ( !e || !s ) { return JS_NULL; }
+		return JS_NewInt32(ctx, (int)Entity::getAttack(e, s, e->behavior == &actPlayer));
+#else
+		(void)uid; return JS_NULL;
+#endif
+	}
+
+	// sam_get_ranged_attack(uid [, quiver_bonus]) -> number, or null.
+	JSValue js_sam_get_ranged_attack(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0; int32_t quiver = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_get_ranged_attack") ) { return JS_NULL; }
+		samJsOptI32(ctx, argc, argv, 1, &quiver, "sam_get_ranged_attack");
+#ifdef SAM_JS_HAVE_BARONY
+		Stat* s = nullptr;
+		Entity* e = SAMLua::resolveCombatant((long long)uid, &s);
+		if ( !e || !s ) { return JS_NULL; }
+		return JS_NewInt32(ctx, (int)e->getRangedAttack((int)quiver));
+#else
+		(void)uid; (void)quiver; return JS_NULL;
+#endif
+	}
+
+	// sam_get_thrown_attack(uid) -> number, or null.
+	JSValue js_sam_get_thrown_attack(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_get_thrown_attack") ) { return JS_NULL; }
+#ifdef SAM_JS_HAVE_BARONY
+		Stat* s = nullptr;
+		Entity* e = SAMLua::resolveCombatant((long long)uid, &s);
+		if ( !e || !s ) { return JS_NULL; }
+		return JS_NewInt32(ctx, (int)e->getThrownAttack());
+#else
+		(void)uid; return JS_NULL;
+#endif
+	}
+
+	// sam_get_bonus_attack_vs(uid, target_uid) -> number, or null.
+	JSValue js_sam_get_bonus_attack_vs(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0, tgt = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_get_bonus_attack_vs") ) { return JS_NULL; }
+		if ( !samJsReqI32Wide(ctx, argc, argv, 1, &tgt, "sam_get_bonus_attack_vs") ) { return JS_NULL; }
+#ifdef SAM_JS_HAVE_BARONY
+		Stat* s = nullptr;
+		Entity* e = SAMLua::resolveCombatant((long long)uid, &s);
+		if ( !e || !s ) { return JS_NULL; }
+		Stat* ts = nullptr;
+		if ( !SAMLua::resolveCombatant((long long)tgt, &ts) || !ts ) { return JS_NULL; }
+		return JS_NewInt32(ctx, (int)e->getBonusAttackOnTarget(*ts));
+#else
+		(void)uid; (void)tgt; return JS_NULL;
+#endif
+	}
+
+	// sam_get_damage_resist(uid [, type]) -> the multiplier, or null. Defaults to "magic".
+	JSValue js_sam_get_damage_resist(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0; std::string type = "magic";
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_get_damage_resist") ) { return JS_NULL; }
+		samJsOptStr(ctx, argc, argv, 1, &type);
+#ifdef SAM_JS_HAVE_BARONY
+		int dtype = 0;
+		if ( !SAMLua::damageTypeFromName(type.c_str(), "sam_get_damage_resist", &dtype) ) { return JS_NULL; }
+		Stat* s = nullptr;
+		Entity* e = SAMLua::resolveCombatant((long long)uid, &s);
+		if ( !e || !s ) { return JS_NULL; }
+		return JS_NewFloat64(ctx, (double)Entity::getDamageTableMultiplier(e, *s, (DamageTableType)dtype));
+#else
+		(void)uid; return JS_NULL;
+#endif
+	}
+
+	// sam_get_magic_resist(uid) -> the raw magic-resistance POINT count, or null.
+	JSValue js_sam_get_magic_resist(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_get_magic_resist") ) { return JS_NULL; }
+#ifdef SAM_JS_HAVE_BARONY
+		Stat* s = nullptr;
+		if ( !SAMLua::resolveCombatant((long long)uid, &s) || !s ) { return JS_NULL; }
+		return JS_NewInt32(ctx, Entity::getMagicResistance(s));
+#else
+		(void)uid; return JS_NULL;
+#endif
+	}
+
+	// sam_preview_damage(attacker_uid, target_uid) -> what a melee swing would deal, dealing
+	// nothing. null if either side is not a creature.
+	JSValue js_sam_preview_damage(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0, tgt = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_preview_damage") ) { return JS_NULL; }
+		if ( !samJsReqI32Wide(ctx, argc, argv, 1, &tgt, "sam_preview_damage") ) { return JS_NULL; }
+#ifdef SAM_JS_HAVE_BARONY
+		Stat* as = nullptr;
+		Entity* ae = SAMLua::resolveCombatant((long long)uid, &as);
+		if ( !ae || !as ) { return JS_NULL; }
+		Stat* ts = nullptr;
+		Entity* te = SAMLua::resolveCombatant((long long)tgt, &ts);
+		if ( !te || !ts ) { return JS_NULL; }
+
+		const real_t myAttack = (real_t)Entity::getAttack(ae, as, ae->behavior == &actPlayer);
+		int numBlessings = 0;
+		const real_t acEff = Entity::getACEffectiveness(te, ts, te->behavior == &actPlayer,
+			ae, as, numBlessings);
+		const real_t enemyAC = (real_t)AC(ts);
+		int out = (int)(std::max(0.0, ((myAttack * acEff - enemyAC))) + (1.0 - acEff) * myAttack);
+		if ( out < 0 ) { out = 0; }
+		return JS_NewInt32(ctx, out);
+#else
+		(void)uid; (void)tgt; return JS_NULL;
+#endif
+	}
+
+	// sam_get_regen_interval(uid) -> ticks between natural HP regeneration ticks, or null.
+	JSValue js_sam_get_regen_interval(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_get_regen_interval") ) { return JS_NULL; }
+#ifdef SAM_JS_HAVE_BARONY
+		Stat* s = nullptr;
+		Entity* e = SAMLua::resolveCombatant((long long)uid, &s);
+		if ( !e || !s ) { return JS_NULL; }
+		return JS_NewInt32(ctx, Entity::getHealthRegenInterval(e, *s, e->behavior == &actPlayer));
+#else
+		(void)uid; return JS_NULL;
+#endif
+	}
+
+	// sam_get_healring(uid) -> the regeneration bonus from equipment and effects, or null.
+	JSValue js_sam_get_healring(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_get_healring") ) { return JS_NULL; }
+#ifdef SAM_JS_HAVE_BARONY
+		Stat* s = nullptr;
+		Entity* e = SAMLua::resolveCombatant((long long)uid, &s);
+		if ( !e || !s ) { return JS_NULL; }
+		const int fromGear = Entity::getHealringFromEquipment(e, *s, e->behavior == &actPlayer);
+		const int fromEff  = Entity::getHealringFromEffects(e, *s);
+		return JS_NewInt32(ctx, fromGear + fromEff);
+#else
+		(void)uid; return JS_NULL;
+#endif
+	}
+
+	// sam_mod_mp(uid, amount) -> the MP after the change, or null.
+	JSValue js_sam_mod_mp(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0; int32_t amount = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_mod_mp") ) { return JS_NULL; }
+		if ( !samJsReqI32(ctx, argc, argv, 1, &amount, "sam_mod_mp") ) { return JS_NULL; }
+#ifdef SAM_JS_HAVE_BARONY
+		Stat* s = nullptr;
+		Entity* e = SAMLua::resolveCombatantWritable((long long)uid, "sam_mod_mp", &s);
+		if ( !e || !s ) { return JS_NULL; }
+		e->modMP((int)amount, true);
+		return JS_NewInt32(ctx, s->MP);
+#else
+		(void)uid; (void)amount; return JS_NULL;
+#endif
+	}
+
+	// sam_drain_mp(uid, amount [, notify]) -> boolean. Overdraw comes out of HEALTH.
+	JSValue js_sam_drain_mp(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0; int32_t amount = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_drain_mp") ) { return JS_FALSE; }
+		if ( !samJsReqI32(ctx, argc, argv, 1, &amount, "sam_drain_mp") ) { return JS_FALSE; }
+		const bool notify = samBoolArgJs(ctx, argc, argv, 2, true);
+#ifdef SAM_JS_HAVE_BARONY
+		Stat* s = nullptr;
+		Entity* e = SAMLua::resolveCombatantWritable((long long)uid, "sam_drain_mp", &s);
+		if ( !e || !s ) { return JS_FALSE; }
+		if ( amount <= 0 )
+		{
+			SAM_WARN("JS", "sam_drain_mp: the amount has to be positive. To GIVE mana use sam_mod_mp.");
+			return JS_FALSE;
+		}
+		e->drainMP((int)amount, notify);
+		return JS_TRUE;
+#else
+		(void)uid; (void)amount; (void)notify; return JS_FALSE;
+#endif
+	}
+
+	// sam_consume_mp(uid, amount) -> boolean. Spends only if affordable -- except for a vampire
+	// PLAYER, whose shortfall the engine takes out of health instead; see the Lua twin.
+	JSValue js_sam_consume_mp(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0; int32_t amount = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_consume_mp") ) { return JS_FALSE; }
+		if ( !samJsReqI32(ctx, argc, argv, 1, &amount, "sam_consume_mp") ) { return JS_FALSE; }
+#ifdef SAM_JS_HAVE_BARONY
+		Stat* s = nullptr;
+		Entity* e = SAMLua::resolveCombatantWritable((long long)uid, "sam_consume_mp", &s);
+		if ( !e || !s ) { return JS_FALSE; }
+		if ( amount < 0 )
+		{
+			SAM_WARN("JS", "sam_consume_mp: the amount cannot be negative. To GIVE mana use sam_mod_mp.");
+			return JS_FALSE;
+		}
+		return e->safeConsumeMP((int)amount) ? JS_TRUE : JS_FALSE;
+#else
+		(void)uid; (void)amount; return JS_FALSE;
+#endif
+	}
+
+	// sam_set_defending(player, on) -> boolean (true if it changed anything).
+	// SAME-FRAME ONLY -- see the Lua twin: actHudShield rewrites this field from the block
+	// input every frame, so it is an override for the current frame and never a latch.
+	JSValue js_sam_set_defending(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = 0; bool on = true;
+		if ( !samJsReqI32(ctx, argc, argv, 0, &player, "sam_set_defending") ) { return JS_FALSE; }
+		if ( !samBoolReqJs(ctx, argc, argv, 1, "sam_set_defending", &on) ) { return JS_FALSE; }
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == CLIENT )
+		{
+			SAM_WARN("JS", "sam_set_defending refused: host only.");
+			return JS_FALSE;
+		}
+		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return JS_FALSE; }
+		const bool was = stats[player]->defending;
+		stats[player]->defending = on;
+		return ( was != on ) ? JS_TRUE : JS_FALSE;
+#else
+		(void)player; (void)on; return JS_FALSE;
+#endif
+	}
+
+	// sam_is_parrying(player) -> boolean.
+	JSValue js_sam_is_parrying(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = 0;
+		if ( !samJsReqI32(ctx, argc, argv, 0, &player, "sam_is_parrying") ) { return JS_FALSE; }
+#ifdef SAM_JS_HAVE_BARONY
+		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return JS_FALSE; }
+		return ( stats[player]->parrying > 0 ) ? JS_TRUE : JS_FALSE;
+#else
+		(void)player; return JS_FALSE;
+#endif
+	}
+
+	// sam_set_parry(player, ticks) -> boolean. 0 closes the window.
+	JSValue js_sam_set_parry(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = 0; int64_t ticks = 0;
+		if ( !samJsReqI32(ctx, argc, argv, 0, &player, "sam_set_parry") ) { return JS_FALSE; }
+		if ( !samJsReqI32Wide(ctx, argc, argv, 1, &ticks, "sam_set_parry") ) { return JS_FALSE; }
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == CLIENT )
+		{
+			SAM_WARN("JS", "sam_set_parry refused: host only.");
+			return JS_FALSE;
+		}
+		if ( player < 0 || player >= MAXPLAYERS || !stats[player] ) { return JS_FALSE; }
+		if ( ticks < 0 ) { ticks = 0; }
+		if ( ticks > 180000LL ) { ticks = 180000LL; }
+		stats[player]->parrying = (Uint32)ticks;
+		return JS_TRUE;
+#else
+		(void)player; (void)ticks; return JS_FALSE;
+#endif
+	}
+
+	// sam_set_monster_target_uid(uid, target_uid [, was_hit]) -> boolean. Monster-versus-monster
+	// aggro, which sam_set_monster_target cannot express because it takes a player index.
+	JSValue js_sam_set_monster_target_uid(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0, tgt = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_set_monster_target_uid") ) { return JS_FALSE; }
+		if ( !samJsReqI32Wide(ctx, argc, argv, 1, &tgt, "sam_set_monster_target_uid") ) { return JS_FALSE; }
+		const bool wasHit = samBoolArgJs(ctx, argc, argv, 2, false);
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == CLIENT )
+		{
+			SAM_WARN("JS", "sam_set_monster_target_uid refused: host only. AI lives on the host,"
+				" and a client holds no stats for an ordinary monster.");
+			return JS_FALSE;
+		}
+		Entity* e = samResolveMonster(uid);
+		if ( !e )
+		{
+			SAM_WARN("JS", "sam_set_monster_target_uid: uid " + std::to_string(uid) + " is not a"
+				" monster with stats, so it has no AI to point anywhere.");
+			return JS_FALSE;
+		}
+		Entity* t = SAMLua::resolveEntityQuiet((long long)tgt);
+		if ( !t ) { return JS_FALSE; }
+		if ( t == e )
+		{
+			SAM_WARN("JS", "sam_set_monster_target_uid: a monster cannot hunt itself.");
+			return JS_FALSE;
+		}
+		e->monsterAcquireAttackTarget(*t, MONSTER_STATE_PATH, wasHit);
+		return JS_TRUE;
+#else
+		(void)uid; (void)tgt; (void)wasHit; return JS_FALSE;
+#endif
+	}
+
+	// sam_get_monster_target_uid(uid) -> the uid of whatever this monster is hunting, or 0.
+	// See the Lua twin: sam_get_monster_target answers a player index, so monster-versus-monster
+	// aggro had no reader at all.
+	JSValue js_sam_get_monster_target_uid(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_get_monster_target_uid") ) { return JS_NewInt32(ctx, 0); }
+#ifdef SAM_JS_HAVE_BARONY
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { return JS_NewInt32(ctx, 0); }
+		Entity* t = uidToEntity((Sint32)e->monsterTarget);
+		return JS_NewInt32(ctx, t ? (int)t->getUID() : 0);
+#else
+		(void)uid; return JS_NewInt32(ctx, 0);
+#endif
+	}
+
+	// sam_clear_monster_target(uid [, force]) -> boolean. The engine's refusal is passed through.
+	JSValue js_sam_clear_monster_target(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_clear_monster_target") ) { return JS_FALSE; }
+		const bool force = samBoolArgJs(ctx, argc, argv, 1, false);
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == CLIENT )
+		{
+			SAM_WARN("JS", "sam_clear_monster_target refused: host only.");
+			return JS_FALSE;
+		}
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { return JS_FALSE; }
+		return e->monsterReleaseAttackTarget(force) ? JS_TRUE : JS_FALSE;
+#else
+		(void)uid; (void)force; return JS_FALSE;
+#endif
+	}
+
+	// sam_alert_allies(uid [, attacker_uid]) -> boolean.
+	JSValue js_sam_alert_allies(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0, att = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_alert_allies") ) { return JS_FALSE; }
+		samJsOptI64(ctx, argc, argv, 1, &att, "sam_alert_allies");
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == CLIENT )
+		{
+			SAM_WARN("JS", "sam_alert_allies refused: host only.");
+			return JS_FALSE;
+		}
+		Entity* e = samResolveMonster(uid);
+		if ( !e ) { return JS_FALSE; }
+		Entity* a = ( att != 0 ) ? SAMLua::resolveEntityQuiet((long long)att) : nullptr;
+		e->alertAlliesOnBeingHit(a);
+		return JS_TRUE;
+#else
+		(void)uid; (void)att; return JS_FALSE;
+#endif
+	}
+
+	// sam_break_armor(uid [, slot]) -> boolean. With no slot, the engine's own picker chooses,
+	// so the odds and the exclusions match a real hit. The numbers below are the engine's
+	// equipment numbering (the one the 'ARMR' packet uses), NOT the equipment-slot enum.
+	JSValue js_sam_break_armor(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0; std::string want;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_break_armor") ) { return JS_FALSE; }
+		samJsOptStr(ctx, argc, argv, 1, &want);
+#ifdef SAM_JS_HAVE_BARONY
+		Stat* s = nullptr;
+		Entity* e = SAMLua::resolveCombatantWritable((long long)uid, "sam_break_armor", &s);
+		if ( !e || !s ) { return JS_FALSE; }
+		for ( char& c : want ) { c = (char)std::tolower((unsigned char)c); }
+
+		Item* armor = nullptr;
+		int armornum = -1;
+		if ( want.empty() )
+		{
+			armornum = s->pickRandomEquippedItemToDegradeOnHit(&armor, true, false, false, true);
+			if ( armornum < 0 || !armor ) { return JS_FALSE; }
+		}
+		else
+		{
+			struct SamArmorSlot { const char* name; int armornum; Item** item; };
+			const SamArmorSlot slots[] = {
+				{ "helmet",      0, &s->helmet      },
+				{ "breastplate", 1, &s->breastplate },
+				{ "armor",       1, &s->breastplate },
+				{ "gloves",      2, &s->gloves      },
+				{ "boots",       3, &s->shoes       },
+				{ "shoes",       3, &s->shoes       },
+				{ "shield",      4, &s->shield      },
+				{ "cloak",       6, &s->cloak       },
+				{ "mask",        9, &s->mask        },
+			};
+			const int slotCount = (int)(sizeof(slots) / sizeof(slots[0]));
+			int chosen = -1;
+			for ( int i = 0; i < slotCount; ++i )
+			{
+				if ( want == slots[i].name ) { chosen = i; break; }
+			}
+			if ( chosen < 0 )
+			{
+				SAM_ERROR("JS", "sam_break_armor: '" + want + "' is not a slot that can degrade."
+					" They are helmet, breastplate, gloves, boots, shield, cloak and mask.");
+				return JS_FALSE;
+			}
+			armor = *slots[chosen].item;
+			armornum = slots[chosen].armornum;
+			if ( !armor ) { return JS_FALSE; }
+		}
+		return e->degradeArmor(*s, *armor, armornum) ? JS_TRUE : JS_FALSE;
+#else
+		(void)uid; return JS_FALSE;
+#endif
+	}
+
+	// sam_gib(uid [, sprite]) -> boolean. A gib takes a PARENT, which is why it could not be
+	// another kind for sam_spawn_particle.
+	JSValue js_sam_gib(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0; int32_t sprite = -1;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_gib") ) { return JS_FALSE; }
+		samJsOptI32(ctx, argc, argv, 1, &sprite, "sam_gib");
+#ifdef SAM_JS_HAVE_BARONY
+		Entity* e = SAMLua::resolveWritableEntity((long long)uid, "sam_gib");
+		if ( !e ) { return JS_FALSE; }
+		Entity* g = spawnGib(e, (int)sprite);
+		return g ? JS_TRUE : JS_FALSE;
+#else
+		(void)uid; (void)sprite; return JS_FALSE;
+#endif
+	}
+
+	// sam_obituary(killer_uid, victim_uid [, from_spell]) -> boolean. Call it AFTER the killing
+	// blow: setHP rewrites the obituary to the generic string on every HP change.
+	JSValue js_sam_obituary(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t killer = 0, victim = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &killer, "sam_obituary") ) { return JS_FALSE; }
+		if ( !samJsReqI32Wide(ctx, argc, argv, 1, &victim, "sam_obituary") ) { return JS_FALSE; }
+		const bool fromSpell = samBoolArgJs(ctx, argc, argv, 2, false);
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == CLIENT )
+		{
+			SAM_WARN("JS", "sam_obituary refused: host only.");
+			return JS_FALSE;
+		}
+		Entity* k = SAMLua::resolveEntityQuiet((long long)killer);
+		Stat* vs = nullptr;
+		Entity* v = SAMLua::resolveCombatant((long long)victim, &vs);
+		if ( !k || !v || !vs )
+		{
+			SAM_WARN("JS", "sam_obituary: both sides have to be live entities and the victim has"
+				" to be a creature — the obituary is written into the victim's own stats.");
+			return JS_FALSE;
+		}
+		k->killedByMonsterObituary(v, fromSpell);
+		return JS_TRUE;
+#else
+		(void)killer; (void)victim; (void)fromSpell; return JS_FALSE;
+#endif
+	}
+
+	// sam_revive_player(player [, x, y]) -> boolean. Same scope as the Lua twin: a player whose
+	// body THIS machine owns. A remote client is refused because revival is client-initiated in
+	// Barony and the other machine would keep rendering its ghost.
+	JSValue js_sam_revive_player(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = 0, wantX = -1, wantY = -1;
+		if ( !samJsReqI32(ctx, argc, argv, 0, &player, "sam_revive_player") ) { return JS_FALSE; }
+		samJsOptI32(ctx, argc, argv, 1, &wantX, "sam_revive_player");
+		samJsOptI32(ctx, argc, argv, 2, &wantY, "sam_revive_player");
+#ifdef SAM_JS_HAVE_BARONY
+		if ( multiplayer == CLIENT )
+		{
+			SAM_WARN("JS", "sam_revive_player refused: host only.");
+			return JS_FALSE;
+		}
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !stats[player] ) { return JS_FALSE; }
+		if ( players[player]->entity )
+		{
+			SAM_WARN("JS", "sam_revive_player: player " + std::to_string(player) + " is not dead.");
+			return JS_FALSE;
+		}
+		if ( multiplayer == SERVER && player != clientnum )
+		{
+			SAM_WARN("JS", "sam_revive_player: player " + std::to_string(player) + " is on another"
+				" machine, and only that machine can rebuild their body — reviving is"
+				" client-initiated in Barony. Reviving the host's own player works.");
+			return JS_FALSE;
+		}
+
+		int tx = (int)wantX, ty = (int)wantY;
+		if ( tx < 0 || ty < 0 )
+		{
+			if ( players[player]->ghost.my )
+			{
+				tx = (int)(players[player]->ghost.my->x / 16);
+				ty = (int)(players[player]->ghost.my->y / 16);
+			}
+			else
+			{
+				SAM_WARN("JS", "sam_revive_player: player " + std::to_string(player) + " has no"
+					" ghost to revive at, so name a tile: sam_revive_player(n, x, y).");
+				return JS_FALSE;
+			}
+		}
+		if ( tx < 0 || ty < 0 || tx >= map.width || ty >= map.height )
+		{
+			SAM_ERROR("JS", "sam_revive_player: tile " + std::to_string(tx) + "," + std::to_string(ty)
+				+ " is outside this map.");
+			return JS_FALSE;
+		}
+
+		if ( players[player]->ghost.my )
+		{
+			list_RemoveNode(players[player]->ghost.my->mynode);
+			players[player]->ghost.my = nullptr;
+		}
+		players[player]->ghost.reset();
+
+		Entity* entity = newEntity(113, 1, map.entities, nullptr);
+		entity->x = (tx * 16) + 8;
+		entity->y = (ty * 16) + 8;
+		entity->new_x = entity->x;
+		entity->new_y = entity->y;
+		entity->z = -1;
+		entity->flags[INVISIBLE] = false;
+		entity->flags[GENIUS] = true;
+		entity->behavior = &actPlayer;
+		entity->skill[2] = player;
+		entity->yaw = 0.0;
+		entity->sizex = 4;
+		entity->sizey = 4;
+		entity->focalx = limbs[HUMAN][0][0];
+		entity->focaly = limbs[HUMAN][0][1];
+		entity->focalz = limbs[HUMAN][0][2];
+		entity->flags[UPDATENEEDED] = true;
+		entity->flags[BLOCKSIGHT] = true;
+		entity->addToCreatureList(map.creatures);
+		players[player]->entity = entity;
+		stats[player]->HP = stats[player]->MAXHP / 2;
+		SAM_INFO("SAM", "sam_revive_player: player " + std::to_string(player) + " revived at tile "
+			+ std::to_string(tx) + "," + std::to_string(ty) + ".");
+		return JS_TRUE;
+#else
+		(void)player; (void)wantX; (void)wantY; return JS_FALSE;
+#endif
+	}
+
+	// sam_set_species_damage_resist(species, type, multiplier) -> boolean. Species-wide.
+	// 0 does NOT mean immune: the engine floors the final multiplier at 0.1, so the least any
+	// species can be made to take is a tenth. See sam_combat.hpp.
+	// Not a write to damagetables — see sam_combat.hpp for why that could not work.
+	JSValue js_sam_set_species_damage_resist(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		std::string speciesName, typeName; double mult = 1.0;
+		if ( !samJsReqStr(ctx, argc, argv, 0, "sam_set_species_damage_resist", &speciesName) ) { return JS_FALSE; }
+		if ( !samJsReqStr(ctx, argc, argv, 1, "sam_set_species_damage_resist", &typeName) ) { return JS_FALSE; }
+		if ( !samJsReqF64(ctx, argc, argv, 2, &mult, "sam_set_species_damage_resist") ) { return JS_FALSE; }
+#ifdef SAM_JS_HAVE_BARONY
+		const int species = samMonsterNameToId(speciesName.c_str());
+		if ( species < 0 )
+		{
+			SAM_ERROR("JS", "sam_set_species_damage_resist: '" + speciesName
+				+ "' is not a creature this game has.");
+			return JS_FALSE;
+		}
+		int dtype = 0;
+		if ( !SAMLua::damageTypeFromName(typeName.c_str(), "sam_set_species_damage_resist", &dtype) )
+		{
+			return JS_FALSE;
+		}
+		return SAMCombat::setSpeciesResist(species, dtype, mult) ? JS_TRUE : JS_FALSE;
+#else
+		(void)mult; return JS_FALSE;
+#endif
+	}
+
+	// sam_clear_species_damage_resist([species [, type]]) -> how many were removed.
+	JSValue js_sam_clear_species_damage_resist(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		std::string speciesName, typeName;
+		samJsOptStr(ctx, argc, argv, 0, &speciesName);
+		samJsOptStr(ctx, argc, argv, 1, &typeName);
+#ifdef SAM_JS_HAVE_BARONY
+		if ( speciesName.empty() ) { return JS_NewInt32(ctx, SAMCombat::clearAllSpeciesResist()); }
+		const int species = samMonsterNameToId(speciesName.c_str());
+		if ( species < 0 )
+		{
+			SAM_ERROR("JS", "sam_clear_species_damage_resist: '" + speciesName
+				+ "' is not a creature this game has.");
+			return JS_NewInt32(ctx, 0);
+		}
+		int dtype = -1;
+		if ( !typeName.empty() )
+		{
+			if ( !SAMLua::damageTypeFromName(typeName.c_str(), "sam_clear_species_damage_resist", &dtype) )
+			{
+				return JS_NewInt32(ctx, 0);
+			}
+		}
+		return JS_NewInt32(ctx, SAMCombat::clearSpeciesResist(species, dtype));
+#else
+		return JS_NewInt32(ctx, 0);
+#endif
+	}
+
+	// sam_add_damage_multiplier(fraction) -> boolean. Valid only inside an on_damage_multiplier
+	// handler, and it says so rather than dropping the number in silence.
+	JSValue js_sam_add_damage_multiplier(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		double f = 0.0;
+		if ( !samJsReqF64(ctx, argc, argv, 0, &f, "sam_add_damage_multiplier") ) { return JS_FALSE; }
+#ifdef SAM_JS_HAVE_BARONY
+		if ( !SAMCombat::multiplierHookActive() )
+		{
+			SAM_WARN("JS", "sam_add_damage_multiplier: no damage is being resolved right now, so"
+				" there is nothing to contribute to. It works inside an on_damage_multiplier"
+				" handler; to change one specific hit use sam_modify_damage (player) or"
+				" sam_modify_monster_damage (monster).");
+			return JS_FALSE;
+		}
+		SAMCombat::addMultiplier(f);
+		return JS_TRUE;
+#else
+		(void)f; return JS_FALSE;
+#endif
+	}
+
 	JSValue js_sam_remove_spell(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
@@ -5842,6 +6667,39 @@ namespace
 	{
 		JSValue g = JS_GetGlobalObject(ctx);
 		JS_SetPropertyStr(ctx, g, "sam_log", JS_NewCFunction(ctx, js_sam_log, "sam_log", 1));
+		// ---- v2.8 batch 4: combat ----------------------------------------------
+		JS_SetPropertyStr(ctx, g, "sam_heal", JS_NewCFunction(ctx, js_sam_heal, "sam_heal", 2));
+		JS_SetPropertyStr(ctx, g, "sam_deal_damage_typed", JS_NewCFunction(ctx, js_sam_deal_damage_typed, "sam_deal_damage_typed", 3));
+		JS_SetPropertyStr(ctx, g, "sam_get_hp", JS_NewCFunction(ctx, js_sam_get_hp, "sam_get_hp", 1));
+		JS_SetPropertyStr(ctx, g, "sam_get_max_hp", JS_NewCFunction(ctx, js_sam_get_max_hp, "sam_get_max_hp", 1));
+		JS_SetPropertyStr(ctx, g, "sam_get_mp", JS_NewCFunction(ctx, js_sam_get_mp, "sam_get_mp", 1));
+		JS_SetPropertyStr(ctx, g, "sam_get_max_mp", JS_NewCFunction(ctx, js_sam_get_max_mp, "sam_get_max_mp", 1));
+		JS_SetPropertyStr(ctx, g, "sam_get_attack", JS_NewCFunction(ctx, js_sam_get_attack, "sam_get_attack", 1));
+		JS_SetPropertyStr(ctx, g, "sam_get_ranged_attack", JS_NewCFunction(ctx, js_sam_get_ranged_attack, "sam_get_ranged_attack", 2));
+		JS_SetPropertyStr(ctx, g, "sam_get_thrown_attack", JS_NewCFunction(ctx, js_sam_get_thrown_attack, "sam_get_thrown_attack", 1));
+		JS_SetPropertyStr(ctx, g, "sam_get_bonus_attack_vs", JS_NewCFunction(ctx, js_sam_get_bonus_attack_vs, "sam_get_bonus_attack_vs", 2));
+		JS_SetPropertyStr(ctx, g, "sam_get_damage_resist", JS_NewCFunction(ctx, js_sam_get_damage_resist, "sam_get_damage_resist", 2));
+		JS_SetPropertyStr(ctx, g, "sam_get_magic_resist", JS_NewCFunction(ctx, js_sam_get_magic_resist, "sam_get_magic_resist", 1));
+		JS_SetPropertyStr(ctx, g, "sam_preview_damage", JS_NewCFunction(ctx, js_sam_preview_damage, "sam_preview_damage", 2));
+		JS_SetPropertyStr(ctx, g, "sam_get_regen_interval", JS_NewCFunction(ctx, js_sam_get_regen_interval, "sam_get_regen_interval", 1));
+		JS_SetPropertyStr(ctx, g, "sam_get_healring", JS_NewCFunction(ctx, js_sam_get_healring, "sam_get_healring", 1));
+		JS_SetPropertyStr(ctx, g, "sam_mod_mp", JS_NewCFunction(ctx, js_sam_mod_mp, "sam_mod_mp", 2));
+		JS_SetPropertyStr(ctx, g, "sam_drain_mp", JS_NewCFunction(ctx, js_sam_drain_mp, "sam_drain_mp", 3));
+		JS_SetPropertyStr(ctx, g, "sam_consume_mp", JS_NewCFunction(ctx, js_sam_consume_mp, "sam_consume_mp", 2));
+		JS_SetPropertyStr(ctx, g, "sam_set_defending", JS_NewCFunction(ctx, js_sam_set_defending, "sam_set_defending", 2));
+		JS_SetPropertyStr(ctx, g, "sam_is_parrying", JS_NewCFunction(ctx, js_sam_is_parrying, "sam_is_parrying", 1));
+		JS_SetPropertyStr(ctx, g, "sam_set_parry", JS_NewCFunction(ctx, js_sam_set_parry, "sam_set_parry", 2));
+		JS_SetPropertyStr(ctx, g, "sam_get_monster_target_uid", JS_NewCFunction(ctx, js_sam_get_monster_target_uid, "sam_get_monster_target_uid", 1));
+		JS_SetPropertyStr(ctx, g, "sam_set_monster_target_uid", JS_NewCFunction(ctx, js_sam_set_monster_target_uid, "sam_set_monster_target_uid", 3));
+		JS_SetPropertyStr(ctx, g, "sam_clear_monster_target", JS_NewCFunction(ctx, js_sam_clear_monster_target, "sam_clear_monster_target", 2));
+		JS_SetPropertyStr(ctx, g, "sam_alert_allies", JS_NewCFunction(ctx, js_sam_alert_allies, "sam_alert_allies", 2));
+		JS_SetPropertyStr(ctx, g, "sam_break_armor", JS_NewCFunction(ctx, js_sam_break_armor, "sam_break_armor", 2));
+		JS_SetPropertyStr(ctx, g, "sam_gib", JS_NewCFunction(ctx, js_sam_gib, "sam_gib", 2));
+		JS_SetPropertyStr(ctx, g, "sam_obituary", JS_NewCFunction(ctx, js_sam_obituary, "sam_obituary", 3));
+		JS_SetPropertyStr(ctx, g, "sam_revive_player", JS_NewCFunction(ctx, js_sam_revive_player, "sam_revive_player", 3));
+		JS_SetPropertyStr(ctx, g, "sam_set_species_damage_resist", JS_NewCFunction(ctx, js_sam_set_species_damage_resist, "sam_set_species_damage_resist", 3));
+		JS_SetPropertyStr(ctx, g, "sam_clear_species_damage_resist", JS_NewCFunction(ctx, js_sam_clear_species_damage_resist, "sam_clear_species_damage_resist", 2));
+		JS_SetPropertyStr(ctx, g, "sam_add_damage_multiplier", JS_NewCFunction(ctx, js_sam_add_damage_multiplier, "sam_add_damage_multiplier", 1));
 		JS_SetPropertyStr(ctx, g, "sam_grant_item", JS_NewCFunction(ctx, js_sam_grant_item, "sam_grant_item", 2));
 		JS_SetPropertyStr(ctx, g, "sam_save_data", JS_NewCFunction(ctx, js_sam_save_data, "sam_save_data", 2));
 		JS_SetPropertyStr(ctx, g, "sam_load_data", JS_NewCFunction(ctx, js_sam_load_data, "sam_load_data", 1));

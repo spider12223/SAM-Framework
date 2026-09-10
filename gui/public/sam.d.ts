@@ -4,7 +4,7 @@
 // Drop this beside your mod's .ts files, or reference it:
 //   /// <reference path="sam.d.ts" />
 //
-// 255 functions, 72 events.
+// 287 functions, 74 events.
 
 declare global {
   /**
@@ -15,11 +15,25 @@ declare global {
   function sam_add_class_passive(class_: any, effect: any): boolean;
 
   /**
+   * Contribute to the damage multiplier for the hit currently being resolved. 0.25 is +25%, -0.5 is half.
+   *
+   * Host-only: refused on a multiplayer client.
+   */
+  function sam_add_damage_multiplier(fraction: number): boolean;
+
+  /**
    * Add to a player's move-speed multiplier (the result is clamped to [0.1, 3.0]). Additive counterpart to sam_set_move_speed — use it to stack a bonus onto whatever the multiplier already is (e.g. +0.1 on top of a 2.0 from another ability). Host-only; syncs to the owning client.
    *
    * Host-only: refused on a multiplayer client.
    */
   function sam_add_move_speed(player: number, delta: number): number;
+
+  /**
+   * Wake every ally near this monster onto an attacker, the way the engine does when something is hit in a room full of its friends. The attacker may be left out for "alerted by nothing in particular".
+   *
+   * Host-only: refused on a multiplayer client.
+   */
+  function sam_alert_allies(uid: number, attacker_uid?: number): boolean;
 
   /**
    * Apply a status effect to a player for N ticks (50 ticks = 1s). Optional strength sets the tier/magnitude for effects that carry one (e.g. GROWTH stacks) — omit it for the plain default. Targets the player, never a monster.
@@ -48,6 +62,13 @@ declare global {
    * Host-only: refused on a multiplayer client.
    */
   function sam_attach_behavior(uid: number, behavior: string): boolean;
+
+  /**
+   * Degrade a worn piece of armour, possibly breaking it. With no slot named, the engine's own picker chooses, so the odds and the exclusions match a real hit. player.on_item_broken has existed as an event with no verb able to cause it.
+   *
+   * Host-only: refused on a multiplayer client.
+   */
+  function sam_break_armor(entity_uid: number, slot?: string): boolean;
 
   /**
    * Shake a player's camera. 1 is a nudge, ~10 a solid hit, 20+ violent. Feeds Barony's own shake channels so it decays naturally; for a remote client the host forwards it.
@@ -110,11 +131,32 @@ declare global {
   function sam_clear_model(uid: number): boolean;
 
   /**
+   * Make a monster forget its current target.
+   *
+   * Host-only: refused on a multiplayer client.
+   */
+  function sam_clear_monster_target(uid: number, force?: boolean): boolean;
+
+  /**
+   * Undo sam_set_species_damage_resist. No arguments clears everything, a species alone clears every type for it.
+   *
+   * Host-only: refused on a multiplayer client.
+   */
+  function sam_clear_species_damage_resist(species?: string, type?: string): number;
+
+  /**
    * Make a companion THRUST forward for a few ticks — the punch motion. Call it repeatedly on a fast repeating timer (e.g. every 3 ticks) during an ability to read as a continuous ORA-ORA flurry. Purely visual on the companion itself; combine with sam_cast_spell (forward projectile + real damage) and/or sam_get_nearby_entities + sam_deal_damage for the hits.
    *
    * Host-only: refused on a multiplayer client.
    */
   function sam_companion_punch(uid: number): boolean;
+
+  /**
+   * Spend mana only if the creature has it. Nothing is taken when it cannot afford the cost, which makes this the right one for a custom ability's cost.
+   *
+   * Host-only: refused on a multiplayer client.
+   */
+  function sam_consume_mp(entity_uid: number, amount: number): boolean;
 
   /**
    * The floating combat number the game shows on a hit. Lets a mod's custom damage read like real damage instead of being invisible.
@@ -131,6 +173,13 @@ declare global {
   function sam_deal_damage(entity_uid: number, amount: number): boolean;
 
   /**
+   * Deal damage of a particular weapon class, so the target's own resistance applies. 10 magic damage is 5 against something that halves magic and 20 against something that doubles it, without your script needing to know which. Both stages the engine applies are applied here, in its order: the species damage table, then live effects such as blood ward and sanctuary.
+   *
+   * Host-only: refused on a multiplayer client.
+   */
+  function sam_deal_damage_typed(entity_uid: number, amount: number, type: string): number;
+
+  /**
    * Delete a persisted per-mod key.
    */
   function sam_delete_data(key: string): boolean;
@@ -139,6 +188,13 @@ declare global {
    * Remove whatever behaviour a script attached to this entity. Local bookkeeping, so it is safe to call anywhere and on a uid that has none.
    */
   function sam_detach_behavior(uid: number): boolean;
+
+  /**
+   * Take mana, and take anything you cannot afford out of HEALTH instead. That overdraw is the point — it is how a blood-magic cost is expressed.
+   *
+   * Host-only: refused on a multiplayer client.
+   */
+  function sam_drain_mp(entity_uid: number, amount: number, notify?: boolean): boolean;
 
   /**
    * Entities of a KIND near a tile. This is the gap sam_get_nearby_entities leaves: that one skips anything which is not a monster or a player, so doors, chests, levers, gold and dropped items were invisible to scripts. A kind you spell wrong is logged by name and returns nothing, rather than returning the empty list that looks exactly like "nothing nearby" — each distinct wrong word is reported once.
@@ -163,6 +219,16 @@ declare global {
   function sam_get_action_binding(player: number, action: string): string | null;
 
   /**
+   * The melee attack figure the engine itself would use for this creature's next swing, weapon and stats included.
+   */
+  function sam_get_attack(entity_uid: number): number | null;
+
+  /**
+   * How much extra attack this creature gets against that particular target — slayer enchantments and the like.
+   */
+  function sam_get_bonus_attack_vs(entity_uid: number, target_uid: number): number | null;
+
+  /**
    * Which class a player is, as an identifier you can act on: a custom class's "namespace:class" id, or the vanilla class's own name. Accepted by sam_patch_class, sam_add_class_passive and the rest, so you can read a player's class and then change it. It is not a display string; a custom class returns its id rather than its title.
    */
   function sam_get_class(player: number): string | null;
@@ -173,6 +239,11 @@ declare global {
    * Host-only: refused on a multiplayer client.
    */
   function sam_get_container_items(uid: number): any;
+
+  /**
+   * How much of a given weapon class this creature actually takes: 1.0 normal, 0.5 half, 2.0 double. Equipment, effects and magic resistance are all included — it is the same call the character sheet makes to draw the number a player sees. Defaults to "magic".
+   */
+  function sam_get_damage_resist(entity_uid: number, type?: string): number | null;
 
   /**
    * Today's date on this machine, which is how you make content that only appears at Halloween or over Christmas. Per-machine, so treat it as decoration rather than as a rule.
@@ -280,6 +351,16 @@ declare global {
   function sam_get_fps(): number;
 
   /**
+   * The regeneration bonus this creature carries. It is what makes sam_get_regen_interval shorter.
+   */
+  function sam_get_healring(entity_uid: number): number | null;
+
+  /**
+   * Read any creature's health by UID.
+   */
+  function sam_get_hp(entity_uid: number): number | null;
+
+  /**
    * The picture's own pixel size, so a script can centre or scale it instead of hard-coding the numbers it was exported at. Also the cheapest way to check a picture actually resolves.
    */
   function sam_get_image_size(image: string): any;
@@ -360,6 +441,11 @@ declare global {
   function sam_get_light_at(x: number, y: number, player?: number): any;
 
   /**
+   * The raw magic-resistance point count. Each point is a separate reduction: this is the input, sam_get_damage_resist(uid, "magic") is the result.
+   */
+  function sam_get_magic_resist(entity_uid: number): number | null;
+
+  /**
    * The rules this particular map sets. Worth checking before a mod grants levitation or teleports someone, because a map that forbids it will simply undo your effect and the player will not know why.
    */
   function sam_get_map_flags(): any;
@@ -368,6 +454,16 @@ declare global {
    * The per-floor generation seed, which is the same number on the host and on every client because a client rebuilds the floor from it. Distinct from sam_get_seed, which identifies the whole run. Use it with sam_random when you want per-floor variety that everyone agrees on.
    */
   function sam_get_map_seed(): number;
+
+  /**
+   * Read any creature's maximum health by UID.
+   */
+  function sam_get_max_hp(entity_uid: number): number | null;
+
+  /**
+   * Read any creature's maximum mana by UID.
+   */
+  function sam_get_max_mp(entity_uid: number): number | null;
 
   /**
    * The ceiling for this item and this player, which differs for arrows, thrown gems and scrap. Read it before writing a count.
@@ -420,6 +516,11 @@ declare global {
   function sam_get_monster_target(uid: number): number;
 
   /**
+   * Read back what a monster is currently hunting, as a uid, whether that is a player, another monster or anything else with a body.
+   */
+  function sam_get_monster_target_uid(uid: number): number;
+
+  /**
    * Identify a creature by name instead of the raw integer in an event payload. NOTE this is the BASE type: a custom monster is a variant of a vanilla species, so a mod's "Rathalos" built on a bat answers "bat". Use sam_get_monster_name for the variant's own name, or sam_monster_has_trait to tell modded creatures apart.
    */
   function sam_get_monster_type(uid: number): string | null;
@@ -428,6 +529,11 @@ declare global {
    * Read a player's move-speed multiplier. Readable on clients.
    */
   function sam_get_move_speed(player: number): number;
+
+  /**
+   * Read any creature's mana by UID.
+   */
+  function sam_get_mp(entity_uid: number): number | null;
 
   /**
    * List UIDs of monsters/players within `radius` tiles of a player (never raw pointers).
@@ -467,9 +573,19 @@ declare global {
   function sam_get_race(player: number): string | null;
 
   /**
+   * The ranged attack figure for this creature, optionally including a quiver bonus.
+   */
+  function sam_get_ranged_attack(entity_uid: number, quiver_bonus?: number): number | null;
+
+  /**
    * This machine's wall clock. Same warning as sam_get_fps: two players' clocks differ, so this must not feed a dice roll or anything you save.
    */
   function sam_get_real_time(): number;
+
+  /**
+   * How often this creature regenerates health naturally. SMALLER is faster.
+   */
+  function sam_get_regen_interval(entity_uid: number): number | null;
 
   /**
    * The run clock the game itself displays. It stops during the intro, while you are dead, and while THIS machine has the game paused. Not the same as sam_get_time_played, which counts wall time since the program started, menus included. In multiplayer each machine counts its own, and pausing is local, so a player who spent a minute in their menu is a minute behind everyone else: read it on the host if a rule depends on it.
@@ -504,6 +620,11 @@ declare global {
   function sam_get_stat(player: number, stat: string): number;
 
   /**
+   * The attack figure this creature would apply to a thrown weapon.
+   */
+  function sam_get_thrown_attack(entity_uid: number): number | null;
+
+  /**
    * Logic frames per second. Barony's step is fixed, so there is no delta time to ask for; this is the constant every per-second conversion needs.
    */
   function sam_get_tick_rate(): number;
@@ -527,6 +648,13 @@ declare global {
    * How fast something is moving and in what direction. Enough to lead a moving target, or to tell a charging monster from a standing one. In JavaScript this returns an array.
    */
   function sam_get_velocity(uid: number): any;
+
+  /**
+   * Throw a chunk of gore off a creature. The optional sprite overrides the model.
+   *
+   * Host-only: refused on a multiplayer client.
+   */
+  function sam_gib(entity_uid: number, sprite?: number): boolean;
 
   /**
    * Add gold to a player (clamped to >= 0), syncing the client HUD.
@@ -558,6 +686,13 @@ declare global {
    * Check whether a player currently has a status effect.
    */
   function sam_has_effect(player: number, effect: string): boolean;
+
+  /**
+   * Restore health to any player or monster by UID. Returns what actually landed, not what you asked for: health is clamped to the maximum, so a 50-point heal on something three short of full restores three.
+   *
+   * Host-only: refused on a multiplayer client.
+   */
+  function sam_heal(entity_uid: number, amount: number): number | null;
 
   /**
    * Take the overlay away early. No player clears every player's.
@@ -689,6 +824,11 @@ declare global {
   function sam_is_mod_loaded(namespace: string): boolean;
 
   /**
+   * Whether a player's parry window is currently open. The engine consumes this in melee resolution to produce parried damage; nothing exposed it before.
+   */
+  function sam_is_parrying(player: number): boolean;
+
+  /**
    * Whether the player has the game paused. Each machine has its own answer in multiplayer, where the world keeps running for everyone else.
    */
   function sam_is_paused(): boolean;
@@ -807,6 +947,13 @@ declare global {
   function sam_message(player: number, text: string): boolean;
 
   /**
+   * Change a creature's mana by a relative amount. Negative takes it away.
+   *
+   * Host-only: refused on a multiplayer client.
+   */
+  function sam_mod_mp(entity_uid: number, amount: number): number | null;
+
+  /**
    * Rewrite incoming damage (clamped to >= 0). ONLY valid inside an on_before_damage callback.
    *
    * Host-only: refused on a multiplayer client.
@@ -901,6 +1048,13 @@ declare global {
   function sam_move_entity(uid: number, dx: number, dy: number): number | null;
 
   /**
+   * Give a scripted kill a proper death message and credit the killer. sam_kill_monster just sets health to 0, so today a scripted kill produces the generic message and nobody gets credit.
+   *
+   * Host-only: refused on a multiplayer client.
+   */
+  function sam_obituary(killer_uid: number, victim_uid: number, from_spell?: boolean): boolean;
+
+  /**
    * Override a class's STARTING stats/skills (patch = { STR, DEX, ..., MAXHP, skills = {...} }). Per-machine — call on every peer in multiplayer; reverts on unload.
    */
   function sam_patch_class(class_: any, patch: any): boolean;
@@ -954,6 +1108,11 @@ declare global {
    * Host-only: refused on a multiplayer client.
    */
   function sam_power_entity(uid: number, on: boolean): boolean;
+
+  /**
+   * Work out what one creature's melee swing would do to another, dealing nothing. Built from the same three terms the real melee path combines: attack, the target's AC effectiveness, and its AC.
+   */
+  function sam_preview_damage(attacker_uid: number, target_uid: number): number | null;
 
   /**
    * Deterministic random drawn from a named stream owned by your mod. Same run seed plus same stream plus same draw order gives the same number on every machine, which ordinary random() cannot promise. Use it for anything that must agree across a multiplayer party.
@@ -1035,6 +1194,13 @@ declare global {
   function sam_remove_spell(player: number, spell: string): boolean;
 
   /**
+   * Bring a dead player back with half their health, at a tile you name or at their ghost's own position.
+   *
+   * Host-only: refused on a multiplayer client.
+   */
+  function sam_revive_player(player: number, x?: number, y?: number): boolean;
+
+  /**
    * Persist a value (number/string/bool/table) for the calling mod under savegames/sam_mod_data/<ns>/.
    */
   function sam_save_data(key: string, value: any): boolean;
@@ -1062,6 +1228,13 @@ declare global {
    * Host-only: refused on a multiplayer client.
    */
   function sam_set_damage_immune(uid: number, on: boolean): boolean;
+
+  /**
+   * Put a player into or out of the blocking stance.
+   *
+   * Host-only: refused on a multiplayer client.
+   */
+  function sam_set_defending(player: number, on: boolean): boolean;
 
   /**
    * Open or close a door. Find one with sam_find_entities(x, y, r, "door").
@@ -1195,6 +1368,13 @@ declare global {
   function sam_set_monster_target(uid: number, player: number): boolean;
 
   /**
+   * Point a monster at ANY entity, not just a player: another monster, a companion, anything with a body.
+   *
+   * Host-only: refused on a multiplayer client.
+   */
+  function sam_set_monster_target_uid(uid: number, target_uid: number, was_hit?: boolean): boolean;
+
+  /**
    * Set a player's move-speed multiplier, clamped to [0.1, 3.0]. Host-only; syncs to the owning client. 1.0 is normal speed.
    *
    * Host-only: refused on a multiplayer client.
@@ -1207,6 +1387,13 @@ declare global {
    * Host-only: refused on a multiplayer client.
    */
   function sam_set_on_fire(uid: number, on?: boolean): boolean;
+
+  /**
+   * Open a parry window for a number of ticks. 0 closes it.
+   *
+   * Host-only: refused on a multiplayer client.
+   */
+  function sam_set_parry(player: number, ticks: number): boolean;
 
   /**
    * Store a per-player value (number/string/bool/table) in memory for THIS session — the right tool for cooldowns, ability flags and stack counters you read often. Unlike sam_save_data it never touches disk and is cleared on a new game.
@@ -1231,6 +1418,13 @@ declare global {
    * Host-only: refused on a multiplayer client.
    */
   function sam_set_scale(uid: number, scale: number): boolean;
+
+  /**
+   * Change how much of a weapon class an entire species takes. 1.0 normal, 0.5 halves it, 2.0 doubles it. Every creature of that species, now and later.
+   *
+   * Host-only: refused on a multiplayer client.
+   */
+  function sam_set_species_damage_resist(species: string, type: string, multiplier: number): boolean;
 
   /**
    * Set a live player stat, bounded (HP never exceeds MAXHP, stats clamped, etc.). Syncs the change to the owning client.
@@ -1468,6 +1662,7 @@ declare global {
     | "on_action_released"
     | "on_before_damage"
     | "on_before_monster_damage"
+    | "on_damage_multiplier"
     | "on_key_pressed"
     | "on_key_released"
     | "on_monster_damaged"
@@ -1477,6 +1672,7 @@ declare global {
     | "player.on_attack_start"
     | "player.on_became_ghost"
     | "player.on_before_equip"
+    | "player.on_before_hit"
     | "player.on_before_item_pickup"
     | "player.on_before_revive"
     | "player.on_bleed_tick"

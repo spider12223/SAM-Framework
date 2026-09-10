@@ -33,6 +33,7 @@
 // Forward declaration only. This header is deliberately dependency-light -- it must not
 // drag the engine in -- and a pointer to an incomplete type is all the resolver exports need.
 class Entity;
+class Stat;   // batch 4: the combat readers hand one back rather than making JS re-fetch it
 
 namespace SAMLua
 {
@@ -261,6 +262,19 @@ namespace SAMLua
 	// ONE queue and one drain, not two that can disagree about ordering.
 	bool queueRemoveEntity(unsigned int uid, const char* who);
 	Entity* resolveReadableEntity(long long uid, const char* who);
+	// ---- batch 4, combat ----------------------------------------------------------------
+	// The combat readers' resolver: an entity that HAS a Stat. Shared because "what counts as a
+	// creature" is one decision, and getting it wrong is silent -- Entity::getStats() answers
+	// nullptr for everything except a monster, a player and a player's limb, and Entity::getHP()
+	// then answers 0 rather than -1, so a reader that skipped the check would report a door at
+	// zero health rather than saying a door has none.
+	Entity* resolveCombatant(long long uid, Stat** outStats);
+	// The writer's twin: refuses a client, a sentinel uid and a limb first, then says out loud
+	// that this uid has no health to change.
+	Entity* resolveCombatantWritable(long long uid, const char* who, Stat** outStats);
+	// A damage-type name -> its DamageTableType value. Shared so both runtimes accept exactly
+	// the same seven words and refuse an eighth with the same sentence.
+	bool damageTypeFromName(const char* name, const char* who, int* out);
 	// The reader's resolver: nullptr for a shared sentinel uid (0, -2, -3, -4), and SILENT about
 	// it, because 0 is the value this API itself returns for "no entity".
 	Entity* resolveEntityQuiet(long long uid);
