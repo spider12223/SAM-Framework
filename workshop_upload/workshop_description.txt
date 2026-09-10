@@ -12,7 +12,7 @@ Barony was never built to be modded. S.A.M is the layer that makes it modded any
 
 A script could always deal damage. It could not heal, could not ask what a hit would do, and could not change how much damage a species takes.
 
-Now it can. Heal something and be told what landed, not what you asked for. Deal damage of a weapon class, so a target's own resistance applies without your script knowing it. Work out what a swing would do before swinging. Make maces shatter skeletons and swords barely scratch slimes, for every one in the game. Spend mana, or health when the mana runs out. Point a monster at another monster. Break armour. Give a scripted kill a real death message and credit the killer.
+Now it can. Heal something and be told what landed, not what you asked for. Deal damage of a weapon class, so a target's own resistance applies without your script knowing it. Work out what a swing would do first. Make maces shatter skeletons and swords barely scratch slimes, for every one in the game. Spend mana, or health when the mana runs out. Point a monster at another monster. Break armour. Give a scripted kill a real death message and credit the killer.
 
 [b]Two new hooks change how damage is decided, not just what happens after.[/b] One sits at the single point every hit passes through, so melee, arrows and spells all reach it. The other fires as a player's swing connects, the only place in the engine that knows who swung, whether it was a backstab, and how much is about to land.
 
@@ -20,7 +20,7 @@ Now it can. Heal something and be told what landed, not what you asked for. Deal
 
 [h1]32 NEW FUNCTIONS: 255 TO 287[/h1]
 
-Health and mana as verbs, not raw numbers. Attack, resistance and regeneration for anything with a body. Blocking, parrying, aggro. Reviving a fallen player.
+Health and mana as verbs, not raw numbers. Attack, resistance and regeneration for anything with a body. Blocking, parrying, aggro. Reviving a fallen player on your own machine.
 
 [b]The complete reference[/b], every function and event with arguments, types, return values and host-only flags:
 https://github.com/spider12223/SAM-Framework/blob/main/docs/function-reference.md
@@ -37,7 +37,7 @@ A mod here is not a guest that can only react. It can be told a player was hit a
 
 [b]Mods that change what happens.[/b] Most events used to be announcements after the fact. Now a mod can halve incoming damage, rewrite what a chest holds, or refuse a hit outright. And two mods that both reduce damage BOTH apply, because each sees what the last one left. That is the difference between mods that stack and mods that fight.
 
-[b]Playing multiplayer? Install this anyway.[/b] S.A.M closes eleven memory safety holes inherited from the base game, reachable with no mods.
+[b]Playing multiplayer? Install this anyway.[/b] S.A.M closes eleven memory safety holes in the base game, reachable with no mods.
 
 [hr][/hr]
 
