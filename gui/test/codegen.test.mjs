@@ -20,6 +20,8 @@ import { generateLua } from '../src/lib/codegen.js';
 import { ACTIONS, CONDITIONS } from '../src/data/blocks.js';
 import { SNIPPETS } from '../src/data/snippets.js';
 import { untilCandidates, findAction, ENGINE_WRITTEN_STATS, conditionsFor, findTrigger, findCondition } from '../src/data/blocks.js';
+import { TRIGGERS, EVERY_SECONDS, triggerHasPlayer, triggerPlayerMayBeMissing, PLAYER_MAY_BE_MISSING, registerCustom } from '../src/data/blocks.js';
+import { toCatalogEntry } from '../src/lib/customBlocks.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const TMP = join(HERE, '.tmp');
@@ -587,6 +589,379 @@ function assert(name, cond) {
 }
 
 // ---------------------------------------------------------------------------------
+// sam_play_sound(sound, volume). There is no player argument. The block used to emit
+// sam_play_sound(player, N), which the engine reads as "sound #<player> at volume N" -- sound
+// #0 is a leather footstep -- and the stub ignored its arguments, so nothing noticed. The stub
+// now records what it was asked for, the way lua_sam_play_sound reads it.
+// ---------------------------------------------------------------------------------
+check('play_sound passes the SOUND first, never the player',
+  [rule('player.on_hit', [act('play_sound', { id: 28, volume: 128 })])],
+  `S.fire('player.on_hit', {player=2})
+   local c = S.state().sounds[1]
+   assert(c, 'sam_play_sound was never called')
+   assert(c.id == 28, 'argument 1 must be the sound (28), got ' .. tostring(c.id))
+   assert(c.vol == 128, 'volume should be the default 128, got ' .. tostring(c.vol))`,
+  { want: { err: '-' } });
+
+check('play_sound plays one of the mod\'s own sounds by its id, at the chosen volume',
+  [rule('player.on_hit', [act('play_sound', { id: 'mymod:boom', volume: 200 })])],
+  `S.fire('player.on_hit', {player=0})
+   local c = S.state().sounds[1]
+   assert(c and c.id == 'mymod:boom', 'expected "mymod:boom", got ' .. tostring(c and c.id))
+   assert(c.vol == 200, 'expected volume 200, got ' .. tostring(c.vol))`,
+  { want: { err: '-' } });
+
+check('play_sound rounds a fractional volume (the engine raises on 99.6)',
+  [rule('player.on_hit', [act('play_sound', { id: 5, volume: 99.6 })])],
+  `S.fire('player.on_hit', {player=0})
+   local c = S.state().sounds[1]
+   assert(c and c.id == 5 and c.vol == 100, 'got ' .. tostring(c and c.id) .. ' at ' .. tostring(c and c.vol))`,
+  { want: { err: '-' } });
+
+// The test above is only worth something if the OLD line fails it. Run the old line itself.
+check('the stub reads the old argument order as sound #0 (so the tests above catch it)',
+  [rule('player.on_hit', [act('message', { text: 'x' })])],
+  `sam_play_sound(0, 28)
+   local c = S.state().sounds[1]
+   assert(c.id == 0 and c.vol == 28, 'stub no longer mirrors the engine')`,
+  { want: { err: '-' } });
+
+{
+  const ps = findAction('play_sound');
+  assert('play_sound: the default block emits the 1-argument form',
+    ps.lua({ id: 28, volume: 128 }) === 'sam_play_sound(28)');
+  assert('play_sound: a block saved before the fix ({ id } only) still generates the right call',
+    ps.lua({ id: 28 }) === 'sam_play_sound(28)');
+  assert('play_sound: a custom sound id is quoted',
+    ps.lua({ id: 'mymod:boom', volume: 128 }) === 'sam_play_sound("mymod:boom")');
+  assert('play_sound: volume is passed second, clamped and whole',
+    ps.lua({ id: 3, volume: 999 }) === 'sam_play_sound(3, 255)');
+  assert('play_sound: never passes the player', !/player/.test(ps.lua({ id: 28, volume: 90 })));
+}
+
+// ---------------------------------------------------------------------------------
+// Sounds and music: export, the builder's own schema validation, import, and the reducer.
+// ---------------------------------------------------------------------------------
+{
+  const { buildModFiles } = await import('@/lib/exportZip.js');
+  const { parseModZip } = await import('@/lib/importZip.js');
+  const { validate } = await import('@/lib/validate.js');
+  const { reducer, initialState } = await import('@/state/modReducer.js');
+  const audio = await import('@/lib/audio.js');
+  const { VANILLA_SOUNDS } = await import('@/data/vanillaSounds.js');
+  const JSZip = (await import('jszip')).default;
+
+  const au = (s) => `data:audio/ogg;base64,${Buffer.from(s).toString('base64')}`;
+  // One added sound, one replacement, one track (with floors, maps and a fight track), one
+  // replaced track.
+  const sample = {
+    meta: { ...initialState.meta, namespace: 'mymod', name: 'Audio Test' },
+    sounds: [
+      { id: 'mymod:boom', file: 'sounds/boom.ogg', volume: 0.8 },
+      { replace: 'SwingWeapon', file: ['sounds/swingweapon.ogg', 'sounds/swingweapon_2.wav'] },
+    ],
+    music: [
+      { id: 'mymod:deep', file: 'music/deep.ogg', floors: [7, 8], maps: ['My Hub'], combat: 'music/deep_combat.ogg' },
+      { replace: 'mines', file: ['music/mines.ogg', 'music/mines_2.mp3'], loop: true },
+    ],
+    assets: {
+      'sounds/boom.ogg': au('boom'), 'sounds/swingweapon.ogg': au('sw1'), 'sounds/swingweapon_2.wav': au('sw2'),
+      'music/deep.ogg': au('deep'), 'music/deep_combat.ogg': au('fight'), 'music/mines.ogg': au('m1'), 'music/mines_2.mp3': au('m2'),
+    },
+  };
+  const files = buildModFiles(sample);
+  const manifest = JSON.parse(files.find((f) => f.path === 'mod.json').text);
+  const modRes = validate('mod', manifest);
+  assert(`exported mod.json passes the builder's own mod schema${modRes.valid ? '' : ' -- ' + JSON.stringify(modRes.errors)}`, modRes.valid);
+  assert('sounds are written INLINE into mod.json as objects',
+    Array.isArray(manifest.sounds) && manifest.sounds.length === 2 && manifest.sounds.every((e) => e && typeof e === 'object'));
+  assert('no per-sound JSON files are written', !files.some((f) => /^sounds\/.*\.json$/i.test(f.path)));
+  assert('music is written inline into mod.json', manifest.music?.length === 2 && manifest.music[0].floors.join() === '7,8'
+    && manifest.music[0].combat === 'music/deep_combat.ogg' && manifest.music[1].replace === 'mines');
+  assert('every sound entry passes sound.schema.json', manifest.sounds.every((e) => validate('sound', e).valid));
+  assert('every music entry passes the mod schema\'s music item', manifest.music.every((e) => validate('music', e).valid));
+  assert('every audio file is in the bundle', Object.keys(sample.assets).every((p) => files.some((f) => f.path === p && f.base64)));
+  assert('the schema rejects an entry with both id and replace (so the editor must never make one)',
+    !validate('sound', { id: 'a', replace: 'Damage', file: 'a.ogg' }).valid);
+
+  // Round trip through a real zip, wrapped in its <namespace>/ folder like an export.
+  const zip = new JSZip();
+  for (const f of files) {
+    if (f.base64 !== undefined) zip.file(`mymod/${f.path}`, f.base64, { base64: true });
+    else zip.file(`mymod/${f.path}`, f.text);
+  }
+  const back = await parseModZip(await zip.generateAsync({ type: 'uint8array' }));
+  assert('round trip keeps both sounds exactly', JSON.stringify(back.sounds) === JSON.stringify(sample.sounds));
+  assert('round trip keeps both tracks exactly', JSON.stringify(back.music) === JSON.stringify(sample.music));
+  assert('round trip keeps every audio file byte for byte',
+    Object.keys(sample.assets).every((p) => back.assets[p] && back.assets[p].split(',')[1] === sample.assets[p].split(',')[1]));
+  assert('round trip gives audio a playable type, not octet-stream', back.assets['music/mines_2.mp3'].startsWith('data:audio/mpeg;'));
+  assert(`round trip reports nothing${back.report.length ? ' -- ' + JSON.stringify(back.report) : ''}`, back.report.length === 0);
+
+  // An older mod: "sounds" lists a sound JSON file and a bare audio path, plus a file dropped
+  // in sounds/replace/ with no entry at all, and one broken inline entry.
+  const legacy = new JSZip();
+  legacy.file('mod.json', JSON.stringify({
+    namespace: 'old', name: 'Old', version: '1.0.0', framework_min_version: '0.1.0',
+    sounds: ['sounds/boom.json', 'sounds/bang.json', 'sounds/Zap Zap.ogg', { id: 'both', replace: 'Damage', file: 'sounds/x.ogg' }],
+  }));
+  legacy.file('sounds/boom.json', JSON.stringify({ $schema: 'x', id: 'old:boom', file: 'sounds/boom.ogg', loop: true }));
+  legacy.file('sounds/bang.json', JSON.stringify({ id: 'bang', file: 'sounds/bang.wav' }));
+  legacy.file('sounds/boom.ogg', 'b');
+  legacy.file('sounds/bang.wav', 'g');
+  legacy.file('sounds/Zap Zap.ogg', 'z');
+  legacy.file('sounds/replace/DoorOpen.ogg', 'd');
+  const old = await parseModZip(await legacy.generateAsync({ type: 'uint8array' }));
+  const byKey = new Map(old.sounds.map((s) => [audio.audioKey(s), s]));
+  assert('legacy: a sound JSON file listed in "sounds" imports',
+    JSON.stringify(byKey.get('id:old:boom')) === JSON.stringify({ id: 'old:boom', file: 'sounds/boom.ogg', loop: true }));
+  assert('legacy: a bare id in a sound JSON gets the namespace', byKey.get('id:old:bang')?.file === 'sounds/bang.wav');
+  assert('legacy: a bare audio path imports under the name the engine gives it ("Zap Zap" -> zap_zap)',
+    byKey.get('id:old:zap_zap')?.file === 'sounds/Zap Zap.ogg');
+  assert('legacy: the bare audio path\'s FILE is kept (it used to be treated as declared JSON and dropped)',
+    !!old.assets['sounds/Zap Zap.ogg']);
+  assert('folder convention: sounds/replace/DoorOpen.ogg becomes a replacement entry',
+    byKey.get('replace:dooropen')?.file === 'sounds/replace/DoorOpen.ogg');
+  assert('a broken inline entry is reported and skipped, not imported',
+    !byKey.has('id:old:both') && old.report.some((r) => /sounds\[3\]/.test(r.path)));
+  const reFiles = buildModFiles({ ...old, meta: { ...old.meta } });
+  const reManifest = JSON.parse(reFiles.find((f) => f.path === 'mod.json').text);
+  assert('legacy: re-exporting writes every sound inline and still validates',
+    reManifest.sounds.every((e) => typeof e === 'object') && validate('mod', reManifest).valid
+    && !reFiles.some((f) => /^sounds\/.*\.json$/i.test(f.path)));
+
+  // The reducer: edits happen IN PLACE, and audio nothing uses any more is dropped.
+  let st = { ...initialState, assets: { 'sounds/boom.ogg': 'data:,1', 'sounds/other.ogg': 'data:,2' } };
+  st = reducer(st, { type: 'saveSound', def: { id: 'm:boom', file: 'sounds/boom.ogg' } });
+  st = reducer(st, { type: 'saveSound', def: { id: 'm:bang', file: 'sounds/boom.ogg' }, prevKey: 'id:m:boom' });
+  assert('renaming a saved sound updates it in place instead of adding a second one',
+    st.sounds.length === 1 && st.sounds[0].id === 'm:bang');
+  assert('a rename keeps the audio the sound still uses', !!st.assets['sounds/boom.ogg']);
+  st = reducer(st, { type: 'saveSound', def: { id: 'm:bang', file: 'sounds/other.ogg' }, prevKey: 'id:m:bang' });
+  assert('swapping a sound\'s file drops the old file nothing else uses',
+    !st.assets['sounds/boom.ogg'] && !!st.assets['sounds/other.ogg']);
+  st = reducer(st, { type: 'saveSound', def: { id: 'm:copy', file: 'sounds/other.ogg' } });
+  st = reducer(st, { type: 'removeSound', key: 'id:m:bang' });
+  assert('removing a sound keeps audio another sound shares', !!st.assets['sounds/other.ogg'] && st.sounds.length === 1);
+  st = reducer(st, { type: 'removeSound', key: 'id:m:copy' });
+  assert('removing the last sound using a file drops the file (else it still ships and still registers)',
+    !st.assets['sounds/other.ogg'] && st.sounds.length === 0);
+  st = reducer(st, { type: 'saveSound', def: { replace: 'SwingWeapon', file: 'sounds/a.ogg' } });
+  st = reducer(st, { type: 'saveSound', def: { replace: 'swingweapon', file: 'sounds/a.ogg' } });
+  assert('two replacements of one game sound (in any case) are one entry, as the engine sees them',
+    st.sounds.length === 1 && st.sounds[0].replace === 'swingweapon');
+  st = { ...st, assets: { ...st.assets, 'music/t.ogg': 'data:,t', 'music/t_combat.ogg': 'data:,c' } };
+  st = reducer(st, { type: 'saveMusic', def: { id: 'm:t', file: 'music/t.ogg', combat: 'music/t_combat.ogg' } });
+  st = reducer(st, { type: 'saveMusic', def: { id: 'm:t2', file: 'music/t.ogg' }, prevKey: 'id:m:t' });
+  assert('editing a track in place drops a fight track it no longer has',
+    st.music.length === 1 && st.music[0].id === 'm:t2' && !st.assets['music/t_combat.ogg'] && !!st.assets['music/t.ogg']);
+  st = reducer(st, { type: 'removeMusic', key: 'id:m:t2' });
+  assert('removing a track drops its audio', st.music.length === 0 && !st.assets['music/t.ogg']);
+  const afterLoad = reducer(initialState, { type: 'loadMod', ...back });
+  assert('loadMod carries music', afterLoad.music.length === 2);
+
+  // Where new uploads go: never onto a file another entry uses; an entry may reuse its own.
+  const p1 = audio.assignAudioPaths({ files: [{ ext: 'ogg' }, { ext: 'wav' }], folder: 'sounds', slug: 'boom',
+    assets: { 'sounds/boom.ogg': 'x' }, otherUse: ['sounds/boom.ogg'] });
+  assert('a new upload never overwrites another sound\'s file', p1.join() === 'sounds/boom_2.ogg,sounds/boom_3.wav');
+  const p2 = audio.assignAudioPaths({ files: [{ ext: 'ogg' }], folder: 'sounds', slug: 'boom',
+    assets: { 'sounds/boom.ogg': 'x' }, ownOld: ['sounds/boom.ogg'] });
+  assert('an entry replacing its own file may reuse its path', p2.join() === 'sounds/boom.ogg');
+  // Renaming the "boom" sound to "bang": files the editor named after "boom" follow the new
+  // name, or "bang" would ship as sounds/boom.ogg and the folder scan would register a stray
+  // "boom". This is an ADD entry, so the third file has to leave sounds/replace/ as well --
+  // it replaces nothing now, and a file left there replaces DoorOpen whatever mod.json says.
+  const own = { 'sounds/boom.ogg': 'x', 'sounds/boom_2.wav': 'y', 'sounds/replace/DoorOpen.ogg': 'z' };
+  const rows = Object.keys(own).map((path) => ({ path }));
+  const plan = audio.planAudioRows(rows, { folder: 'sounds', oldSlug: 'boom', newSlug: 'bang', assets: own, otherUse: [], replaceTarget: null });
+  const moved = audio.assignAudioPaths({ files: plan, folder: 'sounds', slug: 'bang', assets: own, ownOld: Object.keys(own) });
+  assert('a rename carries the files the editor named after the old name',
+    moved[0] === 'sounds/bang.ogg' && moved[1] === 'sounds/bang_2.wav'
+    && plan[0].from === 'sounds/boom.ogg' && plan[1].from === 'sounds/boom_2.wav');
+  assert('...and takes a drop-in with it rather than leaving a replacement behind',
+    plan[2].from === 'sounds/replace/DoorOpen.ogg' && !/replace\//.test(moved[2]));
+  const sharedPlan = audio.planAudioRows([{ path: 'sounds/boom.ogg' }], { folder: 'sounds', oldSlug: 'boom', newSlug: 'bang', assets: own, otherUse: ['sounds/boom.ogg'], replaceTarget: null });
+  assert('a file another entry also plays is never moved out from under it', sharedPlan[0].path === 'sounds/boom.ogg');
+
+  // The picker has to agree with SAMSounds::vanillaIndicesFor: a name that is both a group and
+  // one sound in it means the whole group, and the one sound alone is stored as its number.
+  assert('"SwingWeapon" is the whole group of five', audio.resolveVanillaSound('SwingWeapon')?.via === 'group'
+    && audio.resolveVanillaSound('SwingWeapon').sounds.length === 5);
+  const casting = audio.resolveVanillaSound('Casting');
+  assert('"Casting" (a group AND one sound in it) is the whole group of four', casting?.via === 'group'
+    && casting.sounds.length === 4 && audio.groupNameMeansGroup('Casting'));
+  const baseCasting = casting.sounds.find((s) => s.name === 'Casting');
+  const oneCasting = audio.singleSoundTarget(baseCasting);
+  assert('picking the one base "Casting" stores its number, which resolves to just it',
+    oneCasting === String(baseCasting.i) && audio.resolveVanillaSound(oneCasting).sounds.length === 1);
+  const swing3 = audio.resolveVanillaSound(25).sounds[0];
+  assert('picking an ordinary one sound stores its name', audio.singleSoundTarget(swing3) === 'SwingWeapon3V1');
+  // "Punch" is one file the game lists twice: one sound in two slots, not a group to offer.
+  const distinctNames = (g) => new Set(g.sounds.map((s) => s.name.toLowerCase())).size;
+  assert('every group of more than one distinct sound offers "whole group"',
+    VANILLA_SOUNDS.groups.every((g) => distinctNames(g) < 2 || audio.groupNameMeansGroup(g.group)));
+  const punch = audio.resolveVanillaSound('Punch');
+  assert('a file listed twice is one sound, and its name replaces both copies',
+    punch?.via === 'sound' && punch.sounds.length === 2 && audio.singleSoundTarget(punch.sounds[1]) === 'Punch');
+  assert('an index resolves to its sound', audio.resolveVanillaSound(25)?.sounds[0].name === 'SwingWeapon3V1');
+  assert('an unknown name is flagged', audio.describeSoundTarget('NotASound') === null);
+  assert('floors parse as whole numbers, junk is reported',
+    JSON.stringify(audio.parseIntList('7, 8 x')) === JSON.stringify({ values: [7, 8], bad: ['x'] }));
+
+  // Retargeting a drop-in must not leave the file it was named after still replacing a
+  // sound. The engine's folder scan reads sounds/replace/<Name>.<ext> on its own, whatever
+  // mod.json says, so a file left behind under the old name replaces that sound too.
+  const dropIn = [{ path: 'sounds/replace/DoorOpen.ogg' }];
+  const dropAssets = { 'sounds/replace/DoorOpen.ogg': 'data:audio/ogg;base64,AA==' };
+  const retarget = audio.planAudioRows(dropIn, {
+    folder: 'sounds', oldSlug: 'dooropen', newSlug: 'doorclose', assets: dropAssets, otherUse: [],
+    replaceTarget: 'DoorClose',
+  });
+  assert('an imported drop-in moves when the entry stops replacing what it is named after',
+    retarget[0].from === 'sounds/replace/DoorOpen.ogg');
+  const movedDropIn = audio.assignAudioPaths({
+    files: retarget, folder: 'sounds', slug: 'doorclose', assets: dropAssets,
+    ownOld: ['sounds/replace/DoorOpen.ogg'],
+  });
+  assert('...to a path the folder scan cannot read as a replacement for the old sound',
+    !/replace\/dooropen/i.test(movedDropIn[0]));
+  const kept = audio.planAudioRows(dropIn, {
+    folder: 'sounds', oldSlug: 'dooropen', newSlug: 'dooropen', assets: dropAssets, otherUse: [],
+    replaceTarget: 'DoorOpen',
+  });
+  assert('a drop-in that still replaces its own name stays exactly where the author put it',
+    kept[0].path === 'sounds/replace/DoorOpen.ogg');
+  const toAdd = audio.planAudioRows(dropIn, {
+    folder: 'sounds', oldSlug: 'dooropen', newSlug: 'creak', assets: dropAssets, otherUse: [],
+    replaceTarget: null,
+  });
+  assert('switching a drop-in from Replace to Add moves it too, so nothing is replaced by accident',
+    toAdd[0].from === 'sounds/replace/DoorOpen.ogg');
+  const shared = audio.planAudioRows(dropIn, {
+    folder: 'sounds', oldSlug: 'dooropen', newSlug: 'doorclose', assets: dropAssets,
+    otherUse: ['sounds/replace/DoorOpen.ogg'], replaceTarget: 'DoorClose',
+  });
+  assert('a drop-in another entry also plays is still never moved out from under it',
+    shared[0].path === 'sounds/replace/DoorOpen.ogg');
+}
+
+// ---------------------------------------------------------------------------------
+// AN EDITOR MUST NOT DELETE WHAT IT CANNOT SHOW.
+//
+// Every editor rebuilds its definition from scratch on save, so a field with no control on
+// the page was simply absent from the new object and vanished, with a green "Saved" next to
+// it. The fix is stated the other way round -- each editor declares the keys it OWNS and
+// everything else is carried -- so the thing to check is that the owned list is honest and
+// that an unknown key really does survive.
+// ---------------------------------------------------------------------------------
+{
+  const { EDITOR_KEYS, carryUnknown } = await import('../src/lib/editorKeys.js');
+  const schemas = await import('../src/data/schemas.js');
+  const SCHEMA_OF = {
+    class: schemas.classSchema, item: schemas.itemSchema, monster: schemas.monsterSchema,
+    spell: schemas.spellSchema, effect: schemas.effectSchema, race: schemas.raceSchema,
+    recipe: schemas.recipeSchema, patch: schemas.patchSchema,
+  };
+
+  // A typo in an owned key is silent and nasty: the real key falls into the carried set, so
+  // clearing that box in the editor stops clearing the field.
+  const strays = [];
+  for (const [kind, keys] of Object.entries(EDITOR_KEYS)) {
+    const props = Object.keys(SCHEMA_OF[kind]?.properties ?? {});
+    for (const k of keys) if (!props.includes(k)) strays.push(`${kind}.${k}`);
+  }
+  assert(`every key an editor claims to own is a real schema property${strays.length ? ` -- ${strays.join(', ')}` : ''}`,
+    strays.length === 0);
+
+  // The exact loss from the audit: a race with bent arms AND first_person, opened and saved.
+  const opened = {
+    $schema: '../schemas/race.schema.json',
+    id: 'mymod:wraith', name: 'Wraith', host_body: 'skeleton',
+    limb_models: { arm_right: { model: 'mymod:ar' } },
+    first_person: { arm_right: 'mymod:ar_fp' },
+    extra_limbs: [{ model: 'mymod:tail' }],
+  };
+  const saved = carryUnknown(opened, {
+    id: 'mymod:wraith', name: 'Wraith', host_body: 'skeleton',
+    limb_models: { arm_right: { model: 'mymod:ar', bent: 'mymod:ar_bent' } },
+  }, 'race');
+  assert('first_person survives a race save', JSON.stringify(saved.first_person) === JSON.stringify(opened.first_person));
+  assert('extra_limbs survives a race save', saved.extra_limbs?.length === 1);
+  assert('$schema survives a race save', saved.$schema === opened.$schema);
+  assert('the edited field is the NEW one, not the carried one', saved.limb_models.arm_right.bent === 'mymod:ar_bent');
+
+  // A key the editor OWNS must still be removable: clearing the description box has to clear
+  // it, which is exactly what a blanket "spread the old def underneath" would have broken.
+  const cleared = carryUnknown({ id: 'a:b', name: 'B', host_body: 'skeleton', description: 'old' },
+    { id: 'a:b', name: 'B', host_body: 'skeleton' }, 'race');
+  assert('clearing a field the editor owns still clears it', !('description' in cleared));
+
+  // The same shape for the other editors named in the audit.
+  const item = carryUnknown({ id: 'a:b', name_identified: 'B', model_states: { 1: 'a:m' } },
+    { id: 'a:b', name_identified: 'B' }, 'item');
+  assert('model_states survives an item save', item.model_states?.[1] === 'a:m');
+  const cls = carryUnknown({ id: 'a:b', name: 'B', blood_diet: true }, { id: 'a:b', name: 'B' }, 'class');
+  assert('blood_diet survives a class save', cls.blood_diet === true);
+  const spell = carryUnknown({ id: 'a:b', name: 'B', difficulty: 40 }, { id: 'a:b', name: 'B' }, 'spell');
+  assert('difficulty survives a spell save', spell.difficulty === 40);
+  // kit_ui is read by the engine (sam_items.cpp) and is not in item.schema.json yet, so it is
+  // the live example of a key no editor can know about.
+  const kit = carryUnknown({ id: 'a:b', name_identified: 'B', kit_ui: { frame: 'images/x.png' } },
+    { id: 'a:b', name_identified: 'B' }, 'item');
+  assert('a key no schema mentions survives too', kit.kit_ui?.frame === 'images/x.png');
+
+  assert('a brand new definition carries nothing', JSON.stringify(carryUnknown(null, { id: 'a:b' }, 'race')) === '{"id":"a:b"}');
+}
+
+// ---------------------------------------------------------------------------------
+// "CHANGES SINCE LAST EXPORT" HAS TO SEE EVERY COLLECTION.
+//
+// canonicalize destructured four of them, so adding a sound, a track, a race, a spell, a
+// recipe or a patch left the panel saying "no changes since baseline" -- on a release whose
+// headline content feature is audio. The list is checked against the baseline snapshot the
+// reducer actually takes, so the two cannot drift apart again.
+// ---------------------------------------------------------------------------------
+{
+  const { canonicalize, diffLines, diffSummary, COLLECTIONS } = await import('../src/lib/jsonDiff.js');
+  const { reducer, initialState } = await import('../src/state/modReducer.js');
+
+  const withBaseline = reducer(initialState, { type: 'setBaseline' });
+  const snapshot = Object.keys(withBaseline.baseline).filter((k) => k !== 'meta');
+  const missing = snapshot.filter((k) => !COLLECTIONS.includes(k));
+  const extra = COLLECTIONS.filter((k) => !snapshot.includes(k));
+  assert(`the diff covers every collection the baseline holds${missing.length ? ` -- blind to ${missing.join(', ')}` : ''}`,
+    missing.length === 0);
+  assert(`the diff names no collection the baseline does not hold${extra.length ? ` -- ${extra.join(', ')}` : ''}`,
+    extra.length === 0);
+
+  // One added entry in each collection must show up as a change, one at a time, so a single
+  // collection going blind cannot hide behind the others.
+  const sample = {
+    classes: { id: 'a:c' }, items: { id: 'a:i' }, monsters: { id: 'a:m' }, spells: { id: 'a:s' },
+    effects: { id: 'a:e' }, races: { id: 'a:r' }, sounds: { replace: 'DoorOpen', file: 'sounds/replace/DoorOpen.ogg' },
+    music: { id: 'a:t', file: 'music/t.ogg' }, recipes: { id: 'a:rec' }, patches: { target: 'items/items.json' },
+  };
+  const base = canonicalize(withBaseline.baseline);
+  const blind = COLLECTIONS.filter((name) => {
+    const after = canonicalize({ ...withBaseline.baseline, [name]: [sample[name]] });
+    return diffSummary(diffLines(base, after)).added === 0;
+  });
+  assert(`adding one entry shows up as a change in all ${COLLECTIONS.length} collections`
+    + (blind.length ? ` -- silent in ${blind.join(', ')}` : ''), blind.length === 0);
+
+  // Sounds and music have no id when they replace something, so they need a sort key that is
+  // not `id` -- otherwise every replacement sorts equal and a reorder reads as a change.
+  const twoWays = ['a', 'b'].map((order) => canonicalize({
+    ...withBaseline.baseline,
+    sounds: order === 'a'
+      ? [{ replace: 'DoorOpen', file: 'x.ogg' }, { replace: 'Casting', file: 'y.ogg' }]
+      : [{ replace: 'Casting', file: 'y.ogg' }, { replace: 'DoorOpen', file: 'x.ogg' }],
+  }));
+  assert('two replacements in a different order are not reported as a change',
+    diffSummary(diffLines(twoWays[0], twoWays[1])).added === 0);
+}
+
+// ---------------------------------------------------------------------------------
 // EVERY block must generate Lua that at least PARSES.
 //
 // The cases above are hand written, so a block nobody wrote a case for was never run at
@@ -634,6 +1009,107 @@ ${body}
 }
 
 // ---------------------------------------------------------------------------------
+// EVERY TRIGGER must hand its actions a player the API will accept.
+//
+// TRIGGERS is the one list in blocks.js that is DERIVED -- it is built from SAM_EVENTS, so
+// a new event in the manifest turns into a new trigger in the builder with no code change
+// and no test of its own. The two sweeps above cover ACTIONS and CONDITIONS and say "a new
+// block is covered the moment it exists"; neither of them ever touches TRIGGERS. That gap
+// is how on_before_effect_applied shipped generating `local player = event.player` for an
+// event whose player is -1 on every monster: the hook sits in Entity::setEffect, so it
+// fires for monsters too, and every action the builder offers takes a player first.
+//
+// So: for each trigger, build the one-action ability a first-time user gets, fire the event
+// the way the framework fires it -- with player = -1 on the triggers whose fire site can
+// produce one -- and look at what actually happened.
+//
+// Two-sided on purpose. A real player must still receive the message, and a non-player must
+// produce neither a message nor a call the engine would refuse. Half of this would pass on a
+// generator that guarded everything away, and the other half passes today on the broken one.
+// ---------------------------------------------------------------------------------
+if (LUA) {
+  /** A plausible value for an event field, by the manifest's declared type. */
+  const sampleField = (f) => {
+    const t = String(f.type || '');
+    if (t.startsWith('string')) return `"x"`;
+    return '1';               // int, uid and the annotated int variants
+  };
+
+  /** Run a generated script and report what the simulator saw, rather than a stat total. */
+  const runTrigger = (t, playerValue) => {
+    const rules = [{
+      key: 'sweep',
+      trigger: { id: t.id, params: Object.fromEntries((t.params || []).map((p) => [p.name, p.default])) },
+      conditions: [],
+      actions: [{ id: 'message', params: { text: 'fired' } }],
+    }];
+    const lua = generateLua({ rules });
+    const script = join(TMP, 'trig.lua');
+    writeFileSync(script, lua);
+    const fields = (t.payload || [])
+      .map((f) => `${f.field}=${f.field === 'player' ? String(playerValue) : sampleField(f)}`)
+      .join(', ');
+    const harness = `
+      local S = dofile(${JSON.stringify(join(HERE, 'samsim.lua').replace(/\\/g, '/'))})
+      S.reset({})
+      local f = io.open(${JSON.stringify(script.replace(/\\/g, '/'))}, 'r')
+      local src = f:read('a'); f:close()
+      local ok, err = S.load(src)
+      if not ok then print('LOADFAIL\\t' .. err) os.exit(0) end
+      S.fire(${JSON.stringify(t.id)}, { ${fields} })
+      print('OK\\t' .. #S.state().messages .. '|' .. #S.errors() .. '|' .. #S.refusedPlayerCalls()
+        .. '|' .. (#S.errors() > 0 and S.errors()[1] or '-'))
+    `;
+    const hpath = join(TMP, 'trig_h.lua');
+    writeFileSync(hpath, harness);
+    let out;
+    try { out = execFileSync(LUA, [hpath], { encoding: 'utf8' }).trim(); }
+    catch (e) { return { bad: 'CRASH ' + (e.stdout || e.message), lua }; }
+    const [tag, payload] = out.split('\t');
+    if (tag !== 'OK') return { bad: out, lua };
+    const [messages, errors, refusedCalls, firstError] = payload.split('|');
+    return { messages: Number(messages), errors: Number(errors), refused: Number(refusedCalls), firstError, lua };
+  };
+
+  const eventTriggers = TRIGGERS.filter((t) => t.id !== EVERY_SECONDS);
+  const wrong = [];
+  let withPlayer = 0;
+  for (const t of eventTriggers) {
+    if (!triggerHasPlayer(t)) continue;   // these generate `local player = 0`; nothing to get wrong
+    withPlayer++;
+
+    // The ordinary case: a real player is in the event, so the ability must actually run.
+    const good = runTrigger(t, 0);
+    if (good.bad) { wrong.push(`${t.id}: ${good.bad}`); continue; }
+    if (good.messages !== 1 || good.errors !== 0 || good.refused !== 0) {
+      wrong.push(`${t.id} with player 0: expected 1 message and no refusals, got `
+        + `${good.messages} message(s), ${good.errors} error(s) (${good.firstError}), ${good.refused} refused call(s)`);
+    }
+
+    // The case the framework can actually produce for this event.
+    if (!triggerPlayerMayBeMissing(t)) continue;
+    const none = runTrigger(t, -1);
+    if (none.bad) { wrong.push(`${t.id}: ${none.bad}`); continue; }
+    if (none.refused !== 0 || none.errors !== 0 || none.messages !== 0) {
+      wrong.push(`${t.id} with player -1 (which ${t.id === 'on_before_effect_applied' ? 'every monster' : 'a monster or a trap'} produces): `
+        + `expected the script to do nothing, got ${none.messages} message(s), `
+        + `${none.errors} error(s) (${none.firstError}), ${none.refused} call(s) the engine would refuse`);
+    }
+  }
+  assert(`all ${withPlayer} player-carrying triggers generate code that survives their own fire site`
+    + (wrong.length ? ` -- ${wrong.join(' | ')}` : ''), wrong.length === 0);
+
+  // The list above is only as good as its inventory: if PLAYER_MAY_BE_MISSING ever named an
+  // event that no longer exists, the sweep would quietly stop testing it.
+  const unknown = [...PLAYER_MAY_BE_MISSING].filter((n) => !TRIGGERS.some((t) => t.id === n));
+  assert(`every event named in PLAYER_MAY_BE_MISSING still exists${unknown.length ? ` -- ${unknown.join(', ')}` : ''}`,
+    unknown.length === 0);
+  const noPlayer = [...PLAYER_MAY_BE_MISSING].filter((n) => !triggerHasPlayer(TRIGGERS.find((t) => t.id === n)));
+  assert(`every event named in PLAYER_MAY_BE_MISSING still carries a player field${noPlayer.length ? ` -- ${noPlayer.join(', ')}` : ''}`,
+    noPlayer.length === 0);
+}
+
+// ---------------------------------------------------------------------------------
 // Every SNIPPET must be valid in BOTH languages.
 //
 // Snippets are copy-paste starters, so a broken one does not fail loudly -- it teaches a
@@ -660,6 +1136,67 @@ if (LUA) {
   }
   assert(`all ${SNIPPETS.length} snippets are valid Lua and valid JS`
     + (bad.length ? ` -- ${bad.join(' | ')}` : ''), bad.length === 0);
+}
+
+// ---------------------------------------------------------------------------------
+// A CUSTOM BLOCK WITH AN EMPTY BOX MUST NOT GENERATE A WORKING-LOOKING LINE.
+//
+// renderTemplate leaves an unfilled {name} in the output on purpose, so a broken template
+// looks broken. It does not look broken: `{on}` is a Lua table constructor, the line parses,
+// and a table is TRUE -- so an empty yes/no box turned the flag ON. This runs the real
+// interpreter over the claim rather than restating it, then checks the generated script.
+//
+// Registered last, because registerCustom replaces the whole custom list and the sweeps
+// above enumerate it.
+// ---------------------------------------------------------------------------------
+if (LUA) {
+  const truthy = execFileSync(LUA, ['-e', `local on = {on} io.write(type(on), '/', tostring(not not on))`],
+    { encoding: 'utf8' }).trim();
+  assert(`an unfilled {placeholder} is a truthy Lua table, not an error (got ${truthy})`, truthy === 'table/true');
+
+  const camera = {
+    id: 'cam', kind: 'action', label: 'Camera collision',
+    lua: 'sam_set_camera_collision(player, {on})',
+    params: [{ name: 'on', type: 'text', default: '' }],
+  };
+  const near = {
+    id: 'near', kind: 'condition', label: 'Camera is free',
+    lua: 'sam_get_camera({who}) ~= nil',
+    params: [{ name: 'who', type: 'text', default: '' }],
+  };
+  registerCustom([
+    { kind: 'action', entry: toCatalogEntry(camera) },
+    { kind: 'condition', entry: toCatalogEntry(near) },
+  ]);
+
+  const blank = generateLua({ rules: [rule('player.on_hit', [act('custom:cam', { on: '' })])] });
+  assert('a blank custom-block box never reaches the generated script', !blank.includes('{on}'));
+  assert('...and the script says which box is empty', blank.includes('"on"'));
+  assert('...and does not call the function at all', !blank.includes('sam_set_camera_collision(player,'));
+  assert('...and the row warns, naming the box',
+    /Fill in "on"/.test(toCatalogEntry(camera).warn({})));
+
+  const filled = generateLua({ rules: [rule('player.on_hit', [act('custom:cam', { on: 'true' })])] });
+  assert('a FILLED custom-block box still generates the call',
+    filled.includes('sam_set_camera_collision(player, true)'));
+  assert('...and a filled block does not warn', toCatalogEntry(camera).warn({ on: 'true' }) === '');
+
+  // Both refusals have to still LOAD: a condition sits inside `if <expr> then`, so it cannot
+  // be a comment, and a script that does not parse loads nothing at all.
+  const bothBlank = generateLua({
+    rules: [{
+      key: 'b', trigger: { id: 'player.on_hit', params: {} },
+      conditions: [act('custom:near', { who: '' })],
+      actions: [act('custom:cam', { on: '' })],
+    }],
+  });
+  const f = join(TMP, 'custom.lua');
+  writeFileSync(f, bothBlank);
+  const luaPath = JSON.stringify(f.split('\\').join('/'));
+  const perr = execFileSync(LUA, ['-e', `local fn, e = loadfile(${luaPath}); if not fn then io.write(tostring(e)) end`],
+    { encoding: 'utf8' }).trim();
+  assert(`a refused custom condition and action still parse${perr ? ` -- ${perr}` : ''}`, perr === '');
+  assert('a refused custom condition reads as false, not as a truthy table', bothBlank.includes('if false '));
 }
 
 // ---------------------------------------------------------------------------------

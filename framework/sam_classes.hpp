@@ -201,6 +201,14 @@ public:
 	static bool addClassPassive(int classnum, int effectId);
 	static bool removeClassPassive(int classnum, int effectId);
 
+	// The whole runtime overlay above -- every class patch and every class passive -- and a
+	// wholesale replace of it. For multiplayer: these tables are kept on every machine, and a
+	// joining client takes the host's copy whole (SAMRules does the wire), so a patch left
+	// over from an earlier singleplayer game on either machine cannot make the two disagree.
+	// Plain containers only, so this half stays free of the engine and builds into the editor.
+	static void overlaySnapshot(std::map<int, SAMClassStatPatch>& patches, std::map<int, std::vector<int>>& passives);
+	static void overlayReplace(const std::map<int, SAMClassStatPatch>& patches, const std::map<int, std::vector<int>>& passives);
+
 	// --- application into the running game (defined only in the game build) ---
 	// Apply attribute/skill deltas to a Stat (called from initClassStats). Does
 	// NOT clamp — the caller's unconditional clamp block still runs afterwards.

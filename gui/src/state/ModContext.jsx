@@ -3,6 +3,7 @@
  * work (Tier 3). Holds every content type the framework supports:
  *  - meta: mod.json fields (identity, version gating, dependencies)
  *  - classes / items / monsters / spells / patches: schema-shaped objects
+ *  - sounds / music: mod.json "sounds" / "music" entries (exported inline into mod.json)
  *  - scripts: classId -> { lang: 'lua'|'js'|'ts', code } behavior script that
  *    ships next to the class JSON (classes/<stem>.<lang>)
  *  - assets: mod-relative path -> data URL (portraits/icons) shipped in the zip
@@ -41,6 +42,32 @@ function init(base) {
   }
 }
 
+/*
+ * How much asset data (data-URL characters) the autosave tries to keep. localStorage holds
+ * about 5M characters per site, and everything else in the mod is small next to audio.
+ *
+ * Without a budget, one 30 MB music track (40M characters of base64) made every autosave
+ * fail, and the fallback then saved NO assets at all -- so a reload lost every portrait, icon
+ * and sound too, not just the track. It also meant stringifying 40 MB on every keystroke only
+ * to throw it away. Now the largest assets are left out first, until the rest fits; whatever
+ * is left out stays in memory for this session (export works) and the Mod Builder flags it
+ * as "not bundled" after a reload.
+ */
+const PERSIST_ASSET_BUDGET = 4_000_000;
+
+function persistableAssets(assets) {
+  const entries = Object.entries(assets || {});
+  let total = entries.reduce((n, [, v]) => n + String(v).length, 0);
+  if (total <= PERSIST_ASSET_BUDGET) return assets || {};
+  const kept = { ...assets };
+  for (const [k, v] of [...entries].sort((a, b) => String(b[1]).length - String(a[1]).length)) {
+    if (total <= PERSIST_ASSET_BUDGET) break;
+    delete kept[k];
+    total -= String(v).length;
+  }
+  return kept;
+}
+
 /** Persist the durable slice; drop assets first if we blow the quota. */
 function persist(state) {
   const durable = {
@@ -52,10 +79,11 @@ function persist(state) {
     effects: state.effects,
     races: state.races,
     sounds: state.sounds,
+    music: state.music,
     recipes: state.recipes,
     patches: state.patches,
     scripts: state.scripts,
-    assets: state.assets,
+    assets: persistableAssets(state.assets),
   };
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(durable));

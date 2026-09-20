@@ -48,14 +48,27 @@ you're writing your own behavior scripts:
   fires *after* HP is already gone and can't cancel.
 - **`player.on_kill` is melee-only.** For ranged/magic kills, subscribe to
   **`on_monster_died`** and use its `killer_uid`.
-- **Effects target the local player, not monsters.** `sam_apply_effect(player, "FAST"|"INVISIBLE"|…)`
-  can't blind/confuse an enemy — do enemy debuffs with a thrown item (e.g. `DUST_BALL`) instead.
+- **Two separate calls for effects.** `sam_apply_effect(player, "FAST"|"INVISIBLE"|…)` is for a
+  player; `sam_apply_monster_effect(uid, "BLIND"|"CONFUSED"|…, ticks)` is for a monster, and has
+  been there since v0.7.0. A thrown `DUST_BALL` is still the better *feel* for a smoke bomb, which
+  is why the Trickster uses one, but it is a choice now and not a limit.
 - **There is no invincibility effect.** "Briefly invulnerable" is emulated by cancelling
   damage in `on_before_damage` for a time-boxed window (see Paladin/Berserker/Necromancer).
 - **`sam_set_stat` edits the live player; `sam_patch_class` does not** — the latter only
   changes the class *definition* at character creation, so live buffs use `sam_set_stat`.
-- **`sam_save_data` persists per-mod** — reset per-floor state on `player.on_floor_change`.
-- **All game-affecting APIs are host-authoritative** (host/singleplayer only).
+- **`sam_save_data` persists per-mod, not per player** — it writes one file for the whole mod on
+  one machine, so in co-op every Paladin would share one "already intervened" flag. Per-player
+  state belongs in `sam_set_player_data(player, key, value)`, which is in memory and is cleared
+  when a run starts. All five scripts here use it, and reset on `player.on_floor_change`.
+- **A loaded script gets every event, not only its own class's.** Dispatch is global, so each
+  script's first line in every handler is `sam_get_class(player) == "vanillaplus:…"`. Without it
+  a Ranger would collect the Paladin's damage negation and the Trickster's proc as well.
+- **Read the player out of the event, never assume player 0.** `event.player` is whose event it
+  is; `on_monster_died` gives you `killer_uid` instead, which these scripts match against each
+  player's own body with `sam_get_player_uid`.
+- **Every function says what it does in co-op.** Each entry in the
+  [function reference](../../docs/function-reference.md) carries a **Multiplayer:** line, and
+  [multiplayer.md](../../docs/multiplayer.md) explains the seven kinds.
 
 ## Balance
 

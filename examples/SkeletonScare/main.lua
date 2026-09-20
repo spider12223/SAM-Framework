@@ -58,27 +58,45 @@ function on_event(e)
   end
 end
 
+-- Who it is after. Barony has at most four player slots and a slot can be empty, which is
+-- what sam_get_player_uid answering nil means, so walk them rather than assuming player 0.
+-- Pass nil for the skeleton's position and you get the first player in the game instead of
+-- the nearest, which is what the respawn needs. In singleplayer both give you player 0, so
+-- the same code runs in a solo game and in co-op.
+local function pickPlayer(mx, my)
+  local best, bx, by, bd
+  for p = 0, 3 do
+    local uid = sam_get_player_uid(p)
+    if uid then
+      local x, y = sam_get_position(uid)
+      if x then
+        local d = mx and dist(x, y, mx, my) or 0
+        if not bd or d < bd then best, bx, by, bd = p, x, y, d end
+        if not mx then break end
+      end
+    end
+  end
+  return best, bx, by, bd
+end
+
 function on_tick(e)
   frame = frame + 1
   if frame % 5 ~= 0 then return end   -- 10 checks a second is plenty for a chase
 
-  local me = sam_get_player_uid(0)
-  if not me then return end
-  local px, py = sam_get_position(me)
-  if not px then return end
-
-  -- Dead or never spawned: bring one back after a pause.
+  -- Dead or never spawned: bring one back after a pause, beside somebody.
   if not runner or not sam_get_position(runner) then
     if frame >= respawnAt then
-      runner = spawnRunner(px, py)
+      local _, sx, sy = pickPlayer(nil, nil)
+      if not sx then return end
+      runner = spawnRunner(sx, sy)
       respawnAt = frame + RESPAWN
     end
     return
   end
 
   local mx, my = sam_get_position(runner)
-  local d = dist(px, py, mx, my)
-  if d > HUNT_RANGE then return end
+  local victim, px, py, d = pickPlayer(mx, my)
+  if not victim or d > HUNT_RANGE then return end
 
   -- Only hunt what it can actually see. sam_line_of_sight is the engine's own trace, so
   -- it agrees with what is drawn instead of guessing from distance alone.
@@ -87,7 +105,7 @@ function on_tick(e)
     return
   end
 
-  sam_set_monster_target(runner, 0)
+  sam_set_monster_target(runner, victim)
 
   if d > POUNCE_RANGE then
     -- Charge: a dash that ends by itself, so re-issuing it on a timer reads as running.
@@ -100,14 +118,16 @@ function on_tick(e)
   end
 
   -- ---- it got you ------------------------------------------------------------------
-  if (cooldown[0] or 0) > frame then return end
-  cooldown[0] = frame + COOLDOWN
+  -- Everything from here names the player it happened to, so in co-op the flash, the shake
+  -- and the picture land on THEIR screen and nobody else's, wherever they are playing from.
+  if (cooldown[victim] or 0) > frame then return end
+  cooldown[victim] = frame + COOLDOWN
 
   sam_play_sound(SPOT_SOUND)
-  sam_screen_flash(0, 255, 255, 255, 0.8, 120)
-  sam_camera_shake(0, 14)
+  sam_screen_flash(victim, 255, 255, 255, 0.8, 120)
+  sam_camera_shake(victim, 14)
   -- The whole point of this example. "runner:scare" is the id from mod.json, so if the
   -- file is missing the log said so when the mod loaded, not silently now.
-  sam_show_image(0, "runner:scare", SCARE_MS, 255, "stretch")
-  sam_log("[runner] got you at " .. px .. "," .. py)
+  sam_show_image(victim, "runner:scare", SCARE_MS, 255, "stretch")
+  sam_log("[runner] got player " .. victim .. " at " .. px .. "," .. py)
 end

@@ -1,18 +1,37 @@
 # S.A.M function reference
 
-Every script function the framework exposes: **287 functions** and **74 events**.
+Every script function the framework exposes: **316 functions** and **76 events**.
 All of them work identically in Lua, JavaScript and TypeScript.
 
 This page is generated from the API definition, so it cannot fall behind the code. If a
 function is missing here it is missing from the framework.
 
-**Host-only** means the call is refused on a multiplayer client, where it becomes a logged
-no-op rather than a crash. Read the value on the host and send it on if a client needs it.
+## Multiplayer
+
+Your script's runtime code (its events, on_tick and timers) runs on the **host**. You name
+players by index, and S.A.M carries each call to the machine it has to run on. Every function
+below ends with a **Multiplayer:** line that starts with one of seven kinds. The game enforces
+the kind, so the line is always what really happens:
+
+| kind | what it means for your script |
+|---|---|
+| `host` (145) | Runs on the host, where your events and timers already run. A client's call is refused with a one-time warning. The result reaches every player. |
+| `owner` (10) | Changes something that lives on the player's own machine (their backpack, their spells). Call it on the host; S.A.M carries it to that player's machine. |
+| `screen` (29) | Shows something on one player's screen. Name the player, or leave it out inside an event about a player; -1 means every player. S.A.M carries it to their machine. |
+| `read` (50) | Reads a player. The host can read everyone; a client can read only its own player. |
+| `all` (7) | Changes a table every machine keeps (class and item patches, species resists). A host call runs everywhere and reaches players who join later. |
+| `local` (21) | Answers for the machine running it: its clock, its files, its music. |
+| `any` (54) | The same answer on every machine. Safe anywhere. |
+
+Every event ends with a **Multiplayer:** line that says which machine it fires on and for
+whom. The whole model, with examples, and how to test co-op on one computer:
+[multiplayer.md](multiplayer.md).
 
 For guides and worked examples, see [scripting-reference.md](scripting-reference.md).
 
 ## Contents
 
+- [Camera](#camera) (8)
 - [Combat](#combat) (20)
 - [Context](#context) (11)
 - [Custom events](#custom-events) (2)
@@ -35,6 +54,8 @@ For guides and worked examples, see [scripting-reference.md](scripting-reference
 - [Player state](#player-state) (13)
 - [Presentation](#presentation) (9)
 - [Rewards](#rewards) (5)
+- [Rules](#rules) (15)
+- [Sound & music](#sound-music) (6)
 - [Spells](#spells) (9)
 - [Status effects](#status-effects) (9)
 - [Terrain](#terrain) (9)
@@ -42,16 +63,140 @@ For guides and worked examples, see [scripting-reference.md](scripting-reference
 - [Truth](#truth) (17)
 - [World](#world) (23)
 - [Your own logic](#your-own-logic) (7)
-- [Events](#events) (74)
+- [Events](#events) (76)
+
+
+## Camera
+
+### `sam_get_camera(player)`
+
+Where the camera actually is, in the same tile units the setters take. mode is "vanilla", "orbit" or "absolute".
+
+It reports what is ON SCREEN, not what you asked for. Those differ the moment the boom hits a wall, and a mod placing a camera has no other way to find out whether it got there.
+
+| argument | type |
+|---|---|
+| `player` | int |
+
+**Returns:** a table/object with x, y, height, yaw, pitch, mode, or nil
+
+**Multiplayer:** `local`. Answers for the machine running the script. Given a player on another machine (`player`), it is refused with a one-time warning and returns nil (undefined in JavaScript). Returns nil for a player on another machine, and logs it once.
+
+### `sam_reset_camera(player)`
+
+Hand the camera back to the engine. Call it when your mod unloads, or the player keeps your camera.
+
+| argument | type |
+|---|---|
+| `player` | int |
+
+**Returns:** true if anything was being overridden (boolean)
+
+**Multiplayer:** `screen`. Shows on the screen of the player `player` names; -1 is every player in a multiplayer game. On the host, a call for a player on another machine is carried there and returns true once it is sent; a player whose game does not run S.A.M is refused with a warning. A client can show things only on its own screen.
+
+### `sam_set_camera_angle(player, [yaw], [pitch])`
+
+Point the camera somewhere fixed. Yaw is radians, the same way sam_get_facing reports them. Called with no angle it goes back to following the player's own look, which is what the mouse drives.
+
+Pitch is positive DOWNWARD, which is Barony's convention throughout, and is held inside a right angle so the view cannot roll over — the engine clamps the player's own pitch for the same reason.
+
+| argument | type |
+|---|---|
+| `player` | int |
+| `yaw` *(optional)* | number |
+| `pitch` *(optional)* | number |
+
+**Returns:** true on success (boolean)
+
+**Multiplayer:** `screen`. Shows on the screen of the player `player` names; -1 is every player in a multiplayer game. On the host, a call for a player on another machine is carried there and returns true once it is sent; a player whose game does not run S.A.M is refused with a warning. A client can show things only on its own screen.
+
+### `sam_set_camera_collision(player, on)`
+
+Whether the boom shortens when a wall is between the player and the camera. On by default. Turn it off for a camera meant to pass through geometry.
+
+Only WALLS shorten the boom. It walks the level's wall tiles from the player out to the camera, not the engine's line trace, because that trace also stops at creatures and a rat walking behind you would yank the camera into your back.
+
+| argument | type |
+|---|---|
+| `player` | int |
+| `on` | boolean |
+
+**Returns:** true on success (boolean)
+
+**Multiplayer:** `screen`. Shows on the screen of the player `player` names; -1 is every player in a multiplayer game. On the host, a call for a player on another machine is carried there and returns true once it is sent; a player whose game does not run S.A.M is refused with a warning. A client can show things only on its own screen.
+
+### `sam_set_camera_offset(player, back, [up], [right])`
+
+Put the camera behind the player and keep it there: `back` tiles behind, `up` tiles above, `right` tiles to their right. It follows their yaw and pitch, so looking down swings the camera up and over rather than sliding along the floor, and the boom shortens when a wall is in the way. This is the whole of a third-person camera.
+
+Pair it with sam_show_own_body(player, true) or you will be looking at the back of an invisible character. Barony's own /thirdperson only sets that visibility flag, and because both of the engine's camera writers skip a player who has it set, nothing then moves the camera at all, which is why it stays where you turned it on. This supplies the half that was missing. A camera belongs to the machine that draws it, so the host's call for a player on another machine is carried to that machine.
+
+| argument | type |
+|---|---|
+| `player` | int |
+| `back` | number |
+| `up` *(optional)* | number |
+| `right` *(optional)* | number |
+
+**Returns:** true if the camera is now yours (boolean)
+
+**Multiplayer:** `screen`. Shows on the screen of the player `player` names; -1 is every player in a multiplayer game. On the host, a call for a player on another machine is carried there and returns true once it is sent; a player whose game does not run S.A.M is refused with a warning. A client can show things only on its own screen.
+
+### `sam_set_camera_position(player, x, y, [height])`
+
+Pin the camera in the world instead of on the player: a security camera, a cutscene, a fixed view of a room. x and y are tiles, height is tiles above the floor.
+
+A standing eye is about 0.64 above the floor, and a room is one tile high, so 1.0 is the ceiling. It keeps looking wherever the player looks unless you also call sam_set_camera_angle or sam_set_camera_target, which is usually what a fixed camera wants.
+
+| argument | type |
+|---|---|
+| `player` | int |
+| `x` | number |
+| `y` | number |
+| `height` *(optional)* | number |
+
+**Returns:** true if the camera is now yours (boolean)
+
+**Multiplayer:** `screen`. Shows on the screen of the player `player` names; -1 is every player in a multiplayer game. On the host, a call for a player on another machine is carried there and returns true once it is sent; a player whose game does not run S.A.M is refused with a warning. A client can show things only on its own screen.
+
+### `sam_set_camera_target(player, uid)`
+
+Keep the camera pointed at something, recomputed every frame so it tracks a moving subject. Pass 0 to stop.
+
+If the subject dies the camera holds its last angle rather than snapping to a default, and stops tracking. Combine with sam_set_camera_position for a fixed camera that follows the action, or with sam_set_camera_offset for a lock-on.
+
+| argument | type |
+|---|---|
+| `player` | int |
+| `uid` | uid |
+
+**Returns:** true on success (boolean)
+
+**Multiplayer:** `screen`. Shows on the screen of the player `player` names; -1 is every player in a multiplayer game. On the host, a call for a player on another machine is carried there and returns true once it is sent; a player whose game does not run S.A.M is refused with a warning. A client can show things only on its own screen.
+
+### `sam_show_own_body(player, on)`
+
+Whether you can see your own character. Normally you cannot: the camera is inside your head, so the engine hides your body and draws a first-person weapon instead. Turning this on shows the body and hides that weapon, which is what any camera outside the head needs.
+
+This is the engine's own switch, the one /thirdperson flips, so it costs nothing and behaves exactly as the game already does. Refused while a player is on the death camera, which owns the same switch — taking it would strand them.
+
+| argument | type |
+|---|---|
+| `player` | int |
+| `on` | boolean |
+
+**Returns:** true on success (boolean)
+
+**Multiplayer:** `screen`. Shows on the screen of the player `player` names; -1 is every player in a multiplayer game. On the host, a call for a player on another machine is carried there and returns true once it is sent; a player whose game does not run S.A.M is refused with a warning. A client can show things only on its own screen.
 
 
 ## Combat
 
 ### `sam_break_armor(entity_uid, [slot])`
 
-> Host-only.
-
 Degrade a worn piece of armour, possibly breaking it. With no slot named, the engine's own picker chooses, so the odds and the exclusions match a real hit. player.on_item_broken has existed as an event with no verb able to cause it.
+
+False is a real answer as well as a failure: the engine refuses shadows and liches outright, and refuses artifacts, quivers and anything preserved.
 
 | argument | type |
 |---|---|
@@ -60,11 +205,13 @@ Degrade a worn piece of armour, possibly breaking it. With no slot named, the en
 
 **Returns:** true if the piece degraded (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
+
 ### `sam_consume_mp(entity_uid, amount)`
 
-> Host-only.
-
 Spend mana only if the creature has it. Nothing is taken when it cannot afford the cost, which makes this the right one for a custom ability's cost.
+
+One engine exception: a VAMPIRE player who cannot afford the cost has the shortfall taken out of health instead, and still gets true back. That is Barony's rule for vampires, not the framework's.
 
 | argument | type |
 |---|---|
@@ -73,11 +220,13 @@ Spend mana only if the creature has it. Nothing is taken when it cannot afford t
 
 **Returns:** true if it could afford it and it was spent (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
+
 ### `sam_drain_mp(entity_uid, amount, [notify])`
 
-> Host-only.
-
 Take mana, and take anything you cannot afford out of HEALTH instead. That overdraw is the point — it is how a blood-magic cost is expressed.
+
+This can kill. It has its own name rather than hiding inside sam_mod_mp behind a negative number for exactly that reason. Use sam_consume_mp when you want the safe version.
 
 | argument | type |
 |---|---|
@@ -86,6 +235,8 @@ Take mana, and take anything you cannot afford out of HEALTH instead. That overd
 | `notify` *(optional)* | boolean |
 
 **Returns:** true if it ran (boolean)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
 
 ### `sam_get_attack(entity_uid)`
 
@@ -96,6 +247,8 @@ The melee attack figure the engine itself would use for this creature's next swi
 | `entity_uid` | uid |
 
 **Returns:** the melee attack value, or nil (int)
+
+**Multiplayer:** `read`. The host can read every creature; a client can read only its own player's uid (`entity_uid`), and anything else is refused with a one-time warning and returns nil (undefined in JavaScript).
 
 ### `sam_get_bonus_attack_vs(entity_uid, target_uid)`
 
@@ -108,6 +261,8 @@ How much extra attack this creature gets against that particular target — slay
 
 **Returns:** extra attack against that specific target, or nil (int)
 
+**Multiplayer:** `read`. The host can read every creature; a client can read only its own player's uid (`entity_uid`), and anything else is refused with a one-time warning and returns nil (undefined in JavaScript).
+
 ### `sam_get_healring(entity_uid)`
 
 The regeneration bonus this creature carries. It is what makes sam_get_regen_interval shorter.
@@ -118,15 +273,21 @@ The regeneration bonus this creature carries. It is what makes sam_get_regen_int
 
 **Returns:** the regeneration bonus from equipment and effects combined, or nil (int)
 
+**Multiplayer:** `read`. The host can read every creature; a client can read only its own player's uid (`entity_uid`), and anything else is refused with a one-time warning and returns nil (undefined in JavaScript).
+
 ### `sam_get_hp(entity_uid)`
 
 Read any creature's health by UID.
+
+Fills a real gap: sam_get_stat takes a player INDEX and sam_get_monster_stat refuses anything that is not a monster, so a uid out of sam_find_entities could not reach another player's or a companion's health at all. nil rather than 0 for a door or a chest, because those have no health rather than none left.
 
 | argument | type |
 |---|---|
 | `entity_uid` | uid |
 
 **Returns:** current health, or nil for anything that is not a creature (int)
+
+**Multiplayer:** `read`. The host can read every creature; a client can read only its own player's uid (`entity_uid`), and anything else is refused with a one-time warning and returns nil (undefined in JavaScript).
 
 ### `sam_get_max_hp(entity_uid)`
 
@@ -138,6 +299,8 @@ Read any creature's maximum health by UID.
 
 **Returns:** maximum health, or nil (int)
 
+**Multiplayer:** `read`. The host can read every creature; a client can read only its own player's uid (`entity_uid`), and anything else is refused with a one-time warning and returns nil (undefined in JavaScript).
+
 ### `sam_get_max_mp(entity_uid)`
 
 Read any creature's maximum mana by UID.
@@ -148,15 +311,21 @@ Read any creature's maximum mana by UID.
 
 **Returns:** maximum mana, or nil (int)
 
+**Multiplayer:** `read`. The host can read every creature; a client can read only its own player's uid (`entity_uid`), and anything else is refused with a one-time warning and returns nil (undefined in JavaScript).
+
 ### `sam_get_mp(entity_uid)`
 
 Read any creature's mana by UID.
+
+The batch that added sam_mod_mp, sam_drain_mp and sam_consume_mp needs this: without it the only way to observe mana on anything but a player was to call one of those mutators and read what it returned, and a mutator is not a reader.
 
 | argument | type |
 |---|---|
 | `entity_uid` | uid |
 
 **Returns:** current mana, or nil for anything that is not a creature (int)
+
+**Multiplayer:** `read`. The host can read every creature; a client can read only its own player's uid (`entity_uid`), and anything else is refused with a one-time warning and returns nil (undefined in JavaScript).
 
 ### `sam_get_ranged_attack(entity_uid, [quiver_bonus])`
 
@@ -169,6 +338,8 @@ The ranged attack figure for this creature, optionally including a quiver bonus.
 
 **Returns:** the ranged attack value, or nil (int)
 
+**Multiplayer:** `read`. The host can read every creature; a client can read only its own player's uid (`entity_uid`), and anything else is refused with a one-time warning and returns nil (undefined in JavaScript).
+
 ### `sam_get_regen_interval(entity_uid)`
 
 How often this creature regenerates health naturally. SMALLER is faster.
@@ -178,6 +349,8 @@ How often this creature regenerates health naturally. SMALLER is faster.
 | `entity_uid` | uid |
 
 **Returns:** ticks between natural regeneration ticks, or nil (int)
+
+**Multiplayer:** `read`. The host can read every creature; a client can read only its own player's uid (`entity_uid`), and anything else is refused with a one-time warning and returns nil (undefined in JavaScript). For a client's own player it can miss the vampiric-aura bonus while more than 5 seconds of it remain (clients do not count effect timers); read it on the host for an exact value.
 
 ### `sam_get_thrown_attack(entity_uid)`
 
@@ -189,6 +362,8 @@ The attack figure this creature would apply to a thrown weapon.
 
 **Returns:** the thrown attack value, or nil (int)
 
+**Multiplayer:** `read`. The host can read every creature; a client can read only its own player's uid (`entity_uid`), and anything else is refused with a one-time warning and returns nil (undefined in JavaScript).
+
 ### `sam_is_parrying(player)`
 
 Whether a player's parry window is currently open. The engine consumes this in melee resolution to produce parried damage; nothing exposed it before.
@@ -199,11 +374,13 @@ Whether a player's parry window is currently open. The engine consumes this in m
 
 **Returns:** true while the parry window is open (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript.
+
 ### `sam_mod_mp(entity_uid, amount)`
 
-> Host-only.
-
 Change a creature's mana by a relative amount. Negative takes it away.
+
+Before this there was only the absolute sam_set_stat(player, "MP", n), so every "spend 5 mana" had to read, subtract and clamp by hand, and could not reach a monster.
 
 | argument | type |
 |---|---|
@@ -212,11 +389,13 @@ Change a creature's mana by a relative amount. Negative takes it away.
 
 **Returns:** the MP after the change, or nil (int)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript).
+
 ### `sam_obituary(killer_uid, victim_uid, [from_spell])`
 
-> Host-only.
-
 Give a scripted kill a proper death message and credit the killer. sam_kill_monster just sets health to 0, so today a scripted kill produces the generic message and nobody gets credit.
+
+Call it AFTER the killing blow. Setting health rewrites the obituary to the generic string on every change, so calling it first would have it immediately overwritten.
 
 | argument | type |
 |---|---|
@@ -226,11 +405,13 @@ Give a scripted kill a proper death message and credit the killer. sam_kill_mons
 
 **Returns:** true if it was recorded (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
+
 ### `sam_revive_player(player, [x], [y])`
 
-> Host-only.
-
 Bring a dead player back with half their health, at a tile you name or at their ghost's own position.
+
+Revives any player in co-op whose game runs S.A.M: their own machine takes its ghost down. A player whose game does not run S.A.M is refused with a warning, because only their machine can do that, and returning true while they stayed dead would be worse than saying so. The gear the death dropped or bagged is taken back from the revived player, so nothing is duplicated.
 
 | argument | type |
 |---|---|
@@ -240,11 +421,13 @@ Bring a dead player back with half their health, at a tile you name or at their 
 
 **Returns:** true if the player is back on their feet (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. Revives any player in co-op whose game runs S.A.M; a player without S.A.M is refused with a warning, because only their own machine can take their ghost down. The gear the death dropped or bagged is removed from the revived player, so nothing is duplicated.
+
 ### `sam_set_defending(player, on)`
 
-> Host-only.
-
 Put a player into or out of the blocking stance.
+
+IT LASTS ONE FRAME. The engine writes this field from the player's block input every single frame, so your value is an override for the current frame and never a latch. Set it immediately before reading combat maths, or re-apply it from a per-frame handler. sam_is_defending has existed since v1.2 with no way to cause it, and this is that missing half with its real lifetime stated.
 
 | argument | type |
 |---|---|
@@ -253,11 +436,13 @@ Put a player into or out of the blocking stance.
 
 **Returns:** true if it changed anything (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. On a player on another machine the override lasts exactly one host logic pass. It only changes the host's hit resolution: the player's own screen and the other players never show the raised shield.
+
 ### `sam_set_parry(player, ticks)`
 
-> Host-only.
-
 Open a parry window for a number of ticks. 0 closes it.
+
+Clamped to an hour. The engine counts this down, and a script that passed milliseconds by mistake would otherwise buy a permanent parry.
 
 | argument | type |
 |---|---|
@@ -266,11 +451,11 @@ Open a parry window for a number of ticks. 0 closes it.
 
 **Returns:** true if set (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
+
 ### `sam_spawn_projectile(tile_x, tile_y, angle, speed, [damage], [lifetime], [model], [owner])`
 
-> Host-only.
-
-Fire a moving projectile with its own speed, model, damage and lifetime. Until this the only thing a script could launch was a fixed vanilla spell, which ruled out ranged enemies with real attack patterns, telegraphed boss volleys, and weapons that fire anything but an arrow. It stops on the first thing it hits and fires an "on_projectile_hit" event with .projectile, .target, .x, .y and .damage — spawn a follow-up there for a burst or an explosion. Giving an owner stops the shot killing the player who fired it on its first frame. Leave model empty and the projectile is INVISIBLE, which is almost never what you want. Host-only, like every other world-mutating call. MULTIPLAYER: everything that matters is decided on the host, so damage, collisions and the hit event are correct for everyone — but a connected client has no behaviour for a custom projectile and only moves it when a position update arrives, about 8 times a second, so the flight looks stepped rather than smooth on their screen. Fine for a shot that crosses a room; noticeable on a slow, long-lived one.
+Fire a moving projectile with its own speed, model, damage and lifetime. Until this the only thing a script could launch was a fixed vanilla spell, which ruled out ranged enemies with real attack patterns, telegraphed boss volleys, and weapons that fire anything but an arrow. It stops on the first thing it hits and fires an "on_projectile_hit" event with .projectile, .target, .x, .y and .damage: spawn a follow-up there for a burst or an explosion. Giving an owner stops the shot killing the player who fired it on its first frame. Leave model empty and the projectile is INVISIBLE, which is almost never what you want.
 
 | argument | type |
 |---|---|
@@ -283,7 +468,9 @@ Fire a moving projectile with its own speed, model, damage and lifetime. Until t
 | `model` *(optional)* | string (optional — a model from your mod's "models", or a vanilla model index) |
 | `owner` *(optional)* | int player 0..3 (optional, default -1 = unowned) |
 
-**Returns:** the projectile's entity uid (int), or nil/null if it could not be spawned
+**Returns:** the projectile's entity uid (int), or nil/undefined if it could not be spawned
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Damage, collisions and the hit event are decided on the host, and every player sees the shot fly smoothly between network updates (it used to stand still between them).
 
 
 ## Context
@@ -294,11 +481,15 @@ Today's date on this machine, which is how you make content that only appears at
 
 **Returns:** a table/object with year, month, day, hour, min, sec
 
+**Multiplayer:** `local`. Answers for the machine running the script.
+
 ### `sam_get_fps()`
 
 How fast this machine is drawing. Local to whoever asks, so never let it decide anything shared: two players will get different numbers and their games will disagree.
 
 **Returns:** this machine's render rate (number)
+
+**Multiplayer:** `local`. Answers for the machine running the script.
 
 ### `sam_get_level_info()`
 
@@ -306,11 +497,15 @@ Everything about the current floor. sam_get_floor returns a bare number that can
 
 **Returns:** table { floor, name, author, width, height, secret, skybox, no_digging, no_teleport, no_levitation }
 
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
+
 ### `sam_get_mods()`
 
 Every S.A.M mod loaded right now. Cross-mod integration with zero engine work: soft-depend on another mod, avoid double registering, or light up extra content when a partner mod is present.
 
 **Returns:** array of { ns, name, version, author }
+
+**Multiplayer:** `local`. Answers for the machine running the script.
 
 ### `sam_get_real_time()`
 
@@ -318,11 +513,15 @@ This machine's wall clock. Same warning as sam_get_fps: two players' clocks diff
 
 **Returns:** seconds since 1970 (number)
 
+**Multiplayer:** `local`. Answers for the machine running the script.
+
 ### `sam_get_run_time()`
 
 The run clock the game itself displays. It stops during the intro, while you are dead, and while THIS machine has the game paused. Not the same as sam_get_time_played, which counts wall time since the program started, menus included. In multiplayer each machine counts its own, and pausing is local, so a player who spent a minute in their menu is a minute behind everyone else: read it on the host if a rule depends on it.
 
 **Returns:** seconds of actual play this run (number)
+
+**Multiplayer:** `local`. Answers for the machine running the script.
 
 ### `sam_get_tick_rate()`
 
@@ -330,17 +529,23 @@ Logic frames per second. Barony's step is fixed, so there is no delta time to as
 
 **Returns:** 50 (number)
 
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
+
 ### `sam_is_in_game()`
 
 Whether a run is actually in progress. Worth checking at the top of a timer callback, which can otherwise fire while nobody is playing.
 
 **Returns:** false while the main menu or intro is up (boolean)
 
+**Multiplayer:** `local`. Answers for the machine running the script.
+
 ### `sam_is_loading()`
 
 Whether the game is mid-level-change. Entities are being destroyed and rebuilt during this, so it is the wrong moment to touch uids you were holding.
 
 **Returns:** true during a level change (boolean)
+
+**Multiplayer:** `local`. Answers for the machine running the script.
 
 ### `sam_is_mod_loaded(namespace)`
 
@@ -352,18 +557,20 @@ Is a given mod namespace loaded? The cheap form of sam_get_mods.
 
 **Returns:** boolean
 
+**Multiplayer:** `local`. Answers for the machine running the script.
+
 ### `sam_is_paused()`
 
 Whether the player has the game paused. Each machine has its own answer in multiplayer, where the world keeps running for everyone else.
 
 **Returns:** true if this machine has the game paused (boolean)
 
+**Multiplayer:** `local`. Answers for the machine running the script.
+
 
 ## Custom events
 
 ### `sam_fire_hook(name, [event])`
-
-> Host-only.
 
 Fire a custom event to ALL Lua + JS/TS scripts cross-runtime. Only number/bool/string fields cross over; recursion capped at depth 8.
 
@@ -373,6 +580,8 @@ Fire a custom event to ALL Lua + JS/TS scripts cross-runtime. Only number/bool/s
 | `event` *(optional)* | table |
 
 **Returns:** the number of scripts the event reached (number)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns 0.
 
 ### `sam_register_hook(name)`
 
@@ -384,14 +593,16 @@ Declare a namespaced custom hook. Name must contain a colon ("namespace:hook_nam
 
 **Returns:** nothing
 
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
+
 
 ## Damage
 
 ### `sam_add_damage_multiplier(fraction)`
 
-> Host-only.
-
 Contribute to the damage multiplier for the hit currently being resolved. 0.25 is +25%, -0.5 is half.
+
+Valid ONLY inside an on_damage_multiplier handler, and it says so rather than dropping the number in silence. Positives ADD and negatives MULTIPLY, which is Barony's own rule: two mods each contributing +0.2 give +40%, and two each contributing -0.5 give a quarter rather than nothing.
 
 | argument | type |
 |---|---|
@@ -399,9 +610,9 @@ Contribute to the damage multiplier for the hit currently being resolved. 0.25 i
 
 **Returns:** true if the contribution was taken (boolean)
 
-### `sam_clear_species_damage_resist([species], [type])`
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
 
-> Host-only.
+### `sam_clear_species_damage_resist([species], [type])`
 
 Undo sam_set_species_damage_resist. No arguments clears everything, a species alone clears every type for it.
 
@@ -412,9 +623,9 @@ Undo sam_set_species_damage_resist. No arguments clears everything, a species al
 
 **Returns:** how many overrides were removed (int)
 
-### `sam_deal_damage(entity_uid, amount)`
+**Multiplayer:** `all`. Changes a table every machine keeps its own copy of: a host call runs on the host and on every S.A.M client, and is replayed to a client that joins later. A client's call is refused with a one-time warning and returns 0.
 
-> Host-only.
+### `sam_deal_damage(entity_uid, amount)`
 
 Deal `amount` damage to any entity by UID (positive = damage); existence-validated.
 
@@ -425,11 +636,13 @@ Deal `amount` damage to any entity by UID (positive = damage); existence-validat
 
 **Returns:** true on success (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
+
 ### `sam_deal_damage_typed(entity_uid, amount, type)`
 
-> Host-only.
-
 Deal damage of a particular weapon class, so the target's own resistance applies. 10 magic damage is 5 against something that halves magic and 20 against something that doubles it, without your script needing to know which. Both stages the engine applies are applied here, in its order: the species damage table, then live effects such as blood ward and sanctuary.
+
+Barony's damage types are WEAPON CLASSES, not elements. There is no fire/ice/lightning axis anywhere in the damage funnel — the seven are sword, mace, axe, polearm, ranged, magic and unarmed. Returns 0 honestly when resistance eats the hit.
 
 | argument | type |
 |---|---|
@@ -439,9 +652,13 @@ Deal damage of a particular weapon class, so the target's own resistance applies
 
 **Returns:** the damage actually dealt after resistance (int)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns 0.
+
 ### `sam_get_damage_resist(entity_uid, [type])`
 
 How much of a given weapon class this creature actually takes: 1.0 normal, 0.5 half, 2.0 double. Equipment, effects and magic resistance are all included — it is the same call the character sheet makes to draw the number a player sees. Defaults to "magic".
+
+Needs the target's stats, so it is host-only for monsters. Reading it for your own player on a client is safe.
 
 | argument | type |
 |---|---|
@@ -449,6 +666,8 @@ How much of a given weapon class this creature actually takes: 1.0 normal, 0.5 h
 | `type` *(optional)* | string — one of: `sword`, `mace`, `axe`, `polearm`, `ranged`, `magic`, `unarmed` |
 
 **Returns:** the damage multiplier this creature takes, or nil (number)
+
+**Multiplayer:** `read`. The host can read every creature; a client can read only its own player's uid (`entity_uid`), and anything else is refused with a one-time warning and returns nil (undefined in JavaScript).
 
 ### `sam_get_magic_resist(entity_uid)`
 
@@ -460,11 +679,13 @@ The raw magic-resistance point count. Each point is a separate reduction: this i
 
 **Returns:** magic resistance POINTS, or nil (int)
 
+**Multiplayer:** `read`. The host can read every creature; a client can read only its own player's uid (`entity_uid`), and anything else is refused with a one-time warning and returns nil (undefined in JavaScript).
+
 ### `sam_heal(entity_uid, amount)`
 
-> Host-only.
-
 Restore health to any player or monster by UID. Returns what actually landed, not what you asked for: health is clamped to the maximum, so a 50-point heal on something three short of full restores three.
+
+sam_deal_damage cannot do this. It forces its amount negative, so both signs damage — before this the only way to heal was an absolute sam_set_stat write, which does not exist for monsters.
 
 | argument | type |
 |---|---|
@@ -473,9 +694,9 @@ Restore health to any player or monster by UID. Returns what actually landed, no
 
 **Returns:** the HP actually restored, or nil if the uid is not a creature (int)
 
-### `sam_modify_damage(player, new_value)`
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript).
 
-> Host-only.
+### `sam_modify_damage(player, new_value)`
 
 Rewrite incoming damage (clamped to >= 0). ONLY valid inside an on_before_damage callback.
 
@@ -486,9 +707,13 @@ Rewrite incoming damage (clamped to >= 0). ONLY valid inside an on_before_damage
 
 **Returns:** nothing
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript.
+
 ### `sam_preview_damage(attacker_uid, target_uid)`
 
 Work out what one creature's melee swing would do to another, dealing nothing. Built from the same three terms the real melee path combines: attack, the target's AC effectiveness, and its AC.
+
+A preview, not a promise. The real swing then folds in weapon multipliers, backstab and capstone bonuses, so it usually lands higher. It is NOT bounded by sam_get_attack either: AC has no floor in Barony, so against a target in cursed armour or under DISRUPTED the preview legitimately comes out above the attacker's raw attack.
 
 | argument | type |
 |---|---|
@@ -497,11 +722,13 @@ Work out what one creature's melee swing would do to another, dealing nothing. B
 
 **Returns:** what a melee swing would deal right now, or nil (int)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript).
+
 ### `sam_set_species_damage_resist(species, type, multiplier)`
 
-> Host-only.
-
 Change how much of a weapon class an entire species takes. 1.0 normal, 0.5 halves it, 2.0 doubles it. Every creature of that species, now and later.
+
+IT CANNOT GRANT IMMUNITY. Your number only seeds the multiplier; the engine then runs its own bonus pool over it and floors the result at 0.1, so the least any species can be made to take is a TENTH, not none. Pass 0 and you get 0.1. For real immunity use sam_set_damage_immune, or veto on_before_damage or on_damage_multiplier. Every S.A.M player's machine gets the same table (a client's character sheet reads its own copy), and a player who joins later gets the host's whole table. Cleared when mods unload.
 
 | argument | type |
 |---|---|
@@ -510,6 +737,8 @@ Change how much of a weapon class an entire species takes. 1.0 normal, 0.5 halve
 | `multiplier` | number |
 
 **Returns:** true if it took (boolean)
+
+**Multiplayer:** `all`. Changes a table every machine keeps its own copy of: a host call runs on the host and on every S.A.M client, and is replayed to a client that joins later. A client's call is refused with a one-time warning and returns false.
 
 
 ## Entities
@@ -525,6 +754,8 @@ Distance between two entities on the FLOOR PLANE. Height is ignored, so a bat ho
 
 **Returns:** distance in tiles (number), or nil if either entity is gone
 
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler. Reads this machine's own copy of the entity, which on a client is interpolated between the host's updates and can lag it by a fraction of a second. Two machines can therefore answer slightly differently at the same moment: decide anything that depends on the exact number on the host and send the verdict with sam_send_packet, rather than working it out inside on_packet.
+
 ### `sam_get_distance_to(uid, x, y)`
 
 Distance from an entity to a tile, measured to the centre of that tile, which is where the game places things.
@@ -537,6 +768,8 @@ Distance from an entity to a tile, measured to the centre of that tile, which is
 
 **Returns:** distance in tiles (number), or nil
 
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler. Reads this machine's own copy of the entity, which on a client is interpolated between the host's updates and can lag it by a fraction of a second. Two machines can therefore answer slightly differently at the same moment: decide anything that depends on the exact number on the host and send the verdict with sam_send_packet, rather than working it out inside on_packet.
+
 ### `sam_get_entity_size(uid)`
 
 The entity's collision box. Any overlap test or aim cone written in script needs this, and it was not readable before. In JavaScript this returns an array.
@@ -546,6 +779,8 @@ The entity's collision box. Any overlap test or aim cone written in script needs
 | `uid` | int |
 
 **Returns:** sizex, sizey in pixels (numbers), or nil
+
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler. Reads this machine's own copy of the entity, which on a client is interpolated between the host's updates and can lag it by a fraction of a second. Two machines can therefore answer slightly differently at the same moment: decide anything that depends on the exact number on the host and send the verdict with sam_send_packet, rather than working it out inside on_packet.
 
 ### `sam_get_entity_sprite(uid)`
 
@@ -557,6 +792,8 @@ Which model an entity is currently drawing. Pairs with sam_get_model, which repo
 
 **Returns:** the model index (number), or nil
 
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler. Reads this machine's own copy of the entity, which on a client is interpolated between the host's updates and can lag it by a fraction of a second. Two machines can therefore answer slightly differently at the same moment: decide anything that depends on the exact number on the host and send the verdict with sam_send_packet, rather than working it out inside on_packet.
+
 ### `sam_get_entity_ticks(uid)`
 
 Age of an entity in frames. Divide by sam_get_tick_rate for seconds. Useful for despawning your own spawns after a while without keeping a table of them.
@@ -566,6 +803,8 @@ Age of an entity in frames. Divide by sam_get_tick_rate for seconds. Useful for 
 | `uid` | int |
 
 **Returns:** frames this entity has existed (number), or nil
+
+**Multiplayer:** `local`. Answers for the machine running the script. Each machine answers from its own copy. Each machine counts separately, and a client's count starts when that client first received the entity. Use the host's value for timing.
 
 ### `sam_get_entity_type(uid)`
 
@@ -577,6 +816,8 @@ What kind of thing a uid refers to. Lets one handler deal with a mixed list of u
 
 **Returns:** one of ENTITY_KINDS (string), or nil
 
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler. Reads this machine's own copy of the entity, which on a client is interpolated between the host's updates and can lag it by a fraction of a second. Two machines can therefore answer slightly differently at the same moment: decide anything that depends on the exact number on the host and send the verdict with sam_send_packet, rather than working it out inside on_packet.
+
 ### `sam_get_facing(player)`
 
 Read which way a player is looking. 0 = +x (east), increasing toward +y — so the forward unit vector is (cos yaw, sin yaw) and 'behind' is yaw + π. Use it to place things relative to a player's facing (a marker in front, a follower behind) or to aim. Host-authoritative for remote players; a client always sees its own facing correctly.
@@ -585,13 +826,13 @@ Read which way a player is looking. 0 = +x (east), increasing toward +y — so t
 |---|---|
 | `player` | int |
 
-**Returns:** the player's facing yaw in radians in [0, 2π) (number), or nil/null for an absent player
+**Returns:** the player's facing yaw in radians in [0, 2π) (number), or nil/undefined for an absent player
+
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler. Reads this machine's own copy of the entity, which on a client is interpolated between the host's updates and can lag it by a fraction of a second. Two machines can therefore answer slightly differently at the same moment: decide anything that depends on the exact number on the host and send the verdict with sam_send_packet, rather than working it out inside on_packet.
 
 ### `sam_get_nearby_entities(player, radius)`
 
-> Host-only.
-
-List UIDs of monsters/players within `radius` tiles of a player (never raw pointers).
+List UIDs of monsters/players within `radius` tiles of a player (never raw pointers). In JavaScript both arguments are required.
 
 | argument | type |
 |---|---|
@@ -599,6 +840,8 @@ List UIDs of monsters/players within `radius` tiles of a player (never raw point
 | `radius` | number |
 
 **Returns:** an array/table of creature UIDs (max 32)
+
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler. Works on a client too (it used to return an empty table there). Reads this machine's own copy of the entity, which on a client is interpolated between the host's updates and can lag it by a fraction of a second. Two machines can therefore answer slightly differently at the same moment: decide anything that depends on the exact number on the host and send the verdict with sam_send_packet, rather than working it out inside on_packet.
 
 ### `sam_get_position_precise(uid)`
 
@@ -610,6 +853,8 @@ Exact position, including the sub-tile fraction and the z axis. sam_get_position
 
 **Returns:** x, y, z in world pixels (fractional), or nil
 
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler. Reads this machine's own copy of the entity, which on a client is interpolated between the host's updates and can lag it by a fraction of a second. Two machines can therefore answer slightly differently at the same moment: decide anything that depends on the exact number on the host and send the verdict with sam_send_packet, rather than working it out inside on_packet.
+
 ### `sam_get_velocity(uid)`
 
 How fast something is moving and in what direction. Enough to lead a moving target, or to tell a charging monster from a standing one. In JavaScript this returns an array.
@@ -619,6 +864,8 @@ How fast something is moving and in what direction. Enough to lead a moving targ
 | `uid` | int |
 
 **Returns:** vx, vy, vz in pixels per tick (numbers), or nil
+
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler. Reads this machine's own copy of the entity, which on a client is interpolated between the host's updates and can lag it by a fraction of a second. Two machines can therefore answer slightly differently at the same moment: decide anything that depends on the exact number on the host and send the verdict with sam_send_packet, rather than working it out inside on_packet.
 
 
 ## Game content
@@ -633,6 +880,8 @@ How filling a food is. Takes an item TYPE rather than a uid, so you can price fo
 
 **Returns:** hunger restored (number), or nil for an unknown type
 
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
+
 ### `sam_get_item_info(item)`
 
 Look up one item by type number or by name. The attributes sub-table is where a tooltip's numbers come from (ATK, AC and so on), so this is enough to render your own item description in a panel.
@@ -641,7 +890,9 @@ Look up one item by type number or by name. The attributes sub-table is where a 
 |---|---|
 | `item` | int item type, or a name / "ns:id" string |
 
-**Returns:** { type, name, unidentified, category, level, weight, value, custom, attributes } or nil/null if unknown
+**Returns:** { type, name, unidentified, category, level, weight, value, custom, attributes } or nil/undefined if unknown
+
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
 
 ### `sam_list_items([category])`
 
@@ -653,11 +904,15 @@ List every item the game knows about, including items added by mods (those have 
 
 **Returns:** array of { type, name, unidentified, category, level, weight, value, custom }
 
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
+
 ### `sam_list_monsters()`
 
 List the game's monster types. Note what this does NOT include: a S.A.M custom monster is a variant of a base species rather than a new entry in the engine's table, so it will not appear here as its own row — you will see the species it is built on. The NOTHING sentinel and the engine's reserved padding slots are filtered out. Pair with sam_spawn_monster for an arena mod, or with a panel for a bestiary.
 
 **Returns:** array of { type, name }
+
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
 
 ### `sam_list_spells()`
 
@@ -665,10 +920,12 @@ List the spells a player can actually be given, with their mana cost. Spells the
 
 **Returns:** array of { id, name, cost }
 
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
+
 
 ## HUD
 
-### `sam_hud_bar(id, x, y, w, h, frac, [color])`
+### `sam_hud_bar(id, x, y, w, h, frac, [color], [player])`
 
 Show or update a horizontal bar — a custom resource, a charge meter, a boss health track. frac is clamped to 0..1; 0 draws as empty rather than a sliver.
 
@@ -681,20 +938,26 @@ Show or update a horizontal bar — a custom resource, a charge meter, a boss he
 | `h` | int |
 | `frac` | number (0..1) |
 | `color` *(optional)* | int (0xRRGGBBAA) |
+| `player` *(optional)* | int (whose screen; left out: the player the current event is about, else this machine's own; -1: every player) |
 
 **Returns:** true on success (boolean)
 
-### `sam_hud_clear([id])`
+**Multiplayer:** `screen`. Shows on one player's own screen, picked by the optional last argument `player`: left out, the player the current event is about, else this machine's own; -1 is every player. On the host, a call for a player on another machine is carried there and returns true once it is sent; a player whose game does not run S.A.M is refused with a warning. A client can show things only on its own screen. Inside an event about a player, leaving the player out shows it to THAT player. A timer callback is not an event: there, with no player, it shows on the host's own screen, so keep the player in a local (local p = e.player) and pass it. Update on change rather than every tick: every call for a remote player is a network message.
 
-Remove one HUD element. No id removes the whole script HUD. The HUD is also dropped automatically when the mod unloads, so it can never outlive the mod that drew it.
+### `sam_hud_clear([id], [player])`
+
+Remove one HUD element. No id removes the whole script HUD: sam_hud_clear(nil, p) clears everything on one player's screen. The HUD is also dropped automatically when the mod unloads, so it can never outlive the mod that drew it.
 
 | argument | type |
 |---|---|
 | `id` *(optional)* | string |
+| `player` *(optional)* | int (whose screen; left out: the player the current event is about, else this machine's own; -1: every player) |
 
 **Returns:** true if that id was showing (boolean)
 
-### `sam_hud_text(id, x, y, text, [color])`
+**Multiplayer:** `screen`. Shows on one player's own screen, picked by the optional last argument `player`: left out, the player the current event is about, else this machine's own; -1 is every player. On the host, a call for a player on another machine is carried there and returns true once it is sent; a player whose game does not run S.A.M is refused with a warning. A client can show things only on its own screen. Inside an event about a player, leaving the player out shows it to THAT player. A timer callback is not an event: there, with no player, it shows on the host's own screen, so keep the player in a local (local p = e.player) and pass it. Update on change rather than every tick: every call for a remote player is a network message.
+
+### `sam_hud_text(id, x, y, text, [color], [player])`
 
 Show or update a line of text on screen. Calling again with the same id moves/retitles the existing line rather than stacking a new one.
 
@@ -705,15 +968,16 @@ Show or update a line of text on screen. Calling again with the same id moves/re
 | `y` | int |
 | `text` | string |
 | `color` *(optional)* | int (0xRRGGBBAA) |
+| `player` *(optional)* | int (whose screen; left out: the player the current event is about, else this machine's own; -1: every player) |
 
 **Returns:** true on success (boolean)
+
+**Multiplayer:** `screen`. Shows on one player's own screen, picked by the optional last argument `player`: left out, the player the current event is about, else this machine's own; -1 is every player. On the host, a call for a player on another machine is carried there and returns true once it is sent; a player whose game does not run S.A.M is refused with a warning. A client can show things only on its own screen. Inside an event about a player, leaving the player out shows it to THAT player. A timer callback is not an event: there, with no player, it shows on the host's own screen, so keep the player in a local (local p = e.player) and pass it. Update on change rather than every tick: every call for a remote player is a network message. To name a player without a colour, pass nil (null in JS) for the colour.
 
 
 ## Hooks
 
 ### `sam_modify_monster_damage(newValue)`
-
-> Host-only.
 
 Rewrite the damage a MONSTER is about to take. Only valid inside an on_before_monster_damage callback. No subject argument: only one monster is ever mid-dispatch.
 
@@ -723,17 +987,19 @@ Rewrite the damage a MONSTER is about to take. Only valid inside an on_before_mo
 
 **Returns:** true on success (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
+
 ### `sam_modify_value(newValue)`
 
-> Host-only.
-
-Rewrite the number the engine is about to use, from inside any hook that offers one (XP gained, gold gained, and every future modifiable hook). Only valid inside such a callback — the error names the hook you ARE inside, so a wrong-place call says something useful.
+Rewrite the number the engine is about to use, from inside any hook that offers one (player.on_xp_gained today, and every future modifiable hook; player.on_gold_collected offers no value to rewrite). Only valid inside such a callback: the error names the hook you ARE inside, so a wrong-place call says something useful.
 
 | argument | type |
 |---|---|
 | `newValue` | number |
 
 **Returns:** true on success (boolean)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
 
 
 ## Input
@@ -747,11 +1013,13 @@ What the player actually has an action bound to — use it to print a correct pr
 | `player` | int |
 | `action` | string — one of: `Attack`, `Defend`, `Use`, `Cast Spell`, `Sneak`, `Hotbar Up / Select`, `Hotbar Down / Cancel`, `Hotbar Left`, `Hotbar Right`, `Call Out`, `Command NPC`, `Quick Turn` |
 
-**Returns:** the physical input, e.g. "Mouse3" (string; nil/null if unbound)
+**Returns:** the physical input, e.g. "Mouse3" (string; nil/undefined if unbound)
+
+**Multiplayer:** `read`. The host can read every player; a client can read only its own player (`player`), and asking about another is refused with a one-time warning and returns nil (undefined in JavaScript). On the host, a player on another machine answers with the binding their game reported (nil until it has).
 
 ### `sam_is_action_held(player, action)`
 
-Check whether a BOUND action is held. Reads Barony's own binding, so it follows whatever the player rebound it to (and works with mouse buttons, which raw keys can't see). Local player only — input never leaves its machine.
+Check whether a BOUND action is held. Reads Barony's own binding, so it follows whatever the player rebound it to (and works with mouse buttons, which raw keys can't see).
 
 | argument | type |
 |---|---|
@@ -760,15 +1028,20 @@ Check whether a BOUND action is held. Reads Barony's own binding, so it follows 
 
 **Returns:** whether the action is active (boolean)
 
-### `sam_is_key_held(key_name)`
+**Multiplayer:** `read`. The host can read every player; a client can read only its own player (`player`), and asking about another is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript. On the host it works for every player: a joiner's game reports its buttons (false for a player whose game does not run S.A.M).
 
-Check whether a RAW key is currently held. Takes any key name the game itself uses, so what sam_get_action_binding hands back works here: single letters and digits, F1 to F12, and the spelled-out keys such as "Space", "Return", "Escape" and "Left Shift". A MOUSE binding has no key behind it and cannot be answered here; it says so in the log rather than returning false forever. Ignores the player's keybinds — prefer sam_is_action_held, which follows them and handles every binding kind.
+### `sam_is_key_held(key_name, [player])`
+
+Check whether a RAW key is currently held. Takes any key name the game itself uses, so what sam_get_action_binding hands back works here: single letters and digits, F1 to F12, and the spelled-out keys such as "Space", "Return", "Escape" and "Left Shift". A MOUSE binding has no key behind it and cannot be answered here; it says so in the log rather than returning false forever. Ignores the player's keybinds: prefer sam_is_action_held, which follows them and handles every binding kind.
 
 | argument | type |
 |---|---|
 | `key_name` | string |
+| `player` *(optional)* | int (whose keyboard; left out: the player the current event is about, else this machine's own) |
 
 **Returns:** whether the key is down (boolean)
+
+**Multiplayer:** `read`. The host can read every player; a client can read only its own player (`player`), and asking about another is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript. Left out, `player` is the player the current event is about, else this machine's own. On the host, a player on another machine reads the keys their game reported: A-Z, 0-9 and F1-F12 only, and false for a player whose game does not run S.A.M.
 
 
 ## Inventory
@@ -783,7 +1056,9 @@ Whether two items would actually combine, using the game's own comparison rather
 | `uid_a` | int |
 | `uid_b` | int |
 
-**Returns:** true if the two would merge (boolean)
+**Returns:** true if the two would merge (boolean), or nil when either uid names no item this machine can see
+
+**Multiplayer:** `read`. The host can read every player; a client can read only its own player (`player`), and asking about another is refused with a one-time warning and returns nil (undefined in JavaScript). Returns nil, not false, when either uid names no item this machine can see, because false here means the two would not merge.
 
 ### `sam_can_unequip(player, uid)`
 
@@ -794,29 +1069,35 @@ Check before promising the player a swap, so a cursed item does not silently ref
 | `player` | int |
 | `uid` | int |
 
-**Returns:** false if the item is cursed onto them (boolean)
+**Returns:** false if the item is cursed onto them (boolean), or nil when the uid names no item this machine can see
+
+**Multiplayer:** `read`. The host can read every player; a client can read only its own player (`player`), and asking about another is refused with a one-time warning and returns nil (undefined in JavaScript). Returns nil, not false, when the uid names no item this machine can see, because false here means cursed and cannot come off.
 
 ### `sam_get_equipped_item(player, slot)`
 
-Get the item NAME equipped in a slot (ARMOR==BREASTPLATE, BOOTS==SHOES). Vanilla items only — it can't name a custom item, so use sam_get_equipped_item_id to test for one.
+Get the item NAME equipped in a slot (ARMOR==BREASTPLATE, BOOTS==SHOES). Vanilla items only — it can't name a custom item, so use sam_get_equipped_item_id to test for one. In JavaScript player and slot are required.
 
 | argument | type |
 |---|---|
 | `player` | int |
 | `slot` | string — one of: `WEAPON`, `SHIELD`, `HELMET`, `HELM`, `ARMOR`, `BREASTPLATE`, `GLOVES`, `BOOTS`, `SHOES`, `RING`, `AMULET`, `CLOAK`, `MASK` |
 
-**Returns:** the item name (string; nil/null if slot empty)
+**Returns:** the item name (string; nil/undefined if slot empty)
+
+**Multiplayer:** `read`. The host can read every player; a client can read only its own player (`player`), and asking about another is refused with a one-time warning and returns nil (undefined in JavaScript). Ask on the host for anyone but yourself: the host's copy of every player's worn items is exact.
 
 ### `sam_get_equipped_item_id(player, slot)`
 
-Get the item ID equipped in a slot. Compare it against sam_item_id("namespace:item") to check whether YOUR custom item is equipped — the id is a number, so the name-returning version above can never match it.
+Get the item ID equipped in a slot. Compare it against sam_item_id("namespace:item") to check whether YOUR custom item is equipped — the id is a number, so the name-returning version above can never match it. In JavaScript player and slot are required.
 
 | argument | type |
 |---|---|
 | `player` | int |
 | `slot` | string — one of: `WEAPON`, `SHIELD`, `HELMET`, `HELM`, `ARMOR`, `BREASTPLATE`, `GLOVES`, `BOOTS`, `SHOES`, `RING`, `AMULET`, `CLOAK`, `MASK` |
 
-**Returns:** the numeric item id (int; nil/null if slot empty)
+**Returns:** the numeric item id (int; nil/undefined if slot empty)
+
+**Multiplayer:** `read`. The host can read every player; a client can read only its own player (`player`), and asking about another is refused with a one-time warning and returns nil (undefined in JavaScript). Ask on the host for anyone but yourself: the host's copy of every player's worn items is exact.
 
 ### `sam_get_inventory_count(player, item_name)`
 
@@ -827,7 +1108,9 @@ Count how many of an item (vanilla or custom name) a player holds.
 | `player` | int |
 | `item_name` | string |
 
-**Returns:** total count held (number)
+**Returns:** total count held (number), or nil if this machine cannot see that player's backpack
+
+**Multiplayer:** `read`. The host can read every player; a client can read only its own player (`player`), and asking about another is refused with a one-time warning and returns nil (undefined in JavaScript). On the host, a player on another machine is answered from a copy their own game sends a moment after joining and whenever it changes (at most five times a second). nil means this machine cannot see that player's things: the host before their game has reported, or a player whose game does not run S.A.M. That 'not reported yet' moment comes at the start of EVERY run, not only after a join: the host drops the last character's copy when a new run starts and that player's game sends the new one a moment later, so read another player's backpack or spells from a timer or a later event, never from game.on_game_start. A removal is no more visible than any other change until that next report, so never write 'if they still have it, give the reward' without a flag of your own.
 
 ### `sam_get_item(uid)`
 
@@ -838,6 +1121,8 @@ Everything plain about one item in a single call, rather than a dozen separate g
 | `uid` | int |
 
 **Returns:** a table/object with type, count, beatitude, status, status_name, identified, appearance, owner_uid, droppable, grid_x, grid_y, or nil
+
+**Multiplayer:** `read`. Answers for the items this machine can see. On the host that includes every player's: a remote player's items (the uids sam_get_inventory gives the host) are read from the copy their game reports. A client sees only its own.
 
 ### `sam_get_item_ac(uid, [player])`
 
@@ -850,6 +1135,8 @@ The armour value. Same caveat as sam_get_item_attack: the optional wearer only m
 
 **Returns:** the armour value (number), or nil
 
+**Multiplayer:** `read`. Answers for the items this machine can see. On the host that includes every player's: a remote player's items (the uids sam_get_inventory gives the host) are read from the copy their game reports. A client sees only its own.
+
 ### `sam_get_item_attack(uid, [player])`
 
 The weapon's attack value. The optional player is passed to the engine, but it only affects a few special cases such as shapeshifting and cursed-item inversion: it does NOT add that character's skill or strength, so two ordinary humans get the same number. For a real to-hit you still need the character's own stats.
@@ -861,6 +1148,8 @@ The weapon's attack value. The optional player is passed to the engine, but it o
 
 **Returns:** the weapon's attack value (number), or nil
 
+**Multiplayer:** `read`. Answers for the items this machine can see. On the host that includes every player's: a remote player's items (the uids sam_get_inventory gives the host) are read from the copy their game reports. A client sees only its own.
+
 ### `sam_get_item_name(uid)`
 
 The item's name, using the alias an unidentified item shows rather than its true name. Note this is the bare name: the blessed, cursed and condition wording the player sees in the tooltip is added separately by the game and is not included here.
@@ -871,6 +1160,8 @@ The item's name, using the alias an unidentified item shows rather than its true
 
 **Returns:** the item's name (string), or nil
 
+**Multiplayer:** `read`. Answers for the items this machine can see. On the host that includes every player's: a remote player's items (the uids sam_get_inventory gives the host) are read from the copy their game reports. A client sees only its own.
+
 ### `sam_get_item_owner(uid)`
 
 Who this item belongs to. It is what the shopkeeper's theft rules read, so it is also how a mod knows whether something was taken rather than bought. An item nobody owns returns nil rather than zero.
@@ -879,7 +1170,9 @@ Who this item belongs to. It is what the shopkeeper's theft rules read, so it is
 |---|---|
 | `uid` | int |
 
-**Returns:** the owning entity's uid (number), or nil if nobody owns it
+**Returns:** the owning entity's uid (number), nil if nobody owns it, or false when the uid names no item this machine can see
+
+**Multiplayer:** `read`. Answers for the items this machine can see. On the host that includes every player's: a remote player's items (the uids sam_get_inventory gives the host) are read from the copy their game reports. A client sees only its own. Returns false, not nil, when the uid names no item this machine can see, because nil already means nobody owns it. On the host it reads a remote player's items from the copy their game reports.
 
 ### `sam_get_item_slot(item_type)`
 
@@ -891,6 +1184,8 @@ Where this kind of item is worn. Works for custom items too, so an auto-equip mo
 
 **Returns:** one of WEAPON, SHIELD, MASK, HELM, GLOVES, BOOTS, BREASTPLATE, CLOAK, AMULET, RING, or NONE for something that cannot be worn
 
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
+
 ### `sam_get_item_value(uid)`
 
 What this pile is worth: the engine's per-item value multiplied by how many you have. Blessing and condition are not part of it, because the engine's own gold value ignores them too; the shop applies those separately when it quotes a price.
@@ -901,6 +1196,8 @@ What this pile is worth: the engine's per-item value multiplied by how many you 
 
 **Returns:** gold value of the whole stack (number), or nil
 
+**Multiplayer:** `read`. Answers for the items this machine can see. On the host that includes every player's: a remote player's items (the uids sam_get_inventory gives the host) are read from the copy their game reports. A client sees only its own.
+
 ### `sam_get_item_weight(uid)`
 
 Weight of the whole stack, with the engine's quiver rule applied. Add these up across sam_get_inventory for a carried total.
@@ -910,6 +1207,8 @@ Weight of the whole stack, with the engine's quiver rule applied. Add these up a
 | `uid` | int |
 
 **Returns:** weight of this stack (number), or nil
+
+**Multiplayer:** `read`. Answers for the items this machine can see. On the host that includes every player's: a remote player's items (the uids sam_get_inventory gives the host) are read from the copy their game reports. A client sees only its own.
 
 ### `sam_get_max_stack(player, uid)`
 
@@ -922,11 +1221,11 @@ The ceiling for this item and this player, which differs for arrows, thrown gems
 
 **Returns:** the largest this stack may grow (number), or nil
 
+**Multiplayer:** `read`. The host can read every player; a client can read only its own player (`player`), and asking about another is refused with a one-time warning and returns nil (undefined in JavaScript).
+
 ### `sam_identify_item(player, uid)`
 
-> Host-only.
-
-Identify an item the way a scroll does, through the engine's own path, so the on_item_identified event fires and the owning player's screen updates. Calling it on an already-identified item succeeds quietly.
+Identify an item the way a scroll does, through the engine's own path, so player.on_item_identified fires (once, on the host) and the owning player's screen updates. Calling it on an already-identified item succeeds quietly. An item on the floor, in a chest or in a shop belongs to nobody and is identified for the player you name; only an item in ANOTHER player's backpack is refused.
 
 | argument | type |
 |---|---|
@@ -934,6 +1233,8 @@ Identify an item the way a scroll does, through the engine's own path, so the on
 | `uid` | int |
 
 **Returns:** true on success (boolean)
+
+**Multiplayer:** `owner`. The state lives on the player's own machine: on the host, a call about a player on another machine (named by `uid`) is carried to that machine and done there, and returns true once it is sent. A player whose game does not run S.A.M is refused with a warning. A client's call is refused with a one-time warning and returns false. Call it on the host. An item uid that sam_get_inventory(p) gave you for a player on another machine is carried to that player's machine and changed there, so true means the change was SENT; if their game refuses it (the item was used up, it is equipped, it is over the stack limit) the reason shows in the host's log. The host's copy shows the change after that player's next report, a few ticks later, so reading it back in the same tick still gives the old value. Do NOT call one of these every tick for another player's item: every call is carried over the reliable channel whether or not it changes anything, so call it when the value changes. If the item is one that player is WEARING, the host's own copy of it (the one combat, AC and sam_can_unequip read) is corrected too; if they swap to a different item in the same instant the correction is dropped and logged rather than applied to the wrong item, unless the two share a type AND an appearance, which the host cannot tell apart. A player whose game does not run S.A.M is refused with a warning.
 
 ### `sam_inventory_has_space(player)`
 
@@ -945,6 +1246,8 @@ Whether the bag has room. This one is genuinely local-only: the inventory grid e
 
 **Returns:** true if there is a free slot (boolean), or nil for a remote player
 
+**Multiplayer:** `read`. The host can read every player; a client can read only its own player (`player`), and asking about another is refused with a one-time warning and returns nil (undefined in JavaScript). Answers only for a player on this machine, because it reads that machine's inventory grid: nil for anyone else, on the host too.
+
 ### `sam_is_better_armor(uid_new, [uid_current])`
 
 The armour counterpart of sam_is_better_weapon, covering shields, helmets, breastplates, cloaks, boots, gloves and masks. Omit the second item to ask whether it is worth wearing at all, which is only ever true for something that actually goes in one of those slots.
@@ -954,7 +1257,9 @@ The armour counterpart of sam_is_better_weapon, covering shields, helmets, breas
 | `uid_new` | int |
 | `uid_current` *(optional)* | int (optional) |
 
-**Returns:** true if the first is an upgrade (boolean)
+**Returns:** true if the first is an upgrade (boolean), or nil when a uid you gave names no item this machine can see
+
+**Multiplayer:** `read`. Answers for the items this machine can see. On the host that includes every player's: a remote player's items (the uids sam_get_inventory gives the host) are read from the copy their game reports. A client sees only its own. Returns nil, not false, when either uid names no item this machine can see, including a second uid that was given but names nothing, so it never silently compares against nothing.
 
 ### `sam_is_better_weapon(uid_new, [uid_current])`
 
@@ -965,18 +1270,22 @@ The same comparison monsters use when deciding what to pick up. Omit the second 
 | `uid_new` | int |
 | `uid_current` *(optional)* | int (optional; omit to compare against nothing) |
 
-**Returns:** true if the first is an upgrade (boolean)
+**Returns:** true if the first is an upgrade (boolean), or nil when a uid you gave names no item this machine can see
+
+**Multiplayer:** `read`. Answers for the items this machine can see. On the host that includes every player's: a remote player's items (the uids sam_get_inventory gives the host) are read from the copy their game reports. A client sees only its own. Returns nil, not false, when either uid names no item this machine can see, including a second uid that was given but names nothing, so it never silently compares against nothing.
 
 ### `sam_is_item_equipped(player, uid)`
 
-Whether this specific item is currently equipped, as opposed to merely being in the bag.
+Whether this specific item is currently equipped, as opposed to merely being in the bag. A spare identical ring in the bag does not count.
 
 | argument | type |
 |---|---|
 | `player` | int |
 | `uid` | int |
 
-**Returns:** true if that player is wearing or wielding it (boolean)
+**Returns:** true if that player is wearing or wielding this exact item (boolean), or nil when the uid names no item this machine can see
+
+**Multiplayer:** `read`. The host can read every player; a client can read only its own player (`player`), and asking about another is refused with a one-time warning and returns nil (undefined in JavaScript). On the host it answers for a remote player's items too, from the copy their game reports. It returns nil when the uid names no item this machine can see, and it is true only for the exact item being worn, so a spare identical ring does not read as equipped. It agrees with the equipped flag in sam_get_inventory.
 
 ### `sam_is_melee_weapon(uid)`
 
@@ -986,7 +1295,9 @@ The engine's own test, so it agrees with what the game counts as melee for skill
 |---|---|
 | `uid` | int |
 
-**Returns:** true for a melee weapon (boolean)
+**Returns:** true for a melee weapon (boolean), or nil when the uid names no item this machine can see (a warning names the function once)
+
+**Multiplayer:** `read`. Answers for the items this machine can see. On the host that includes every player's: a remote player's items (the uids sam_get_inventory gives the host) are read from the copy their game reports. A client sees only its own. On the host this answers for every player's items, including the uids sam_get_inventory hands back for a remote player. When the uid names nothing this machine can see it returns nil rather than false, and a warning names the function once.
 
 ### `sam_is_potion_bad(uid)`
 
@@ -996,7 +1307,9 @@ The same judgement the game's own AI uses when deciding whether to throw a potio
 |---|---|
 | `uid` | int |
 
-**Returns:** true if drinking this is a bad idea (boolean)
+**Returns:** true if drinking this is a bad idea (boolean), or nil when the uid names no item this machine can see (a warning names the function once)
+
+**Multiplayer:** `read`. Answers for the items this machine can see. On the host that includes every player's: a remote player's items (the uids sam_get_inventory gives the host) are read from the copy their game reports. A client sees only its own. On the host this answers for every player's items, including the uids sam_get_inventory hands back for a remote player. When the uid names nothing this machine can see it returns nil rather than false, and a warning names the function once.
 
 ### `sam_is_ranged_weapon(item_type)`
 
@@ -1008,6 +1321,8 @@ Takes a TYPE, so it answers for an item you have not spawned.
 
 **Returns:** true for a bow, crossbow or sling (boolean)
 
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
+
 ### `sam_is_shield(uid)`
 
 Covers everything worn in the shield hand, not only shields: lanterns, torches, quivers, spellbooks and crystal shards all count, as does any custom item your mod marks for the shield slot.
@@ -1016,7 +1331,9 @@ Covers everything worn in the shield hand, not only shields: lanterns, torches, 
 |---|---|
 | `uid` | int |
 
-**Returns:** true if this occupies the offhand slot (boolean)
+**Returns:** true if this occupies the offhand slot (boolean), or nil when the uid names no item this machine can see (a warning names the function once)
+
+**Multiplayer:** `read`. Answers for the items this machine can see. On the host that includes every player's: a remote player's items (the uids sam_get_inventory gives the host) are read from the copy their game reports. A client sees only its own. On the host this answers for every player's items, including the uids sam_get_inventory hands back for a remote player. When the uid names nothing this machine can see it returns nil rather than false, and a warning names the function once.
 
 ### `sam_item_has_trait(item_type, trait)`
 
@@ -1029,9 +1346,9 @@ The item counterpart of sam_monster_has_trait. Takes a TYPE. Answers for all ele
 
 **Returns:** true if the type has that trait (boolean)
 
-### `sam_set_item_appearance(uid, appearance)`
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
 
-> Host-only.
+### `sam_set_item_appearance(uid, appearance)`
 
 Set the appearance number, which chooses a readable book's contents and which potion or scroll look an unidentified item shows. REFUSED on the types where this field is not decoration: a spell tome stores its spell here, a loot bag its contents, the robots their health and a scepter its charges, and all of that is written to the save, so changing it would permanently alter what the item is.
 
@@ -1042,11 +1359,11 @@ Set the appearance number, which chooses a readable book's contents and which po
 
 **Returns:** true on success (boolean), false if the type is refused
 
+**Multiplayer:** `owner`. The state lives on the player's own machine: on the host, a call about a player on another machine (named by `uid`) is carried to that machine and done there, and returns true once it is sent. A player whose game does not run S.A.M is refused with a warning. A client's call is refused with a one-time warning and returns false. Call it on the host. An item uid that sam_get_inventory(p) gave you for a player on another machine is carried to that player's machine and changed there, so true means the change was SENT; if their game refuses it (the item was used up, it is equipped, it is over the stack limit) the reason shows in the host's log. The host's copy shows the change after that player's next report, a few ticks later, so reading it back in the same tick still gives the old value. Do NOT call one of these every tick for another player's item: every call is carried over the reliable channel whether or not it changes anything, so call it when the value changes. If the item is one that player is WEARING, the host's own copy of it (the one combat, AC and sam_can_unequip read) is corrected too; if they swap to a different item in the same instant the correction is dropped and logged rather than applied to the wrong item, unless the two share a type AND an appearance, which the host cannot tell apart. A player whose game does not run S.A.M is refused with a warning.
+
 ### `sam_set_item_beatitude(uid, value)`
 
-> Host-only.
-
-Bless or curse an item. Clamped to a range the tooltips and damage maths can actually represent. Host-only: changing an equipped item from a client would leave the host's copy of that slot stale.
+Bless or curse an item. Clamped to a range the tooltips and damage maths can actually represent. A worn item's new blessing reaches the host's copy used for combat.
 
 | argument | type |
 |---|---|
@@ -1055,9 +1372,9 @@ Bless or curse an item. Clamped to a range the tooltips and damage maths can act
 
 **Returns:** true on success (boolean)
 
-### `sam_set_item_count(uid, count)`
+**Multiplayer:** `owner`. The state lives on the player's own machine: on the host, a call about a player on another machine (named by `uid`) is carried to that machine and done there, and returns true once it is sent. A player whose game does not run S.A.M is refused with a warning. A client's call is refused with a one-time warning and returns false. Call it on the host. An item uid that sam_get_inventory(p) gave you for a player on another machine is carried to that player's machine and changed there, so true means the change was SENT; if their game refuses it (the item was used up, it is equipped, it is over the stack limit) the reason shows in the host's log. The host's copy shows the change after that player's next report, a few ticks later, so reading it back in the same tick still gives the old value. Do NOT call one of these every tick for another player's item: every call is carried over the reliable channel whether or not it changes anything, so call it when the value changes. If the item is one that player is WEARING, the host's own copy of it (the one combat, AC and sam_can_unequip read) is corrected too; if they swap to a different item in the same instant the correction is dropped and logged rather than applied to the wrong item, unless the two share a type AND an appearance, which the host cannot tell apart. A player whose game does not run S.A.M is refused with a warning.
 
-> Host-only.
+### `sam_set_item_count(uid, count)`
 
 Set how many are in a stack, up to the item's own limit; a larger number is refused rather than silently wrapped, and sam_get_max_stack tells you the ceiling. A count of zero or less DESTROYS the item, which happens a moment later rather than instantly: the game is still using that item at the point your script runs, so the removal is queued and carried out on the next frame. Destroying an equipped item is refused, because the engine's cleanup identifies items by their contents and cannot tell two identical ones apart.
 
@@ -1068,11 +1385,11 @@ Set how many are in a stack, up to the item's own limit; a larger number is refu
 
 **Returns:** true if accepted (boolean)
 
+**Multiplayer:** `owner`. The state lives on the player's own machine: on the host, a call about a player on another machine (named by `uid`) is carried to that machine and done there, and returns true once it is sent. A player whose game does not run S.A.M is refused with a warning. A client's call is refused with a one-time warning and returns false. Call it on the host. An item uid that sam_get_inventory(p) gave you for a player on another machine is carried to that player's machine and changed there, so true means the change was SENT; if their game refuses it (the item was used up, it is equipped, it is over the stack limit) the reason shows in the host's log. The host's copy shows the change after that player's next report, a few ticks later, so reading it back in the same tick still gives the old value. Do NOT call one of these every tick for another player's item: every call is carried over the reliable channel whether or not it changes anything, so call it when the value changes. If the item is one that player is WEARING, the host's own copy of it (the one combat, AC and sam_can_unequip read) is corrected too; if they swap to a different item in the same instant the correction is dropped and logged rather than applied to the wrong item, unless the two share a type AND an appearance, which the host cannot tell apart. A player whose game does not run S.A.M is refused with a warning.
+
 ### `sam_set_item_droppable(uid, droppable)`
 
-> Host-only.
-
-Whether this item drops when its owner dies. Turn it off for a boss's crown that is meant to be scenery rather than loot. The true or false is required: leaving it out is refused rather than treated as false, because a silent false pins the item in place for the rest of the game.
+Set an item's droppable flag. Know what the game reads it for: a monster's items when it dies (and no item uid can reach a monster's inventory today), and worn armour a thief steals, which copies the flag. On a player's item it therefore matters only if a thief steals it while it is worn. The true or false is required: leaving it out is refused rather than treated as false.
 
 | argument | type |
 |---|---|
@@ -1081,9 +1398,9 @@ Whether this item drops when its owner dies. Turn it off for a boss's crown that
 
 **Returns:** true on success (boolean)
 
-### `sam_set_item_owner(uid, owner_uid)`
+**Multiplayer:** `owner`. The state lives on the player's own machine: on the host, a call about a player on another machine (named by `uid`) is carried to that machine and done there, and returns true once it is sent. A player whose game does not run S.A.M is refused with a warning. A client's call is refused with a one-time warning and returns false. Call it on the host. An item uid that sam_get_inventory(p) gave you for a player on another machine is carried to that player's machine and changed there, so true means the change was SENT; if their game refuses it (the item was used up, it is equipped, it is over the stack limit) the reason shows in the host's log. The host's copy shows the change after that player's next report, a few ticks later, so reading it back in the same tick still gives the old value. Do NOT call one of these every tick for another player's item: every call is carried over the reliable channel whether or not it changes anything, so call it when the value changes. If the item is one that player is WEARING, the host's own copy of it (the one combat, AC and sam_can_unequip read) is corrected too; if they swap to a different item in the same instant the correction is dropped and logged rather than applied to the wrong item, unless the two share a type AND an appearance, which the host cannot tell apart. A player whose game does not run S.A.M is refused with a warning.
 
-> Host-only.
+### `sam_set_item_owner(uid, owner_uid)`
 
 Reassign ownership. This is how a soulbound or stolen-goods mod says what it means using the game's own bookkeeping instead of inventing a parallel one.
 
@@ -1094,9 +1411,9 @@ Reassign ownership. This is how a soulbound or stolen-goods mod says what it mea
 
 **Returns:** true on success (boolean)
 
-### `sam_set_item_status(uid, status)`
+**Multiplayer:** `owner`. The state lives on the player's own machine: on the host, a call about a player on another machine (named by `uid`) is carried to that machine and done there, and returns true once it is sent. A player whose game does not run S.A.M is refused with a warning. A client's call is refused with a one-time warning and returns false. Call it on the host. An item uid that sam_get_inventory(p) gave you for a player on another machine is carried to that player's machine and changed there, so true means the change was SENT; if their game refuses it (the item was used up, it is equipped, it is over the stack limit) the reason shows in the host's log. The host's copy shows the change after that player's next report, a few ticks later, so reading it back in the same tick still gives the old value. Do NOT call one of these every tick for another player's item: every call is carried over the reliable channel whether or not it changes anything, so call it when the value changes. If the item is one that player is WEARING, the host's own copy of it (the one combat, AC and sam_can_unequip read) is corrected too; if they swap to a different item in the same instant the correction is dropped and logged rather than applied to the wrong item, unless the two share a type AND an appearance, which the host cannot tell apart. A player whose game does not run S.A.M is refused with a warning. An owner set on a client player's item stays while it is in their backpack, but is lost if they drop it: the game's drop packet carries no owner.
 
-> Host-only.
+### `sam_set_item_status(uid, status)`
 
 Set an item's condition, as a name or as a number from 0 (BROKEN) to 4 (EXCELLENT). Anything outside that range is refused rather than quietly rounded to the nearest end, so a wrong number tells you instead of half working. A string is always read as a name, so pass 3 and not "3". Note that dropping a worn item to BROKEN does not take it off: the game refuses to USE a broken item but leaves it equipped, and that is vanilla behaviour rather than something this call gets wrong.
 
@@ -1107,12 +1424,12 @@ Set an item's condition, as a name or as a number from 0 (BROKEN) to 4 (EXCELLEN
 
 **Returns:** true on success (boolean), false if the status is out of range
 
+**Multiplayer:** `owner`. The state lives on the player's own machine: on the host, a call about a player on another machine (named by `uid`) is carried to that machine and done there, and returns true once it is sent. A player whose game does not run S.A.M is refused with a warning. A client's call is refused with a one-time warning and returns false. Call it on the host. An item uid that sam_get_inventory(p) gave you for a player on another machine is carried to that player's machine and changed there, so true means the change was SENT; if their game refuses it (the item was used up, it is equipped, it is over the stack limit) the reason shows in the host's log. The host's copy shows the change after that player's next report, a few ticks later, so reading it back in the same tick still gives the old value. Do NOT call one of these every tick for another player's item: every call is carried over the reliable channel whether or not it changes anything, so call it when the value changes. If the item is one that player is WEARING, the host's own copy of it (the one combat, AC and sam_can_unequip read) is corrected too; if they swap to a different item in the same instant the correction is dropped and logged rather than applied to the wrong item, unless the two share a type AND an appearance, which the host cannot tell apart. A player whose game does not run S.A.M is refused with a warning.
+
 
 ## Live patching
 
 ### `sam_add_class_passive(class, effect)`
-
-> Host-only.
 
 Grant a class a permanent status effect at character creation (bakes at creation; run at mod-load).
 
@@ -1123,9 +1440,11 @@ Grant a class a permanent status effect at character creation (bakes at creation
 
 **Returns:** true on success (boolean)
 
+**Multiplayer:** `all`. Changes a table every machine keeps its own copy of: a host call runs on the host and on every S.A.M client, and is replayed to a client that joins later. A client's call is refused with a one-time warning and returns false. Call it on the host or when your mod loads. A host call applies on every S.A.M player's machine, and a player who joins later gets the host's whole table.
+
 ### `sam_patch_class(class, patch)`
 
-Override a class's STARTING stats/skills (patch = { STR, DEX, ..., MAXHP, skills = {...} }). Per-machine — call on every peer in multiplayer; reverts on unload.
+Override a class's STARTING stats/skills (patch = { STR, DEX, ..., MAXHP, skills = {...} }). Reverts on unload. Tables are read the same way in Lua and JavaScript: keys are case-insensitive, number fields take only numbers and text fields only strings.
 
 | argument | type |
 |---|---|
@@ -1134,9 +1453,11 @@ Override a class's STARTING stats/skills (patch = { STR, DEX, ..., MAXHP, skills
 
 **Returns:** true on success (boolean)
 
+**Multiplayer:** `all`. Changes a table every machine keeps its own copy of: a host call runs on the host and on every S.A.M client, and is replayed to a client that joins later. A client's call is refused with a one-time warning and returns false. Call it on the host or when your mod loads. A host call applies on every S.A.M player's machine, and a player who joins later gets the host's whole table. A patch left over from an earlier singleplayer game can still shape a client's FIRST character in a co-op run, because that character is built before the host's table arrives: patch classes when your mod loads, or reload mods before hosting.
+
 ### `sam_patch_item(item, patch)`
 
-Override an item type's base fields live: { weight, value/gold_value, level, category, slot, tooltip, name/name_identified, name_unidentified, attributes = {...} }. An unrecognised category or slot name is refused rather than being read as WEAPON or NO_EQUIP, which are real values that would have applied silently. The whole patch is checked before any of it is written, so a false really does mean the item is untouched. Category and slot names are matched without regard to case, so "weapon" and "WEAPON" are the same thing.
+Override an item type's base fields live: { weight, value/gold_value, level, category, slot, tooltip, name/name_identified, name_unidentified, attributes = {...} }. An unrecognised category or slot name is refused rather than being read as WEAPON or NO_EQUIP, which are real values that would have applied silently. The whole patch is checked before any of it is written, so a false really does mean the item is untouched. Tables are read the same way in Lua and JavaScript: keys and category and slot names are matched without regard to case, number fields take only numbers and text fields only strings, and value beats gold_value and name_identified beats name.
 
 | argument | type |
 |---|---|
@@ -1145,9 +1466,9 @@ Override an item type's base fields live: { weight, value/gold_value, level, cat
 
 **Returns:** true on success (boolean); false if a category or slot name is not recognised, and then nothing at all is changed
 
-### `sam_patch_monster(monster, patch)`
+**Multiplayer:** `all`. Changes a table every machine keeps its own copy of: a host call runs on the host and on every S.A.M client, and is replayed to a client that joins later. A client's call is refused with a one-time warning and returns false. Call it on the host or when your mod loads. A host call applies on every S.A.M player's machine, and a player who joins later gets the host's whole table.
 
-> Host-only.
+### `sam_patch_monster(monster, patch)`
 
 Override a monster type's base stats (e.g. { HP, MAXHP, STR }) for future spawns; also zero RANDOM_* for exact values.
 
@@ -1158,9 +1479,9 @@ Override a monster type's base stats (e.g. { HP, MAXHP, STR }) for future spawns
 
 **Returns:** true if any field applied (boolean)
 
-### `sam_remove_class_passive(class, effect)`
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
 
-> Host-only.
+### `sam_remove_class_passive(class, effect)`
 
 Remove a class passive effect previously added.
 
@@ -1171,6 +1492,8 @@ Remove a class passive effect previously added.
 
 **Returns:** true on success (boolean)
 
+**Multiplayer:** `all`. Changes a table every machine keeps its own copy of: a host call runs on the host and on every S.A.M client, and is replayed to a client that joins later. A client's call is refused with a one-time warning and returns false. Call it on the host or when your mod loads. A host call applies on every S.A.M player's machine, and a player who joins later gets the host's whole table.
+
 ### `sam_unpatch_class(class)`
 
 Revert a class stat/skill patch.
@@ -1180,6 +1503,8 @@ Revert a class stat/skill patch.
 | `class` | any — one of: `classnum (int)`, `"namespace:class" (string)` |
 
 **Returns:** true on success (boolean)
+
+**Multiplayer:** `all`. Changes a table every machine keeps its own copy of: a host call runs on the host and on every S.A.M client, and is replayed to a client that joins later. A client's call is refused with a one-time warning and returns false. Call it on the host or when your mod loads. A host call applies on every S.A.M player's machine, and a player who joins later gets the host's whole table.
 
 
 ## Logging
@@ -1194,9 +1519,9 @@ Write a line to sam_log.txt (the only output channel). Also exposed as sam.log(m
 
 **Returns:** nothing
 
-### `sam_message(player, text)`
+**Multiplayer:** `local`. Answers for the machine running the script.
 
-> Host-only.
+### `sam_message(player, text)`
 
 Show a line in a player's in-game message log.
 
@@ -1207,12 +1532,12 @@ Show a line in a player's in-game message log.
 
 **Returns:** true on success (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. A line sent to a player on another machine is shown with one leading space, so that player's game can never mistake it for one of Barony's own messages that it acts on.
+
 
 ## Mechanisms
 
 ### `sam_power_entity(uid, on)`
-
-> Host-only.
 
 Power a mechanism on or off, as a switch wired to it would.
 
@@ -1223,9 +1548,9 @@ Power a mechanism on or off, as a switch wired to it would.
 
 **Returns:** true on success (boolean)
 
-### `sam_set_door(uid, open)`
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
 
-> Host-only.
+### `sam_set_door(uid, open)`
 
 Open or close a door. Find one with sam_find_entities(x, y, r, "door").
 
@@ -1236,9 +1561,9 @@ Open or close a door. Find one with sam_find_entities(x, y, r, "door").
 
 **Returns:** true on success (boolean)
 
-### `sam_set_door_locked(uid, locked)`
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
 
-> Host-only.
+### `sam_set_door_locked(uid, locked)`
 
 Lock or unlock a door.
 
@@ -1249,9 +1574,9 @@ Lock or unlock a door.
 
 **Returns:** true on success (boolean)
 
-### `sam_toggle_switch(uid)`
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
 
-> Host-only.
+### `sam_toggle_switch(uid)`
 
 Flip a lever or switch, driving whatever it is wired to.
 
@@ -1261,12 +1586,12 @@ Flip a lever or switch, driving whatever it is wired to.
 
 **Returns:** true on success (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
+
 
 ## Monsters
 
 ### `sam_alert_allies(uid, [attacker_uid])`
-
-> Host-only.
 
 Wake every ally near this monster onto an attacker, the way the engine does when something is hit in a room full of its friends. The attacker may be left out for "alerted by nothing in particular".
 
@@ -1277,9 +1602,9 @@ Wake every ally near this monster onto an attacker, the way the engine does when
 
 **Returns:** true if the call ran (boolean)
 
-### `sam_apply_monster_effect(uid, effect, ticks)`
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
 
-> Host-only.
+### `sam_apply_monster_effect(uid, effect, ticks)`
 
 Apply a status effect to a monster by UID for N ticks.
 
@@ -1291,11 +1616,13 @@ Apply a status effect to a monster by UID for N ticks.
 
 **Returns:** true unless immune (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
+
 ### `sam_clear_monster_target(uid, [force])`
 
-> Host-only.
-
 Make a monster forget its current target.
+
+The engine can REFUSE — a monster whose AI insists keeps its target unless you pass force — and that refusal is passed straight through, so false means "it would not" rather than "nothing happened".
 
 | argument | type |
 |---|---|
@@ -1303,6 +1630,8 @@ Make a monster forget its current target.
 | `force` *(optional)* | boolean |
 
 **Returns:** true if it let go (boolean)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
 
 ### `sam_get_monster_data(uid, key)`
 
@@ -1315,6 +1644,8 @@ Read per-monster scratch data (boss phases, etc.); in-memory, cleared on shutdow
 
 **Returns:** the stored value, or nil/undefined
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript).
+
 ### `sam_get_monster_effect_duration(uid, effect)`
 
 How many ticks of an effect a monster has left.
@@ -1324,7 +1655,9 @@ How many ticks of an effect a monster has left.
 | `uid` | uid |
 | `effect` | string — one of: `ASLEEP`, `POISONED`, `STUNNED`, `CONFUSED`, `DRUNK`, `INVISIBLE`, `BLIND`, `GREASY`, `MESSY`, `FAST`, `PARALYZED`, `LEVITATING`, `TELEPATH`, `VOMITING`, `BLEEDING`, `SLOW`, `MAGICRESIST`, `MAGICREFLECT`, `VAMPIRICAURA`, `SHRINE_RED_BUFF`, `SHRINE_GREEN_BUFF`, `SHRINE_BLUE_BUFF`, `HP_REGEN`, `MP_REGEN`, `PACIFY`, `POLYMORPH`, `KNOCKBACK`, `WITHDRAWAL`, `POTION_STR`, `SHAPESHIFT`, `WEBBED`, `FEAR`, `MAGICAMPLIFY`, `DISORIENTED`, `SHADOW_TAGGED`, `TROLLS_BLOOD`, `FLUTTER`, `DASH`, `DISTRACTED_COOLDOWN`, `MIMIC_LOCKED`, `ROOTED`, `NAUSEA_PROTECTION`, `CON_BONUS`, `PWR`, `AGILITY`, `RALLY`, `MARIGOLD`, `ENSEMBLE_FLUTE`, `ENSEMBLE_LYRE`, `ENSEMBLE_DRUM`, `ENSEMBLE_LUTE`, `ENSEMBLE_HORN`, `LIFT`, `GUARD_SPIRIT`, `GUARD_BODY`, `DIVINE_GUARD`, `NIMBLENESS`, `GREATER_MIGHT`, `COUNSEL`, `STURDINESS`, `BLESS_FOOD`, `PINPOINT`, `PENANCE`, `SACRED_PATH`, `DETECT_ENEMY`, `BLOOD_WARD`, `TRUE_BLOOD`, `DIVINE_ZEAL`, `MAXIMISE`, `MINIMISE`, `WEAKNESS`, `INCOHERENCE`, `OVERCHARGE`, `ENVENOM_WEAPON`, `MAGIC_GREASE`, `COMMAND`, `MIMIC_VOID`, `CURSE_FLESH`, `NUMBING_BOLT`, `DELAY_PAIN`, `SEEK_CREATURE`, `TABOO`, `COURAGE`, `COWARDICE`, `SPORES`, `ABUNDANCE`, `GREATER_ABUNDANCE`, `PRESERVE`, `MIST_FORM`, `FORCE_SHIELD`, `LIGHTEN_LOAD`, `ATTRACT_ITEMS`, `RETURN_ITEM`, `DEMESNE_DOOR`, `REFLECTOR_SHIELD`, `DIZZY`, `SPIN`, `CRITICAL_SPELL`, `MAGIC_WELL`, `STATIC`, `ABSORB_MAGIC`, `FLAME_CLOAK`, `DUSTED`, `NOISE_VISIBILITY`, `RATION_SPICY`, `RATION_SOUR`, `RATION_BITTER`, `RATION_HEARTY`, `RATION_HERBAL`, `RATION_SWEET`, `GROWTH`, `THORNS`, `BLADEVINES`, `BASTION_MUSHROOM`, `BASTION_ROOTS`, `FOCI_LIGHT_PEACE`, `FOCI_LIGHT_JUSTICE`, `FOCI_LIGHT_PROVIDENCE`, `FOCI_LIGHT_PURITY`, `FOCI_LIGHT_SANCTUARY`, `STASIS`, `HP_MP_REGEN`, `DISRUPTED`, `FROST`, `MAGICIANS_ARMOR`, `PROJECT_SPIRIT`, `DEFY_FLESH`, `PINPOINT_DAMAGE`, `SALAMANDER_HEART`, `DIVINE_FIRE`, `HEALING_WORD`, `HOLY_FIRE`, `SIGIL`, `SANCTUARY`, `DUCKED` |
 
-**Returns:** remaining ticks (int; 0 inactive, -1 permanent)
+**Returns:** remaining ticks (int; 0 inactive, -1 permanent; nil on a client)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript).
 
 ### `sam_get_monster_effect_strength(uid, effect)`
 
@@ -1337,6 +1670,8 @@ A monster effect's strength/magnitude.
 
 **Returns:** strength/tier (int; 0 if inactive)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript.
+
 ### `sam_get_monster_effects(uid)`
 
 Every active effect on a monster at once. Custom slots appear under the id you declared them with, like "mymod:frostbite", and vanilla ones under the lowercase name the effect events use.
@@ -1346,6 +1681,8 @@ Every active effect on a monster at once. Custom slots appear under the id you d
 | `uid` | uid |
 
 **Returns:** array/table of { name, ticks, strength }
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns an empty table (an empty array in JavaScript). In Lua the names now match JavaScript and the effect events: lowercase for a vanilla effect, the mod's 'ns:effect' for a custom one, and 'CUSTOM:<id>' for an unnamed slot. A Lua script comparing against 'POISONED' must change.
 
 ### `sam_get_monster_stat(uid, stat)`
 
@@ -1358,6 +1695,8 @@ Read a monster's stat by UID. DEX aliases SPEED.
 
 **Returns:** the stat value (number; 0 if not a monster)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript.
+
 ### `sam_get_monster_target(uid)`
 
 Get the player index a monster is currently targeting (if any).
@@ -1366,11 +1705,15 @@ Get the player index a monster is currently targeting (if any).
 |---|---|
 | `uid` | uid |
 
-**Returns:** the targeted player index, or -1 (number)
+**Returns:** the targeted player index, or -1 (number); nil on a client
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). A client's call returns nil, never 0, because 0 would read as "hunting the host".
 
 ### `sam_get_monster_target_uid(uid)`
 
 Read back what a monster is currently hunting, as a uid, whether that is a player, another monster or anything else with a body.
+
+sam_get_monster_target answers a player INDEX and -1 for everything else, so it cannot see a monster hunting another monster. This is the reader that matches sam_set_monster_target_uid. The stored number is resolved before it is handed back: a monster does not forget its target when that target dies, and the engine reuses uids, so a raw read could name something else entirely.
 
 | argument | type |
 |---|---|
@@ -1378,9 +1721,9 @@ Read back what a monster is currently hunting, as a uid, whether that is a playe
 
 **Returns:** the uid of whatever this monster is hunting, or 0 for nobody (int)
 
-### `sam_kill_monster(uid)`
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript.
 
-> Host-only.
+### `sam_kill_monster(uid)`
 
 Kill a monster by UID (runs its normal death + drops; fires on_monster_died).
 
@@ -1390,9 +1733,9 @@ Kill a monster by UID (runs its normal death + drops; fires on_monster_died).
 
 **Returns:** true on success (boolean)
 
-### `sam_monster_attack(uid)`
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
 
-> Host-only.
+### `sam_monster_attack(uid)`
 
 Make a monster swing immediately, using whatever attack pose its current weapon calls for.
 
@@ -1402,11 +1745,11 @@ Make a monster swing immediately, using whatever attack pose its current weapon 
 
 **Returns:** true on success (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
+
 ### `sam_monster_can_wield(uid, item_type)`
 
-> Host-only.
-
-Whether a creature's AI knows how to use a kind of item. Only five species have that behaviour at all: goblins, humans, goatmen, automatons and shadows. Everything else answers false, including custom races, even though sam_monster_equip will happily put the item in their hand. Host-only, because it reads the monster's stats.
+Whether a creature's AI knows how to use a kind of item. Only five species have that behaviour at all: goblins, humans, goatmen, automatons and shadows. Everything else answers false, including custom races, even though sam_monster_equip will happily put the item in their hand. It runs on the host, because it reads the monster's stats.
 
 | argument | type |
 |---|---|
@@ -1415,11 +1758,13 @@ Whether a creature's AI knows how to use a kind of item. Only five species have 
 
 **Returns:** true if that creature's AI will pick up and use the item (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript.
+
 ### `sam_monster_charge(uid, [ticks])`
 
-> Host-only.
-
 Send a monster into a straight-line charge for N ticks (50 = 1 second, default 50, max 500). Aims at its target if it has line of sight, otherwise charges along its current facing.
+
+Self-terminating: it stops when the timer ends OR the instant it hits anything, so you cannot wedge a monster in a wall. Drives a charge behaviour that shipped in the engine fully written but unreachable.
 
 | argument | type |
 |---|---|
@@ -1428,23 +1773,26 @@ Send a monster into a straight-line charge for N ticks (50 = 1 second, default 5
 
 **Returns:** true on success (boolean)
 
-### `sam_monster_equip(uid, slot, item)`
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
 
-> Host-only.
+### `sam_monster_equip(uid, slot, item, [beatitude], [status], [count])`
 
-Put an item into a monster's equipment slot. Resolves a custom "ns:item" first and falls back to a vanilla item name. An unknown slot is refused and the valid list is logged.
+Put an item into a monster's equipment slot. Resolves a custom "ns:item" first and falls back to a vanilla item name. An unknown slot is refused and the valid list is logged. The last three arguments are the same three sam_grant_item takes, so a monster can be given a cursed, a broken or a stacked item.
 
 | argument | type |
 |---|---|
 | `uid` | int |
 | `slot` | string — one of: `helmet`, `breastplate`, `gloves`, `shoes`, `shield`, `weapon`, `cloak`, `amulet`, `ring`, `mask` |
 | `item` | string ("ns:item" from your mod, or a vanilla item name) |
+| `beatitude` *(optional)* | int (default 0; negative is cursed, positive blessed) |
+| `status` *(optional)* | int (0 BROKEN to 4 EXCELLENT, default 4) |
+| `count` *(optional)* | int (default 1) |
 
 **Returns:** true on success (boolean)
 
-### `sam_monster_face(uid, tileX, tileY)`
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
 
-> Host-only.
+### `sam_monster_face(uid, tileX, tileY)`
 
 Turn a monster to look at a tile. Aims at the tile centre. Pair it with sam_monster_charge to aim a charge.
 
@@ -1455,6 +1803,8 @@ Turn a monster to look at a tile. Aims at the tile centre. Pair it with sam_mons
 | `tileY` | int |
 
 **Returns:** true on success (boolean)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
 
 ### `sam_monster_has_effect(uid, effect)`
 
@@ -1467,11 +1817,13 @@ The monster counterpart of sam_has_effect — e.g. react when a monster you just
 
 **Returns:** whether the monster has the effect (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript.
+
 ### `sam_monster_path_to(uid, tileX, tileY)`
 
-> Host-only.
-
 Path a monster to a tile using the engine's real pathfinder, then put it in the hunt state so it walks there. Tile coordinates, matching sam_get_position. Returns false when the destination is unreachable.
+
+Barony has no per-species AI — every creature runs one shared state machine — so this steers that machine rather than replacing a brain.
 
 | argument | type |
 |---|---|
@@ -1481,9 +1833,9 @@ Path a monster to a tile using the engine's real pathfinder, then put it in the 
 
 **Returns:** true if a path was found (boolean)
 
-### `sam_monster_unequip(uid, slot)`
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
 
-> Host-only.
+### `sam_monster_unequip(uid, slot)`
 
 Empty one of a monster's equipment slots. Pairs with sam_monster_equip for disarm effects and for swapping a creature's loadout mid-fight.
 
@@ -1494,9 +1846,9 @@ Empty one of a monster's equipment slots. Pairs with sam_monster_equip for disar
 
 **Returns:** true on success (boolean)
 
-### `sam_remove_monster_effect(uid, effect)`
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
 
-> Host-only.
+### `sam_remove_monster_effect(uid, effect)`
 
 Clear a status effect from a monster by UID — the monster counterpart of sam_remove_effect.
 
@@ -1507,9 +1859,11 @@ Clear a status effect from a monster by UID — the monster counterpart of sam_r
 
 **Returns:** true on success (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
+
 ### `sam_set_monster_data(uid, key, value)`
 
-Store any primitive/table value in a monster's scratch store (JSON-marshaled).
+Store any primitive/table value in a monster's scratch store (JSON-marshaled). Returns true in Lua and JavaScript alike.
 
 | argument | type |
 |---|---|
@@ -1519,9 +1873,9 @@ Store any primitive/table value in a monster's scratch store (JSON-marshaled).
 
 **Returns:** true on success (boolean)
 
-### `sam_set_monster_name(uid, name)`
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
 
-> Host-only.
+### `sam_set_monster_name(uid, name)`
 
 Rename a living monster. The name is what the player sees when targeting it and what appears in the obituary, so this is how a scripted boss or a named rare gets its title.
 
@@ -1532,11 +1886,11 @@ Rename a living monster. The name is what the player sees when targeting it and 
 
 **Returns:** true on success (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. A follower's new name reaches its owner's ally panel and nametag, if the owner's game runs S.A.M.
+
 ### `sam_set_monster_stat(uid, stat, value)`
 
-> Host-only.
-
-Set a monster's stat by UID (bounded).
+Set a monster's stat by UID (bounded). MAXHP is capped at 32767, the enemy HP bar's wire size.
 
 | argument | type |
 |---|---|
@@ -1546,9 +1900,9 @@ Set a monster's stat by UID (bounded).
 
 **Returns:** true on success (boolean)
 
-### `sam_set_monster_target(uid, player)`
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. A remote player's follower shows its new MAX HP and level on its owner's ally panel.
 
-> Host-only.
+### `sam_set_monster_target(uid, player)`
 
 Make a monster acquire a player as its attack target.
 
@@ -1559,11 +1913,13 @@ Make a monster acquire a player as its attack target.
 
 **Returns:** true on success (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
+
 ### `sam_set_monster_target_uid(uid, target_uid, [was_hit])`
 
-> Host-only.
-
 Point a monster at ANY entity, not just a player: another monster, a companion, anything with a body.
+
+sam_set_monster_target takes a player INDEX and can only ever aim at a player, so monster-versus-monster aggro was unreachable even though the engine method itself accepts any entity.
 
 | argument | type |
 |---|---|
@@ -1573,9 +1929,9 @@ Point a monster at ANY entity, not just a player: another monster, a companion, 
 
 **Returns:** true if the monster took the target (boolean)
 
-### `sam_spawn_monsters(near_uid, monster_type, count)`
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
 
-> Host-only.
+### `sam_spawn_monsters(near_uid, monster_type, count)`
 
 Spawn `count` (1-8) monsters of a type near an anchor entity's UID.
 
@@ -1587,20 +1943,30 @@ Spawn `count` (1-8) monsters of a type near an anchor entity's UID.
 
 **Returns:** the number actually spawned (number)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns 0.
+
 
 ## Multiplayer
 
 ### `sam_is_host()`
 
-Whether this machine is the host. Most functions are host-only and warn on a client; check this first instead of letting a client fill the log with refusals.
+Whether this machine is the host. Functions of kind host warn once on a client; check this first to skip a whole block of host work.
+
+Scripts load before multiplayer starts, so while mods load this answers true on every machine. Call it inside events, and never cache the answer at load.
 
 **Returns:** true on the host or in singleplayer (boolean)
+
+**Multiplayer:** `local`. Answers for the machine running the script.
 
 ### `sam_local_player()`
 
 The player index THIS machine controls.
 
+Not always 0. On a multiplayer client it is that client's own index, which is the assumption most singleplayer-tested mods quietly bake in. While mods load it answers 0 on every machine (scripts load before multiplayer starts), so call it inside events and never cache it at load.
+
 **Returns:** player index (int)
+
+**Multiplayer:** `local`. Answers for the machine running the script.
 
 ### `sam_player_count()`
 
@@ -1608,12 +1974,14 @@ How many players are actually connected right now.
 
 **Returns:** connected players (int)
 
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler. Correct on every machine after a player times out or is kicked with /kick (while a mod is loaded).
+
 
 ## Networking
 
 ### `sam_send_packet(target, tag, payload)`
 
-Send a mod-defined message to another machine. Barony's packet ids are a fixed table, so before this a co-op mod had no way to tell the other side anything at all. On a client the target is ignored and the packet always goes to the host. The other side receives an "on_packet" event with .from, .tag and .payload. One datagram only — use sam_save_data for bulk state.
+Send a mod-defined message to another machine. Barony's packet ids are a fixed table, so before this a co-op mod had no way to tell the other side anything at all. On a client the target is ignored and the packet always goes to the host. The other side receives an "on_packet" event with .from, .tag and .payload. The tag is 1 to 32 characters and the payload at most 400 bytes: one datagram, so split bulk data into several packets.
 
 | argument | type |
 |---|---|
@@ -1623,10 +1991,12 @@ Send a mod-defined message to another machine. Barony's packet ids are a fixed t
 
 **Returns:** true if sent (boolean)
 
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler. Works only once the game has started: in the lobby it is refused with a warning, and in singleplayer it returns false. Delivery is reliable but NOT ordered, so number your packets if order matters. A payload may contain zero bytes: Lua handlers receive the exact bytes, JavaScript handlers receive text (invalid UTF-8 is replaced), so send text or JSON from mods meant for both runtimes. The host ignores a packet that claims to come from slot 0 or from an empty slot. This is how a client's own script (in on_packet) tells the host something.
+
 
 ## Panels
 
-### `sam_ui_button(panel, id, x, y, w, h, text)`
+### `sam_ui_button(panel, id, x, y, w, h, text, [player])`
 
 Put a clickable button in a panel. Clicking it fires a "ui.on_click" event whose .panel and .widget match what you passed here, so one handler can serve every button by switching on .widget. The panel must have been opened with modal = true or the player will have no cursor to click with.
 
@@ -1639,30 +2009,39 @@ Put a clickable button in a panel. Clicking it fires a "ui.on_click" event whose
 | `w` | int |
 | `h` | int |
 | `text` | string |
+| `player` *(optional)* | int (whose screen; left out: the player the current event is about, else this machine's own; -1: every player) |
 
 **Returns:** true, or false if that panel is not open (boolean)
 
-### `sam_ui_clear(panel)`
+**Multiplayer:** `screen`. Shows on one player's own screen, picked by the optional last argument `player`: left out, the player the current event is about, else this machine's own; -1 is every player. On the host, a call for a player on another machine is carried there and returns true once it is sent; a player whose game does not run S.A.M is refused with a warning. A client can show things only on its own screen. Inside an event about a player, leaving the player out shows it to THAT player. A timer callback is not an event: there, with no player, it shows on the host's own screen, so keep the player in a local (local p = e.player) and pass it. Update on change rather than every tick: every call for a remote player is a network message.
+
+### `sam_ui_clear(panel, [player])`
 
 Remove every widget from a panel but leave the panel itself open. This is how you rebuild a changing screen — clear, then re-declare the rows — without the window flickering shut and open again.
 
 | argument | type |
 |---|---|
 | `panel` | string |
+| `player` *(optional)* | int (whose screen; left out: the player the current event is about, else this machine's own; -1: every player) |
 
 **Returns:** true, or false if the panel is not open (boolean)
 
-### `sam_ui_close([panel])`
+**Multiplayer:** `screen`. Shows on one player's own screen, picked by the optional last argument `player`: left out, the player the current event is about, else this machine's own; -1 is every player. On the host, a call for a player on another machine is carried there and returns true once it is sent; a player whose game does not run S.A.M is refused with a warning. A client can show things only on its own screen. Inside an event about a player, leaving the player out shows it to THAT player. A timer callback is not an event: there, with no player, it shows on the host's own screen, so keep the player in a local (local p = e.player) and pass it. Update on change rather than every tick: every call for a remote player is a network message.
 
-Close one panel, or every panel your mod has open if you pass nothing. Closing the last modal panel restores the player's camera control. Always close your panels on player.on_death and game.on_game_start so a leftover window cannot follow the player into the next run.
+### `sam_ui_close([panel], [player])`
+
+Close one panel, or every panel your mod has open if you pass nothing (sam_ui_close(nil, p) closes all of them on one player's screen). Closing the last modal panel restores the player's camera control. Always close your panels on player.on_death and game.on_game_start so a leftover window cannot follow the player into the next run.
 
 | argument | type |
 |---|---|
 | `panel` *(optional)* | string (optional — omit to close ALL of your mod's panels) |
+| `player` *(optional)* | int (whose screen; left out: the player the current event is about, else this machine's own; -1: every player) |
 
 **Returns:** true, or false if that panel was not open (boolean)
 
-### `sam_ui_font(panel, id, font)`
+**Multiplayer:** `screen`. Shows on one player's own screen, picked by the optional last argument `player`: left out, the player the current event is about, else this machine's own; -1 is every player. On the host, a call for a player on another machine is carried there and returns true once it is sent; a player whose game does not run S.A.M is refused with a warning. A client can show things only on its own screen. Inside an event about a player, leaving the player out shows it to THAT player. A timer callback is not an event: there, with no player, it shows on the host's own screen, so keep the player in a local (local p = e.player) and pass it. Update on change rather than every tick: every call for a remote player is a network message.
+
+### `sam_ui_font(panel, id, font, [player])`
 
 Change the font of one widget, or of an entire panel by passing an empty id -- which is the only way to restyle a panel's text in one call rather than widget by widget. Panels default to a small 16px face because the game's standard 32px font makes any list look enormous. The number after the first # is the pixel size — raise it for a heading, and raise the row height to match if it is a list.
 
@@ -1671,10 +2050,13 @@ Change the font of one widget, or of an entire panel by passing an empty id -- w
 | `panel` | string |
 | `id` | string (a widget's id, or "" to set the whole panel's font) |
 | `font` | string (a font path, e.g. "fonts/pixel_maz_multiline.ttf#16#2") |
+| `player` *(optional)* | int (whose screen; left out: the player the current event is about, else this machine's own; -1: every player) |
 
 **Returns:** true, or false if that panel or widget does not exist (boolean)
 
-### `sam_ui_image(panel, id, x, y, w, h, image, [color])`
+**Multiplayer:** `screen`. Shows on one player's own screen, picked by the optional last argument `player`: left out, the player the current event is about, else this machine's own; -1 is every player. On the host, a call for a player on another machine is carried there and returns true once it is sent; a player whose game does not run S.A.M is refused with a warning. A client can show things only on its own screen. Inside an event about a player, leaving the player out shows it to THAT player. A timer callback is not an event: there, with no player, it shows on the host's own screen, so keep the player in a local (local p = e.player) and pass it. Update on change rather than every tick: every call for a remote player is a network message.
+
+### `sam_ui_image(panel, id, x, y, w, h, image, [color], [player])`
 
 Put one of your mod's pictures in a panel, scaled to w by h. Resolves the same way sam_show_image does. The colour argument tints the picture and its alpha fades it, so the same file can be reused greyed-out for a locked entry.
 
@@ -1688,10 +2070,13 @@ Put one of your mod's pictures in a panel, scaled to w by h. Resolves the same w
 | `h` | int |
 | `image` | string ("ns:id", a bare name, or a path inside your mod) |
 | `color` *(optional)* | colour (optional, default white = untinted) |
+| `player` *(optional)* | int (whose screen; left out: the player the current event is about, else this machine's own; -1: every player) |
 
 **Returns:** true, or false if the picture could not be resolved (boolean)
 
-### `sam_ui_input(panel, id, x, y, w, h, [text])`
+**Multiplayer:** `screen`. Shows on one player's own screen, picked by the optional last argument `player`: left out, the player the current event is about, else this machine's own; -1 is every player. On the host, a call for a player on another machine is carried there and returns true once it is sent; a player whose game does not run S.A.M is refused with a warning. A client can show things only on its own screen. Inside an event about a player, leaving the player out shows it to THAT player. A timer callback is not an event: there, with no player, it shows on the host's own screen, so keep the player in a local (local p = e.player) and pass it. Update on change rather than every tick: every call for a remote player is a network message.
+
+### `sam_ui_input(panel, id, x, y, w, h, [text], [player])`
 
 Put an editable text box in a panel — a search field, a name entry, a price offer. Read what the player typed with sam_ui_input_text. Place the box clear of any label: a label wide enough to overlap the box will sit on top of it.
 
@@ -1704,31 +2089,40 @@ Put an editable text box in a panel — a search field, a name entry, a price of
 | `w` | int |
 | `h` | int |
 | `text` *(optional)* | string (optional starting contents) |
+| `player` *(optional)* | int (whose screen; left out: the player the current event is about, else this machine's own; -1: every player) |
 
 **Returns:** true, or false if that panel is not open (boolean)
 
-### `sam_ui_input_text(panel, id)`
+**Multiplayer:** `screen`. Shows on one player's own screen, picked by the optional last argument `player`: left out, the player the current event is about, else this machine's own; -1 is every player. On the host, a call for a player on another machine is carried there and returns true once it is sent; a player whose game does not run S.A.M is refused with a warning. A client can show things only on its own screen. Inside an event about a player, leaving the player out shows it to THAT player. A timer callback is not an event: there, with no player, it shows on the host's own screen, so keep the player in a local (local p = e.player) and pass it. Update on change rather than every tick: every call for a remote player is a network message.
 
-Read what the player has typed into one of your text boxes. Poll it from a button handler, or from on_tick if you want a search list to filter as they type. Pressing Enter in the box also fires "ui.on_submit" with the text in .value.
+### `sam_ui_input_text(panel, id, [player])`
+
+Read what the player has typed into one of your text boxes. Poll it from a button handler, or when a ui.on_submit arrives. Pressing Enter in the box also fires "ui.on_submit" with the text in .value.
 
 | argument | type |
 |---|---|
 | `panel` | string |
 | `id` | string (the input's id) |
+| `player` *(optional)* | int (whose panel; left out: the player the current event is about, else this machine's own) |
 
 **Returns:** the current contents (string), or "" if there is no such input
 
-### `sam_ui_is_open(panel)`
+**Multiplayer:** `read`. The host can read every player; a client can read only its own player (`player`), and asking about another is refused with a one-time warning and returns nil (undefined in JavaScript). Left out, `player` is the player the current event is about, else this machine's own. On the host, a player on another machine is answered from what their game last reported (typing is reported a few times a second), so right after sam_ui_input it can still hold the old text for a moment.
+
+### `sam_ui_is_open(panel, [player])`
 
 Ask whether one of your panels is on screen. Useful to make a key or an item toggle a window instead of re-opening it, and to skip expensive refresh work while it is closed.
 
 | argument | type |
 |---|---|
 | `panel` | string |
+| `player` *(optional)* | int (whose panel; left out: the player the current event is about, else this machine's own) |
 
 **Returns:** true if that panel is currently open (boolean)
 
-### `sam_ui_label(panel, id, x, y, w, text, [color])`
+**Multiplayer:** `read`. The host can read every player; a client can read only its own player (`player`), and asking about another is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript. Left out, `player` is the player the current event is about, else this machine's own. On the host, a player on another machine is answered from what their game last reported, so right after sam_ui_open it can still say closed for a moment.
+
+### `sam_ui_label(panel, id, x, y, w, text, [color], [player])`
 
 Put a line of text in a panel. x/y are measured from the panel's top-left corner, not the screen. Give w enough room for the text or it will be cut off — sam_ui_text_size measures a string before you place it. Re-declaring the same id replaces the text, which is how you update a running total.
 
@@ -1741,10 +2135,13 @@ Put a line of text in a panel. x/y are measured from the panel's top-left corner
 | `w` | int |
 | `text` | string |
 | `color` *(optional)* | colour (optional, default warm parchment) |
+| `player` *(optional)* | int (whose screen; left out: the player the current event is about, else this machine's own; -1: every player) |
 
 **Returns:** true, or false if that panel is not open (boolean)
 
-### `sam_ui_list(panel, id, x, y, w, h)`
+**Multiplayer:** `screen`. Shows on one player's own screen, picked by the optional last argument `player`: left out, the player the current event is about, else this machine's own; -1 is every player. On the host, a call for a player on another machine is carried there and returns true once it is sent; a player whose game does not run S.A.M is refused with a warning. A client can show things only on its own screen. Inside an event about a player, leaving the player out shows it to THAT player. A timer callback is not an event: there, with no player, it shows on the host's own screen, so keep the player in a local (local p = e.player) and pass it. Update on change rather than every tick: every call for a remote player is a network message.
+
+### `sam_ui_list(panel, id, x, y, w, h, [player])`
 
 Create an empty scrolling list in a panel. Fill it with sam_ui_list_add. This is the widget for a shop's stock, a bestiary, a recipe index or a quest log — anything with more entries than fit on screen.
 
@@ -1756,10 +2153,13 @@ Create an empty scrolling list in a panel. Fill it with sam_ui_list_add. This is
 | `y` | int |
 | `w` | int |
 | `h` | int |
+| `player` *(optional)* | int (whose screen; left out: the player the current event is about, else this machine's own; -1: every player) |
 
 **Returns:** true, or false if that panel is not open (boolean)
 
-### `sam_ui_list_add(panel, id, row_id, text, [color])`
+**Multiplayer:** `screen`. Shows on one player's own screen, picked by the optional last argument `player`: left out, the player the current event is about, else this machine's own; -1 is every player. On the host, a call for a player on another machine is carried there and returns true once it is sent; a player whose game does not run S.A.M is refused with a warning. A client can show things only on its own screen. Inside an event about a player, leaving the player out shows it to THAT player. A timer callback is not an event: there, with no player, it shows on the host's own screen, so keep the player in a local (local p = e.player) and pass it. Update on change rather than every tick: every call for a remote player is a network message.
+
+### `sam_ui_list_add(panel, id, row_id, text, [color], [player])`
 
 Append one row to a list. Clicking a row fires "ui.on_select" with .panel, .widget set to the list and .value set to the row_id you chose here — so make row_id something you can act on, like an item id, rather than a display string.
 
@@ -1770,10 +2170,13 @@ Append one row to a list. Clicking a row fires "ui.on_select" with .panel, .widg
 | `row_id` | string (your id for this row) |
 | `text` | string |
 | `color` *(optional)* | colour (optional) |
+| `player` *(optional)* | int (whose screen; left out: the player the current event is about, else this machine's own; -1: every player) |
 
 **Returns:** true, or false if that panel or list does not exist (boolean)
 
-### `sam_ui_list_clear(panel, id)`
+**Multiplayer:** `screen`. Shows on one player's own screen, picked by the optional last argument `player`: left out, the player the current event is about, else this machine's own; -1 is every player. On the host, a call for a player on another machine is carried there and returns true once it is sent; a player whose game does not run S.A.M is refused with a warning. A client can show things only on its own screen. Inside an event about a player, leaving the player out shows it to THAT player. A timer callback is not an event: there, with no player, it shows on the host's own screen, so keep the player in a local (local p = e.player) and pass it. Update on change rather than every tick: every call for a remote player is a network message.
+
+### `sam_ui_list_clear(panel, id, [player])`
 
 Empty one list without touching the rest of the panel. Use this before re-filling a list from a search box or a filter, so the old results do not pile up under the new ones.
 
@@ -1781,10 +2184,13 @@ Empty one list without touching the rest of the panel. Use this before re-fillin
 |---|---|
 | `panel` | string |
 | `id` | string (the list's id) |
+| `player` *(optional)* | int (whose screen; left out: the player the current event is about, else this machine's own; -1: every player) |
 
 **Returns:** true, or false if that panel or list does not exist (boolean)
 
-### `sam_ui_list_row_height(panel, id, pixels)`
+**Multiplayer:** `screen`. Shows on one player's own screen, picked by the optional last argument `player`: left out, the player the current event is about, else this machine's own; -1 is every player. On the host, a call for a player on another machine is carried there and returns true once it is sent; a player whose game does not run S.A.M is refused with a warning. A client can show things only on its own screen. Inside an event about a player, leaving the player out shows it to THAT player. A timer callback is not an event: there, with no player, it shows on the host's own screen, so keep the player in a local (local p = e.player) and pass it. Update on change rather than every tick: every call for a remote player is a network message.
+
+### `sam_ui_list_row_height(panel, id, pixels, [player])`
 
 Set how tall each row of a list is. Raise it if you switched that list to a larger font, or rows will overlap.
 
@@ -1793,10 +2199,13 @@ Set how tall each row of a list is. Raise it if you switched that list to a larg
 | `panel` | string |
 | `id` | string (the list's id) |
 | `pixels` | int |
+| `player` *(optional)* | int (whose screen; left out: the player the current event is about, else this machine's own; -1: every player) |
 
 **Returns:** true, or false if that panel or list does not exist (boolean)
 
-### `sam_ui_open(panel, x, y, w, h, [title], [modal])`
+**Multiplayer:** `screen`. Shows on one player's own screen, picked by the optional last argument `player`: left out, the player the current event is about, else this machine's own; -1 is every player. On the host, a call for a player on another machine is carried there and returns true once it is sent; a player whose game does not run S.A.M is refused with a warning. A client can show things only on its own screen. Inside an event about a player, leaving the player out shows it to THAT player. A timer callback is not an event: there, with no player, it shows on the host's own screen, so keep the player in a local (local p = e.player) and pass it. Update on change rather than every tick: every call for a remote player is a network message.
+
+### `sam_ui_open(panel, x, y, w, h, [title], [modal], [player])`
 
 Open one of your mod's panels at a position and size given in VIRTUAL screen units (1280x720 at the default UI scale, not your monitor's pixels). modal = true frees the mouse cursor so the player can click your widgets, and hands camera control back when the panel closes — use it for anything with buttons. A non-modal panel is display-only and leaves the player in normal look-around mode. Opening a panel id that is already open re-positions it instead of opening a second one.
 
@@ -1809,10 +2218,13 @@ Open one of your mod's panels at a position and size given in VIRTUAL screen uni
 | `h` | int |
 | `title` *(optional)* | string (optional, "" for none) |
 | `modal` *(optional)* | boolean (optional, default false) |
+| `player` *(optional)* | int (whose screen; left out: the player the current event is about, else this machine's own; -1: every player) |
 
 **Returns:** true if the panel opened (boolean)
 
-### `sam_ui_panel_style(panel, background, border, [border_width])`
+**Multiplayer:** `screen`. Shows on one player's own screen, picked by the optional last argument `player`: left out, the player the current event is about, else this machine's own; -1 is every player. On the host, a call for a player on another machine is carried there and returns true once it is sent; a player whose game does not run S.A.M is refused with a warning. A client can show things only on its own screen. Inside an event about a player, leaving the player out shows it to THAT player. A timer callback is not an event: there, with no player, it shows on the host's own screen, so keep the player in a local (local p = e.player) and pass it. Update on change rather than every tick: every call for a remote player is a network message. A modal panel shown to a client frees that client's mouse, and typing into its text box does not move that player. Clicks fire ui.on_click, ui.on_select and ui.on_submit on the host, with .player set to who clicked.
+
+### `sam_ui_panel_style(panel, background, border, [border_width], [player])`
 
 Recolour a panel's background and border. Nothing about a panel's look is fixed by the framework — set the background fully transparent for a bare overlay, or opaque for a solid window. Colours accept the same forms as the HUD calls.
 
@@ -1822,8 +2234,11 @@ Recolour a panel's background and border. Nothing about a panel's look is fixed 
 | `background` | colour (0 = leave unchanged) |
 | `border` | colour (0 = leave unchanged) |
 | `border_width` *(optional)* | int (optional, omit to leave unchanged) |
+| `player` *(optional)* | int (whose screen; left out: the player the current event is about, else this machine's own; -1: every player) |
 
 **Returns:** true, or false if that panel is not open (boolean)
+
+**Multiplayer:** `screen`. Shows on one player's own screen, picked by the optional last argument `player`: left out, the player the current event is about, else this machine's own; -1 is every player. On the host, a call for a player on another machine is carried there and returns true once it is sent; a player whose game does not run S.A.M is refused with a warning. A client can show things only on its own screen. Inside an event about a player, leaving the player out shows it to THAT player. A timer callback is not an event: there, with no player, it shows on the host's own screen, so keep the player in a local (local p = e.player) and pass it. Update on change rather than every tick: every call for a remote player is a network message.
 
 ### `sam_ui_text_size(text, [font])`
 
@@ -1834,7 +2249,9 @@ Measure a string before you place it. This is how you lay a panel out properly i
 | `text` | string |
 | `font` *(optional)* | string (optional; defaults to the standard panel face, NOT whatever font you set on a particular panel — this call takes no panel) |
 
-**Returns:** width, height in pixels (two ints), or nil/null if the font could not be loaded
+**Returns:** width, height in pixels (two ints), or nil/undefined if the font could not be loaded
+
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
 
 
 ## Persistence
@@ -1849,6 +2266,8 @@ Delete a persisted per-mod key.
 
 **Returns:** true (boolean)
 
+**Multiplayer:** `local`. Answers for the machine running the script.
+
 ### `sam_get_player_data(player, key)`
 
 Read back a per-player in-memory value set by sam_set_player_data.
@@ -1860,6 +2279,8 @@ Read back a per-player in-memory value set by sam_set_player_data.
 
 **Returns:** the stored value, or nil/undefined if unset
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Uses the host's store; a client's call is refused. Send values a client's panel needs with sam_send_packet.
+
 ### `sam_has_data(key)`
 
 Whether a key exists, without loading it. This genuinely distinguishes stored-but-empty from never-stored: saving nil writes a real entry, so sam_has_data is true while sam_load_data gives you nothing back. Use sam_delete_data when you want a key to actually be gone.
@@ -1870,11 +2291,15 @@ Whether a key exists, without loading it. This genuinely distinguishes stored-bu
 
 **Returns:** true if your mod has saved something under this key (boolean)
 
+**Multiplayer:** `local`. Answers for the machine running the script.
+
 ### `sam_list_data_keys()`
 
 List the keys sam_save_data has written for your mod, so you can iterate stored state without having to remember every key name. Returns an empty table when nothing has been saved yet.
 
 **Returns:** an array/table of every key your mod has saved
+
+**Multiplayer:** `local`. Answers for the machine running the script.
 
 ### `sam_load_data(key)`
 
@@ -1885,6 +2310,8 @@ Read back a persisted per-mod value.
 | `key` | string |
 
 **Returns:** the stored value, or nil/undefined if unset
+
+**Multiplayer:** `local`. Answers for the machine running the script.
 
 ### `sam_save_data(key, value)`
 
@@ -1897,9 +2324,11 @@ Persist a value (number/string/bool/table) for the calling mod under savegames/s
 
 **Returns:** true on success (boolean)
 
+**Multiplayer:** `local`. Answers for the machine running the script.
+
 ### `sam_set_player_data(player, key, value)`
 
-Store a per-player value (number/string/bool/table) in memory for THIS session — the right tool for cooldowns, ability flags and stack counters you read often. Unlike sam_save_data it never touches disk and is cleared on a new game.
+Store a per-player value (number/string/bool/table) in memory for THIS session: the right tool for cooldowns, ability flags and stack counters you read often. Unlike sam_save_data it never touches disk, and it is cleared when a game starts.
 
 | argument | type |
 |---|---|
@@ -1909,17 +2338,23 @@ Store a per-player value (number/string/bool/table) in memory for THIS session �
 
 **Returns:** nothing
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript. Uses the host's store; a client's call is refused. Send values a client's panel needs with sam_send_packet. A value written in player.on_player_joined (the lobby) is cleared when the game starts: set per-player state up in game.on_game_start or game.on_level_entered.
+
 ### `sam_world_bytes()`
 
 How much of the savegame's mod-state budget is in use. sam_world_save shares one 64 KB allowance between every mod in the run.
 
-**Returns:** bytes currently used across all mods (number)
+**Returns:** bytes currently used across all mods (number); nil on a client
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Uses the host's store; a client's call is refused. Send values a client's panel needs with sam_send_packet.
 
 ### `sam_world_bytes_free()`
 
 How much room is left before sam_world_save starts refusing writes. Check this before storing something large, rather than discovering the ceiling when a save quietly fails mid-run.
 
-**Returns:** bytes still available (number)
+**Returns:** bytes still available (number); nil on a client
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Uses the host's store; a client's call is refused. Send values a client's panel needs with sam_send_packet.
 
 ### `sam_world_clear(key)`
 
@@ -1931,11 +2366,15 @@ Forget one key for the current character. The whole store is dropped automatical
 
 **Returns:** true if there was something to remove (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. Uses the host's store; a client's call is refused. Send values a client's panel needs with sam_send_packet.
+
 ### `sam_world_keys()`
 
 List the keys your mod has saved for this character. Handy for migrating an older save's data, or for showing the player what a mod is remembering about their run.
 
 **Returns:** array of your mod's stored key names (strings)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns an empty table (an empty array in JavaScript). Uses the host's store; a client's call is refused. Send values a client's panel needs with sam_send_packet.
 
 ### `sam_world_load(key)`
 
@@ -1945,7 +2384,9 @@ Read a value back from the current character's savegame. nil on a key you have n
 |---|---|
 | `key` | string |
 
-**Returns:** the stored value, or nil/null if this character never stored one
+**Returns:** the stored value, or nil/undefined if this character never stored one
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Uses the host's store; a client's call is refused. Send values a client's panel needs with sam_send_packet.
 
 ### `sam_world_save(key, value)`
 
@@ -1958,12 +2399,12 @@ Save a value inside the CURRENT character's savegame. A brand new character star
 
 **Returns:** true if stored, false if a size limit was hit (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. Uses the host's store; a client's call is refused. Send values a client's panel needs with sam_send_packet.
+
 
 ## Pictures
 
 ### `sam_clear_model(uid)`
-
-> Host-only.
 
 Drop a script-set model and go back to whatever the entity would otherwise draw. Clients are told too, so a transformation can end cleanly.
 
@@ -1972,6 +2413,8 @@ Drop a script-set model and go back to whatever the entity would otherwise draw.
 | `uid` | int |
 
 **Returns:** true on success (boolean)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. Reaches every S.A.M player in order, so the entity goes back to its original look on their screens too.
 
 ### `sam_get_entity_flag(uid, flag)`
 
@@ -1982,7 +2425,9 @@ Read one of Barony's entity flags by name. An unknown name gives you nil, never 
 | `uid` | int |
 | `flag` | string — one of: `BRIGHT`, `INVISIBLE`, `NOUPDATE`, `UPDATENEEDED`, `GENIUS`, `OVERDRAW`, `SPRITE`, `BLOCKSIGHT`, `BURNING`, `BURNABLE`, `UNCLICKABLE`, `PASSABLE`, `USERFLAG1`, `USERFLAG2`, `INVISIBLE_DITHER`, `NOCLIP_WALLS`, `NOCLIP_CREATURES`, `ENTITY_SKIP_CULLING`, `STASIS_DITHER` |
 
-**Returns:** true or false (boolean), or nil/null if the flag name is not one of the ones listed, if the uid is gone, or if the uid is a shared engine marker (0, -2, -3, -4)
+**Returns:** true or false (boolean), or nil/undefined if the flag name is not one of the ones listed, if the uid is gone, or if the uid is a shared engine marker (0, -2, -3, -4)
+
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler. Reads this machine's copy of the entity. On a client it can lag the host, and a flag the host clears without telling clients can stay set there. Read on the host when the answer matters.
 
 ### `sam_get_image_size(image)`
 
@@ -1992,17 +2437,21 @@ The picture's own pixel size, so a script can centre or scale it instead of hard
 |---|---|
 | `image` | string |
 
-**Returns:** width, height (two numbers in Lua; a [w, h] array in JS/TS; nil/null if it could not be loaded)
+**Returns:** width, height (two numbers in Lua; a [w, h] array in JS/TS; nil/undefined if it could not be loaded)
+
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
 
 ### `sam_get_model(uid)`
 
-Read back the model ID a script set on this entity. Returns nil for an entity drawing its ordinary model.
+Read back the model ID a script set on this entity, or the mod model a spawned entity was created with. Returns nil for an entity drawing its ordinary model.
 
 | argument | type |
 |---|---|
 | `uid` | int |
 
 **Returns:** the model ID string, or nil if the entity has no script-set model
+
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler. Answers the same on every machine, because the model crosses the network by name. One exception: a player whose game never received the announcement -- it joined while the host already had more than 512 calls waiting for it, or it is not running S.A.M -- answers nil there. The host writes a line to the log when it has to refuse an announcement, so this is visible rather than silent.
 
 ### `sam_get_scale(uid)`
 
@@ -2014,9 +2463,11 @@ Read an entity's scale. The counterpart to sam_set_scale, which shipped without 
 
 **Returns:** x, y, z scale (numbers), or nil
 
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler. Reads this machine's copy; on a client the scale is rounded to steps of 1/128.
+
 ### `sam_hide_image([player])`
 
-Take the overlay away early. No player clears every player's.
+Take the overlay away early. With no player it hides the overlay of the player the current event is about (outside an event: your own, and in splitscreen every local player's); -1 hides every player's in multiplayer.
 
 | argument | type |
 |---|---|
@@ -2024,7 +2475,9 @@ Take the overlay away early. No player clears every player's.
 
 **Returns:** true if something was showing (boolean)
 
-### `sam_hud_image(id, x, y, w, h, image, [color])`
+**Multiplayer:** `screen`. Shows on the screen of the player `player` names (left out: the player the current event is about, else this machine's own); -1 is every player in a multiplayer game. On the host, a call for a player on another machine is carried there and returns true once it is sent; a player whose game does not run S.A.M is refused with a warning. A client can show things only on its own screen.
+
+### `sam_hud_image(id, x, y, w, h, image, [color], [player])`
 
 A PERSISTENT picture in the script HUD — a portrait, a custom gauge, a marker. Stays until sam_hud_clear(id) or the mod unloads, unlike the overlay. w/h of 0 means the picture's own pixel size. The colour is MIXED into the art, so white (the default) leaves it untouched and the alpha byte fades it.
 
@@ -2037,12 +2490,15 @@ A PERSISTENT picture in the script HUD — a portrait, a custom gauge, a marker.
 | `h` | int |
 | `image` | string |
 | `color` *(optional)* | int (0xRRGGBBAA) |
+| `player` *(optional)* | int (whose screen; left out: the player the current event is about, else this machine's own; -1: every player) |
 
 **Returns:** true on success (boolean)
 
+**Multiplayer:** `screen`. Shows on one player's own screen, picked by the optional last argument `player`: left out, the player the current event is about, else this machine's own; -1 is every player. On the host, a call for a player on another machine is carried there and returns true once it is sent; a player whose game does not run S.A.M is refused with a warning. A client can show things only on its own screen. Inside an event about a player, leaving the player out shows it to THAT player. A timer callback is not an event: there, with no player, it shows on the host's own screen, so keep the player in a local (local p = e.player) and pass it. Update on change rather than every tick: every call for a remote player is a network message.
+
 ### `sam_is_visible(uid)`
 
-Whether an entity is visible. The counterpart to sam_set_visible, which shipped without a reader. On a multiplayer CLIENT this is only reliable for hiding your own script did: the engine's entity update sets invisibility flags but never clears them, so a monster whose invisibility potion wears off still reads as hidden on every client. Ask the host if the answer has to be right.
+Whether an entity is visible. The counterpart to sam_set_visible.
 
 | argument | type |
 |---|---|
@@ -2050,9 +2506,9 @@ Whether an entity is visible. The counterpart to sam_set_visible, which shipped 
 
 **Returns:** true if the entity is being drawn (boolean), or nil
 
-### `sam_set_elevation(uid, z)`
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler. Reads this machine's copy of the entity. On a client it can lag the host, and a flag the host clears without telling clients can stay set there. Read on the host when the answer matters. When a monster's invisibility effect ends, every player now sees it again (while scripts are loaded).
 
-> Host-only.
+### `sam_set_elevation(uid, z)`
 
 Set how high an entity floats. This is the engine's raw z, the third value sam_get_position_precise gives you, so reading and writing it round-trips. Barony's z axis points DOWN (gravity adds to it), so negative numbers are up and 0 is the floor. Clamped to -1023..1023, which is what the network can carry. REFUSED on players and monsters: their height is rewritten from scratch by their own species code on every single frame, so the call would report success and be erased before the next frame drew. Lift a creature with a levitation effect instead. Also refused on a companion, whose own hover curve rewrites its height every tick for the same reason. Use this on props, ground items, spawned portals, and entities your script owns through sam_register_behavior (though if your own handler writes the height, it wins).
 
@@ -2063,9 +2519,9 @@ Set how high an entity floats. This is the engine's raw z, the third value sam_g
 
 **Returns:** true on success (boolean); false for a player, a monster or a companion
 
-### `sam_set_entity_flag(uid, flag, on)`
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. A ground item's height reaches S.A.M players. On a ground item this sets the height WITHOUT waking it, so an item you have already placed stays at the height you give it and it no longer matters whether you call this before or after sam_set_position. An item that is still falling or sliding is under the engine's physics and pulls itself back down, so lift items that are at rest.
 
-> Host-only.
+### `sam_set_entity_flag(uid, flag, on)`
 
 Turn one of Barony's entity flags on or off, and tell the other players about it. PASSABLE for a decoration nobody should bump into, BLOCKSIGHT for a prop that should cast a shadow, UNCLICKABLE for scenery, BRIGHT for something that glows, BURNABLE to make a prop able to catch fire. Four flags are read-only here and the refusal tells you why: INVISIBLE belongs to sam_set_visible and BURNING to sam_set_on_fire, both of which know extra rules this one does not, while NOUPDATE and UPDATENEEDED are how the network sweep decides who to tell about what, and STASIS_DITHER is rewritten from the stasis effect on every frame so setting it would be undone before you saw it.
 
@@ -2077,11 +2533,11 @@ Turn one of Barony's entity flags on or off, and tell the other players about it
 
 **Returns:** true on success (boolean); false for an unknown or read-only flag, or an entity you may not write to
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. Also refused where the game rewrites the flag every frame: BLOCKSIGHT on players and monsters, INVISIBLE_DITHER on players, and BURNABLE on ground items.
+
 ### `sam_set_entity_size(uid, size, [size_y])`
 
-> Host-only.
-
-Set an entity's collision box. The number is a half-extent in world units, 16 to a tile, so 4 is the usual monster and 0 means nothing collides with it. size_y defaults to the same value. Clamped to 0..127 in every mode: the network carries the size as one signed byte, so anything larger arrives negative on the other machines and turns the hitbox inside-out there while looking correct to you. Pair it with sam_set_scale when you grow a model and want the swing to match. Unlike sam_set_elevation this sticks, because the engine only writes sizes when an entity is created.
+Set an entity's collision box. The number is a half-extent in world units, 16 to a tile, so 4 is the usual monster and 0 means nothing collides with it. size_y defaults to the same value. Clamped to 0..127 in every mode: the network carries the size as one signed byte, so anything larger arrives negative on the other machines and turns the hitbox inside-out there while looking correct to you. Pair it with sam_set_scale when you grow a model and want the swing to match. Unlike sam_set_elevation this sticks, because the engine only writes sizes when an entity is created. In JavaScript a size that is not a whole number is refused, as in Lua.
 
 | argument | type |
 |---|---|
@@ -2091,9 +2547,9 @@ Set an entity's collision box. The number is a half-extent in world units, 16 to
 
 **Returns:** true on success (boolean)
 
-### `sam_set_model(uid, model_id)`
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. On a player on another machine the new size reaches their own machine if it runs S.A.M; a player whose game does not run S.A.M is refused, because their machine could not be told and they would stick in doorways. A pinned prop's size reaches S.A.M players.
 
-> Host-only.
+### `sam_set_model(uid, model_id)`
 
 Swap any entity's model while the game is running. What crosses the wire is the model ID, never an index, so machines with different mod orders still agree. This is what makes transformations, boss phases and damage states possible; before it, a model was fixed at spawn.
 
@@ -2104,9 +2560,9 @@ Swap any entity's model while the game is running. What crosses the wire is the 
 
 **Returns:** true on success (boolean)
 
-### `sam_set_scale(uid, scale)`
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. The model crosses BY NAME and in order, and a player who joins later is told as well, so every machine that has the mod draws the same model whatever order their mods loaded in. A player whose game does not run S.A.M keeps seeing the entity's original look.
 
-> Host-only.
+### `sam_set_scale(uid, scale)`
 
 Scale an entity. A scale of 0 or less is REFUSED, not quietly treated as 1.0 the way it used to be, which turned a script easing a model down to nothing into a model that popped back to full size on the last frame. To make something disappear use sam_set_visible. Clamped at the bottom to 1/128 with a warning as well, because the wire packs scale into one byte as scale times 128, so anything smaller arrives as 0 and vanishes on every other machine. Clamped at 1.99 with a logged warning, in EVERY mode including singleplayer: Barony quantises scale on the wire in 1/128 steps with a cap just under 2, so a larger value looks right to you and wrong to everyone else. The clamp used to be skipped in singleplayer, which meant a mod authored at 3.0 worked for its author and was broken the moment anyone hosted it.
 
@@ -2117,11 +2573,11 @@ Scale an entity. A scale of 0 or less is REFUSED, not quietly treated as 1.0 the
 
 **Returns:** true on success (boolean); false for a scale of 0 or less
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. Refused for players and slimes, whose scale the game rewrites every frame on every machine. A pinned prop's exact scale reaches S.A.M players.
+
 ### `sam_set_visible(uid, visible)`
 
-> Host-only.
-
-Show or hide an entity. The flag is REQUIRED: leaving it out is refused rather than guessed. A numeric 0 counts as false in both runtimes now (Lua used to read 0 as true, so the same call did opposite things in Lua and JavaScript). Refused, with a logged reason, on an entity that has a custom body: the draw pass deliberately keeps those visible, so hiding one this way would not work consistently. Clear the model first, or move it out of sight.
+Show or hide an entity. The flag is REQUIRED: leaving it out is refused rather than guessed. A numeric 0 counts as false in both runtimes. Refused, with a logged reason, for players, monsters, ground items and a creature's LIMB (its weapon, shield, helmet or an arm), whose visibility the game rewrites every frame: use sam_apply_effect(player, "INVISIBLE", ticks) for a player or sam_apply_monster_effect(uid, "INVISIBLE", ticks) for a monster. On a limb INVISIBLE is how the game says the slot is EMPTY, so hiding one lasted a single tick; take the item off the creature instead. sam_set_model on a limb still works, which is how a cosmetic is floated in an empty hand. On props, spawned entities and companions it works even when they have a custom model.
 
 | argument | type |
 |---|---|
@@ -2130,9 +2586,11 @@ Show or hide an entity. The flag is REQUIRED: leaving it out is refused rather t
 
 **Returns:** true on success (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. Players, monsters, ground items and a creature's limb are refused, because the game rewrites their visibility every frame; use sam_apply_effect(uid, 'INVISIBLE', ticks) for a creature. On props, spawned entities and companions it works even when they have a custom model, and the change reaches every player.
+
 ### `sam_show_image(player, image, [duration_ms], [alpha], [fit])`
 
-Cover a player's screen with one of the mod's pictures, over the world AND the HUD, for duration_ms (0 or omitted = until sam_hide_image). This is the jumpscare / title-card / death-splash layer: it removes itself, so there is nothing to clean up. alpha is 0..255 (default 255). "contain" keeps the picture's aspect ratio; "stretch" (default) fills the view. In multiplayer the host forwards the image NAME to the owning client, which draws it from its own copy of the mod.
+Cover a player's screen with one of the mod's pictures, over the world AND the HUD, for duration_ms (0 or omitted = until sam_hide_image). This is the jumpscare / title-card / death-splash layer: it removes itself, so there is nothing to clean up. alpha is 0..255 (default 255). "contain" keeps the picture's aspect ratio; "stretch" (default) fills the view. In multiplayer it is drawn on that player's own machine, from its own copy of the mod.
 
 | argument | type |
 |---|---|
@@ -2143,6 +2601,8 @@ Cover a player's screen with one of the mod's pictures, over the world AND the H
 | `fit` *(optional)* | string — one of: `stretch`, `contain` |
 
 **Returns:** true if the picture resolved (boolean)
+
+**Multiplayer:** `screen`. Shows on the screen of the player `player` names; -1 is every player in a multiplayer game. On the host, a call for a player on another machine is carried there and returns true once it is sent; a player whose game does not run S.A.M is refused with a warning. A client can show things only on its own screen.
 
 ### `sam_show_image_at(player, image, x, y, w, h, [duration_ms], [alpha])`
 
@@ -2161,14 +2621,14 @@ The same overlay, placed rather than full-screen. Coordinates are virtual screen
 
 **Returns:** true if the picture resolved (boolean)
 
+**Multiplayer:** `screen`. Shows on the screen of the player `player` names; -1 is every player in a multiplayer game. On the host, a call for a player on another machine is carried there and returns true once it is sent; a player whose game does not run S.A.M is refused with a warning. A client can show things only on its own screen.
+
 
 ## Player state
 
 ### `sam_add_move_speed(player, delta)`
 
-> Host-only.
-
-Add to a player's move-speed multiplier (the result is clamped to [0.1, 3.0]). Additive counterpart to sam_set_move_speed — use it to stack a bonus onto whatever the multiplier already is (e.g. +0.1 on top of a 2.0 from another ability). Host-only; syncs to the owning client.
+Add to a player's move-speed multiplier (the result is clamped to [0.1, 3.0]). Additive counterpart to sam_set_move_speed: use it to stack a bonus onto whatever the multiplier already is (e.g. +0.1 on top of a 2.0 from another ability).
 
 | argument | type |
 |---|---|
@@ -2176,6 +2636,8 @@ Add to a player's move-speed multiplier (the result is clamped to [0.1, 3.0]). A
 | `delta` | number |
 
 **Returns:** the new multiplier (number)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript. Reaches every S.A.M player's machine in order, like sam_set_move_speed. A player whose game does not run S.A.M still walks at vanilla speed.
 
 ### `sam_get_class(player)`
 
@@ -2185,13 +2647,17 @@ Which class a player is, as an identifier you can act on: a custom class's "name
 |---|---|
 | `player` | int |
 
-**Returns:** the class id (string; nil/null if invalid)
+**Returns:** the class id (string; nil/undefined if invalid)
+
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
 
 ### `sam_get_floor()`
 
 Get the current floor/dungeon level.
 
 **Returns:** the current dungeon level (number, 0-based)
+
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
 
 ### `sam_get_kills(player)`
 
@@ -2203,15 +2669,19 @@ Get the SAM-tracked per-player kill count for this session.
 
 **Returns:** kills this session (number)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript.
+
 ### `sam_get_move_speed(player)`
 
-Read a player's move-speed multiplier. Readable on clients.
+Read a player's move-speed multiplier.
 
 | argument | type |
 |---|---|
 | `player` | int |
 
 **Returns:** the multiplier (number; 1.0 if unset/invalid)
+
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler. Every S.A.M machine holds every player's multiplier, so a client can read anyone's and gets the host's answer.
 
 ### `sam_get_race(player)`
 
@@ -2221,20 +2691,22 @@ Get a player's race: a custom race's "namespace:race" id, or the vanilla race na
 |---|---|
 | `player` | int |
 
-**Returns:** the race id (string; nil/null if invalid)
+**Returns:** the race id (string; nil/undefined if invalid)
+
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
 
 ### `sam_get_stat(player, stat)`
 
-> Host-only.
-
-Read a live player stat. Refused on a multiplayer client.
+Read a live player stat.
 
 | argument | type |
 |---|---|
 | `player` | int |
 | `stat` | string — one of: `STR`, `DEX`, `CON`, `INT`, `PER`, `CHR`, `HP`, `MAXHP`, `MP`, `MAXMP`, `GOLD`, `HUNGER`, `LEVEL`, `LVL`, `EXP` |
 
-**Returns:** the stat value (number; 0 on client/invalid)
+**Returns:** the stat value (number; 0 for an unknown stat). A refused call answers with nothing at all, never 0, because 0 is a real max HP
+
+**Multiplayer:** `read`. The host can read every player; a client can read only its own player (`player`), and asking about another is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript. A client's own HUNGER is at most 5 seconds behind the host's.
 
 ### `sam_get_time_played()`
 
@@ -2242,9 +2714,11 @@ Get elapsed game ticks for the current run.
 
 **Returns:** ticks since the run started (number, 50/sec)
 
+**Multiplayer:** `local`. Answers for the machine running the script.
+
 ### `sam_is_defending(player)`
 
-Whether the player is actually blocking right now — the real engine state, not just the Defend button being down. Works for remote players in multiplayer.
+Whether the player is actually blocking right now: the real engine state, not just the Defend button being down.
 
 | argument | type |
 |---|---|
@@ -2252,11 +2726,13 @@ Whether the player is actually blocking right now — the real engine state, not
 
 **Returns:** whether the player is blocking (boolean)
 
+**Multiplayer:** `read`. The host can read every player; a client can read only its own player (`player`), and asking about another is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript.
+
 ### `sam_level_up(player, [count])`
 
-> Host-only.
+Level a player up count times (default 1) through the real engine path: attribute rolls, HP/MP gain, the level-up screen and sound, and full client sync. These are the actual benefits, unlike bumping LVL with sam_set_stat. Fires the player.on_level_up hook once per level.
 
-Level a player up count times (default 1) through the real engine path: attribute rolls, HP/MP gain, the level-up screen and sound, and full client sync — the actual benefits, unlike bumping LVL with sam_set_stat. Host-only. Fires the player.on_level_up hook once per level.
+Grants exactly what the next count levels cost under the XP curve (sam_set_xp_curve), not a flat 100 each, so it still grants exactly count levels when a mod has changed the curve.
 
 | argument | type |
 |---|---|
@@ -2265,11 +2741,13 @@ Level a player up count times (default 1) through the real engine path: attribut
 
 **Returns:** true on success (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
+
 ### `sam_play_sound(sound_id, [vol])`
 
-> Host-only.
+Play a sound for every player. sound_id is a vanilla numeric index OR one of your mod's sounds: a file sounds/boom.ogg is "mymod:boom", or just "boom" from your own scripts. vol 0-255 (default 128).
 
-Play a sound for all connected players. sound_id is a vanilla numeric index OR the "namespace:sound" id of a custom sound bundled in the mod. vol 0-255 (default 128).
+A sound with several files plays one at random each time, and a sound's own volume (mod.json) multiplies vol. To CHANGE one of the game's sounds there is nothing to play: drop a file named after it in sounds/replace/ (docs/vanilla-sounds.md).
 
 | argument | type |
 |---|---|
@@ -2278,11 +2756,11 @@ Play a sound for all connected players. sound_id is a vanilla numeric index OR t
 
 **Returns:** true on success (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. Plays once per computer, however many splitscreen players share it. A mod sound reaches the other players by NAME, so everyone hears the same sound whatever order their mods loaded in; a player without the mod hears nothing for it. A client's call is refused with one log line, so an event that fires on every machine never plays it twice and needs no sam_is_host() guard.
+
 ### `sam_set_move_speed(player, mult)`
 
-> Host-only.
-
-Set a player's move-speed multiplier, clamped to [0.1, 3.0]. Host-only; syncs to the owning client. 1.0 is normal speed.
+Set a player's move-speed multiplier, clamped to [0.1, 3.0]. 1.0 is normal speed.
 
 | argument | type |
 |---|---|
@@ -2291,11 +2769,11 @@ Set a player's move-speed multiplier, clamped to [0.1, 3.0]. Host-only; syncs to
 
 **Returns:** true on success (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. Reaches every S.A.M player's machine in order, and is caught up at the start of every run. A player whose game does not run S.A.M still walks at vanilla speed, because their own machine computes their movement.
+
 ### `sam_set_stat(player, stat, value)`
 
-> Host-only.
-
-Set a live player stat, bounded (HP never exceeds MAXHP, stats clamped, etc.). Syncs the change to the owning client.
+Set a live player stat, bounded (HP never exceeds MAXHP, stats clamped, etc.). The change reaches the player's own machine, and a LVL write updates every player's party display at once.
 
 | argument | type |
 |---|---|
@@ -2305,12 +2783,14 @@ Set a live player stat, bounded (HP never exceeds MAXHP, stats clamped, etc.). S
 
 **Returns:** true on success (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
+
 
 ## Presentation
 
 ### `sam_camera_shake(player, magnitude)`
 
-Shake a player's camera. 1 is a nudge, ~10 a solid hit, 20+ violent. Feeds Barony's own shake channels so it decays naturally; for a remote client the host forwards it.
+Shake a player's camera. 1 is a nudge, ~10 a solid hit, 20+ violent. Feeds Barony's own shake channels so it decays naturally; for a remote client the host forwards it. In JavaScript player and magnitude are required.
 
 | argument | type |
 |---|---|
@@ -2319,9 +2799,9 @@ Shake a player's camera. 1 is a nudge, ~10 a solid hit, 20+ violent. Feeds Baron
 
 **Returns:** true if accepted (boolean)
 
-### `sam_damage_number(uid, amount, [type])`
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. A shake for a player on another machine reaches their screen; nothing is sent to an empty player slot.
 
-> Host-only.
+### `sam_damage_number(uid, amount, [type])`
 
 The floating combat number the game shows on a hit. Lets a mod's custom damage read like real damage instead of being invisible.
 
@@ -2333,11 +2813,13 @@ The floating combat number the game shows on a hit. Lets a mod's custom damage r
 
 **Returns:** true on success (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
+
 ### `sam_gib(entity_uid, [sprite])`
 
-> Host-only.
-
 Throw a chunk of gore off a creature. The optional sprite overrides the model.
+
+The one member of the spawn family sam_spawn_particle could not carry: bang, poof, explosion and sleep all take a position, and a gib takes a PARENT — it inherits the creature's colour and flies off it.
 
 | argument | type |
 |---|---|
@@ -2346,11 +2828,11 @@ Throw a chunk of gore off a creature. The optional sprite overrides the model.
 
 **Returns:** true if a chunk was thrown (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. The chunks are seen by every player. A custom gib sprite crosses as a model number, so use vanilla model numbers for gibs in multiplayer.
+
 ### `sam_hitstop(duration_ms)`
 
-> Host-only.
-
-Briefly freeze enemy and projectile logic — a freeze-frame — for duration_ms (capped ~400). The player, HUD weapon and hand magic keep animating, so it reads as a punchy impact beat. SINGLEPLAYER ONLY: freezing host logic in a netgame would desync clients.
+Singleplayer only. Briefly freeze enemy and projectile logic, a freeze-frame, for duration_ms (capped ~400). The player, HUD weapon and hand magic keep animating, so it reads as a punchy impact beat.
 
 | argument | type |
 |---|---|
@@ -2358,9 +2840,11 @@ Briefly freeze enemy and projectile logic — a freeze-frame — for duration_ms
 
 **Returns:** true if accepted (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. In multiplayer it does nothing and says so once in the log: freezing the host's logic would desync the clients.
+
 ### `sam_impact_frame(player, r, g, b, [intensity], [duration_ms], [lines])`
 
-The EXAGGERATED version of the flash: a colour pop PLUS manga speed lines converging on screen centre PLUS a bright core flare. Pair it with sam_camera_shake and sam_hitstop for a full impact beat. lines is the speed-line count (0 = a plain flash).
+The EXAGGERATED version of the flash: a colour pop PLUS manga speed lines converging on screen centre PLUS a bright core flare. Pair it with sam_camera_shake and sam_hitstop for a full impact beat. lines is the speed-line count (0 = a plain flash). In JavaScript player, r, g and b are required: a missing colour is refused instead of flashing black.
 
 | argument | type |
 |---|---|
@@ -2374,38 +2858,42 @@ The EXAGGERATED version of the flash: a colour pop PLUS manga speed lines conver
 
 **Returns:** true if accepted (boolean)
 
-### `sam_play_sound_at(sound, tileX, tileY, [volume])`
+**Multiplayer:** `screen`. Shows on the screen of the player `player` names; -1 is every player in a multiplayer game. On the host, a call for a player on another machine is carried there and returns true once it is sent; a player whose game does not run S.A.M is refused with a warning. A client can show things only on its own screen.
 
-> Host-only.
+### `sam_play_sound_at(sound, tileX, tileY, [volume])`
 
 Positional audio: it attenuates with distance and pans, so a trap firing across the level is quiet, and in co-op each player hears it from where THEY are.
 
 | argument | type |
 |---|---|
-| `sound` | int | string ("ns:sound") |
+| `sound` | int|string |
 | `tileX` | int |
 | `tileY` | int |
 | `volume` *(optional)* | int |
 
 **Returns:** true on success (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. Every player hears it from where they stand, and a mod sound goes by name. A client's call is refused with one log line, so an event that fires on every machine never plays it twice.
+
 ### `sam_play_sound_entity(sound, uid, [volume])`
 
-> Host-only.
+The same, at an entity's position -- and if that entity is a monster or wears an item with its own "sounds" map, that map applies.
 
-The same, but the sound follows the entity as it moves.
+It plays once where the entity IS; it does not follow it as it moves.
 
 | argument | type |
 |---|---|
-| `sound` | int | string ("ns:sound") |
+| `sound` | int|string |
 | `uid` | uid |
 | `volume` *(optional)* | int |
 
 **Returns:** true on success (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. Every player hears it. A sound map's sound reaches a player without the mod as the game sound it replaces. A client's call is refused with one log line.
+
 ### `sam_screen_flash(player, r, g, b, [intensity], [duration_ms])`
 
-Flash a player's whole screen in an RGB colour that fades to nothing — the anime "impact frame". intensity 0..1 is the peak opacity. Drawn on the machine the player lives on.
+Flash a player's whole screen in an RGB colour that fades to nothing — the anime "impact frame". intensity 0..1 is the peak opacity. Drawn on the machine the player lives on. In JavaScript player, r, g and b are required: a missing colour is refused instead of flashing black.
 
 | argument | type |
 |---|---|
@@ -2418,9 +2906,9 @@ Flash a player's whole screen in an RGB colour that fades to nothing — the ani
 
 **Returns:** true if accepted (boolean)
 
-### `sam_spawn_particle(kind, tileX, tileY, [z], [scale])`
+**Multiplayer:** `screen`. Shows on the screen of the player `player` names; -1 is every player in a multiplayer game. On the host, a call for a player on another machine is carried there and returns true once it is sent; a player whose game does not run S.A.M is refused with a warning. A client can show things only on its own screen.
 
-> Host-only.
+### `sam_spawn_particle(kind, tileX, tileY, [z], [scale])`
 
 A vanilla particle burst at a tile, so a mod's own effect looks like part of the game.
 
@@ -2433,6 +2921,8 @@ A vanilla particle burst at a tile, so a mod's own effect looks like part of the
 | `scale` *(optional)* | number |
 
 **Returns:** true on success (boolean)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. A poof's scale is clamped to 0.01..655 with a warning, so every player sees the same size.
 
 
 ## Rewards
@@ -2447,9 +2937,9 @@ The category of an item (WEAPON / ARMOR / GEM / POTION / SCROLL / SPELLBOOK / �
 
 **Returns:** the category name (string) e.g. "GEM", or nil/undefined if unknown
 
-### `sam_grant_gold(player, amount)`
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
 
-> Host-only.
+### `sam_grant_gold(player, amount)`
 
 Add gold to a player (clamped to >= 0), syncing the client HUD.
 
@@ -2460,18 +2950,23 @@ Add gold to a player (clamped to >= 0), syncing the client HUD.
 
 **Returns:** true on success (boolean)
 
-### `sam_grant_item(player, item_name)`
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
 
-> Host-only.
+### `sam_grant_item(player, item_name, [beatitude], [status], [count])`
 
-Give a vanilla item (e.g. "IRON_DAGGER") to a player. Local player only for now.
+Give an item to a player: a vanilla name (e.g. "IRON_DAGGER") or a custom "namespace:item". The optional beatitude, status and count shape the item. A grant never asks player.on_before_item_pickup, so it cannot be vetoed.
 
 | argument | type |
 |---|---|
 | `player` | int |
 | `item_name` | string |
+| `beatitude` *(optional)* | int (default 0; negative is cursed, positive blessed) |
+| `status` *(optional)* | int (0 BROKEN to 4 EXCELLENT, default 4) |
+| `count` *(optional)* | int (default 1) |
 
 **Returns:** true on success (boolean)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. A player on another machine receives it through the game's own item packet, so this works even for a player whose game does not run S.A.M; a mod item arrives as a rock for a player whose game does not have that mod. In singleplayer, slots 1 to 3 are not players and are refused.
 
 ### `sam_item_id(name)`
 
@@ -2481,11 +2976,11 @@ Resolve an item's numeric type id — compare it against event fields like on_bl
 |---|---|
 | `name` | string — one of: `vanilla ITEM name`, `"namespace:item" (custom)` |
 
-**Returns:** the item's numeric type id (int), or nil/null if unknown
+**Returns:** the item's numeric type id (int), or nil/undefined if unknown
+
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
 
 ### `sam_spawn_item(x, y, item_name, [status], [beatitude], [count])`
-
-> Host-only.
 
 Spawn a ground item at a map tile. status, beatitude and count let you put an item back exactly as you found it — without them a stash could record that you owned a cursed, worn ring and then only ever hand back a pristine one. The uid comes back so you can move it (sam_set_position) or clear it (sam_remove_entity) later; a uid is never 0, so an older `if sam_spawn_item(...)` check still behaves as it did.
 
@@ -2498,16 +2993,296 @@ Spawn a ground item at a map tile. status, beatitude and count let you put an it
 | `beatitude` *(optional)* | int (optional, default 0; negative is cursed, positive blessed; clamped -100..100) |
 | `count` *(optional)* | int (optional, default 1; clamped 1..1000) |
 
-**Returns:** the spawned item's entity uid (int), or nil/null if the tile was invalid
+**Returns:** the spawned item's entity uid (int), or nil/undefined if the tile was invalid
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). A ground stack above 255 shows as its count modulo 256 on other players' screens (the game's own packet carries one byte), but picking it up gives the full count. Spawn smaller stacks if the display matters.
+
+
+## Rules
+
+### `sam_add_monster_stat_modifier(uid, stat, id, [add], [multiply])`
+
+The same for one creature.
+
+DIES WITH THE FLOOR. Monster tables are dropped on every level change, because the engine reuses entity uids and a remembered one can come to name something else. All nine stats work on a creature; SPEED scales how fast it walks, chases and flees. Refused for a uid that is not a living monster, a player's included: players have sam_add_stat_modifier.
+
+| argument | type |
+|---|---|
+| `uid` | uid |
+| `stat` | string — one of: `STR`, `DEX`, `CON`, `INT`, `PER`, `CHR`, `AC`, `ATTACK`, `SPEED` |
+| `id` | string |
+| `add` *(optional)* | number |
+| `multiply` *(optional)* | number |
+
+**Returns:** true if it took (boolean)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
+
+### `sam_add_stat_modifier(player, stat, id, [add], [multiply])`
+
+Contribute to one of a player's computed stats. Adds are summed and multipliers multiplied ACROSS EVERY MOD, then applied as (base + adds) * multipliers — so two mods each giving +2 STR give +4, and two each halving give a quarter. Neither mod has to know the other exists. SPEED takes a multiplier only (add must be 0): a player's speed and a monster's are scaled from different bases, so an add would mean different things on each. Add is limited to +-10000 and multiply to 100.
+
+The id is yours, and scoped to your mod: another mod using the same word gets an entry of its own, and cannot replace or remove yours. Adding again with the same id REPLACES that contribution, which makes a per-tick "recalculate my buff" loop safe, and sam_remove_stat_modifier takes back everything under it and touches nothing else. Survives floors (these are keyed by player slot, because a player's entity is rebuilt on the stairs and its uid changes) but not a new run: a new character, or a loaded save, starts with none, so re-apply anything permanent in game.on_game_start. The totals reach every S.A.M player's machine in order, since a player's own character sheet and walking speed are computed there.
+
+| argument | type |
+|---|---|
+| `player` | int |
+| `stat` | string — one of: `STR`, `DEX`, `CON`, `INT`, `PER`, `CHR`, `AC`, `ATTACK`, `SPEED` |
+| `id` | string |
+| `add` *(optional)* | number |
+| `multiply` *(optional)* | number |
+
+**Returns:** true if it took (boolean)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
+
+### `sam_clear_immunities()`
+
+Drop every immunity YOUR MOD declared, per player, per creature and per species.
+
+Immunities belong to the mods that set them. A creature two mods made immune stays immune until both have let go, so this never cancels another mod's.
+
+**Returns:** how many were removed (int)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns 0.
+
+### `sam_clear_stat_modifiers([player])`
+
+Take back every modifier YOUR MOD made, from one player, or with no argument from every player and every monster — which is what a mod's teardown wants. Other mods' contributions are left alone.
+
+| argument | type |
+|---|---|
+| `player` *(optional)* | int |
+
+**Returns:** how many were removed (int)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns 0.
+
+### `sam_clear_xp_curve()`
+
+Take back your mod's XP curve. Levels no other mod has set go back to a flat 100; a level another mod also set keeps that mod's threshold.
+
+**Returns:** how many of YOUR MOD's entries were removed (int)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns 0.
+
+### `sam_get_stat_modifier(player, stat, id)`
+
+Read back what your own id currently contributes, so a mod does not have to remember. Only your mod's ids are visible to you.
+
+| argument | type |
+|---|---|
+| `player` | int |
+| `stat` | string — one of: `STR`, `DEX`, `CON`, `INT`, `PER`, `CHR`, `AC`, `ATTACK`, `SPEED` |
+| `id` | string |
+
+**Returns:** a table/object with add and multiply, or nil
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript).
+
+### `sam_get_xp_threshold(level)`
+
+Read the current threshold. Answers 100 unless a mod said otherwise, so it is also how to read vanilla's number.
+
+| argument | type |
+|---|---|
+| `level` | int |
+
+**Returns:** what that level costs right now (int)
+
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
+
+### `sam_grant_xp(player, amount)`
+
+Give a player experience. Crossing the threshold levels them up naturally on the next tick, firing player.on_level_up, and respects any curve set with sam_set_xp_curve.
+
+Nothing granted an arbitrary amount before this: sam_level_up adds whole levels and sam_set_stat("EXP") is an absolute write.
+
+| argument | type |
+|---|---|
+| `player` | int |
+| `amount` | int |
+
+**Returns:** the player's experience afterwards, or nil (int)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript).
+
+### `sam_is_immune(uid, effect)`
+
+Ask before wasting a cast, which is impossible in vanilla.
+
+It answers about the MOD table only. Barony's own immunities are a switch with no way to query it, so a false here does not promise the effect will land.
+
+| argument | type |
+|---|---|
+| `uid` | uid |
+| `effect` | string — one of: `ASLEEP`, `POISONED`, `STUNNED`, `CONFUSED`, `DRUNK`, `INVISIBLE`, `BLIND`, `GREASY`, `MESSY`, `FAST`, `PARALYZED`, `LEVITATING`, `TELEPATH`, `VOMITING`, `BLEEDING`, `SLOW`, `MAGICRESIST`, `MAGICREFLECT`, `VAMPIRICAURA`, `SHRINE_RED_BUFF`, `SHRINE_GREEN_BUFF`, `SHRINE_BLUE_BUFF`, `HP_REGEN`, `MP_REGEN`, `PACIFY`, `POLYMORPH`, `KNOCKBACK`, `WITHDRAWAL`, `POTION_STR`, `SHAPESHIFT`, `WEBBED`, `FEAR`, `MAGICAMPLIFY`, `DISORIENTED`, `SHADOW_TAGGED`, `TROLLS_BLOOD`, `FLUTTER`, `DASH`, `DISTRACTED_COOLDOWN`, `MIMIC_LOCKED`, `ROOTED`, `NAUSEA_PROTECTION`, `CON_BONUS`, `PWR`, `AGILITY`, `RALLY`, `MARIGOLD`, `ENSEMBLE_FLUTE`, `ENSEMBLE_LYRE`, `ENSEMBLE_DRUM`, `ENSEMBLE_LUTE`, `ENSEMBLE_HORN`, `LIFT`, `GUARD_SPIRIT`, `GUARD_BODY`, `DIVINE_GUARD`, `NIMBLENESS`, `GREATER_MIGHT`, `COUNSEL`, `STURDINESS`, `BLESS_FOOD`, `PINPOINT`, `PENANCE`, `SACRED_PATH`, `DETECT_ENEMY`, `BLOOD_WARD`, `TRUE_BLOOD`, `DIVINE_ZEAL`, `MAXIMISE`, `MINIMISE`, `WEAKNESS`, `INCOHERENCE`, `OVERCHARGE`, `ENVENOM_WEAPON`, `MAGIC_GREASE`, `COMMAND`, `MIMIC_VOID`, `CURSE_FLESH`, `NUMBING_BOLT`, `DELAY_PAIN`, `SEEK_CREATURE`, `TABOO`, `COURAGE`, `COWARDICE`, `SPORES`, `ABUNDANCE`, `GREATER_ABUNDANCE`, `PRESERVE`, `MIST_FORM`, `FORCE_SHIELD`, `LIGHTEN_LOAD`, `ATTRACT_ITEMS`, `RETURN_ITEM`, `DEMESNE_DOOR`, `REFLECTOR_SHIELD`, `DIZZY`, `SPIN`, `CRITICAL_SPELL`, `MAGIC_WELL`, `STATIC`, `ABSORB_MAGIC`, `FLAME_CLOAK`, `DUSTED`, `NOISE_VISIBILITY`, `RATION_SPICY`, `RATION_SOUR`, `RATION_BITTER`, `RATION_HEARTY`, `RATION_HERBAL`, `RATION_SWEET`, `GROWTH`, `THORNS`, `BLADEVINES`, `BASTION_MUSHROOM`, `BASTION_ROOTS`, `FOCI_LIGHT_PEACE`, `FOCI_LIGHT_JUSTICE`, `FOCI_LIGHT_PROVIDENCE`, `FOCI_LIGHT_PURITY`, `FOCI_LIGHT_SANCTUARY`, `STASIS`, `HP_MP_REGEN`, `DISRUPTED`, `FROST`, `MAGICIANS_ARMOR`, `PROJECT_SPIRIT`, `DEFY_FLESH`, `PINPOINT_DAMAGE`, `SALAMANDER_HEART`, `DIVINE_FIRE`, `HEALING_WORD`, `HOLY_FIRE`, `SIGIL`, `SANCTUARY`, `DUCKED` |
+
+**Returns:** whether a mod has made it immune (boolean)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript.
+
+### `sam_remove_monster_stat_modifier(uid, id)`
+
+The monster twin of sam_remove_stat_modifier.
+
+| argument | type |
+|---|---|
+| `uid` | uid |
+| `id` | string |
+
+**Returns:** how many stats carried that id (int)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns 0.
+
+### `sam_remove_stat_modifier(player, id)`
+
+Take back everything your mod contributed under one id, across every stat, leaving other mods' contributions alone.
+
+| argument | type |
+|---|---|
+| `player` | int |
+| `id` | string |
+
+**Returns:** how many stats carried that id (int)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns 0.
+
+### `sam_set_immunity(player, effect, [on])`
+
+Make a player immune to a named effect — poison, curse, polymorph, anything the game has.
+
+Barony's own immunities are a hardcoded species switch inside setEffect with no table and no way to ask it anything. This is a table your mod owns, checked before that switch runs. Survives floors but not a new run, like the stat modifiers. If two mods make the player immune, it lasts until both turn it off.
+
+| argument | type |
+|---|---|
+| `player` | int |
+| `effect` | string — one of: `ASLEEP`, `POISONED`, `STUNNED`, `CONFUSED`, `DRUNK`, `INVISIBLE`, `BLIND`, `GREASY`, `MESSY`, `FAST`, `PARALYZED`, `LEVITATING`, `TELEPATH`, `VOMITING`, `BLEEDING`, `SLOW`, `MAGICRESIST`, `MAGICREFLECT`, `VAMPIRICAURA`, `SHRINE_RED_BUFF`, `SHRINE_GREEN_BUFF`, `SHRINE_BLUE_BUFF`, `HP_REGEN`, `MP_REGEN`, `PACIFY`, `POLYMORPH`, `KNOCKBACK`, `WITHDRAWAL`, `POTION_STR`, `SHAPESHIFT`, `WEBBED`, `FEAR`, `MAGICAMPLIFY`, `DISORIENTED`, `SHADOW_TAGGED`, `TROLLS_BLOOD`, `FLUTTER`, `DASH`, `DISTRACTED_COOLDOWN`, `MIMIC_LOCKED`, `ROOTED`, `NAUSEA_PROTECTION`, `CON_BONUS`, `PWR`, `AGILITY`, `RALLY`, `MARIGOLD`, `ENSEMBLE_FLUTE`, `ENSEMBLE_LYRE`, `ENSEMBLE_DRUM`, `ENSEMBLE_LUTE`, `ENSEMBLE_HORN`, `LIFT`, `GUARD_SPIRIT`, `GUARD_BODY`, `DIVINE_GUARD`, `NIMBLENESS`, `GREATER_MIGHT`, `COUNSEL`, `STURDINESS`, `BLESS_FOOD`, `PINPOINT`, `PENANCE`, `SACRED_PATH`, `DETECT_ENEMY`, `BLOOD_WARD`, `TRUE_BLOOD`, `DIVINE_ZEAL`, `MAXIMISE`, `MINIMISE`, `WEAKNESS`, `INCOHERENCE`, `OVERCHARGE`, `ENVENOM_WEAPON`, `MAGIC_GREASE`, `COMMAND`, `MIMIC_VOID`, `CURSE_FLESH`, `NUMBING_BOLT`, `DELAY_PAIN`, `SEEK_CREATURE`, `TABOO`, `COURAGE`, `COWARDICE`, `SPORES`, `ABUNDANCE`, `GREATER_ABUNDANCE`, `PRESERVE`, `MIST_FORM`, `FORCE_SHIELD`, `LIGHTEN_LOAD`, `ATTRACT_ITEMS`, `RETURN_ITEM`, `DEMESNE_DOOR`, `REFLECTOR_SHIELD`, `DIZZY`, `SPIN`, `CRITICAL_SPELL`, `MAGIC_WELL`, `STATIC`, `ABSORB_MAGIC`, `FLAME_CLOAK`, `DUSTED`, `NOISE_VISIBILITY`, `RATION_SPICY`, `RATION_SOUR`, `RATION_BITTER`, `RATION_HEARTY`, `RATION_HERBAL`, `RATION_SWEET`, `GROWTH`, `THORNS`, `BLADEVINES`, `BASTION_MUSHROOM`, `BASTION_ROOTS`, `FOCI_LIGHT_PEACE`, `FOCI_LIGHT_JUSTICE`, `FOCI_LIGHT_PROVIDENCE`, `FOCI_LIGHT_PURITY`, `FOCI_LIGHT_SANCTUARY`, `STASIS`, `HP_MP_REGEN`, `DISRUPTED`, `FROST`, `MAGICIANS_ARMOR`, `PROJECT_SPIRIT`, `DEFY_FLESH`, `PINPOINT_DAMAGE`, `SALAMANDER_HEART`, `DIVINE_FIRE`, `HEALING_WORD`, `HOLY_FIRE`, `SIGIL`, `SANCTUARY`, `DUCKED` |
+| `on` *(optional)* | boolean |
+
+**Returns:** true if it took (boolean)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
+
+### `sam_set_monster_immunity(uid, effect, [on])`
+
+Make one creature immune to a named effect.
+
+Dies with the floor, like the monster stat modifiers and for the same reason. Use sam_set_species_immunity for something permanent. Turning it on is refused for a uid that is not a living monster; use sam_set_immunity for a player.
+
+| argument | type |
+|---|---|
+| `uid` | uid |
+| `effect` | string — one of: `ASLEEP`, `POISONED`, `STUNNED`, `CONFUSED`, `DRUNK`, `INVISIBLE`, `BLIND`, `GREASY`, `MESSY`, `FAST`, `PARALYZED`, `LEVITATING`, `TELEPATH`, `VOMITING`, `BLEEDING`, `SLOW`, `MAGICRESIST`, `MAGICREFLECT`, `VAMPIRICAURA`, `SHRINE_RED_BUFF`, `SHRINE_GREEN_BUFF`, `SHRINE_BLUE_BUFF`, `HP_REGEN`, `MP_REGEN`, `PACIFY`, `POLYMORPH`, `KNOCKBACK`, `WITHDRAWAL`, `POTION_STR`, `SHAPESHIFT`, `WEBBED`, `FEAR`, `MAGICAMPLIFY`, `DISORIENTED`, `SHADOW_TAGGED`, `TROLLS_BLOOD`, `FLUTTER`, `DASH`, `DISTRACTED_COOLDOWN`, `MIMIC_LOCKED`, `ROOTED`, `NAUSEA_PROTECTION`, `CON_BONUS`, `PWR`, `AGILITY`, `RALLY`, `MARIGOLD`, `ENSEMBLE_FLUTE`, `ENSEMBLE_LYRE`, `ENSEMBLE_DRUM`, `ENSEMBLE_LUTE`, `ENSEMBLE_HORN`, `LIFT`, `GUARD_SPIRIT`, `GUARD_BODY`, `DIVINE_GUARD`, `NIMBLENESS`, `GREATER_MIGHT`, `COUNSEL`, `STURDINESS`, `BLESS_FOOD`, `PINPOINT`, `PENANCE`, `SACRED_PATH`, `DETECT_ENEMY`, `BLOOD_WARD`, `TRUE_BLOOD`, `DIVINE_ZEAL`, `MAXIMISE`, `MINIMISE`, `WEAKNESS`, `INCOHERENCE`, `OVERCHARGE`, `ENVENOM_WEAPON`, `MAGIC_GREASE`, `COMMAND`, `MIMIC_VOID`, `CURSE_FLESH`, `NUMBING_BOLT`, `DELAY_PAIN`, `SEEK_CREATURE`, `TABOO`, `COURAGE`, `COWARDICE`, `SPORES`, `ABUNDANCE`, `GREATER_ABUNDANCE`, `PRESERVE`, `MIST_FORM`, `FORCE_SHIELD`, `LIGHTEN_LOAD`, `ATTRACT_ITEMS`, `RETURN_ITEM`, `DEMESNE_DOOR`, `REFLECTOR_SHIELD`, `DIZZY`, `SPIN`, `CRITICAL_SPELL`, `MAGIC_WELL`, `STATIC`, `ABSORB_MAGIC`, `FLAME_CLOAK`, `DUSTED`, `NOISE_VISIBILITY`, `RATION_SPICY`, `RATION_SOUR`, `RATION_BITTER`, `RATION_HEARTY`, `RATION_HERBAL`, `RATION_SWEET`, `GROWTH`, `THORNS`, `BLADEVINES`, `BASTION_MUSHROOM`, `BASTION_ROOTS`, `FOCI_LIGHT_PEACE`, `FOCI_LIGHT_JUSTICE`, `FOCI_LIGHT_PROVIDENCE`, `FOCI_LIGHT_PURITY`, `FOCI_LIGHT_SANCTUARY`, `STASIS`, `HP_MP_REGEN`, `DISRUPTED`, `FROST`, `MAGICIANS_ARMOR`, `PROJECT_SPIRIT`, `DEFY_FLESH`, `PINPOINT_DAMAGE`, `SALAMANDER_HEART`, `DIVINE_FIRE`, `HEALING_WORD`, `HOLY_FIRE`, `SIGIL`, `SANCTUARY`, `DUCKED` |
+| `on` *(optional)* | boolean |
+
+**Returns:** true if it took (boolean)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
+
+### `sam_set_species_immunity(species, effect, [on])`
+
+Make every creature of a kind immune to an effect, now and later. Skeletons that cannot be poisoned, automatons that cannot be charmed.
+
+Unlike the per-creature form this survives floors, because a species is not a uid.
+
+| argument | type |
+|---|---|
+| `species` | string — one of: `human`, `rat`, `goblin`, `slime`, `troll`, `bat`, `spider`, `ghoul`, `skeleton`, `scorpion`, `imp`, `crab`, `gnome`, `demon`, `succubus`, `mimic`, `lich`, `minotaur`, `devil`, `shopkeeper`, `kobold`, `scarab`, `crystalgolem`, `incubus`, `vampire`, `shadow`, `cockatrice`, `insectoid`, `goatman`, `automaton`, `lichice`, `lichfire`, `sentrybot`, `spellbot`, `gyrobot`, `dummybot`, `bugbear`, `dryad`, `myconid`, `salamander`, `gremlin`, `revenant_skull`, `minimimic`, `monster_adorcised_weapon`, `flame_elemental`, `hologram`, `moth`, `earth_elemental`, `duck_small` |
+| `effect` | string — one of: `ASLEEP`, `POISONED`, `STUNNED`, `CONFUSED`, `DRUNK`, `INVISIBLE`, `BLIND`, `GREASY`, `MESSY`, `FAST`, `PARALYZED`, `LEVITATING`, `TELEPATH`, `VOMITING`, `BLEEDING`, `SLOW`, `MAGICRESIST`, `MAGICREFLECT`, `VAMPIRICAURA`, `SHRINE_RED_BUFF`, `SHRINE_GREEN_BUFF`, `SHRINE_BLUE_BUFF`, `HP_REGEN`, `MP_REGEN`, `PACIFY`, `POLYMORPH`, `KNOCKBACK`, `WITHDRAWAL`, `POTION_STR`, `SHAPESHIFT`, `WEBBED`, `FEAR`, `MAGICAMPLIFY`, `DISORIENTED`, `SHADOW_TAGGED`, `TROLLS_BLOOD`, `FLUTTER`, `DASH`, `DISTRACTED_COOLDOWN`, `MIMIC_LOCKED`, `ROOTED`, `NAUSEA_PROTECTION`, `CON_BONUS`, `PWR`, `AGILITY`, `RALLY`, `MARIGOLD`, `ENSEMBLE_FLUTE`, `ENSEMBLE_LYRE`, `ENSEMBLE_DRUM`, `ENSEMBLE_LUTE`, `ENSEMBLE_HORN`, `LIFT`, `GUARD_SPIRIT`, `GUARD_BODY`, `DIVINE_GUARD`, `NIMBLENESS`, `GREATER_MIGHT`, `COUNSEL`, `STURDINESS`, `BLESS_FOOD`, `PINPOINT`, `PENANCE`, `SACRED_PATH`, `DETECT_ENEMY`, `BLOOD_WARD`, `TRUE_BLOOD`, `DIVINE_ZEAL`, `MAXIMISE`, `MINIMISE`, `WEAKNESS`, `INCOHERENCE`, `OVERCHARGE`, `ENVENOM_WEAPON`, `MAGIC_GREASE`, `COMMAND`, `MIMIC_VOID`, `CURSE_FLESH`, `NUMBING_BOLT`, `DELAY_PAIN`, `SEEK_CREATURE`, `TABOO`, `COURAGE`, `COWARDICE`, `SPORES`, `ABUNDANCE`, `GREATER_ABUNDANCE`, `PRESERVE`, `MIST_FORM`, `FORCE_SHIELD`, `LIGHTEN_LOAD`, `ATTRACT_ITEMS`, `RETURN_ITEM`, `DEMESNE_DOOR`, `REFLECTOR_SHIELD`, `DIZZY`, `SPIN`, `CRITICAL_SPELL`, `MAGIC_WELL`, `STATIC`, `ABSORB_MAGIC`, `FLAME_CLOAK`, `DUSTED`, `NOISE_VISIBILITY`, `RATION_SPICY`, `RATION_SOUR`, `RATION_BITTER`, `RATION_HEARTY`, `RATION_HERBAL`, `RATION_SWEET`, `GROWTH`, `THORNS`, `BLADEVINES`, `BASTION_MUSHROOM`, `BASTION_ROOTS`, `FOCI_LIGHT_PEACE`, `FOCI_LIGHT_JUSTICE`, `FOCI_LIGHT_PROVIDENCE`, `FOCI_LIGHT_PURITY`, `FOCI_LIGHT_SANCTUARY`, `STASIS`, `HP_MP_REGEN`, `DISRUPTED`, `FROST`, `MAGICIANS_ARMOR`, `PROJECT_SPIRIT`, `DEFY_FLESH`, `PINPOINT_DAMAGE`, `SALAMANDER_HEART`, `DIVINE_FIRE`, `HEALING_WORD`, `HOLY_FIRE`, `SIGIL`, `SANCTUARY`, `DUCKED` |
+| `on` *(optional)* | boolean |
+
+**Returns:** true if it took (boolean)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
+
+### `sam_set_xp_curve(level, threshold)`
+
+How much experience the next level costs. Barony's is a flat 100 at every level — the vanilla scaling is literally commented out beside it in the engine — so every progression mod has had to fake it by writing EXP directly. The XP bar follows the curve, on clients too, and sam_level_up grants what the curve charges.
+
+Level -1 sets the flat value for EVERY level, which is the one-line version of a slower or faster game. Naming a level overrides just that one, so a whole curve is a handful of calls. A threshold under 1 is refused: the engine grants a level on every tick that EXP reaches the threshold, so it would level the player up forever. If two mods set the same level, the most recent one is in force; each mod's entries are its own, so when one clears its curve the other's shows through.
+
+| argument | type |
+|---|---|
+| `level` | int |
+| `threshold` | int |
+
+**Returns:** true if it took (boolean)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. A curve declared when your mod loads reaches clients on the first floor. The XP bar and a client's own EXP stay correct above 255 on S.A.M clients; a player whose game does not run S.A.M sees EXP modulo 256 on the bar.
+
+
+## Sound & music
+
+### `sam_get_music()`
+
+What is playing right now: one of a mod's tracks ("mymod:boss") or a vanilla name ("mines02", "shop").
+
+A vanilla track a mod replaced answers with the VANILLA name, since that is what the game asked for. Works on clients: it reports what this machine is playing.
+
+**Returns:** the track playing on this machine, or nil (string)
+
+**Multiplayer:** `local`. Answers for the machine running the script.
+
+### `sam_list_music()`
+
+The ids sam_play_music and a monster's "music" accept. /sam_music in the console prints the same, plus the vanilla names a replacement can target.
+
+**Returns:** every track a loaded mod declares (table/array)
+
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
+
+### `sam_list_sounds()`
+
+The ids sam_play_sound accepts. /sam_sounds in the console prints the same; /sam_sounds vanilla <text> searches the game's own.
+
+**Returns:** every sound a loaded mod adds (table/array)
+
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
+
+### `sam_play_music(track, [fade_seconds], [loop], [persist])`
+
+Take over the music for every player -- a boss fight, a cutscene, a victory sting. track is a file in your mod's music/ folder: "boss" from your own scripts, or "mymod:boss". It plays until sam_stop_music(), or until the floor changes unless persist is true.
+
+fade_seconds defaults to 1.5; 0 cuts straight to it. A track that does not loop hands the music back when it ends, which makes a sting. A monster can have a theme with no script at all (its "music" field), and a script's track outranks it.
+
+| argument | type |
+|---|---|
+| `track` | string |
+| `fade_seconds` *(optional)* | number |
+| `loop` *(optional)* | boolean |
+| `persist` *(optional)* | boolean |
+
+**Returns:** true if it started (boolean)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. Every player hears it, including a player who joins while it plays, and it is dropped when a game ends or a new one starts. "Until the floor changes" really means the floor; it used to last until the area name changed.
+
+### `sam_stop_music()`
+
+Hand the music back. The game crossfades to whatever it would have been playing.
+
+**Returns:** whether a script's track was playing (boolean)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
+
+### `sam_stop_sound(sound)`
+
+Stop every playing copy of one of your sounds, for every player. The way to end a sound declared with "loop": true, which otherwise plays until the floor changes.
+
+| argument | type |
+|---|---|
+| `sound` | string |
+
+**Returns:** how many copies stopped on this machine (int)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns 0. Reaches S.A.M players in order after the play it stops.
 
 
 ## Spells
 
 ### `sam_cast_spell(player, spell)`
 
-> Host-only.
-
-Immediately FIRE a spell/bolt from a player in the direction they face (free, no mana). Great for 'shoot on block'. Don't call from an on_spell_cast handler.
+Immediately FIRE a spell/bolt from a player in the direction they face (free, no mana). Great for 'shoot on block'. Accepts the number sam_get_tome_spell returns, like sam_cast_spell_at and sam_cast_spell_pos. Don't call from an on_spell_cast handler.
 
 | argument | type |
 |---|---|
@@ -2516,9 +3291,9 @@ Immediately FIRE a spell/bolt from a player in the direction they face (free, no
 
 **Returns:** true if a projectile spawned (boolean)
 
-### `sam_cast_spell_at(player, target_uid, spell)`
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
 
-> Host-only.
+### `sam_cast_spell_at(player, target_uid, spell)`
 
 Fire a spell AIMED at an entity (aims the bolt toward it) instead of straight ahead. Free cast, host-only.
 
@@ -2528,11 +3303,11 @@ Fire a spell AIMED at an entity (aims the bolt toward it) instead of straight ah
 | `target_uid` | uid |
 | `spell` | string — one of: `vanilla SPELL_ name`, `"namespace:spell" (custom)` |
 
-**Returns:** the missile's uid (int), or nil/null
+**Returns:** the missile's uid (int), or nil/undefined
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript).
 
 ### `sam_cast_spell_pos(player, tile_x, tile_y, spell)`
-
-> Host-only.
 
 Fire a spell aimed at a map tile. Free cast, host-only.
 
@@ -2543,7 +3318,9 @@ Fire a spell aimed at a map tile. Free cast, host-only.
 | `tile_y` | int |
 | `spell` | string — one of: `vanilla SPELL_ name`, `"namespace:spell" (custom)` |
 
-**Returns:** the missile's uid (int), or nil/null
+**Returns:** the missile's uid (int), or nil/undefined
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript).
 
 ### `sam_get_spells(player)`
 
@@ -2553,7 +3330,9 @@ List the spells a player currently knows.
 |---|---|
 | `player` | int |
 
-**Returns:** array/table of spell internal-name strings
+**Returns:** array/table of the spells the player knows (a mod's spell as its "namespace:spell", a vanilla one as its internal name), or nil if this machine cannot see that player's spells
+
+**Multiplayer:** `read`. The host can read every player; a client can read only its own player (`player`), and asking about another is refused with a one-time warning and returns nil (undefined in JavaScript). On the host, a player on another machine is answered from a copy their own game sends a moment after joining and whenever it changes (at most five times a second). nil means this machine cannot see that player's things: the host before their game has reported, or a player whose game does not run S.A.M. That 'not reported yet' moment comes at the start of EVERY run, not only after a join: the host drops the last character's copy when a new run starts and that player's game sends the new one a moment later, so read another player's backpack or spells from a timer or a later event, never from game.on_game_start. A removal is no more visible than any other change until that next report, so never write 'if they still have it, give the reward' without a flag of your own. A remote player's spells are reported by NAME, so they are right whatever order the mods loaded in.
 
 ### `sam_get_tome_spell(uid)`
 
@@ -2563,24 +3342,24 @@ Which spell a spellbook or a spell tome contains. This is the bridge from an ite
 |---|---|
 | `uid` | int |
 
-**Returns:** the spell id (number), or nil if the item teaches no spell
+**Returns:** the spell id (number), nil if the item teaches no spell, or false when the uid names no item this machine can see
+
+**Multiplayer:** `read`. Answers for the items this machine can see. On the host that includes every player's: a remote player's items (the uids sam_get_inventory gives the host) are read from the copy their game reports. A client sees only its own. Returns false, not nil, when the uid names no item this machine can see, because nil already means the item teaches no spell. On the host it reads a remote player's items from the copy their game reports.
 
 ### `sam_grant_spell(player, spell)`
 
-> Host-only.
-
-Grant a spell to a player: a vanilla SPELL_ name, or a custom "namespace:spell".
+Teach a player a spell: a vanilla SPELL_ name, a custom "namespace:spell", or the number sam_get_tome_spell returns. player.on_spell_learned fires once, on the host, when the spell is actually learned.
 
 | argument | type |
 |---|---|
 | `player` | int |
 | `spell` | string — one of: `vanilla SPELL_ name`, `"namespace:spell" (custom)` |
 
-**Returns:** true on success (boolean)
+**Returns:** true on success (boolean); for a player on another machine, true means the call was sent
+
+**Multiplayer:** `owner`. The state lives on the player's own machine: on the host, a call about a player on another machine (named by `player`) is carried to that machine and done there, and returns true once it is sent. A player whose game does not run S.A.M is refused with a warning. A client's call is refused with a one-time warning and returns false. Carried to the player's own machine, where their spell list lives. Works for every player whose game runs S.A.M; a player without S.A.M is refused with a warning. When granting to another player prefer the NAME, because a mod's spell numbers follow mod load order. If their game refuses (the spell is already known), the reason shows in the host's log.
 
 ### `sam_monster_cast_spell(uid, spell)`
-
-> Host-only.
 
 Make a monster (or a companion) cast a spell along its own facing. Free cast, host-only.
 
@@ -2589,7 +3368,9 @@ Make a monster (or a companion) cast a spell along its own facing. Free cast, ho
 | `uid` | uid |
 | `spell` | string — one of: `vanilla SPELL_ name`, `"namespace:spell" (custom)` |
 
-**Returns:** the missile's uid (int), or nil/null
+**Returns:** the missile's uid (int), or nil/undefined
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript).
 
 ### `sam_player_knows_spell(player, spell)`
 
@@ -2600,27 +3381,27 @@ Check whether a player already knows a spell (vanilla or custom).
 | `player` | int |
 | `spell` | string — one of: `vanilla SPELL_ name`, `"namespace:spell" (custom)` |
 
-**Returns:** whether the player knows it (boolean)
+**Returns:** whether the player knows it (boolean), or nil if this machine cannot see that player's spells
+
+**Multiplayer:** `read`. The host can read every player; a client can read only its own player (`player`), and asking about another is refused with a one-time warning and returns nil (undefined in JavaScript). On the host, a player on another machine is answered from a copy their own game sends a moment after joining and whenever it changes (at most five times a second). nil means this machine cannot see that player's things: the host before their game has reported, or a player whose game does not run S.A.M. That 'not reported yet' moment comes at the start of EVERY run, not only after a join: the host drops the last character's copy when a new run starts and that player's game sends the new one a moment later, so read another player's backpack or spells from a timer or a later event, never from game.on_game_start. A removal is no more visible than any other change until that next report, so never write 'if they still have it, give the reward' without a flag of your own.
 
 ### `sam_remove_spell(player, spell)`
 
-> Host-only.
-
-Un-learn a spell from a player's known list (local player). The counterpart to sam_grant_spell.
+Un-learn a spell. Also takes the spell's item out of the backpack and hotbar (and a vanilla spell's shapeshift twin), and drops it from the selected, hotbar-alternate and quick-cast slots. It happens at the end of the tick, so removing a spell inside a cast or item handler is safe. Until then sam_player_knows_spell still answers true, and a sam_grant_spell of the same spell CANCELS the queued removal -- so "remove the vanilla spell, then grant my own version of it" in one handler leaves the player with the spell rather than with neither. The counterpart to sam_grant_spell.
 
 | argument | type |
 |---|---|
 | `player` | int |
 | `spell` | string — one of: `vanilla SPELL_ name`, `"namespace:spell" (custom)` |
 
-**Returns:** true if it was known and removed (boolean)
+**Returns:** true if the player knew it and it is queued for removal (boolean); for a player on another machine, true means the call was sent
+
+**Multiplayer:** `owner`. The state lives on the player's own machine: on the host, a call about a player on another machine (named by `player`) is carried to that machine and done there, and returns true once it is sent. A player whose game does not run S.A.M is refused with a warning. A client's call is refused with a one-time warning and returns false. Carried to the player's own machine. Works for every player whose game runs S.A.M; a player without S.A.M is refused with a warning.
 
 
 ## Status effects
 
 ### `sam_apply_effect(player, effect, ticks, [strength])`
-
-> Host-only.
 
 Apply a status effect to a player for N ticks (50 ticks = 1s). Optional strength sets the tier/magnitude for effects that carry one (e.g. GROWTH stacks) — omit it for the plain default. Targets the player, never a monster.
 
@@ -2633,9 +3414,9 @@ Apply a status effect to a player for N ticks (50 ticks = 1s). Optional strength
 
 **Returns:** true unless immune/refused (boolean)
 
-### `sam_clear_effects(player)`
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
 
-> Host-only.
+### `sam_clear_effects(player)`
 
 Strip EVERY active status effect from a player at once — buffs and debuffs, vanilla and custom.
 
@@ -2645,20 +3426,24 @@ Strip EVERY active status effect from a player at once — buffs and debuffs, va
 
 **Returns:** how many effects were cleared (int)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns 0.
+
 ### `sam_get_effect_duration(player, effect)`
 
-How many ticks of an effect are left (50 = 1s) — so a debuff can scale or decay by time remaining. Readable on clients.
+How many ticks of an effect are left (50 = 1s), so a debuff can scale or decay by time remaining.
 
 | argument | type |
 |---|---|
 | `player` | int |
 | `effect` | string — one of: `ASLEEP`, `POISONED`, `STUNNED`, `CONFUSED`, `DRUNK`, `INVISIBLE`, `BLIND`, `GREASY`, `MESSY`, `FAST`, `PARALYZED`, `LEVITATING`, `TELEPATH`, `VOMITING`, `BLEEDING`, `SLOW`, `MAGICRESIST`, `MAGICREFLECT`, `VAMPIRICAURA`, `SHRINE_RED_BUFF`, `SHRINE_GREEN_BUFF`, `SHRINE_BLUE_BUFF`, `HP_REGEN`, `MP_REGEN`, `PACIFY`, `POLYMORPH`, `KNOCKBACK`, `WITHDRAWAL`, `POTION_STR`, `SHAPESHIFT`, `WEBBED`, `FEAR`, `MAGICAMPLIFY`, `DISORIENTED`, `SHADOW_TAGGED`, `TROLLS_BLOOD`, `FLUTTER`, `DASH`, `DISTRACTED_COOLDOWN`, `MIMIC_LOCKED`, `ROOTED`, `NAUSEA_PROTECTION`, `CON_BONUS`, `PWR`, `AGILITY`, `RALLY`, `MARIGOLD`, `ENSEMBLE_FLUTE`, `ENSEMBLE_LYRE`, `ENSEMBLE_DRUM`, `ENSEMBLE_LUTE`, `ENSEMBLE_HORN`, `LIFT`, `GUARD_SPIRIT`, `GUARD_BODY`, `DIVINE_GUARD`, `NIMBLENESS`, `GREATER_MIGHT`, `COUNSEL`, `STURDINESS`, `BLESS_FOOD`, `PINPOINT`, `PENANCE`, `SACRED_PATH`, `DETECT_ENEMY`, `BLOOD_WARD`, `TRUE_BLOOD`, `DIVINE_ZEAL`, `MAXIMISE`, `MINIMISE`, `WEAKNESS`, `INCOHERENCE`, `OVERCHARGE`, `ENVENOM_WEAPON`, `MAGIC_GREASE`, `COMMAND`, `MIMIC_VOID`, `CURSE_FLESH`, `NUMBING_BOLT`, `DELAY_PAIN`, `SEEK_CREATURE`, `TABOO`, `COURAGE`, `COWARDICE`, `SPORES`, `ABUNDANCE`, `GREATER_ABUNDANCE`, `PRESERVE`, `MIST_FORM`, `FORCE_SHIELD`, `LIGHTEN_LOAD`, `ATTRACT_ITEMS`, `RETURN_ITEM`, `DEMESNE_DOOR`, `REFLECTOR_SHIELD`, `DIZZY`, `SPIN`, `CRITICAL_SPELL`, `MAGIC_WELL`, `STATIC`, `ABSORB_MAGIC`, `FLAME_CLOAK`, `DUSTED`, `NOISE_VISIBILITY`, `RATION_SPICY`, `RATION_SOUR`, `RATION_BITTER`, `RATION_HEARTY`, `RATION_HERBAL`, `RATION_SWEET`, `GROWTH`, `THORNS`, `BLADEVINES`, `BASTION_MUSHROOM`, `BASTION_ROOTS`, `FOCI_LIGHT_PEACE`, `FOCI_LIGHT_JUSTICE`, `FOCI_LIGHT_PROVIDENCE`, `FOCI_LIGHT_PURITY`, `FOCI_LIGHT_SANCTUARY`, `STASIS`, `HP_MP_REGEN`, `DISRUPTED`, `FROST`, `MAGICIANS_ARMOR`, `PROJECT_SPIRIT`, `DEFY_FLESH`, `PINPOINT_DAMAGE`, `SALAMANDER_HEART`, `DIVINE_FIRE`, `HEALING_WORD`, `HOLY_FIRE`, `SIGIL`, `SANCTUARY`, `DUCKED` |
 
-**Returns:** remaining ticks (int; 0 if inactive, -1 if permanent)
+**Returns:** remaining ticks (int; 0 if inactive, -1 if permanent; nil on a client)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). A client does not count effect timers (it only knows whether an effect is on), so its call is refused and returns nil rather than a misleading 0.
 
 ### `sam_get_effect_strength(player, effect)`
 
-The effect's strength/magnitude for effects that store one (GROWTH tiers, potion STR). Readable on clients.
+The effect's strength/magnitude for effects that store one (GROWTH tiers, potion STR).
 
 | argument | type |
 |---|---|
@@ -2667,15 +3452,21 @@ The effect's strength/magnitude for effects that store one (GROWTH tiers, potion
 
 **Returns:** strength/tier (int; 0 if inactive)
 
+**Multiplayer:** `read`. The host can read every player; a client can read only its own player (`player`), and asking about another is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript.
+
 ### `sam_get_effects(player)`
 
-Every active effect on a player at once — react to "any debuff" or strip all buffs without polling each effect by name. Custom pseudo-effect slots appear under the id you declared them with, like "mymod:frostbite", and vanilla ones under the same lowercase name the effect events use, so a list from here can be compared directly against an event's effect_name.
+Every active effect on a player at once: react to "any debuff" or strip all buffs without polling each effect by name. Names match the effect events in Lua and JavaScript alike: the lowercase vanilla name ("poisoned"), a mod's "namespace:effect" id, or "CUSTOM:<id>" for an unnamed custom slot, so a list from here can be compared directly against an event's effect_name.
+
+Lua used to name vanilla effects in capitals here. A Lua script comparing against "POISONED" must compare against "poisoned" now.
 
 | argument | type |
 |---|---|
 | `player` | int |
 
 **Returns:** array/table of { name, ticks, strength }
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns an empty table (an empty array in JavaScript). A client does not count effect timers, so the ticks it could give would be wrong; its call is refused.
 
 ### `sam_has_effect(player, effect)`
 
@@ -2688,9 +3479,9 @@ Check whether a player currently has a status effect.
 
 **Returns:** whether the effect is active (boolean)
 
-### `sam_remove_effect(player, effect)`
+**Multiplayer:** `read`. The host can read every player; a client can read only its own player (`player`), and asking about another is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript.
 
-> Host-only.
+### `sam_remove_effect(player, effect)`
 
 Clear a status effect from a player.
 
@@ -2701,9 +3492,9 @@ Clear a status effect from a player.
 
 **Returns:** true on success (boolean)
 
-### `sam_set_effect_duration(player, effect, ticks)`
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
 
-> Host-only.
+### `sam_set_effect_duration(player, effect, ticks)`
 
 Retime an ALREADY-ACTIVE effect in place, without re-triggering it. No-op if the effect isn't active (never spawns a fresh one). 50 ticks = 1s.
 
@@ -2715,9 +3506,9 @@ Retime an ALREADY-ACTIVE effect in place, without re-triggering it. No-op if the
 
 **Returns:** true if the effect was active and retimed (boolean)
 
-### `sam_set_effect_strength(player, effect, strength)`
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
 
-> Host-only.
+### `sam_set_effect_strength(player, effect, strength)`
 
 Change the magnitude/tier of an ALREADY-ACTIVE effect while keeping its remaining duration. strength 1-255.
 
@@ -2729,12 +3520,14 @@ Change the magnitude/tier of an ALREADY-ACTIVE effect while keeping its remainin
 
 **Returns:** true if the effect was active and changed (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
+
 
 ## Terrain
 
 ### `sam_find_entities(x, y, radiusTiles, [kind])`
 
-Entities of a KIND near a tile. This is the gap sam_get_nearby_entities leaves: that one skips anything which is not a monster or a player, so doors, chests, levers, gold and dropped items were invisible to scripts. A kind you spell wrong is logged by name and returns nothing, rather than returning the empty list that looks exactly like "nothing nearby" — each distinct wrong word is reported once.
+Entities of a KIND near a tile. This is the gap sam_get_nearby_entities leaves: that one skips anything which is not a monster or a player, so doors, chests, levers, gold and dropped items were invisible to scripts. A kind you spell wrong is logged by name and returns nothing, rather than returning the empty list that looks exactly like "nothing nearby"; each distinct wrong word is reported once. It never returns the engine's shared marker uids (particles, flames, a client's own local effects), so every uid it returns works with the other functions.
 
 | argument | type |
 |---|---|
@@ -2745,9 +3538,9 @@ Entities of a KIND near a tile. This is the gap sam_get_nearby_entities leaves: 
 
 **Returns:** array of uids
 
-### `sam_get_container_items(uid)`
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler. Never returns the engine's shared marker uids (particles, flames, a client's own local effects), so every uid it returns can be used with the other functions. Each machine answers from its own copy, which on a client can lag the host.
 
-> Host-only.
+### `sam_get_container_items(uid)`
 
 What is inside a chest, or what a creature is carrying.
 
@@ -2756,6 +3549,8 @@ What is inside a chest, or what a creature is carrying.
 | `uid` | uid |
 
 **Returns:** array of tables { type, name, count, status, beatitude, identified } or nil
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript).
 
 ### `sam_get_light_at(x, y, [player])`
 
@@ -2767,7 +3562,9 @@ How lit a tile is, computed exactly the way the engine computes it, so the numbe
 | `y` | int |
 | `player` *(optional)* | int |
 
-**Returns:** 0..255
+**Returns:** a light level from 0 to 255 (number)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript. The shared lightmap the monster AI reads exists only on the host, so a client's call is refused with a warning. It answers with nothing at all rather than 0, because 0 is a real light level: pitch darkness.
 
 ### `sam_get_tile(x, y)`
 
@@ -2780,6 +3577,8 @@ Read one map tile. Liquid comes from the FLOOR tile, and the engine decides whic
 
 **Returns:** table { wall, floor, ceiling, solid, water, lava, walkable } or nil for a tile off the map
 
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
+
 ### `sam_is_spawnable(x, y)`
 
 Is this a sane place to put something: in bounds, not inside a wall, not lava. Check before spawning instead of dropping a monster into rock.
@@ -2791,6 +3590,8 @@ Is this a sane place to put something: in bounds, not inside a wall, not lava. C
 
 **Returns:** boolean
 
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
+
 ### `sam_is_tile_diggable(x, y)`
 
 Whether the map's rules allow digging here: it returns false for water and lava, the Hell and fortress edges, and any tile marked no-dig. It does NOT check that there is a wall to dig, so it is true on ordinary open floor too. Pair it with sam_get_tile if you need something solid to be there. Out-of-bounds coordinates return false rather than reading past the map.
@@ -2801,6 +3602,8 @@ Whether the map's rules allow digging here: it returns false for water and lava,
 | `y` | int (tile) |
 
 **Returns:** true if this tile's terrain permits digging (boolean)
+
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
 
 ### `sam_line_of_sight(x1, y1, x2, y2, [blockedByEntities])`
 
@@ -2816,9 +3619,9 @@ Can a straight line get from A to B? This is the engine's own trace, so it agree
 
 **Returns:** visible, blockedX, blockedY (blocked coords are -1 when visible)
 
-### `sam_set_tile(x, y, layer, tileId)`
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
 
-> Host-only.
+### `sam_set_tile(x, y, layer, tileId)`
 
 Write one map tile — dig a passage, wall something in, flood a room. Refuses out of bounds rather than corrupting the map array. Check sam_tiles_connected afterwards if the edit could seal the exit.
 
@@ -2830,6 +3633,8 @@ Write one map tile — dig a passage, wall something in, flood a room. Refuses o
 | `tileId` | int |
 
 **Returns:** true on success (boolean)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. Edits reach every S.A.M player in the order they were made, including a player who finishes loading late. A player whose game does not run S.A.M sees only dug walls (a wall set to 0), not placed walls or floor and ceiling changes. Tile ids only mean the same tile when every player has the same mods.
 
 ### `sam_tiles_connected(x1, y1, x2, y2, [flying])`
 
@@ -2845,6 +3650,8 @@ Can something WALK (or fly) from A to B at all? The softlock check: after a mod 
 
 **Returns:** boolean
 
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler. Answers correctly on a client after the host changes terrain.
+
 
 ## Timers
 
@@ -2858,9 +3665,11 @@ Cancel a pending timer by id (for the calling mod).
 
 **Returns:** nothing
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript.
+
 ### `sam_set_repeating_timer(id, interval_ticks, callback)`
 
-Run `callback` (a function) every interval_ticks until cancelled. Ticks host-side.
+Run `callback` (a function) every interval_ticks until cancelled.
 
 | argument | type |
 |---|---|
@@ -2870,9 +3679,11 @@ Run `callback` (a function) every interval_ticks until cancelled. Ticks host-sid
 
 **Returns:** nothing
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript. Timers run on the host only. Every machine drops all timers when a run starts, so set them from game.on_game_start or later, never from top-level script code. A timer callback is not an event: a screen call inside it with no player shows on the host's screen.
+
 ### `sam_set_timer(id, delay_ticks, callback)`
 
-Run `callback` (a function) once after delay_ticks (50/sec). Replaces any timer with the same id. Ticks host-side.
+Run `callback` (a function) once after delay_ticks (50/sec). Replaces any timer with the same id.
 
 | argument | type |
 |---|---|
@@ -2881,6 +3692,8 @@ Run `callback` (a function) once after delay_ticks (50/sec). Replaces any timer 
 | `callback` | any |
 
 **Returns:** nothing
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript. Timers run on the host only. Every machine drops all timers when a run starts, so set them from game.on_game_start or later, never from top-level script code. A timer callback is not an event: a screen call inside it with no player shows on the host's screen, so keep the player in a local and pass it.
 
 
 ## Truth
@@ -2895,6 +3708,8 @@ Armor class as the damage formula sees it, gear included.
 
 **Returns:** number
 
+**Multiplayer:** `read`. The host can read every creature; a client can read only its own player's uid (`uid`), and anything else is refused with a one-time warning and returns nil (undefined in JavaScript).
+
 ### `sam_get_effective_stat(uid, stat)`
 
 A stat as the game actually uses it — gear, effects and curses folded in — rather than the raw number on the sheet.
@@ -2906,6 +3721,8 @@ A stat as the game actually uses it — gear, effects and curses folded in — r
 
 **Returns:** number
 
+**Multiplayer:** `read`. The host can read every creature; a client can read only its own player's uid (`uid`), and anything else is refused with a one-time warning and returns nil (undefined in JavaScript).
+
 ### `sam_get_flag(flag)`
 
 Read a lobby setting the host chose at game start. Lets a mod adapt to the run it is actually in — skip a hunger mechanic when hunger is off, or scale difficulty when hardcore is on.
@@ -2915,6 +3732,8 @@ Read a lobby setting the host chose at game start. Lets a mod adapt to the run i
 | `flag` | string — one of: `cheats`, `friendlyfire`, `minotaurs`, `hunger`, `traps`, `hardcore`, `classic`, `keep_inventory`, `lifesaving`, `assist_items` |
 
 **Returns:** true or false, or nil if the flag name is unknown (the valid list is logged)
+
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
 
 ### `sam_get_monster_name(uid)`
 
@@ -2926,6 +3745,8 @@ For a mod's custom monster this is the variant name it was given ("Rathalos"). A
 
 **Returns:** the creature's DISPLAY name (string; nil if not a creature)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript).
+
 ### `sam_get_monster_type(uid)`
 
 Identify a creature by name instead of the raw integer in an event payload. NOTE this is the BASE type: a custom monster is a variant of a vanilla species, so a mod's "Rathalos" built on a bat answers "bat". Use sam_get_monster_name for the variant's own name, or sam_monster_has_trait to tell modded creatures apart.
@@ -2936,11 +3757,15 @@ Identify a creature by name instead of the raw integer in an event payload. NOTE
 
 **Returns:** the species name, e.g. "skeleton" (string; nil if not a creature)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript).
+
 ### `sam_get_seed()`
 
-Read the seed identifying this run. Pair it with sam_random when you want per-run variety that every player still agrees on.
+Read the seed identifying this run. Pair it with sam_random when you want per-run variety.
 
 **Returns:** the run's unique game key (number)
+
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
 
 ### `sam_get_skill(uid, skill, [effective])`
 
@@ -2952,7 +3777,9 @@ A proficiency rank. Accepts both spellings — "PRO_SWORD" (the class schema) an
 | `skill` | string |
 | `effective` *(optional)* | boolean |
 
-**Returns:** 0..100
+**Returns:** a proficiency rank from 0 to 100 (number)
+
+**Multiplayer:** `read`. The host can read every creature; a client can read only its own player's uid (`uid`), and anything else is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript.
 
 ### `sam_is_enemy(uid_a, uid_b)`
 
@@ -2965,6 +3792,8 @@ Would these two fight? The engine's own allegiance answer, so charm, race and fa
 
 **Returns:** boolean
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript.
+
 ### `sam_is_friend(uid_a, uid_b)`
 
 The other side of sam_is_enemy — allies, followers and charmed creatures.
@@ -2976,6 +3805,8 @@ The other side of sam_is_enemy — allies, followers and charmed creatures.
 
 **Returns:** boolean
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript.
+
 ### `sam_is_ghost(player)`
 
 Whether a dead player is walking around as a ghost. Worth checking before granting items or applying effects, since a ghost is not an ordinary player.
@@ -2986,6 +3817,8 @@ Whether a dead player is walking around as a ghost. Worth checking before granti
 
 **Returns:** true if that player is currently a ghost (boolean)
 
+**Multiplayer:** `read`. The host can read every player; a client can read only its own player (`player`), and asking about another is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript.
+
 ### `sam_is_spirit_ghost(player)`
 
 The stricter ghost test: a spirit ghost specifically, rather than any ghost state.
@@ -2995,6 +3828,8 @@ The stricter ghost test: a spirit ghost specifically, rather than any ghost stat
 | `player` | int |
 
 **Returns:** true if that player is a spirit ghost (boolean)
+
+**Multiplayer:** `read`. The host can read every player; a client can read only its own player (`player`), and asking about another is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript.
 
 ### `sam_monster_has_trait(uid, trait)`
 
@@ -3007,9 +3842,11 @@ Reads back what the mod declared in JSON. Without this a mod can SAY a monster i
 
 **Returns:** boolean
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript.
+
 ### `sam_random(stream, min, max)`
 
-Deterministic random drawn from a named stream owned by your mod. Same run seed plus same stream plus same draw order gives the same number on every machine, which ordinary random() cannot promise. Use it for anything that must agree across a multiplayer party.
+Deterministic random drawn from a named stream owned by your mod. The same run seed, the same stream and the same order of calls give the same number, which ordinary random() cannot promise.
 
 | argument | type |
 |---|---|
@@ -3019,9 +3856,11 @@ Deterministic random drawn from a named stream owned by your mod. Same run seed 
 
 **Returns:** an integer in [min, max]
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Draws happen on the host only and are not synchronized between machines: roll on the host and send the result with sam_send_packet if a client needs it.
+
 ### `sam_random_chance(stream, percent)`
 
-Rolls a percentage chance. 0 or less is always false and 100 or more is always true, so you never have to clamp. This is the single most-typed line in any mod, and doing it by hand with an undeterministic random is how multiplayer mods drift apart.
+Rolls a percentage chance. 0 or less is always false and 100 or more is always true, so you never have to clamp. Drawn from one of your mod's named streams, so the same run and the same call order give the same rolls.
 
 | argument | type |
 |---|---|
@@ -3030,15 +3869,19 @@ Rolls a percentage chance. 0 or less is always false and 100 or more is always t
 
 **Returns:** true or false
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript. Draws happen on the host only and are not synchronized between machines: roll on the host and send the result with sam_send_packet if a client needs it.
+
 ### `sam_random_float(stream)`
 
-A deterministic fraction from one of your mod's named streams. Same run, same stream, same call order gives the same number on every machine, which ordinary random() cannot promise.
+A deterministic fraction from one of your mod's named streams. The same run, the same stream and the same call order give the same number.
 
 | argument | type |
 |---|---|
 | `stream` | string (any name; each stream is independent) |
 
 **Returns:** a number from 0.0 to 1.0
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Draws happen on the host only and are not synchronized between machines: roll on the host and send the result with sam_send_packet if a client needs it.
 
 ### `sam_random_from_list(stream, list)`
 
@@ -3051,9 +3894,11 @@ Picks one entry at random, deterministically. Note that Lua lists start at 1 and
 
 **Returns:** one element, or nil for an empty list
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Draws happen on the host only and are not synchronized between machines: roll on the host and send the result with sam_send_packet if a client needs it.
+
 ### `sam_random_weighted(stream, weights)`
 
-Picks a key with probability proportional to its weight, for loot tables and spawn tables. Weights need not add up to anything in particular, and a weight of zero or less can never come up.
+Picks a key with probability proportional to its weight, for loot tables and spawn tables. Weights need not add up to anything in particular, and a weight of zero or less can never come up. Number keys count by their text in Lua and JavaScript alike ({[1]=5} and {1:5} both mean the key "1"), and the key comes back as a string.
 
 | argument | type |
 |---|---|
@@ -3062,12 +3907,12 @@ Picks a key with probability proportional to its weight, for loot tables and spa
 
 **Returns:** one key, or nil if no weight is positive
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Draws happen on the host only and are not synchronized between machines: roll on the host and send the result with sam_send_packet if a client needs it.
+
 
 ## World
 
 ### `sam_apply_force(uid, force, angle, [ticks])`
-
-> Host-only.
 
 Shove an entity, using the engine's own knockback. The angle is a Barony yaw in radians, the same number sam_get_facing gives you, so away-from-you is atan2(theirY - myY, theirX - myX). This is deliberately not a raw velocity write: both act functions throw velocity away unless the knockback effect is active, and a player takes the impulse in a completely different field from a monster, so a hand-written version does nothing at all to the two targets you would actually aim it at. The optional ticks is how long the stagger lasts and defaults to 30, which is what the engine uses. Force is capped at 7 because a single step bigger than that can jump clean over a wall instead of hitting it. Returns false, with a logged reason, for a creature that refuses knockback outright: liches, minotaurs, the devil and shopkeepers are immune, and the engine's own knockback does nothing to them either. It also returns false for anything whose behaviour never reads velocity at all, which includes the decorative portals sam_spawn_portal creates: use sam_move_entity on those. The angle is wrapped into 0 to 2 pi for you, because the network carries it as a fixed-point number that overflows past about 128 radians.
 
@@ -3080,9 +3925,11 @@ Shove an entity, using the engine's own knockback. The angle is a Barony yaw in 
 
 **Returns:** true if something will act on the shove (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. A resting gold bag moves too (it used to do nothing on any machine), and a shoved item or bag slides on every player's screen and ends where the host's copy comes to rest.
+
 ### `sam_can_stand(uid, tile_x, tile_y)`
 
-Ask whether THIS entity could stand on that tile. Different from sam_is_spawnable, which only reads the map and cannot see other entities or the asker's own collision profile: levitation, body size and the pass-through set all change the answer. Check with this before sam_set_position instead of dropping a monster inside a wall. True is necessary but not sufficient for a player teleport, which applies extra rules of its own (no teleporting on the minotaur levels, and MFLAG_DISABLETELEPORT maps). One multiplayer caveat, and it is logged when it applies: on a connected client this only sees walls and floor, not creatures, because the client does not keep the entity grid the test reads. Ask the host when the answer has to include who is standing there.
+Ask whether THIS entity could stand on that tile. Different from sam_is_spawnable, which only reads the map and cannot see other entities or the asker's own collision profile: levitation, body size and the pass-through set all change the answer. Check with this before sam_set_position instead of dropping a monster inside a wall. True is necessary but not sufficient for a player teleport, which applies extra rules of its own (no teleporting on the minotaur levels, and MFLAG_DISABLETELEPORT maps).
 
 | argument | type |
 |---|---|
@@ -3090,11 +3937,11 @@ Ask whether THIS entity could stand on that tile. Different from sam_is_spawnabl
 | `tile_x` | int |
 | `tile_y` | int |
 
-**Returns:** true if that entity would fit at that tile (boolean); false if it is blocked, or the tile is off the map, or the uid is gone
+**Returns:** true if that entity would fit at that tile (boolean); false if it is blocked, or the tile is off the map, or the uid is gone; nil on a client
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). The entity grid this test reads exists only on the host, so a client's call is refused with a warning and returns nil ("cannot answer here") rather than a confident false.
 
 ### `sam_companion_punch(uid)`
-
-> Host-only.
 
 Make a companion THRUST forward for a few ticks — the punch motion. Call it repeatedly on a fast repeating timer (e.g. every 3 ticks) during an ability to read as a continuous ORA-ORA flurry. Purely visual on the companion itself; combine with sam_cast_spell (forward projectile + real damage) and/or sam_get_nearby_entities + sam_deal_damage for the hits.
 
@@ -3104,21 +3951,27 @@ Make a companion THRUST forward for a few ticks — the punch motion. Call it re
 
 **Returns:** true if uid is a live companion (boolean); false otherwise
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. The lunge is animated on every S.A.M player's machine.
+
 ### `sam_get_exit_position()`
 
 Where the ladder or portal off this floor is, found the same way the game's own dowsing does it. In JavaScript this returns an array.
 
 **Returns:** tile x, y of the way onward, or nil if none was found
 
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
+
 ### `sam_get_inventory(player)`
 
-List a player's inventory. Use each item's uid with sam_remove_item. A mod item reports its own "namespace:item" id as its name, so it can be told apart from other mod items and fed back into sam_grant_item. Empty list for an invalid player.
+List a player's inventory. Use each item's uid with the item functions and sam_remove_item. name is the vanilla internal name, or a mod item's own "namespace:item" id (in Lua and JavaScript alike), so it can be told apart from other mod items and fed back into sam_grant_item. equipped is true only for the exact item being worn, so a spare identical ring in the bag does not count; it agrees with sam_is_item_equipped.
 
 | argument | type |
 |---|---|
 | `player` | int |
 
-**Returns:** a list of items, each { uid, type, name, count, beatitude, status, identified, equipped }
+**Returns:** a list of items, each { uid, type, name, count, beatitude, status, identified, equipped }; empty for an invalid player; nil if this machine cannot see that player's backpack
+
+**Multiplayer:** `read`. The host can read every player; a client can read only its own player (`player`), and asking about another is refused with a one-time warning and returns nil (undefined in JavaScript). On the host, a player on another machine is answered from a copy their own game sends a moment after joining and whenever it changes (at most five times a second). nil means this machine cannot see that player's things: the host before their game has reported, or a player whose game does not run S.A.M. That 'not reported yet' moment comes at the start of EVERY run, not only after a join: the host drops the last character's copy when a new run starts and that player's game sends the new one a moment later, so read another player's backpack or spells from a timer or a later event, never from game.on_game_start. A removal is no more visible than any other change until that next report, so never write 'if they still have it, give the reward' without a flag of your own. The uids a remote player's list gives you work with every item function: readers answer from the host's copy, writers are carried to that player's machine. A remote player's item crosses as a type NUMBER, and a mod's item numbers follow the order that machine's mods loaded, so the host names it from its own table: right when both machines load the same mods in the same order, wrong otherwise. An item whose type this host has no definition for is left out of that player's list entirely rather than guessed at.
 
 ### `sam_get_map_flags()`
 
@@ -3126,17 +3979,23 @@ The rules this particular map sets. Worth checking before a mod grants levitatio
 
 **Returns:** a table/object of booleans (no_digging, no_teleport, no_levitation, no_opening, no_messages, no_hunger, gen_adjacent) plus perimeter_gap, which is a tile count
 
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
+
 ### `sam_get_map_seed()`
 
-The per-floor generation seed, which is the same number on the host and on every client because a client rebuilds the floor from it. Distinct from sam_get_seed, which identifies the whole run. Use it with sam_random when you want per-floor variety that everyone agrees on.
+The per-floor generation seed, which is the same number on the host and on every client because a client rebuilds the floor from it. Distinct from sam_get_seed, which identifies the whole run.
 
 **Returns:** the seed this floor was generated from (number)
+
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
 
 ### `sam_get_playable_bounds()`
 
 The rectangle the level generator is actually allowed to use, which excludes the perimeter gap some maps reserve. A spawner that ignores this can place things inside the outer wall. In JavaScript this returns an array.
 
 **Returns:** x1, y1, x2, y2 in tiles, upper bounds exclusive
+
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
 
 ### `sam_get_player_uid(player)`
 
@@ -3146,7 +4005,9 @@ Get a player's entity uid, so the uid-based world-ops (get/set position) can act
 |---|---|
 | `player` | int |
 
-**Returns:** the player's entity uid (int), or nil/null if not in-game
+**Returns:** the player's entity uid (int), or nil/undefined if not in-game
+
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
 
 ### `sam_get_position(uid)`
 
@@ -3156,17 +4017,21 @@ Read any entity's map-tile position (player, monster or ground item). Get a play
 |---|---|
 | `uid` | int |
 
-**Returns:** tile x, tile y (two values in Lua; an [x, y] array in JS), or nil/null if the uid is gone
+**Returns:** tile x, tile y (two values in Lua; an [x, y] array in JS), or nil/undefined if the uid is gone
+
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler. Reads this machine's own copy of the entity, which on a client is interpolated between the host's updates and can lag it by a fraction of a second. Two machines can therefore answer slightly differently at the same moment: decide anything that depends on the exact number on the host and send the verdict with sam_send_packet, rather than working it out inside on_packet.
 
 ### `sam_is_damage_immune(uid)`
 
-Whether a script has made this entity immune to damage with sam_set_damage_immune. The immunity lives on the host, so ask the host if the answer has to be right.
+Whether a script has made this entity immune to damage with sam_set_damage_immune.
 
 | argument | type |
 |---|---|
 | `uid` | int |
 
-**Returns:** true or false (boolean)
+**Returns:** true or false (boolean); nil on a client
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). The immunity set exists only on the host, so a client's call returns nil rather than a confident false.
 
 ### `sam_is_dark_level()`
 
@@ -3174,11 +4039,11 @@ Whether this floor is one of the unlit ones.
 
 **Returns:** true on a dark floor (boolean)
 
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
+
 ### `sam_move_entity(uid, dx, dy)`
 
-> Host-only.
-
-Nudge an entity by a relative distance, sliding along whatever it runs into rather than stopping dead or passing through. The answer is the distance it MANAGED, so 0 means something is right there and 0.3 out of a requested 2 means it hit a corner: a plain true or false would have hidden the difference. Distances are in tiles, like every other spatial call here, and a long move is walked in short steps so it cannot skip over a wall: the engine's collision test only looks at where you land, not at the path, so a single two-tile step used to step clean over a one-tile wall and report the whole distance as clear. Nudging another player's character logs a warning, because their machine owns their position and will report it back over yours within a frame or two. Use sam_set_position to teleport, or sam_apply_force to shove. One multiplayer limit worth knowing: a ground item, a gold bag, a flame or a gate refuses position updates on a client, so moving one is real on the host and other players keep seeing it where it was. You get a logged warning when that happens. Remove it and spawn a new one at the destination if everyone has to see it.
+Nudge an entity by a relative distance, sliding along whatever it runs into rather than stopping dead or passing through. The answer is the distance it MANAGED, so 0 means something is right there and 0.3 out of a requested 2 means it hit a corner: a plain true or false would have hidden the difference. Distances are in tiles, like every other spatial call here, and a long move is walked in short steps so it cannot skip over a wall: the engine's collision test only looks at where you land, not at the path, so a single two-tile step used to step clean over a one-tile wall and report the whole distance as clear. A ground item or gold bag is woken, so it settles exactly like a dropped item (drops to the floor, falls into a pit, floats on water), in singleplayer too. Use sam_set_position to teleport, or sam_apply_force to shove.
 
 | argument | type |
 |---|---|
@@ -3186,13 +4051,13 @@ Nudge an entity by a relative distance, sliding along whatever it runs into rath
 | `dx` | number (tiles, can be fractional) |
 | `dy` | number (tiles, can be fractional) |
 
-**Returns:** how far it actually moved, in tiles (number), or nil/null if the uid is refused
+**Returns:** how far it actually moved, in tiles (number), or nil/undefined if the uid is refused
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). On a connected player it really moves them: their own machine applies the move through its own collision, and the returned distance is what the host computed. A player whose game does not run S.A.M is corrected with the engine's own position packet, which can occasionally be lost. A ground item or gold bag moves for every player. Moving a prop Barony never updates on a client (a gate, a torch) reaches players who run S.A.M; a player without S.A.M keeps seeing the old spot, and the log says so once.
 
 ### `sam_remove_entity(uid)`
 
-> Host-only.
-
-Remove a non-player world entity by uid: a sam_spawn_portal marker, a spawned monster, a companion, a ground item, etc. Refuses players (use the normal death/teleport paths for those). Frees any light the entity owned, and closes the chest UI first if it is a chest somebody has open. The removal is QUEUED and happens on the next frame, so the uid still resolves for the rest of the current event. That is deliberate: your handler was called from inside the engine, which is still holding a pointer to that entity, so freeing it immediately corrupted memory.
+Remove a non-player world entity by uid: a sam_spawn_portal marker, a spawned monster, a companion, a ground item, etc. Refuses players (use the normal death/teleport paths for those). Frees any light the entity owned, and closes the chest UI first if it is a chest somebody has open. A follower is also taken off its leader's follower list and ally HUD, on the leader's own machine too. The removal is QUEUED and happens on the next frame, so the uid still resolves for the rest of the current event. That is deliberate: your handler was called from inside the engine, which is still holding a pointer to that entity, so freeing it immediately corrupted memory.
 
 | argument | type |
 |---|---|
@@ -3200,11 +4065,11 @@ Remove a non-player world entity by uid: a sam_spawn_portal marker, a spawned mo
 
 **Returns:** true on success (boolean); false for an unknown uid or a player
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. Removing a follower also takes it out of its leader's follower list and ally HUD, on the leader's own machine too.
+
 ### `sam_remove_item(item_uid)`
 
-> Host-only.
-
-Remove a whole item stack from a player's inventory by its uid (from sam_get_inventory). Refuses an equipped item — unequip it first.
+Remove a whole item stack from a player's inventory by its uid (from sam_get_inventory). Refuses an equipped item; unequip it first. The removal is queued and happens at the end of the tick, so it is safe inside an item event.
 
 | argument | type |
 |---|---|
@@ -3212,9 +4077,9 @@ Remove a whole item stack from a player's inventory by its uid (from sam_get_inv
 
 **Returns:** true on success (boolean); false if the item is missing or currently equipped
 
-### `sam_set_chest_stash(chest_uid, [on])`
+**Multiplayer:** `owner`. The state lives on the player's own machine: on the host, a call about a player on another machine (named by `item_uid`) is carried to that machine and done there, and returns true once it is sent. A player whose game does not run S.A.M is refused with a warning. A client's call is refused with a one-time warning and returns false. Call it on the host. An item uid that sam_get_inventory(p) gave you for a player on another machine is carried to that player's machine and changed there, so true means the change was SENT; if their game refuses it (the item was used up, it is equipped, it is over the stack limit) the reason shows in the host's log. The host's copy shows the change after that player's next report, a few ticks later, so reading it back in the same tick still gives the old value. Do NOT call one of these every tick for another player's item: every call is carried over the reliable channel whether or not it changes anything, so call it when the value changes. If the item is one that player is WEARING, the host's own copy of it (the one combat, AC and sam_can_unequip read) is corrected too; if they swap to a different item in the same instant the correction is dropped and logged rather than applied to the wrong item, unless the two share a type AND an appearance, which the host cannot tell apart. A player whose game does not run S.A.M is refused with a warning.
 
-> Host-only.
+### `sam_set_chest_stash(chest_uid, [on])`
 
 Turn an existing chest into permanent storage. Its contents then live in the player's savegame instead of on the floor, surviving descending, dying later, quitting and loading. This is the game's own void-chest storage, so the window, the networking and the save round-trip are all vanilla. Two limits worth designing around: every stash chest in a run shares ONE set of contents, and the chest window holds 12 stacks — so this is a stash, not a bank. Converting a chest that already holds loot hides that loot until you turn the stash back off; prefer converting an empty one.
 
@@ -3225,9 +4090,9 @@ Turn an existing chest into permanent storage. Its contents then live in the pla
 
 **Returns:** true if the chest was converted (boolean)
 
-### `sam_set_damage_immune(uid, on)`
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
 
-> Host-only.
+### `sam_set_damage_immune(uid, on)`
 
 Make a player or a monster stop taking damage, or let them take damage again. It works at the one place every point of damage to a CREATURE is applied, right beside the engine's own invulnerabilities, so for a creature nothing gets through by another route. Anything else is refused and the refusal says why: chests, doors, furniture and breakable decorations do not have health in that sense, they carry their own separate pools that a hit decrements directly, and no immunity here could reach them. The hit still lands, the sound still plays and the knockback still happens; only the loss of health is stopped, which is what invulnerable means everywhere else in Barony. You could already do this from an on_before_damage handler, and still can; this costs nothing per hit and needs no bookkeeping. It is session state: never saved, and cleared on every floor and at the start of a run, because entity uids restart from 1 on each level and a leftover entry would hand your boss's invulnerability to a rat downstairs.
 
@@ -3238,9 +4103,9 @@ Make a player or a monster stop taking damage, or let them take damage again. It
 
 **Returns:** true on success (boolean); false for anything that is not a player or a monster
 
-### `sam_set_on_fire(uid, [on])`
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
 
-> Host-only.
+### `sam_set_on_fire(uid, [on])`
 
 Set something alight, or put it out with sam_set_on_fire(uid, false). The answer is whether it is burning NOW, which is deliberately not what the engine's own function returns: that one answers false for an entity that was already on fire, so a script retrying on false would retry for ever. Two things stop a fire starting and each logs its reason. An entity that is not BURNABLE will never light (turn the flag on with sam_set_entity_flag first), and skeletons, automatons, anyone in a machinist apron and anyone wearing an amulet of burning resistance are immune. One thing to know about props: the burn timer only runs for players and monsters, so a chest or a decoration you light stays lit for the rest of the level and hurts nothing. That is useful for a brazier, and the second argument is how you undo it.
 
@@ -3251,11 +4116,11 @@ Set something alight, or put it out with sam_set_on_fire(uid, false). The answer
 
 **Returns:** true if the entity is on fire once the call finishes (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
+
 ### `sam_set_position(uid, tile_x, tile_y)`
 
-> Host-only.
-
-Move an entity to a map tile. Players go through the safe teleport path and cannot tunnel into walls; everything else is relocated and re-broadcast to clients. Anything that is not a player is placed where you asked even when the tile is blocked, because putting a decoration inside a wall alcove is a real thing mods do, but you get a logged warning: a monster dropped into a wall is stuck there for good. Call sam_can_stand first when the answer matters. A shared engine marker uid (0 or a negative number) and a limb uid are both refused with a reason. In multiplayer a ground item, a gold bag, a flame or a gate refuses position updates on a client, so moving one of those is host-only and you get a logged warning saying so.
+Move an entity to a map tile. Players go through the safe teleport path and cannot tunnel into walls; everything else is relocated and re-broadcast to clients. Anything that is not a player is placed where you asked even when the tile is blocked, because putting a decoration inside a wall alcove is a real thing mods do, but you get a logged warning: a monster dropped into a wall is stuck there for good. Call sam_can_stand first when the answer matters. A shared engine marker uid (0 or a negative number) and a limb uid are both refused with a reason.
 
 | argument | type |
 |---|---|
@@ -3265,11 +4130,11 @@ Move an entity to a map tile. Players go through the safe teleport path and cann
 
 **Returns:** true on success (boolean); false if refused (out of bounds, or a player teleport blocked by a wall)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. Items, gold bags and pinned props reach every player that can be told: S.A.M players see props Barony never updates on a client (a gate, a torch) move too, while a player without S.A.M keeps seeing the old spot and the log says so once. A teleported player on another machine does not snap back. A ground item or a bag of gold that has already come to REST stays at rest: it is placed exactly where you ask -- in mid-air, over a pit, inside a wall alcove -- and it does not fall, in any mode. Use sam_push_entity when you want it to fall or slide; that call wakes the item on purpose. An item still in flight is simply moved mid-fall and lands where it lands.
+
 ### `sam_spawn_companion(player, model_id, [scale])`
 
-> Host-only.
-
-Spawn a floating COMPANION (a JoJo-style "Stand" / familiar) that renders one of your custom .vox models and trails the player a short distance behind, with a gentle hover. Follows the player every frame and faces where they face. Optional scale (default 1.0, capped at 8) sizes the model. Drive the punch motion with sam_companion_punch, and clear it with sam_remove_entity. It's a decorative follower (PASSABLE, no AI, does no damage on its own — pair it with sam_cast_spell / sam_deal_damage for the actual attack). Host-only; not network-synced (host renders it). Re-spawn it on each new floor (entities are cleared on descent).
+Spawn a floating COMPANION (a JoJo-style "Stand" / familiar) that renders one of your custom .vox models and trails the player a short distance behind, with a gentle hover. Follows the player every frame and faces where they face. The optional scale (default 1.0) sizes the model; it is clamped to 1.99 with a warning, the most the network can carry. Drive the punch motion with sam_companion_punch, and clear it with sam_remove_entity. It's a decorative follower (PASSABLE, no AI, does no damage on its own; pair it with sam_cast_spell / sam_deal_damage for the actual attack). Re-spawn it on each new floor (entities are cleared on descent).
 
 | argument | type |
 |---|---|
@@ -3277,11 +4142,11 @@ Spawn a floating COMPANION (a JoJo-style "Stand" / familiar) that renders one of
 | `model_id` | string — one of: `a registered custom model id, e.g. "mymod:star_platinum"` |
 | `scale` *(optional)* | number |
 
-**Returns:** the new companion's entity uid (int), or nil/null (bad player / unregistered model / off-host)
+**Returns:** the new companion's entity uid (int), or nil/undefined (bad player / unregistered model / on a client)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Every S.A.M player sees it follow and animate. A player whose game does not run S.A.M cannot draw a companion's mod model at all.
 
 ### `sam_spawn_monster(tile_x, tile_y, monster_name, [shop_type])`
-
-> Host-only.
 
 Summon a monster at a map tile. "shopkeeper" makes a working shop; the optional shop_type (0-14) picks the store kind.
 
@@ -3292,26 +4157,26 @@ Summon a monster at a map tile. "shopkeeper" makes a working shop; the optional 
 | `monster_name` | string — one of: `vanilla monster name, e.g. "skeleton", "shopkeeper"` |
 | `shop_type` *(optional)* | int |
 
-**Returns:** the new monster's uid (int), or nil/null if the name is unknown or the tile is blocked
+**Returns:** the new monster's uid (int), or nil/undefined if the name is unknown or the tile is blocked
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript).
 
 ### `sam_spawn_portal(tile_x, tile_y)`
 
-> Host-only.
-
-Spawn a purely-DECORATIVE portal (the swirling vortex) at a map tile — it animates and glows but is never interactive and never sends anyone to the next floor. Walkable, so a player can stand on it. Returns the uid so you can move it (sam_set_position) or clear it (sam_remove_entity) — e.g. a portal-gun marker. Host-only. Multiplayer: the portal is host-authoritative and NOT network-synced, so only the host renders it — connected clients won't see it (your teleport/logic still runs host-side).
+Spawn a purely DECORATIVE portal (the swirling vortex) at a map tile: it animates and glows but is never interactive and never sends anyone to the next floor. Walkable, so a player can stand on it. Returns the uid so you can move it (sam_set_position) or clear it (sam_remove_entity), e.g. a portal-gun marker. In JavaScript both tile arguments are required.
 
 | argument | type |
 |---|---|
 | `tile_x` | int |
 | `tile_y` | int |
 
-**Returns:** the new portal's entity uid (int), or nil/null if the tile is out of bounds
+**Returns:** the new portal's entity uid (int), or nil/undefined if the tile is out of bounds
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Every player sees it (it used to show on the host only).
 
 ### `sam_travel_to_level(floor, [opts])`
 
-> Host-only.
-
-Send the party to any floor, including BACK UP, which the game otherwise never does — a ladder only ever counts upward, so before this no hub, home base or shop you walk back to was possible. The trip is deferred exactly as a ladder defers it, so it is safe to call from inside an event handler. Refused, with a logged reason, on a client, while another level change is already under way, or before a game has started. Nothing on the old floor is preserved: floors regenerate from the map seed, so put anything that must survive in a stash chest or in sam_world_save.
+Send the party to any floor, including BACK UP, which the game otherwise never does: a ladder only ever counts upward, so before this no hub, home base or shop you walk back to was possible. The trip is deferred exactly as a ladder defers it, so it is safe to call from inside an event handler. Refused, with a logged reason, on a client, while another level change is already under way, or before a game has started. Nothing on the old floor is preserved: floors regenerate from the map seed, so put anything that must survive in a stash chest or in sam_world_save. opts.secret follows one rule in both runtimes: in Lua, { secret = 0 } means not secret, as in JavaScript.
 
 | argument | type |
 |---|---|
@@ -3320,12 +4185,12 @@ Send the party to any floor, including BACK UP, which the game otherwise never d
 
 **Returns:** true if the trip was accepted (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. The engine's periodic level-change reminder is held back while a change is pending, so a player cannot be sent to the wrong floor. In Lua, opts.secret = 0 now means not secret, as it does in JavaScript.
+
 
 ## Your own logic
 
 ### `sam_attach_behavior(uid, behavior)`
-
-> Host-only.
 
 Attach one of your registered behaviours to a live monster. It runs AFTER vanilla AI each frame rather than replacing it, so the creature still fights and paths normally and your code layers on top.
 
@@ -3336,9 +4201,11 @@ Attach one of your registered behaviours to a live monster. It runs AFTER vanill
 
 **Returns:** true on success (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
+
 ### `sam_detach_behavior(uid)`
 
-Remove whatever behaviour a script attached to this entity. Local bookkeeping, so it is safe to call anywhere and on a uid that has none.
+Remove whatever behaviour a script attached to this entity. Safe on a uid that has none.
 
 | argument | type |
 |---|---|
@@ -3346,19 +4213,21 @@ Remove whatever behaviour a script attached to this entity. Local bookkeeping, s
 
 **Returns:** true (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
+
 ### `sam_get_entity_facing(uid)`
 
-Read which way an entity is pointing. sam_get_facing takes a PLAYER index and reads where that player looks; this takes an entity uid, which is what a behaviour is handed. Feed it straight to sam_spawn_projectile to fire where the thing is aiming.
+Read which way an entity is pointing. sam_get_facing takes a PLAYER index and reads where that player looks; this takes an entity uid, which is what a behaviour is handed. Feed it straight to sam_spawn_projectile to fire where the thing is aiming. Always in [0, 2π): an entity whose raw yaw was negative used to read as nil.
 
 | argument | type |
 |---|---|
 | `uid` | int |
 
-**Returns:** the facing in radians (number), or nil/null for an unknown uid
+**Returns:** the facing in radians in [0, 2π) (number), or nil/undefined for an unknown uid
+
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler. Reads this machine's copy of the entity. On a client it can lag the host, and a flag the host clears without telling clients can stay set there. Read on the host when the answer matters.
 
 ### `sam_look_at(uid, target_uid)`
-
-> Host-only.
 
 Turn one entity to face another. This is the one a turret wants — it does the trigonometry so you do not have to. Because your behaviour owns the entity, the engine has no opinion about which way it points; you do. Refuses to turn a PLAYER: their facing belongs to whoever is holding the mouse, and a script fighting their input every frame would feel broken.
 
@@ -3369,9 +4238,9 @@ Turn one entity to face another. This is the one a turret wants — it does the 
 
 **Returns:** true if it turned (boolean)
 
-### `sam_register_behavior(name, fn)`
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. A spawned entity turns smoothly on every player's screen; a pinned prop turns for S.A.M players.
 
-> Host-only.
+### `sam_register_behavior(name, fn)`
 
 Give a name to a function that will BE an entity's brain. Barony runs every entity through a function pointer once per frame; this puts yours behind one. Your function is called with the entity's uid, once per frame, for every entity you spawned with that behaviour — and everything else in this reference is available inside it, so it can look around, move, shoot, damage, or open a window. Nothing about what it does comes from a list. Register at the top of your script rather than inside a handler, so the name exists before you spawn anything with it. Registering the same name twice replaces the function, and entities already in the world follow the new code. Behaviours are dropped when mods reload.
 
@@ -3382,9 +4251,9 @@ Give a name to a function that will BE an entity's brain. Barony runs every enti
 
 **Returns:** true if registered (boolean)
 
-### `sam_set_entity_facing(uid, radians)`
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
 
-> Host-only.
+### `sam_set_entity_facing(uid, radians)`
 
 Point an entity at an angle. The primitive under sam_look_at, for when you are computing a direction yourself — a sweep, a spin, a lead on a moving target. The angle is normalised, so a behaviour that keeps adding to it will not drift out of range.
 
@@ -3395,11 +4264,11 @@ Point an entity at an angle. The primitive under sam_look_at, for when you are c
 
 **Returns:** true if it turned (boolean)
 
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. A spawned entity turns smoothly on every player's screen; a pinned prop turns for S.A.M players.
+
 ### `sam_spawn_entity(tile_x, tile_y, behaviour, [model])`
 
-> Host-only.
-
-Put something in the world that runs your behaviour. This is the other half of sam_register_behavior: that one supplies the code, this gives it a body. The entity starts passable with no collision of its own, because your behaviour decides what it collides with. Leave model empty and it is invisible, which is almost never what you want. Host-only.
+Put something in the world that runs your behaviour. This is the other half of sam_register_behavior: that one supplies the code, this gives it a body. The entity starts passable with no collision of its own, because your behaviour decides what it collides with. Leave model empty and it is invisible, which is almost never what you want.
 
 | argument | type |
 |---|---|
@@ -3408,12 +4277,16 @@ Put something in the world that runs your behaviour. This is the other half of s
 | `behaviour` | string (a name you registered) |
 | `model` *(optional)* | string (optional — a model from your mod's "models", or a vanilla model index) |
 
-**Returns:** the new entity's uid (int), or nil/null
+**Returns:** the new entity's uid (int), or nil/undefined
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Every player sees it move, turn, rise and fall smoothly, and its mod model is sent by NAME, so a player whose mods loaded in another order still sees the right model; sam_get_model(uid) answers the model it was spawned with on every machine. A player whose game does not run S.A.M sees a spawned entity with a special vanilla model (a torch, door, gate, chest lid, portal or gold bag) behave like that object, and it may stay where it first appeared: use a mod model or an ordinary vanilla model for anything that moves.
 
 
 ## Events
 
 Handle these in `on_event(e)`. Every script receives every event; check `e.name`.
+Most events fire only on the host, which is where your script's runtime code runs; the
+**Multiplayer:** line under each says where and for whom.
 
 ### `<namespace>:<hook_name>`
 
@@ -3423,6 +4296,10 @@ Fires a script calls sam_fire_hook("namespace:name", event); delivered cross-run
 |---|---|
 | `name` | string |
 | `<any user field>` | any |
+
+not a fixed event — the name is author-defined and MUST contain a colon; only number/bool/string fields survive the crossing; host-only; recursion capped at depth 8
+
+**Multiplayer:** Fires on the machine that calls sam_fire_hook, which is the host (a client's call is refused).
 
 ### `game.on_game_end`
 
@@ -3436,6 +4313,10 @@ Fires the game is won or the party wipes.
 | `kills` | int |
 | `time_played` | int |
 
+won is 0/1
+
+**Multiplayer:** Fires on the host, once per run (a party wipe and every win path alike).
+
 ### `game.on_game_start`
 
 Fires a new game begins.
@@ -3448,6 +4329,8 @@ Fires a new game begins.
 | `race` | int |
 | `race_name` | string |
 
+**Multiplayer:** Fires on the host, once for every player.
+
 ### `game.on_level_entered`
 
 Fires a floor finishes loading.
@@ -3457,6 +4340,8 @@ Fires a floor finishes loading.
 | `player` | int |
 | `floor` | int |
 | `level_name` | string |
+
+**Multiplayer:** Fires on the host, once for every connected player on every arrival (ladders, portals, teleports and sam_travel_to_level alike).
 
 ### `on_action_pressed`
 
@@ -3468,6 +4353,10 @@ Fires a BOUND action goes down — e.g. the player presses whatever they have "U
 | `action` | string |
 | `binding` | string |
 
+no player. prefix. This is the one to use for button-mapped abilities: it reads Barony's named actions, so it follows the player's own keybinds and can never collide with them (it claims no key of its own), and it sees mouse buttons, which the raw-key hooks cannot. Observation only, so vanilla blocking/attacking/hotbar keep working. `binding` is the physical input ("Mouse3") for prompts, and is that player's OWN binding (a joiner's comes from their game). Single-fire per press; use sam_is_action_held for continuous checks. While the chat box or the console has the keyboard, every bound action reads as not held and no press fires, on every machine and in singleplayer -- an action that was already down when the box opened still fires its release. On a splitscreen machine that applies to every seat while one of them is typing, because the game's text focus belongs to the machine and not to a seat. A joiner's buttons reach the host from the moment their game says hello, and anything they were already holding at that moment is reported as a press, so press and release stay paired.
+
+**Multiplayer:** Fires on the host (and in singleplayer), for every player: each local seat, and each joiner's buttons as their game reports them. A joiner whose game does not run S.A.M produces none.
+
 ### `on_action_released`
 
 Fires a bound action goes back up.
@@ -3477,6 +4366,10 @@ Fires a bound action goes back up.
 | `player` | int |
 | `action` | string |
 | `binding` | string |
+
+no player. prefix; the release twin of on_action_pressed
+
+**Multiplayer:** Fires on the host (and in singleplayer), for every player, the same way as on_action_pressed.
 
 ### `on_before_damage`
 
@@ -3488,6 +4381,31 @@ Fires before a player's HP is reduced (bracketed around Entity::modHP).
 |---|---|
 | `player` | int |
 | `damage` | int |
+
+no player. prefix; the ONLY cancellable event — call sam_modify_damage(player, new) to reduce/cancel the incoming hit
+
+**Multiplayer:** Fires on the host, for every player.
+
+### `on_before_effect_applied`
+
+> Cancellable: return `false` to stop it.
+
+Fires a status effect is about to be applied to any creature, before the engine's own immunity checks.
+
+| field | type |
+|---|---|
+| `uid` | uid |
+| `player` | int |
+| `effect` | int |
+| `effect_name` | string |
+| `strength` | int |
+| `duration_ticks` | int |
+| `was_active` | int |
+| `immune` | int |
+
+no player. prefix, and player is -1 for a monster. The scarcest kind of hook: returning false REFUSES the effect outright. You can also rewrite duration_ticks and strength — so a mod can halve a poison rather than only blocking it — or clear the pre-filled `immune` field to let something through that sam_set_immunity would have stopped. Fires only for an effect being APPLIED, never a removal: a gate over removals would trap a creature in whatever it was already carrying. A rewritten duration_ticks of 0 refuses the effect, like strength 0 does; a negative one makes it permanent (-1). Host-side.
+
+**Multiplayer:** Fires on the host.
 
 ### `on_before_monster_damage`
 
@@ -3502,6 +4420,8 @@ Fires before a monster's HP is reduced.
 | `damage` | int |
 
 Rewrite the number with sam_modify_monster_damage(n). Set 0 to negate the hit entirely. Not cancellable by returning false.
+
+**Multiplayer:** Fires on the host.
 
 ### `on_damage_multiplier`
 
@@ -3518,6 +4438,10 @@ Fires while a hit's damage multiplier is being decided, after every vanilla effe
 | `projectile_uid` | uid |
 | `spell_id` | int |
 
+no player. prefix. Fires for melee, arrows and every magic path -- one choke point covers all three. The multiplier crosses as THOUSANDTHS because the event bus carries whole numbers only: 1000 is normal damage, 1500 is +50%, 0 is immune. Contribute with sam_add_damage_multiplier (positives add, negatives multiply, the engine's own rule) or assign multiplier_x1000 directly for an absolute override; returning false makes the hit do nothing. attacker_uid is real here, unlike on_before_damage where it is always 0.
+
+**Multiplayer:** Fires on the host.
+
 ### `on_key_pressed`
 
 Fires a supported RAW key transitions to down (A-Z, 0-9, F1-F12).
@@ -3528,6 +4452,10 @@ Fires a supported RAW key transitions to down (A-Z, 0-9, F1-F12).
 | `key_name` | string |
 | `held` | int |
 
+no player. prefix; single-fire per press — use sam_is_key_held for continuous checks. Reads the PHYSICAL key and ignores the player's keybinds, so it can collide with whatever they've bound there, and it can't see mouse buttons — prefer on_action_pressed unless you specifically want a raw key. While the chat box or the console has the keyboard, every key reads as not held and no press fires, on every machine and in singleplayer -- a key that was already down when the box opened still fires its release. On a splitscreen machine that applies to every seat while one of them is typing. A joiner's keys reach the host from the moment their game says hello, and anything they were already holding at that moment is reported as a press, so press and release stay paired.
+
+**Multiplayer:** Fires on the host, for every player: the host's keyboard (player is the seat holding it) and each joiner's keys (A-Z, 0-9, F1-F12) as their game reports them, a moment after the press. A joiner whose game does not run S.A.M produces no key events.
+
 ### `on_key_released`
 
 Fires a supported key transitions to up (A-Z, 0-9, F1-F12).
@@ -3536,6 +4464,10 @@ Fires a supported key transitions to up (A-Z, 0-9, F1-F12).
 |---|---|
 | `player` | int |
 | `key_name` | string |
+
+no player. prefix; no `held` field (present only on press)
+
+**Multiplayer:** Fires on the host, for every player, the same way as on_key_pressed.
 
 ### `on_monster_damaged`
 
@@ -3551,6 +4483,10 @@ Fires any monster takes damage.
 | `killer_uid` | uid |
 | `floor` | int |
 
+no player. prefix; use killer_uid to identify the attacker (0 = environmental)
+
+**Multiplayer:** Fires on the host.
+
 ### `on_monster_died`
 
 Fires any monster dies (melee, ranged, magic, or scripted).
@@ -3564,6 +4500,24 @@ Fires any monster dies (melee, ranged, magic, or scripted).
 | `killer_uid` | uid |
 | `floor` | int |
 
+no player. prefix; the reliable kill hook for ranged/magic (player.on_kill is melee-only). killer_uid > 0 means an actual killer (skip traps/starvation)
+
+**Multiplayer:** Fires on the host.
+
+### `on_packet`
+
+Fires a mod-defined message sent with sam_send_packet arrives.
+
+| field | type |
+|---|---|
+| `from` | int (the sender's player index; 0 is the host) |
+| `tag` | string |
+| `payload` | string |
+
+no player. prefix. The only event a client's own scripts run besides player.on_before_equip and player.on_game_over, which makes it how a host tells a client's script something and the client answers (sam_send_packet from inside the handler). Delivery is reliable but NOT ordered.
+
+**Multiplayer:** Fires on the machine the packet was sent to: a client's scripts for a packet from the host, the host's scripts for a packet from a client.
+
 ### `on_projectile_hit`
 
 Fires a projectile from sam_spawn_projectile stops against a wall or an entity.
@@ -3576,6 +4530,10 @@ Fires a projectile from sam_spawn_projectile stops against a wall or an entity.
 | `y` | int (tile) |
 | `damage` | int (the damage the projectile was configured with) |
 
+fires just BEFORE the projectile is removed, so the uid is still valid when your handler runs but will not be a moment later -- removing it yourself from here is safe. target is 0 for a wall, so check it before treating the hit as a creature. .damage is what the projectile CARRIES, not what landed: it is reported unchanged on a wall, and on anything without a health bar nothing was actually dealt. It fires on the host, like the spawn call.
+
+**Multiplayer:** Fires on the host.
+
 ### `on_tick`
 
 Fires every game tick (50/sec), for every script that defines on_tick(event).
@@ -3584,6 +4542,10 @@ Fires every game tick (50/sec), for every script that defines on_tick(event).
 |---|---|
 | `tick_count` | int |
 | `delta_ticks` | int |
+
+no player. prefix; delivered to the separate on_tick(event) handler, not on_event; host-only and silent
+
+**Multiplayer:** Fires on the host only (and in singleplayer). A client gets no tick: update HUD and panels when something changes and pass the player, because every call for a remote player is a network message.
 
 ### `player.on_attack_start`
 
@@ -3595,6 +4557,8 @@ Fires a player starts an attack swing (any weapon).
 | `weapon_type` | int |
 | `target_uid` | uid |
 
+**Multiplayer:** Fires on the host, for every player.
+
 ### `player.on_became_ghost`
 
 Fires a dead player becomes a ghost.
@@ -3604,6 +4568,8 @@ Fires a dead player becomes a ghost.
 | `player` | int |
 
 Pairs with sam_is_ghost. Fires once on the transition, not every frame while dead.
+
+**Multiplayer:** Fires on the host, for every player.
 
 ### `player.on_before_equip`
 
@@ -3615,8 +4581,11 @@ Fires before a player equips an item.
 |---|---|
 | `player` | int |
 | `item_type` | int |
+| `category` | int |
 
-Return false to refuse the equip. Use it for class or race restrictions the vanilla slot rules cannot express.
+Return false to refuse the equip. Use it for class or race restrictions the vanilla slot rules cannot express. It covers wielding from the item menu, the hotbar and Alt+right-click, as well as the equip-by-Use path. Starting gear, shops and grants are never asked. A refusal is SILENT: the framework used to print an English "You cannot equip that." that no mod could suppress and that was untranslated on a non-English install, and it no longer says anything at all. Say why yourself, with sam_hud_text: this handler runs on the equipping player's own machine, so a screen call for that player works in the host's game and in a joiner's alike, while sam_message and sam_play_sound are host functions and are refused there. Read carefully too: sam_get_player_data is a host function and returns nil in a joiner's game, so a restriction driven by data you stored with sam_set_player_data passes on every joiner and blocks only the host -- it fails OPEN, silently. Decide from something every machine can see: sam_get_class, sam_get_race, sam_get_stat and the item argument are all readable there. If you must use your own data, send it to the joiner's machine yourself (sam_send_packet in game.on_game_start, stored by their on_packet) and read that copy here.
+
+**Multiplayer:** Fires on the equipping player's own machine, before anything is equipped or sent: the host for its own and splitscreen players, the joiner's own game for a joiner. In a joiner's game, use only functions that work there (reads of that player, and kinds any and local) and return false to refuse. A joiner whose game does not run S.A.M is never asked.
 
 ### `player.on_before_hit`
 
@@ -3635,6 +4604,10 @@ Fires a player's melee swing has connected and the damage is decided, but not ye
 | `flanking` | int |
 | `weapon_type` | int |
 
+The only place in the engine where the attacker, the crit state and a writable damage figure are all available at once. backstab and flanking are Barony's nearest thing to a critical hit and die as locals everywhere else, so this is the only way to see one. Rewrite with sam_modify_value or `event.damage = x`; returning false makes the blow land for nothing. Host-side, melee only -- arrows and spells do not come through here, use on_damage_multiplier for those.
+
+**Multiplayer:** Fires on the host, for every player.
+
 ### `player.on_before_item_pickup`
 
 > Cancellable: return `false` to stop it.
@@ -3650,6 +4623,8 @@ Fires before an item the player walked over enters the inventory.
 
 Return false to refuse the pickup; the item stays on the floor. Only fires for genuine world pickups, never for starting gear or internal grants.
 
+**Multiplayer:** Fires on the host, for every player (a client's pickup is decided there). A grant with sam_grant_item never fires it.
+
 ### `player.on_before_revive`
 
 > Cancellable: return `false` to stop it.
@@ -3659,8 +4634,12 @@ Fires before a dead player is brought back.
 | field | type |
 |---|---|
 | `player` | int |
+| `floor` | int (the floor being loaded) |
+| `keep_gear` | int (1 when the server has keep-inventory on) |
 
-Return false to refuse the revive. This is the hook for a permadeath rule or a resurrection cost.
+Return false to refuse the revive. This is the hook for a permadeath rule or a resurrection cost. floor is the floor being loaded and keep_gear is 1 when the server keeps inventory on death, so a cost can depend on both. The FIRST floor load of a run is never asked -- there is no level-change packet at that point to carry an answer to the clients on, so a run that begins with a dead player in the party (loading a co-op save) revives them as vanilla does. A player you refuse stays dead for the rest of the run: their body is taken down again on every later floor, player.on_death does NOT fire a second time, and on every machine they get a camera to watch from with no fresh game-over prompt.
+
+**Multiplayer:** Fires on the host only (or in splitscreen singleplayer), once per dead player, before the level change. Its answer applies on every machine; a joiner's game no longer asks its own scripts.
 
 ### `player.on_bleed_tick`
 
@@ -3671,6 +4650,8 @@ Fires bleeding ticks damage on a player.
 | `player` | int |
 | `damage` | int |
 | `stacks_remaining` | int |
+
+**Multiplayer:** Fires on the host, for every player.
 
 ### `player.on_block`
 
@@ -3686,15 +4667,29 @@ Fires a player blocks a hit while defending with a shield (partial or full).
 | `attacker_type` | int |
 | `damage_blocked` | int |
 
+Fires on ANY block while actively defending with a shield and getting hit — not on right-click alone. full_block is 1 when all damage was negated (0 on a partial block); damage_taken is what leaked through. shield_type is the blocking shield's item id; gate with sam_item_id("namespace:item") to react only to your own shield.
+
+**Multiplayer:** Fires on the host, for every player.
+
 ### `player.on_callout`
+
+> Cancellable: return `false` to stop it.
 
 Fires a player uses the callout / ping command.
 
 | field | type |
 |---|---|
 | `player` | int |
+| `cmd` | int |
+| `type` | int |
+| `target_uid` | uid |
+| `x` | int |
+| `y` | int |
+| `help_flags` | int |
 
-A free player-driven input channel: a mod can treat a callout as a custom command without binding a key.
+A free player-driven input channel: a mod can treat a callout as a custom command without binding a key. Return false to hide the ping.
+
+**Multiplayer:** Fires on the host, for every player (a joiner's ping arrives there). A veto hides the ping from everyone; on a S.A.M joiner it also takes the marker off their own screen, but their ping sound has already played. A joiner without S.A.M keeps their own marker.
 
 ### `player.on_chest_opened`
 
@@ -3706,6 +4701,8 @@ Fires a player opens a chest.
 | `chest_uid` | uid |
 | `floor_x` | int |
 | `floor_y` | int |
+
+**Multiplayer:** Fires on the host, for every player.
 
 ### `player.on_damage_taken`
 
@@ -3721,6 +4718,10 @@ Fires a player takes damage from any source.
 | `source_uid` | uid |
 | `source_type` | int |
 
+read-only, and fires AFTER the HP is already gone — use it to react (a sound, a screen effect, a counter). To CHANGE how much lands, use on_before_damage, which fires ahead of the hit and can also negate it.
+
+**Multiplayer:** Fires on the host, for every player.
+
 ### `player.on_death`
 
 Fires a player dies.
@@ -3733,6 +4734,8 @@ Fires a player dies.
 | `killer_monster` | int |
 | `obituary` | string |
 
+**Multiplayer:** Fires on the host, for every player.
+
 ### `player.on_effect_applied`
 
 Fires a status effect is newly applied to a player (a genuine off→on transition, not a refresh).
@@ -3743,6 +4746,10 @@ Fires a status effect is newly applied to a player (a genuine off→on transitio
 | `effect_name` | string |
 | `duration_ticks` | int |
 | `strength` | int |
+
+Re-applying an already-active effect does NOT re-fire this. To watch a refresh or stack change, poll sam_get_effect_strength / sam_get_effect_duration in on_tick.
+
+**Multiplayer:** Fires on the host, for every player.
 
 ### `player.on_effect_expired`
 
@@ -3755,6 +4762,8 @@ Fires a status effect runs out on a player.
 
 The counterpart to player.on_effect_applied. Use it to clean up anything the effect granted.
 
+**Multiplayer:** Fires on the host, for every player.
+
 ### `player.on_effect_removed`
 
 Fires a status effect ends (cleared or expired).
@@ -3764,6 +4773,10 @@ Fires a status effect ends (cleared or expired).
 | `player` | int |
 | `effect_name` | string |
 | `effect` | int |
+
+the numeric `effect` id is only present on expiry
+
+**Multiplayer:** Fires on the host, for every player.
 
 ### `player.on_equip`
 
@@ -3775,25 +4788,40 @@ Fires a player equips an item.
 | `item_type` | int |
 | `slot` | string |
 
+slot is a lowercase name, e.g. "cloak"
+
+**Multiplayer:** Fires on the host, for every player (a joiner's equip arrives there as the game's own echo).
+
 ### `player.on_floor_change`
 
-Fires a player descends to a new floor.
+Fires the party takes a ladder to a new floor.
 
 | field | type |
 |---|---|
 | `player` | int |
+| `initiator` | int (the player who climbed) |
 | `old_floor` | int |
 | `new_floor` | int |
 
+Fires once for EVERY connected player, so check player == initiator to act once per descent. Ladders only: portals, teleporters and sam_travel_to_level do not fire it, while game.on_level_entered fires for every player on every arrival. new_floor is an estimate (a secret branch can change it). A good place to reset per-floor state.
+
+**Multiplayer:** Fires on the host, once for every connected player when the party takes a ladder; initiator is the player who climbed.
+
 ### `player.on_game_over`
 
-Fires the run ends.
+Fires a player's game-over window opens on their own machine.
 
 | field | type |
 |---|---|
 | `player` | int |
+| `tutorial` | int |
+| `survived` | int |
+| `placement` | int |
+| `made_top` | int |
 
-Your last chance to write per-run state with sam_save_data before the run is gone.
+Your last chance to write per-run state with sam_save_data (a file on that machine) before the run is gone. Not cancellable.
+
+**Multiplayer:** Fires on the dying player's own machine (a client's own game for a client) when that player's game-over window opens. In co-op that can be a death while others still live (survived tells you), not only the end of the run. The host never sees a remote player's.
 
 ### `player.on_gold_collected`
 
@@ -3804,6 +4832,8 @@ Fires a player picks up gold.
 | `player` | int |
 | `amount` | int |
 | `total_gold` | int |
+
+**Multiplayer:** Fires on the host, for every player.
 
 ### `player.on_hit`
 
@@ -3818,6 +4848,10 @@ Fires a player's melee weapon hits an entity.
 | `weapon_type` | int |
 | `lethal` | int |
 
+melee only; lethal is 0/1
+
+**Multiplayer:** Fires on the host, for every player (melee is resolved there).
+
 ### `player.on_hunger_change`
 
 Fires hunger crosses a tier edge.
@@ -3829,6 +4863,8 @@ Fires hunger crosses a tier edge.
 | `hunger_level` | int |
 | `old_hunger_level` | int |
 
+**Multiplayer:** Fires on the host, for every player (hunger is counted there).
+
 ### `player.on_item_bought`
 
 Fires a player buys from a shop.
@@ -3839,6 +4875,8 @@ Fires a player buys from a shop.
 | `item_type` | int |
 | `gold_spent` | int |
 
+**Multiplayer:** Fires on the host, for every player.
+
 ### `player.on_item_broken`
 
 Fires a player's equipped item breaks.
@@ -3848,6 +4886,8 @@ Fires a player's equipped item breaks.
 | `player` | int |
 | `item_type` | int |
 | `slot` | string |
+
+**Multiplayer:** Fires on the host, for every player.
 
 ### `player.on_item_dropped`
 
@@ -3860,6 +4900,8 @@ Fires a player drops an item.
 | `floor_x` | int |
 | `floor_y` | int |
 
+**Multiplayer:** Fires on the host, for every player.
+
 ### `player.on_item_identified`
 
 Fires a player identifies an item.
@@ -3869,6 +4911,8 @@ Fires a player identifies an item.
 | `player` | int |
 | `item_type` | int |
 | `item_name` | string |
+
+**Multiplayer:** Fires on the host, for every player, once per identification: directly for the host's own players, and as reported by a joiner's own game (appraisal, a scroll or spell, a curse revealed on equip, a carried sam_identify_item). A joiner whose game does not run S.A.M reports nothing, except a curse the host sees on its copy of their worn item.
 
 ### `player.on_item_pickup`
 
@@ -3881,6 +4925,10 @@ Fires a player picks an item up off the ground.
 | `count` | int |
 | `item_name` | string |
 
+in-world pickups only — does NOT fire for starting inventory. gate with sam_item_id("ns:item") == event.item_type to react to your own item
+
+**Multiplayer:** Fires on the host, for every player.
+
 ### `player.on_item_sold`
 
 Fires a player sells to a shop.
@@ -3890,6 +4938,8 @@ Fires a player sells to a shop.
 | `player` | int |
 | `item_type` | int |
 | `gold_received` | int |
+
+**Multiplayer:** Fires on the host, for every player.
 
 ### `player.on_item_use`
 
@@ -3904,6 +4954,8 @@ Fires a player uses a consumable (potion / scroll / food).
 | `item_count` | int |
 | `category` | string |
 
+**Multiplayer:** Fires on the host, for every player. A joiner whose game runs S.A.M asks the host before using anything deliberately, so a veto uses up nothing and an allowed use happens one network round trip later. For a joiner without S.A.M (or in the first moment of a game) a veto stops the effect, but their game has already used the item up.
+
 ### `player.on_kill`
 
 Fires a player's melee blow kills an entity.
@@ -3914,6 +4966,10 @@ Fires a player's melee blow kills an entity.
 | `target_uid` | uid |
 | `target_type` | int |
 | `was_lethal` | int |
+
+melee only; for ranged/magic kills use on_monster_died and its killer_uid
+
+**Multiplayer:** Fires on the host, for every player (melee is resolved there).
 
 ### `player.on_level_up`
 
@@ -3926,6 +4982,8 @@ Fires a player gains a level.
 | `amount` | int |
 | `stats` | int |
 
+**Multiplayer:** Fires on the host, for every player.
+
 ### `player.on_miss`
 
 Fires a player's melee swing connects with nothing.
@@ -3936,36 +4994,50 @@ Fires a player's melee swing connects with nothing.
 | `target_uid` | uid |
 | `weapon_type` | int |
 
+**Multiplayer:** Fires on the host, for every player.
+
 ### `player.on_player_joined`
 
 Fires a client joins the lobby.
 
 | field | type |
 |---|---|
+| `player` | int |
 | `player_index` | int |
 | `player_name` | string |
 | `class_id` | int |
 | `race` | int |
 
+carries the slot twice: player_index is the historical name and player is the same number, so that a screen call written with no player inside this handler is about the joiner. It is still a lobby notification -- anything sent to the joiner here is dropped.
+
+**Multiplayer:** Fires on the host, in the lobby, when a client joins. It is a lobby notification only: per-player state written here (sam_set_player_data) is cleared when the game starts, and anything sent to the joiner here is dropped. Set per-player state up in game.on_game_start or game.on_level_entered.
+
 ### `player.on_player_left`
 
-Fires a client disconnects or times out.
+Fires a client leaves, times out or is kicked, in the lobby or in a game.
 
 | field | type |
 |---|---|
+| `player` | int |
 | `player_index` | int |
 | `player_name` | string |
 
+carries the slot twice: player_index is the historical name and player is the same number, there so that a screen call written with no player inside this handler is about the player who left rather than about the host. They have already gone, so such a call is refused -- name the players who are still here.
+
+**Multiplayer:** Fires on the host, exactly once per departure: a leave, a keep-alive drop or a kick (including /kick), in the lobby or in a game. It pairs with player.on_player_joined.
+
 ### `player.on_player_revived`
 
-Fires a downed player is revived on a new floor.
+Fires a dead player comes back: on a new floor, or when their ghost respawns.
 
 | field | type |
 |---|---|
 | `player` | int |
 | `revived_by` | int |
 | `floor` | int |
-| `revive_type` | int |
+| `revive_type` | string ("floor_load" or "ghost_respawn") |
+
+**Multiplayer:** Fires on the host. floor_load fires once the new level has loaded, just before game.on_level_entered; ghost_respawn fires when a dead player's ghost respawns (the host's own or a joiner's).
 
 ### `player.on_poison_tick`
 
@@ -3976,6 +5048,8 @@ Fires poison ticks damage on a player.
 | `player` | int |
 | `damage` | int |
 | `stacks_remaining` | int |
+
+**Multiplayer:** Fires on the host, for every player.
 
 ### `player.on_proficiency_increased`
 
@@ -3989,6 +5063,8 @@ Fires a skill rank goes up.
 | `old_rank` | int |
 | `new_rank` | int |
 
+**Multiplayer:** Fires on the host, for every player.
+
 ### `player.on_shop_entered`
 
 Fires a player opens trade with a shopkeeper.
@@ -3997,6 +5073,8 @@ Fires a player opens trade with a shopkeeper.
 |---|---|
 | `player` | int |
 | `shopkeeper_uid` | uid |
+
+**Multiplayer:** Fires on the host, for every player.
 
 ### `player.on_spell_cast`
 
@@ -4011,6 +5089,8 @@ Fires a player casts a spell.
 | `spell_name` | string |
 | `target_uid` | uid |
 
+**Multiplayer:** Fires on the host, for every player (a joiner's cast arrives before mana is spent).
+
 ### `player.on_spell_failed`
 
 Fires a cast fizzles or is blocked.
@@ -4022,6 +5102,8 @@ Fires a cast fizzles or is blocked.
 | `spell_name` | string |
 | `reason` | string |
 
+**Multiplayer:** Fires on the host, for every player: a fizzle from the host's own cast, and not_enough_mana as reported by the caster's own game. A joiner whose game does not run S.A.M reports no mana failures.
+
 ### `player.on_spell_learned`
 
 Fires a player learns a spell.
@@ -4031,6 +5113,8 @@ Fires a player learns a spell.
 | `player` | int |
 | `spell_id` | int |
 | `spell_name` | string |
+
+**Multiplayer:** Fires on the host, for every player, once, when the spell is actually learned: a joiner's own game reports it (including a carried sam_grant_spell). A joiner whose game does not run S.A.M reports nothing.
 
 ### `player.on_status_effect_tick`
 
@@ -4043,6 +5127,10 @@ Fires an active status effect ticks.
 | `effect_name` | string |
 | `ticks_remaining` | int |
 
+throttled to ~1/sec
+
+**Multiplayer:** Fires on the host, for every player (effect timers are counted there).
+
 ### `player.on_unequip`
 
 Fires a player unequips an item.
@@ -4053,6 +5141,8 @@ Fires a player unequips an item.
 | `item_type` | int |
 | `item_count` | int |
 | `slot` | string |
+
+**Multiplayer:** Fires on the host, for every player (a joiner's unequip arrives there as the game's own echo).
 
 ### `player.on_xp_gained`
 
@@ -4067,16 +5157,23 @@ Fires a player gains XP from a kill.
 
 The engine's one value-rewrite hook: set event.amount (or use sam_modify_value) and the engine adopts it. Set it to 0 to detach levelling from kills entirely.
 
+**Multiplayer:** Fires on the host, for every player.
+
 ### `ui.on_click`
 
 Fires the player clicks a button you placed with sam_ui_button.
 
 | field | type |
 |---|---|
+| `player` | int (who clicked) |
 | `mod` | string (owning namespace) |
 | `panel` | string |
 | `widget` | string (the button id) |
 | `value` | string (empty for a button) |
+
+only reachable while the panel is open with modal = true: a non-modal panel gives the player no cursor to click with. Answer the clicking player by passing .player to the panel calls (or leave the player out: inside this event it defaults to the clicker).
+
+**Multiplayer:** Fires on the host (in singleplayer, locally), with player = who clicked. A client's click is sent to the host and does not fire in the client's own scripts.
 
 ### `ui.on_select`
 
@@ -4084,10 +5181,15 @@ Fires the player clicks a row in a list you built with sam_ui_list / sam_ui_list
 
 | field | type |
 |---|---|
+| `player` | int (who clicked) |
 | `mod` | string |
 | `panel` | string |
 | `widget` | string (the LIST's id, not the row's) |
 | `value` | string (the row_id you passed to sam_ui_list_add) |
+
+the row is in .value and the list is in .widget — easy to swap by accident. Give each row a row_id you can act on directly, such as an item id.
+
+**Multiplayer:** Fires on the host (in singleplayer, locally), with player = who clicked the row. A client's click is sent to the host and does not fire in the client's own scripts.
 
 ### `ui.on_submit`
 
@@ -4095,10 +5197,15 @@ Fires the player commits the contents of a text box placed with sam_ui_input.
 
 | field | type |
 |---|---|
+| `player` | int (who typed) |
 | `mod` | string |
 | `panel` | string |
 | `widget` | string (the input id) |
 | `value` | string (what they typed) |
+
+you can also read the box at any time with sam_ui_input_text; this event just tells you when they finished.
+
+**Multiplayer:** Fires on the host (in singleplayer, locally), with player = who typed. A client's submit is sent to the host and does not fire in the client's own scripts.
 
 ### `world.on_before_chest_open`
 
@@ -4113,6 +5220,8 @@ Fires before a chest opens.
 
 Return false to keep the chest shut. Combine with sam_spawn_monsters for a mimic or an ambush.
 
+**Multiplayer:** Fires on the host, for every player.
+
 ### `world.on_boulder_triggered`
 
 Fires a boulder trap launches.
@@ -4121,6 +5230,8 @@ Fires a boulder trap launches.
 |---|---|
 | `floor_x` | int |
 | `floor_y` | int |
+
+**Multiplayer:** Fires on the host.
 
 ### `world.on_chest_found`
 
@@ -4133,6 +5244,10 @@ Fires a player first walks up close to a chest (proximity — fires once per che
 | `floor_x` | int |
 | `floor_y` | int |
 
+This is "spotted a chest nearby", not "opened a chest". For the moment a player actually opens one, use player.on_chest_opened.
+
+**Multiplayer:** Fires on the host, for every player.
+
 ### `world.on_door_opened`
 
 Fires a player opens a wooden door.
@@ -4144,6 +5259,10 @@ Fires a player opens a wooden door.
 | `status` | int |
 | `type` | string |
 
+opens only (not closes); wooden doors only, not iron gates. status is the swing direction (1 or 2)
+
+**Multiplayer:** Fires on the host, for every player.
+
 ### `world.on_fountain_used`
 
 Fires a player drinks from / uses a fountain.
@@ -4153,6 +5272,10 @@ Fires a player drinks from / uses a fountain.
 | `player` | int |
 | `fountain` | uid |
 | `effect` | int |
+
+fires once, just before the fountain dries up. effect is the fountain's rolled effect type
+
+**Multiplayer:** Fires on the host, for every player.
 
 ### `world.on_item_deployed`
 
@@ -4171,6 +5294,10 @@ Fires a thrown gadget lands and something must be built there.
 
 Return false after spawning your own thing, to skip the engine's built-in gadget list. This is how a mod makes custom traps and turrets.
 
+player is -1 when a monster threw it
+
+**Multiplayer:** Fires on the host (a thrown gadget lands there), for every player.
+
 ### `world.on_monster_spawned`
 
 Fires a monster is summoned at runtime.
@@ -4184,6 +5311,8 @@ Fires a monster is summoned at runtime.
 | `floor_y` | int |
 | `floor` | int |
 
+**Multiplayer:** Fires on the host.
+
 ### `world.on_orb_placed`
 
 Fires a player places an orb on a pedestal.
@@ -4194,6 +5323,10 @@ Fires a player places an orb on a pedestal.
 | `pedestal` | uid |
 | `orb_type` | int |
 | `correct` | int |
+
+correct is 1 when the orb matched the pedestal (ritual advanced), 0 for the wrong orb
+
+**Multiplayer:** Fires on the host, for every player.
 
 ### `world.on_projectile_hit`
 
@@ -4206,6 +5339,10 @@ Fires a fired projectile strikes an entity.
 | `target_uid` | uid |
 | `target_type` | int |
 
+player is the shooter's index, or -1 when a monster or trap fired it. target_type is the struck monster's type, or -1 for a non-creature (chest, etc.)
+
+**Multiplayer:** Fires on the host.
+
 ### `world.on_sink_used`
 
 Fires a player uses a sink.
@@ -4217,6 +5354,10 @@ Fires a player uses a sink.
 | `outcome_code` | int |
 | `outcome` | string |
 
+outcome is one of "ring" / "slime" / "nutrition" / "damage"
+
+**Multiplayer:** Fires on the host, for every player.
+
 ### `world.on_switch_toggled`
 
 Fires a player flips a lever or switch.
@@ -4226,6 +5367,10 @@ Fires a player flips a lever or switch.
 | `player` | int |
 | `switch` | uid |
 | `state` | int |
+
+state is the NEW value after the flip (1 = on / powered, 0 = off)
+
+**Multiplayer:** Fires on the host, for every player.
 
 ### `world.on_teleport`
 
@@ -4239,6 +5384,10 @@ Fires a player uses a teleporter (pad or tunnel-spell).
 | `dest_x` | int |
 | `dest_y` | int |
 
+same-floor teleport only; dest_x/dest_y are the destination tile. For descending floors use player.on_floor_change
+
+**Multiplayer:** Fires on the host, for every player.
+
 ### `world.on_trap_triggered`
 
 Fires an arrow / spike / magic trap fires.
@@ -4251,4 +5400,8 @@ Fires an arrow / spike / magic trap fires.
 | `floor_y` | int |
 | `damage` | int |
 | `spell` | int |
+
+carries `damage` for physical traps OR `spell` (spell id) for magic traps, not both. player is -1 when a monster or the dungeon set it off, which for a magic or spike trap is ALWAYS: only an arrow trap names a player
+
+**Multiplayer:** Fires on the host.
 

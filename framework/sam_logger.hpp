@@ -30,7 +30,7 @@
 #include <chrono>
 
 // S.A.M framework version — stamped into the session banner in the log file.
-#define SAM_FRAMEWORK_VERSION "2.8.0"
+#define SAM_FRAMEWORK_VERSION "3.0.0"
 
 // Barony release this build is patched against — shown in the session banner.
 #define SAM_BARONY_TARGET "5.0.2"
@@ -173,7 +173,23 @@ private:
 
 	static void rotateAndOpen(const std::string& path);   // keep last 5 sessions
 	static int  bumpSessionCounter(const std::string& dir);
+	static int  readSessionCounter(const std::string& dir);
 	static void writeSessionHeader();
+
+	// TWO COPIES OF THE GAME IN ONE FOLDER. Testing multiplayer alone means launching the
+	// same install twice and joining 127.0.0.1, and both copies would otherwise open, rotate
+	// and truncate the same sam_log.txt: the host's log would be archived and emptied the
+	// moment the client started, and the two runs would interleave line by line. Each copy
+	// therefore claims a numbered slot by holding a lock file open exclusively, and writes
+	// sam_log.txt (slot 1), sam_log_2.txt, sam_log_3.txt ... Only slot 1 rotates and only
+	// slot 1 bumps the session counter; the rest leave the first copy's files alone.
+	// 1 in singleplayer and for the first copy, so nothing changes for a normal launch.
+	// A machine that cannot create the lock file at all (Controlled Folder Access, an AV
+	// policy, a share with no locking) gets slot 1 as well, so an ordinary launch never
+	// silently writes its session to sam_log_8.txt; see claimInstanceSlot's comment.
+	static int  instanceIndex;
+	static int  claimInstanceSlot(const std::string& dir);  // 1-based; holds the lock
+	static void releaseInstanceSlot();
 };
 
 /*-------------------------------------------------------------------------------

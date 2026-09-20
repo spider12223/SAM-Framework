@@ -16,6 +16,7 @@
 #	include "game.hpp"
 #	include "net.hpp"
 #	include "player.hpp"
+#	include "sam_net.hpp"   // peerMayHaveSam: do not send 'SAMI' to a machine declared stock
 #	include "ui/Frame.hpp"   // Frame::virtualScreenX/Y -- the HUD coordinate space
 #	include "ui/Image.hpp"
 #	define SAM_IMAGES_HAVE_BARONY 1
@@ -83,12 +84,24 @@ namespace
 	//
 	// Guarded exactly like samSendMoveSpeed: player 0 would index net_clients[-1], and a
 	// local or splitscreen player already has the state written directly.
+	//
+	// A script's call never gets here for a remote player any more: the runtime carries it to
+	// that player's machine instead (sam_images.hpp, MULTIPLAYER), where this returns at once
+	// because that machine is not the server. The two guards are exact complements, so a call
+	// can never be both carried AND sent: this is left for any engine-side caller only.
 	void sendOverlay(int player, bool showIt, const Overlay& o)
 	{
 		if ( multiplayer != SERVER ) { return; }
 		if ( player <= 0 || player >= MAXPLAYERS ) { return; }
 		if ( !players[player] || players[player]->isLocalPlayer() ) { return; }
 		if ( client_disconnected[player] ) { return; }
+		// One rule for all three legacy S.A.M packets ('SAMI' here, 'SAMB' in sam_bodies.cpp,
+		// 'SAMT' in sam_mp_entities.cpp), stated in sam_net.hpp: a machine that has not said
+		// HELLO YET still gets them, because it may simply be slow to load or be a client on an
+		// older S.A.M build that understands them; a machine SAMNet has DECLARED stock gets
+		// none, because it has no handler and would log one "mystery packet" line for every
+		// picture for the rest of the game.
+		if ( !SAMNet::peerMayHaveSam(player) ) { return; }
 		if ( o.ns.size() > SAMImages::SAM_IMAGE_MAX_NS ) { return; }
 		if ( o.name.size() > SAMImages::SAM_IMAGE_MAX_NAME ) { return; }
 

@@ -8,22 +8,25 @@ Barony was never built to be modded. S.A.M is the layer that makes it modded any
 
 [hr][/hr]
 
-[h1]NEW IN 2.8: COMBAT[/h1]
+[h1]NEW: MULTIPLAYER[/h1]
 
-A script could always deal damage. It could not heal, could not ask what a hit would do, and could not change how much damage a species takes.
+A S.A.M mod used to work properly only for the host. Now every one of the 316 functions has a defined co-op behaviour and the game enforces it. You write one script, name players by number, and S.A.M carries each call to the machine it has to run on: a HUD line to that player's screen, a spell to their own game, a rule change to everybody.
 
-Now it can. Heal something and be told what landed, not what you asked for. Deal damage of a weapon class, so a target's own resistance applies without your script knowing it. Work out what a swing would do first. Make maces shatter skeletons and swords barely scratch slimes, for every one in the game. Spend mana, or health when the mana runs out. Point a monster at another monster. Break armour. Give a scripted kill a real death message and credit the killer.
+[b]Stats, effects, backpacks, spells, keys, panels, cameras, spawned entities and terrain all reach the right player now.[/b] A player who joins halfway through is caught up on what they missed. A player running plain unmodified Barony can still join and play.
 
-[b]Two new hooks change how damage is decided, not just what happens after.[/b] One sits at the single point every hit passes through, so melee, arrows and spells all reach it. The other fires as a player's swing connects, the only place in the engine that knows who swung, whether it was a backstab, and how much is about to land.
+[b]Sounds and music, without writing a script.[/b] Drop an .ogg, .wav, .mp3 or .flac into your mod's sounds/ folder and it is ready to play. Name one after a Barony sound in sounds/replace/ and it takes over, for everyone who has your mod. Give a floor or a boss its own music.
 
-[b]Each was written against the engine rather than guessed at.[/b] Barony's damage types are weapon classes, not elements. Its melee has no hit roll left. And the table it reads is declared in a way that makes the obvious version of a resistance setter report success and change nothing.
+[b]It is all documented.[/b] Every function and event says which machine it runs on, and there is a guide to testing a co-op game by yourself on one computer.
 
-[h1]32 NEW FUNCTIONS: 255 TO 287[/h1]
+[h1]29 NEW FUNCTIONS: 287 TO 316[/h1]
 
-Health and mana as verbs, not raw numbers. Attack, resistance and regeneration for anything with a body. Blocking, parrying, aggro. Reviving a fallen player on your own machine.
+Rules you can rewrite: stat modifiers, immunities, and your own XP curve. A camera you can move, aim, pin to a spot or lock onto a target, which is a third-person mod or a cutscene. Sound and music control from a script.
 
-[b]The complete reference[/b], every function and event with arguments, types, return values and host-only flags:
+[b]The complete reference[/b], every function and event with arguments, types, return values and what it does in co-op:
 https://github.com/spider12223/SAM-Framework/blob/main/docs/function-reference.md
+
+[b]How multiplayer works, and how to test co-op alone on one computer:[/b]
+https://github.com/spider12223/SAM-Framework/blob/main/docs/multiplayer.md
 
 [b]Writing in TypeScript?[/b] [b]sam.d.ts[/b] ships in this folder and with every release. Point your editor at it for autocomplete and type checking across the whole API.
 
@@ -37,7 +40,7 @@ A mod here is not a guest that can only react. It can be told a player was hit a
 
 [b]Mods that change what happens.[/b] Most events used to be announcements after the fact. Now a mod can halve incoming damage, rewrite what a chest holds, or refuse a hit outright. And two mods that both reduce damage BOTH apply, because each sees what the last one left. That is the difference between mods that stack and mods that fight.
 
-[b]Playing multiplayer? Install this anyway.[/b] S.A.M closes eleven memory safety holes in the base game, reachable with no mods.
+[b]It also closes eleven memory safety holes[/b] in the base game, reachable with no mods at all.
 
 [hr][/hr]
 
@@ -51,7 +54,7 @@ A mod here is not a guest that can only react. It can be told a player was hit a
 [*][b]Items and weapons.[/b] Real entries in Barony's item table, with your own model and icon.
 [*][b]Monsters.[/b] Variants of any creature with your own stats, gear, followers and spawn floors, and your own animated model.
 [*][b]Spells and projectiles.[/b] Custom spells that really cast, and projectiles with their own speed, model, damage and range.
-[*][b]Status effects, races, sounds, models, recipes.[/b] Your own buffs, monster bodies to play as, .ogg files, voxel models, and changes to what the tinkering kit builds.
+[*][b]Sounds, music, status effects, races, models, recipes.[/b] Replace any sound in the game, give a floor or a boss its own track, plus your own buffs, bodies, models and tinkering recipes.
 [*][b]Vanilla patches.[/b] Edit the game's data in layers, so two mods stack instead of overwriting each other.
 [/list]
 
@@ -69,7 +72,7 @@ Build a class, item, monster, spell or effect with dropdowns and sliders, watch 
 
 JSON says what your content [i]is[/i]. A script says what it [i]does[/i]. Drop a .lua, .js or .ts file next to any JSON and it loads automatically. TypeScript is compiled for you.
 
-[b]74 events[/b] to react to, and now to change. [b]287 functions[/b] to act with: grant items and gold, read and set stats, apply effects, cast spells, deal or change damage, teleport, spawn monsters, run your own per frame logic, open windows, timers, saved data, screen effects, and live patching that reverts when your mod unloads.
+[b]76 events[/b] to react to, and now to change. [b]316 functions[/b] to act with: grant items and gold, read and set stats, apply effects, cast spells, deal or change damage, teleport, spawn monsters, run your own per frame logic, open windows, timers, saved data, screen effects, and live patching that reverts when your mod unloads.
 
 Only two functions ever get called: [b]on_event(event)[/b] and [b]on_tick(event)[/b].
 

@@ -31,6 +31,8 @@
 #include "sam_logger.hpp"
 #include "sam_models.hpp" // modelIndexForId — body resolution report
 #include "sam_errors.hpp"
+#include "sam_sounds.hpp"   // a monster's own sounds
+#include "sam_music.hpp"    // a monster's theme
 #include "nlohmann/json.hpp"
 
 #include "main.hpp"           // physfs.h + core
@@ -42,6 +44,15 @@
 #include "mod_tools.hpp"      // ItemTooltips (itemNameStringToItemID)
 #include "monster.hpp"        // monstertypename[], NUMMONSTERS
 #include "files.hpp"          // outputdir
+#include "entity.hpp"         // Entity, monsterNameIsGeneric (the follower helpers)
+#include "sam_net.hpp"        // the channel a follower's new name reaches its owner on
+#include "sam_rules.hpp"      // SAMRules::NetOp, this package's op table
+
+#include <cstdint>
+
+// colors.hpp's, word for word. Declared rather than included: that header pulls the renderer
+// in, for the one colour a follower's nametag is drawn in.
+const Uint32 playerColor(int index, bool colorblind, bool ally);
 
 #include <fstream>
 #include <sstream>
@@ -417,6 +428,36 @@ static Translated translateMonster(const json& in, const std::string& modNs, con
 			}
 			else { s_monsterTraits[tr.name] = bits; }
 		}
+	}
+
+	// S.A.M: this monster's own sounds and its theme, by NAME for the same reason as traits.
+	//   "sounds": { "RatDie": "mymod:squeak" } -- when it plays that vanilla sound, it plays this
+	//   "music": "mymod:boss"  or  { "track": "mymod:boss", "range": 12 }
+	// Staged here and resolved once every sound and track exists, so the order the mod lists
+	// them in does not matter.
+	if ( in.contains("sounds") && in["sounds"].is_object() )
+	{
+		std::vector<std::pair<std::string, std::string>> map;
+		for ( auto it = in["sounds"].begin(); it != in["sounds"].end(); ++it )
+		{
+			if ( it.value().is_string() ) { map.emplace_back(it.key(), it.value().get<std::string>()); }
+			else { SAM_WARN(MOD, "Monster '" + tr.name + "' sounds.\"" + it.key() + "\" is not a sound id -- ignored."); }
+		}
+		SAMSounds::stageMonsterSounds(tr.name, modNs, map, "Monster '" + tr.name + "' sounds");
+	}
+	if ( in.contains("music") )
+	{
+		const auto& mu = in["music"];
+		std::string track;
+		int range = 0;
+		if ( mu.is_string() ) { track = mu.get<std::string>(); }
+		else if ( mu.is_object() )
+		{
+			if ( mu.contains("track") && mu["track"].is_string() ) { track = mu["track"].get<std::string>(); }
+			if ( mu.contains("range") && mu["range"].is_number_integer() ) { range = mu["range"].get<int>(); }
+		}
+		if ( track.empty() ) { SAM_WARN(MOD, "Monster '" + tr.name + "' music is not a track id -- ignored."); }
+		else { SAMMusic::stageMonsterMusic(tr.name, modNs, track, range, "Monster '" + tr.name + "' music"); }
 	}
 
 	// S.A.M: an optional custom BODY model, recorded by name for the same reason as traits.
@@ -1000,3 +1041,113 @@ void SAMMonsters::applyAll(const std::vector<SAMModManifest>& mods)
 int SAMMonsters::count() { return s_filesWritten; }
 int SAMMonsters::declared() { return s_declared; }
 int SAMMonsters::curveLevels() { return s_curveLevels; }
+
+/*-------------------------------------------------------------------------------
+	A follower of a player on another machine (see the header)
+-------------------------------------------------------------------------------*/
+
+namespace
+{
+	// The player slot this monster follows, or -1. The same test the engine makes before its own
+	// 'NPCI' at a follower's level-up (entity.cpp): its leader_uid is that player's live body.
+	int samFollowerOwner(Entity* monster)
+	{
+		if ( !monster || monster->behavior != &actMonster ) { return -1; }
+		Stat* s = monster->getStats();
+		if ( !s || !s->leader_uid ) { return -1; }
+		Entity* leader = uidToEntity(s->leader_uid);
+		if ( !leader ) { return -1; }
+		for ( int i = 0; i < MAXPLAYERS; ++i )
+		{
+			if ( players[i] && players[i]->entity == leader ) { return i; }
+		}
+		return -1;
+	}
+
+	std::uint8_t samFollowerNameOp() { return (std::uint8_t)(SAMNet::Op::RulesFirst + SAMRules::NetOp::FollowerName); }
+
+	bool samIsMyFollower(Uint32 uid)
+	{
+		if ( clientnum < 0 || clientnum >= MAXPLAYERS || !stats[clientnum] ) { return false; }
+		for ( node_t* node = stats[clientnum]->FOLLOWERS.first; node != nullptr; node = node->next )
+		{
+			if ( node->element && *((Uint32*)node->element) == uid ) { return true; }
+		}
+		return false;
+	}
+
+	// The follower's owner, on its own machine. Body: [u32 uid][str8 name].
+	void samOnFollowerName(const std::string& body)
+	{
+		SAMNet::Reader r(body);
+		const Uint32 uid = r.u32();
+		const std::string name = r.str8();
+		if ( !r.ok || multiplayer != CLIENT ) { return; }
+		// Only a monster this machine already lists as its own follower: the host sends this to
+		// nobody else, and a stale uid must not rename something that took its number.
+		if ( !samIsMyFollower(uid) ) { return; }
+		Entity* monster = uidToEntity(uid);
+		if ( !monster ) { return; }
+		if ( !monster->clientsHaveItsStats ) { monster->giveClientStats(); }
+		Stat* s = monster->clientStats;
+		if ( !s ) { return; }
+		stringCopy(s->name, name.c_str(), sizeof(s->name), name.size());
+
+		// 'LEAD' makes a nametag only for a real name at the moment of recruiting, so a follower
+		// renamed from "skeleton" to "Bonesy" would otherwise get none. The same test and the same
+		// tag the engine uses (net.cpp, 'LEAD'), made only when this follower has none yet -- an
+		// existing tag reads the name off the monster every frame and needs nothing.
+		if ( !s->name[0] || (monsterNameIsGeneric(*s) && s->type != SLIME) ) { return; }
+		for ( node_t* node = map.entities->first; node != nullptr; node = node->next )
+		{
+			Entity* tag = (Entity*)node->element;
+			if ( tag && tag->behavior == &actSpriteNametag && tag->parent == uid ) { return; }
+		}
+		Entity* nametag = newEntity(-1, 1, map.entities, nullptr);
+		nametag->x = monster->x;
+		nametag->y = monster->y;
+		nametag->z = monster->z - 6;
+		nametag->sizex = 1;
+		nametag->sizey = 1;
+		nametag->flags[NOUPDATE] = true;
+		nametag->flags[PASSABLE] = true;
+		nametag->flags[SPRITE] = true;
+		nametag->flags[UNCLICKABLE] = true;
+		nametag->flags[BRIGHT] = true;
+		nametag->behavior = &actSpriteNametag;
+		nametag->parent = uid;
+		nametag->scalex = 0.2;
+		nametag->scaley = 0.2;
+		nametag->scalez = 0.2;
+		nametag->skill[0] = clientnum;
+		nametag->skill[1] = playerColor(clientnum, colorblind_lobby, true);
+	}
+
+	struct SamMonstersNet
+	{
+		SamMonstersNet() { SAMNet::onClientOp(samFollowerNameOp(), &samOnFollowerName); }
+	};
+	SamMonstersNet s_monstersNet;
+}
+
+void SAMMonsters::syncFollowerSheet(Entity* monster)
+{
+	if ( multiplayer != SERVER ) { return; }
+	const int owner = samFollowerOwner(monster);
+	if ( owner <= 0 ) { return; }
+	Stat* s = monster->getStats();
+	// serverUpdateAllyStat guards the rest itself: a disconnected slot, a player on this machine.
+	serverUpdateAllyStat(owner, monster->getUID(), s->LVL, s->HP, s->MAXHP, s->type);
+}
+
+void SAMMonsters::syncFollowerName(Entity* monster)
+{
+	if ( multiplayer != SERVER ) { return; }
+	const int owner = samFollowerOwner(monster);
+	if ( owner <= 0 || !SAMNet::peerHasSam(owner) ) { return; }
+	Stat* s = monster->getStats();
+	SAMNet::Writer w;
+	w.u32((std::uint32_t)monster->getUID());
+	w.str8(s->name);
+	SAMNet::sendToClient(owner, samFollowerNameOp(), w.buf);
+}

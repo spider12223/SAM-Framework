@@ -27,6 +27,31 @@ export function renderTemplate(tpl, params) {
 }
 
 /**
+ * The placeholders a template still has nothing to put in.
+ *
+ * A LEFT-OVER PLACEHOLDER IS NOT INERT. `{on}` is a Lua TABLE CONSTRUCTOR, so
+ * `sam_set_camera_collision(player, {on})` parses, loads and runs -- and a table is truthy,
+ * so `samBoolReq` (sam_lua_runtime.cpp:928, which falls through to lua_toboolean) reads it
+ * as TRUE. An empty box therefore turns a toggle ON, which is the opposite of what an empty
+ * box looks like it means, and nothing anywhere says a word about it. For a number it is
+ * merely loud: luaL_checknumber raises at runtime.
+ *
+ * validateBlock can't catch this -- it lints the template with the DEFAULTS filled in, and
+ * the case that bites is a param whose default is blank (CustomBlockEditor ships new params
+ * with default: '') that is still blank when the block is used. So it has to be caught here,
+ * where the line is actually generated.
+ */
+export function unresolvedParams(tpl, params) {
+  return [...new Set([...String(tpl || '').matchAll(/\{(\w+)\}/g)].map((m) => m[1]))]
+    .filter((k) => !params || params[k] === undefined || params[k] === '');
+}
+
+/** Lua chokes on a `]]` or a newline inside a comment, and a block label is free text. */
+const safeComment = (s) => String(s ?? '').replace(/\s+/g, ' ').replace(/\]\]/g, '] ]').trim();
+
+const missingList = (names) => names.map((n) => `"${n}"`).join(', ');
+
+/**
  * Validate a block definition. Returns { ok, errors[] }.
  * Lints the template with placeholders filled by their defaults, so we check the shape of
  * the real emitted line rather than the raw template (where {x} would trip the parser).
@@ -51,7 +76,11 @@ export function validateBlock(b) {
   }
 
   // The real check: does the emitted line only call functions that exist?
-  const filled = renderTemplate(b.lua, Object.fromEntries((b.params || []).map((p) => [p.name, p.default ?? '0'])));
+  // A BLANK default stands in as "0" here rather than being left as {x}: a left-over
+  // placeholder is a table constructor, so the probe would lint a line the block can never
+  // actually emit, and would read as valid whatever the argument was supposed to be.
+  const filled = renderTemplate(b.lua, Object.fromEntries(
+    (b.params || []).map((p) => [p.name, (p.default === undefined || p.default === '') ? '0' : p.default])));
   const probe = b.kind === 'condition' ? `if ${filled} then end` : filled;
   for (const d of lintScript(probe)) {
     if (d.severity === 'warn') errors.push(d.message);
@@ -62,8 +91,21 @@ export function validateBlock(b) {
   return { ok: errors.length === 0, errors };
 }
 
-/** Turn a stored definition into the shape the builder's catalog expects. */
+/**
+ * Turn a stored definition into the shape the builder's catalog expects.
+ *
+ * A block with an empty box REFUSES to generate rather than emitting the placeholder. The
+ * refusal is a comment for an action and `false` for a condition -- a condition has to stay
+ * an expression, because the codegen drops it into `if <expr> then`, and `false` is the
+ * reading that does nothing instead of the reading that silently does everything. Both name
+ * the block and the box, in the generated script, next to the </> peek the author is
+ * already looking at, and `warn` puts the same sentence under the row in red.
+ */
 export function toCatalogEntry(b) {
+  const label = String(b.label ?? 'this block');
+  const refuse = (names) => (b.kind === 'condition'
+    ? `false --[[ S.A.M: ${safeComment(label)} has nothing in ${missingList(names)} ]]`
+    : `-- S.A.M: nothing generated -- ${safeComment(label)} has nothing in ${missingList(names)}.`);
   return {
     id: `custom:${b.id}`,
     label: `${b.label} (custom)`,
@@ -78,7 +120,18 @@ export function toCatalogEntry(b) {
         ? String(p.values || '').split(',').map((s) => s.trim()).filter(Boolean)
         : undefined,
     })),
-    lua: (vals) => renderTemplate(b.lua, vals),
+    lua: (vals) => {
+      const missing = unresolvedParams(b.lua, vals);
+      return missing.length ? refuse(missing) : renderTemplate(b.lua, vals);
+    },
+    warn: (vals) => {
+      const missing = unresolvedParams(b.lua, vals);
+      if (!missing.length) return '';
+      return `Fill in ${missingList(missing)} — ${missing.length === 1 ? 'an empty box' : 'empty boxes'} `
+        + `cannot be written as Lua, so this block generates nothing. `
+        + `(A blank there used to become {${missing[0]}}, which Lua reads as an empty table: `
+        + `a true value, so a yes/no argument would have turned itself ON.)`;
+    },
     note: b.note || 'Custom block.',
   };
 }

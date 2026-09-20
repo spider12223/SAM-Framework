@@ -127,14 +127,34 @@ end
 -- Careful here: this fires for real player equips only, not for starting gear or scripted
 -- grants, which is deliberate — vetoing those crashes character creation. If you want to
 -- block a grant too, don't grant it.
+--
+-- Two things about saying WHY. First, a refusal is silent: the framework prints nothing, so
+-- if you do not say something the player just sees the axe not go on. Second, this handler is
+-- the odd one out — it runs in the equipping player's OWN game, not on the host. sam_message
+-- is a host function and is refused there, so on a joiner it would say nothing at all, which
+-- is the worst of both. sam_hud_text draws on that player's own screen and works in the host's
+-- game and a joiner's alike, so use that. The same goes for reading: sam_get_stat answers for
+-- that machine's own player, and gives NOTHING rather than 0 if it cannot, so check it.
+
+local HEAVY = "bonehunter_too_heavy"
 
 local function on_before_equip(e)
   if e.item_type ~= AXE then return end
 
-  if sam_get_stat(e.player, "STR") < 8 then
-    sam_message(e.player, "The bone axe is too heavy for you.")
+  local str = sam_get_stat(e.player, "STR")
+  if str and str < 8 then
+    sam_hud_text(HEAVY, 40, 40, "The bone axe is too heavy for you.", 0xFFFFFFFF, e.player)
     return false
   end
+end
+
+-- ...and take the line down again once they put something on. This one runs on the HOST for
+-- every player, and sam_hud_clear names the screen it clears, so S.A.M carries it to that
+-- player's machine. Naming the player is what makes it the right screen; leaving it out would
+-- clear the host's.
+
+local function on_equip(e)
+  sam_hud_clear(HEAVY, e.player)
 end
 
 
@@ -166,7 +186,14 @@ end
 
 local function on_monster_spawned(e)
   if sam_monster_has_trait(e.monster_uid, "boss") then
-    sam_message(0, "Something large is awake down here.")
+    -- sam_message names one player, so tell each of them. Barony has at most four slots and
+    -- a slot can be empty: sam_get_player_uid gives nil for one with nobody in it. Writing
+    -- sam_message(0, ...) here would mean only the host ever read the line.
+    for p = 0, 3 do
+      if sam_get_player_uid(p) then
+        sam_message(p, "Something large is awake down here.")
+      end
+    end
   end
 end
 
@@ -199,6 +226,7 @@ function on_event(e)
   elseif e.name == "world.on_item_deployed"      then return on_deployed(e)
   elseif e.name == "on_before_monster_damage"    then return on_monster_damage(e)
   elseif e.name == "player.on_before_equip"      then return on_before_equip(e)
+  elseif e.name == "player.on_equip"             then return on_equip(e)
   elseif e.name == "world.on_monster_spawned"    then return on_monster_spawned(e)
   end
 end

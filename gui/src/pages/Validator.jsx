@@ -18,6 +18,11 @@ const SCHEMA_LABELS = {
   monster: 'Monster definition',
   spell: 'Spell definition',
   patch: 'Layered patch',
+  effect: 'Status effect definition',
+  race: 'Race definition',
+  sound: 'Sound entry (mod.json "sounds")',
+  recipe: 'Recipe definition',
+  music: 'Music entry (mod.json "music")',
 };
 
 /** Which schema file each kind validates against (for the success note). */
@@ -28,6 +33,11 @@ const SCHEMA_FILE = {
   monster: 'schemas/monster.schema.json',
   spell: 'schemas/spell.schema.json',
   patch: 'schemas/patch.schema.json',
+  effect: 'schemas/effect.schema.json',
+  race: 'schemas/race.schema.json',
+  sound: 'schemas/sound.schema.json',
+  recipe: 'schemas/recipe.schema.json',
+  music: 'schemas/mod.schema.json ("music" item)',
 };
 
 /** Guess the schema kind from an object's shape (see task heuristics). */

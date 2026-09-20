@@ -6,6 +6,7 @@
 #include <set>
 #include "sam_logger.hpp"
 
+#include <algorithm>
 #include <map>
 #include <string>
 #include <vector>
@@ -18,7 +19,9 @@
 #	include "ui/Button.hpp"
 #	include "ui/Font.hpp"     // sizeText: measure before you place
 #	include "player.hpp"    // players[]->shootmode: frees the cursor for a GUI
-#	include "sam_lua_runtime.hpp"   // dispatchUiEvent
+#	include "sam_lua_runtime.hpp"
+#	include "sam_event.hpp"   // SamEvent: a click reaches Lua and JS alike
+#	include "sam_net.hpp"     // a client's clicks go to the host; the host's copy of its panels
 #	define SAM_UI_HAVE_ENGINE 1
 #endif
 
@@ -182,14 +185,189 @@ namespace
 		return true;
 	}
 
+	// ---- multiplayer: the host's copy of each remote player's panels ----------------------------
+	//
+	// Client -> host op on the ordered S.A.M channel (SAMNet, UiFirst block):
+	//   UiFirst+0  this player's panels  [u16 panels] then per panel: [str8 ns][str8 panel id]
+	//              [u16 text boxes] then per text box: [str8 widget id][str16 text so far]
+	// The WHOLE picture each time it changes, never a delta: a report from before a reconnect, or a
+	// panel closed by a new game, can then never leave the host believing something is open.
+	constexpr std::uint8_t OP_PANELS = SAMNet::Op::UiFirst + 0;
+	// Typing is reported at most this often (ten times a second); the panel list itself at once.
+	constexpr Uint32 REPORT_TYPING_TICKS = 5;
+
+	struct RemotePanels
+	{
+		std::map<std::string, std::map<std::string, std::string>> open;   // keyOf(ns, id) -> text box -> text
+	};
+	RemotePanels s_remote[MAXPLAYERS];   // host: what each client last reported
+
+	// Client: the report the host last got, and just its panel list. Both start as "no panels", so
+	// a client that never opens anything never sends a byte.
+	std::string emptyReport() { return std::string(2, '\0'); }
+	std::string s_lastReport = emptyReport();
+	std::string s_lastReportSet = emptyReport();
+	Uint32 s_lastReportTick = 0;
+
+	void buildReport(std::string& setKey, std::string& body)
+	{
+		SAMNet::Writer names, all;
+		const std::size_t n = std::min<std::size_t>(s_panels.size(), 0xFFFF);
+		names.u16((std::uint16_t)n);
+		all.u16((std::uint16_t)n);
+		std::size_t i = 0;
+		for ( const auto& kv : s_panels )
+		{
+			if ( i++ >= n ) { break; }
+			const Panel& p = kv.second;
+			names.str8(p.ns); names.str8(p.id);
+			all.str8(p.ns); all.str8(p.id);
+			std::vector<const UiWidget*> boxes;
+			for ( const UiWidget& w : p.widgets ) { if ( w.kind == UiWidget::INPUT ) { boxes.push_back(&w); } }
+			const std::size_t m = std::min<std::size_t>(boxes.size(), 0xFFFF);
+			all.u16((std::uint16_t)m);
+			for ( std::size_t j = 0; j < m; ++j )
+			{
+				all.str8(boxes[j]->id);
+				// The same read sam_ui_input_text makes here, so the host answers what this would.
+				all.str16(SAMUi::inputText(p.ns, p.id, boxes[j]->id));
+			}
+		}
+		setKey = std::move(names.buf);
+		body = std::move(all.buf);
+	}
+
+	// Client: tell the host what is open here, when that changed. A panel opening or closing goes at
+	// once, typing at most every REPORT_TYPING_TICKS, and `force` sends whatever changed right now --
+	// used just before a click is sent, so the host's copy is current when the click's handler runs.
+	void reportPanels(bool force)
+	{
+		if ( multiplayer != CLIENT ) { return; }
+		std::string setKey, body;
+		buildReport(setKey, body);
+		if ( body == s_lastReport ) { return; }
+		const bool setChanged = ( setKey != s_lastReportSet );
+		if ( !force && !setChanged && (Uint32)(ticks - s_lastReportTick) < REPORT_TYPING_TICKS ) { return; }
+		if ( !SAMNet::sendToHost(OP_PANELS, body) ) { return; }
+		s_lastReport = std::move(body);
+		s_lastReportSet = std::move(setKey);
+		s_lastReportTick = ticks;
+	}
+
+	// Host: a client's report. A torn one changes nothing.
+	void onPanelsOp(int from, const std::string& body)
+	{
+		if ( from <= 0 || from >= MAXPLAYERS ) { return; }
+		SAMNet::Reader r(body);
+		RemotePanels fresh;
+		const int n = r.u16();
+		for ( int i = 0; i < n && r.ok; ++i )
+		{
+			const std::string ns = r.str8();
+			const std::string id = r.str8();
+			std::map<std::string, std::string>& boxes = fresh.open[keyOf(ns, id)];
+			const int m = r.u16();
+			for ( int j = 0; j < m && r.ok; ++j )
+			{
+				const std::string w = r.str8();
+				boxes[w] = r.str16();
+			}
+		}
+		if ( !r.ok ) { return; }
+		s_remote[from] = std::move(fresh);
+	}
+
+	// Every machine, every game tick (only while scripts are loaded, in multiplayer).
+	void uiTick()
+	{
+		if ( multiplayer == CLIENT ) { reportPanels(false); return; }
+		// Host: a player who left takes their panels with them.
+		for ( int p = 1; p < MAXPLAYERS; ++p )
+		{
+			if ( client_disconnected[p] && !s_remote[p].open.empty() ) { s_remote[p].open.clear(); }
+		}
+	}
+
+	// Host: a client that just said hello starts from nothing; it reports what it has.
+	void uiHello(int p)
+	{
+		if ( p > 0 && p < MAXPLAYERS ) { s_remote[p].open.clear(); }
+	}
+
+	// A game ended: forget every copy, and what this client last reported.
+	void uiClear()
+	{
+		for ( int p = 0; p < MAXPLAYERS; ++p ) { s_remote[p].open.clear(); }
+		s_lastReport = emptyReport();
+		s_lastReportSet = emptyReport();
+		s_lastReportTick = 0;
+	}
+
+	// Registered at static initialisation, like every SAMNet op, hook and client event.
+	struct UiNet
+	{
+		UiNet() { SAMNet::onHostOp(OP_PANELS, &onPanelsOp); }
+	};
+	UiNet s_uiNet;
+	SAMNet::TickHook s_uiTick(&uiTick);
+	SAMNet::HelloHook s_uiHello(&uiHello);
+	SAMNet::ClearHook s_uiClear(&uiClear);
+	SAMNet::AllowEvent s_allowClick("ui.on_click");
+	SAMNet::AllowEvent s_allowSelect("ui.on_select");
+	SAMNet::AllowEvent s_allowSubmit("ui.on_submit");
+
+	// The player on THIS machine who has the mouse and keyboard. In multiplayer each machine has
+	// exactly one local player, clientnum -- but the engine's getPlayerIDAllowedKeyboard() answers 0
+	// there (player.hpp), which on a client is somebody else's slot. A modal panel carried to a
+	// client therefore never freed that client's cursor, and its text boxes never took the keyboard.
+	int keyboardPlayer()
+	{
+		if ( multiplayer != SINGLE ) { return clientnum; }
+		return inputs.getPlayerIDAllowedKeyboard();
+	}
+
+	// Who clicked. A panel has no owner, so it is the player who has the mouse and keyboard.
+	int localClicker()
+	{
+		const int kb = keyboardPlayer();
+		if ( kb >= 0 && kb < MAXPLAYERS ) { return kb; }
+		return clientnum;
+	}
+
+	// Fire ui.on_click / on_select / on_submit for a click on THIS machine.
+	//
+	// On a client the mod's handlers belong to the HOST, where its events, timers and state live;
+	// fired here they would run on a machine where a host-only call is refused. So the click goes to
+	// the host, which fires it with player = this client -- after the panel report, so the host's copy
+	// of what is open and typed is already current when a handler reads it. Everywhere else it fires
+	// here, carrying the clicking player like every other player event.
+	void fireUi(const char* name, const std::string& ns, const std::string& panel,
+		const std::string& widget, const std::string& value)
+	{
+		if ( multiplayer == CLIENT )
+		{
+			reportPanels(true);
+			SAMNet::EventFields f;
+			f.addStr("mod", ns);
+			f.addStr("panel", panel);
+			f.addStr("widget", widget);
+			f.addStr("value", value);
+			if ( SAMNet::sendEventToHost(name, f) ) { return; }
+		}
+		DispatchGuard g;
+		SamEvent ev(name);
+		ev.i("player", (long long)localClicker());
+		ev.s("mod", ns).s("panel", panel).s("widget", widget).s("value", value);
+		ev.fire();
+	}
+
 	// THE ONE C CALLBACK every S.A.M button shares. It recovers the route from the button's
 	// name and hands it to the script runtimes, which dispatch ui.on_click to Lua and JS alike.
 	void onSamButton(Button& b)
 	{
 		std::string ns, panel, id;
 		if ( !parseWidgetName(b.getName() ? b.getName() : "", ns, panel, id) ) { return; }
-		DispatchGuard g;
-		SAMLua::dispatchUiEvent("ui.on_click", ns, panel, id, "");
+		fireUi("ui.on_click", ns, panel, id, "");
 	}
 
 	// A row in a mod list was clicked.
@@ -200,8 +378,7 @@ namespace
 		if ( bar == std::string::npos ) { return; }
 		std::string ns, panel, id;
 		if ( !parseWidgetName(full.substr(0, bar), ns, panel, id) ) { return; }
-		DispatchGuard g;
-		SAMLua::dispatchUiEvent("ui.on_select", ns, panel, id, full.substr(bar + 1));
+		fireUi("ui.on_select", ns, panel, id, full.substr(bar + 1));
 	}
 
 	// Enter was pressed in a mod text box. Field::callback fires once the text is committed,
@@ -210,8 +387,7 @@ namespace
 	{
 		std::string ns, panel, id;
 		if ( !parseWidgetName(f.getName() ? f.getName() : "", ns, panel, id) ) { return; }
-		DispatchGuard g;
-		SAMLua::dispatchUiEvent("ui.on_submit", ns, panel, id, f.getText() ? f.getText() : "");
+		fireUi("ui.on_submit", ns, panel, id, f.getText() ? f.getText() : "");
 	}
 
 	void paintWidget(Frame* panelFrame, const Panel& p, const UiWidget& v)
@@ -527,6 +703,45 @@ bool SAMUi::isOpen(const std::string& ns, const std::string& id)
 	return s_panels.find(keyOf(ns, id)) != s_panels.end();
 }
 
+bool SAMUi::isOpenFor(int player, const std::string& ns, const std::string& id)
+{
+#ifndef SAM_UI_HAVE_ENGINE
+	(void)player;
+	return isOpen(ns, id);
+#else
+	if ( player >= MAXPLAYERS ) { return false; }
+	if ( player < 0 ) { player = SAMNet::defaultScreenPlayer(); }
+	// A player on this machine: this machine's panels (splitscreen players share them).
+	if ( players[player] && players[player]->isLocalPlayer() ) { return isOpen(ns, id); }
+	// A player on another machine: what their game last reported, which only the host keeps.
+	if ( multiplayer == SERVER && SAMNet::isRemotePlayer(player) )
+	{
+		return s_remote[player].open.find(keyOf(ns, id)) != s_remote[player].open.end();
+	}
+	return false;
+#endif
+}
+
+std::string SAMUi::inputTextFor(int player, const std::string& ns, const std::string& panel, const std::string& id)
+{
+#ifndef SAM_UI_HAVE_ENGINE
+	(void)player;
+	return inputText(ns, panel, id);
+#else
+	if ( player >= MAXPLAYERS ) { return ""; }
+	if ( player < 0 ) { player = SAMNet::defaultScreenPlayer(); }
+	if ( players[player] && players[player]->isLocalPlayer() ) { return inputText(ns, panel, id); }
+	if ( multiplayer == SERVER && SAMNet::isRemotePlayer(player) )
+	{
+		const auto p = s_remote[player].open.find(keyOf(ns, panel));
+		if ( p == s_remote[player].open.end() ) { return ""; }
+		const auto t = p->second.find(id);
+		return ( t != p->second.end() ) ? t->second : std::string();
+	}
+	return "";
+#endif
+}
+
 bool SAMUi::clearWidgets(const std::string& ns, const std::string& id)
 {
 #ifndef SAM_UI_HAVE_ENGINE
@@ -830,6 +1045,17 @@ bool SAMUi::keyboardCaptured()
 #endif
 }
 
+bool SAMUi::keyboardCapturedFor(int player)
+{
+#ifndef SAM_UI_HAVE_ENGINE
+	(void)player;
+	return false;
+#else
+	if ( s_panels.empty() ) { return false; }   // the vanilla path: one test
+	return player == keyboardPlayer() && keyboardCaptured();
+#endif
+}
+
 void SAMUi::ensure()
 {
 #ifdef SAM_UI_HAVE_ENGINE
@@ -852,7 +1078,7 @@ void SAMUi::ensure()
 			// Scoped to the player who actually owns the mouse. A panel has no owner, so
 			// taking the cursor from every local player meant one splitscreen player opening
 			// a mod window disabled the OTHER player's aiming as well.
-			const int kbOwner = inputs.getPlayerIDAllowedKeyboard();
+			const int kbOwner = keyboardPlayer();
 			for ( int c = 0; c < MAXPLAYERS; ++c )
 			{
 				if ( players[c] && players[c]->isLocalPlayer()
@@ -871,7 +1097,7 @@ void SAMUi::ensure()
 			// local player in splitscreen -- and handed it back at all in situations where
 			// the engine had deliberately taken it, such as the death and gameover screens.
 			// gui_mode covers an open inventory; isLocalPlayerAlive covers the rest.
-			const int owner = inputs.getPlayerIDAllowedKeyboard();
+			const int owner = keyboardPlayer();
 			for ( int c = 0; c < MAXPLAYERS; ++c )
 			{
 				if ( players[c] && players[c]->isLocalPlayer()

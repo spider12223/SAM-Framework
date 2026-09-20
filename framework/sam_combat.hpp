@@ -30,8 +30,13 @@
 	   getDamageTableMultiplier looks like the better site and is not — 24 call sites,
 	   several of them the character sheet rendering on a CLIENT every frame.
 
-	   Nothing here touches an engine type. The engine passes uids and a double; this
-	   module owns the accumulation and the clamp, and the runtimes own the dispatch.
+	   Nothing in those two touches an engine type. The engine passes uids and a double;
+	   this module owns the accumulation and the clamp, and the runtimes own the dispatch.
+
+	3. THE MULTIPLAYER HALF OF THREE COMBAT FUNCTIONS, kept here so both runtimes share
+	   one body: the species-resist table reaching a joining client, sam_revive_player for
+	   every player slot, and the one-frame sam_set_defending override on a player whose
+	   shield input lives on another machine. These do touch the engine, and say why.
 
 -------------------------------------------------------------------------------*/
 
@@ -63,6 +68,38 @@ namespace SAMCombat
 	// The engine read. Returns true and writes *out only when this species+type is
 	// overridden; leaves *out alone otherwise.
 	bool speciesResist(int species, int damageType, double* out);
+
+	// MULTIPLAYER. The table is kept on every machine: the host resolves the damage, and each
+	// client's character sheet reads its own copy. The two script functions are `all` calls,
+	// so a host call is carried to every client as it happens. What that cannot cover is a
+	// table that already differed before the game -- an override left from an earlier
+	// singleplayer game on either machine -- so a client's catch-up (SAMRules) sends the host's
+	// whole table here and the client takes it wholesale. Host side; one client.
+	void sendResistSnapshot(int peer);
+
+	// ---- reviving a player (sam_revive_player) -------------------------------------------
+	//
+	// The shared body of both runtimes' binding. Returns true when the player is standing again.
+	//
+	// THE GEAR THE DEATH ALREADY PAID OUT. Dying copies the backpack out -- to the floor in
+	// singleplayer, to the loot bag in co-op without keep-inventory -- and leaves the originals
+	// where they were, because the engine only ever revives on the next floor, where it purges
+	// them. A revive mid-floor has to do that purge itself or every item exists twice.
+	//
+	// A REMOTE PLAYER is stood up by the host building the body exactly as the engine's own
+	// 'REZZ' handler does, and telling that player's machine (S.A.M only) to take down its ghost
+	// and drop what the death copied. A stock client cannot be told, and would keep its ghost
+	// and a second copy of its gear, so it is refused rather than half-revived.
+	bool revivePlayer(int player, int wantX, int wantY);
+
+	// ---- sam_set_defending ------------------------------------------------------------------
+	//
+	// The flag is rewritten by its owner: every frame by actHudShield for a player on this
+	// machine, but for a REMOTE player only by their next 'SHLD' -- sent on a change or every
+	// 120 ticks. So the documented one-frame override lasted up to 2.4 seconds on a remote
+	// player. The binding reports each write here, and the host puts the player's own value
+	// back once one full pass of game logic has seen the override.
+	void noteDefendingOverride(int player, bool before, bool forced);
 
 	// ---- the on_damage_multiplier hook --------------------------------------------------
 	//

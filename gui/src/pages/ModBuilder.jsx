@@ -19,6 +19,7 @@ import { isFsSupported, isFilePickSupported, getModsDirHandle, writeModToDir, re
 import { canonicalize, diffLines, collapseHunks, diffSummary } from '@/lib/jsonDiff.js';
 import { useMod } from '@/state/ModContext.jsx';
 import { Panel, Field, TextInput, GoldButton, ItemRow, ErrorList, SavedNote } from '@/components/ui.jsx';
+import { audioKey, audioFiles } from '@/lib/audio.js';
 
 const BARONY_APPID = '371970';
 
@@ -36,7 +37,7 @@ function cloneWithNewId(def, existingIds) {
 }
 
 export default function ModBuilder() {
-  const { meta, classes, items, monsters, spells, effects, races, sounds, recipes, patches, scripts, assets, baseline, dispatch } = useMod();
+  const { meta, classes, items, monsters, spells, effects, races, sounds, music = [], recipes, patches, scripts, assets, baseline, dispatch } = useMod();
   const navigate = useNavigate();
   const [errors, setErrors] = useState([]);
   const [savedAs, setSavedAs] = useState('');
@@ -49,7 +50,7 @@ export default function ModBuilder() {
   const zipRef = useRef(null);
 
   const setMeta = (patch) => dispatch({ type: 'setMeta', patch });
-  const mod = { meta, classes, items, monsters, spells, effects, races, sounds, recipes, patches, scripts, assets };
+  const mod = { meta, classes, items, monsters, spells, effects, races, sounds, music, recipes, patches, scripts, assets };
 
   const namespaceBad = meta.namespace !== '' && !NAMESPACE_PATTERN.test(meta.namespace);
   const versionBad = meta.version !== '' && !VERSION_PATTERN.test(meta.version);
@@ -65,14 +66,22 @@ export default function ModBuilder() {
     const push = (source, res) => {
       for (const e of res.errors) all.push({ path: `${source} ${e.path}`, message: e.message });
     };
-    push('mod.json', validate('mod', buildManifest(meta, paths)));
+    // Sounds and music are checked one entry at a time: inside the manifest a bad entry only
+    // reports "must match exactly one schema in oneOf", which does not say what is wrong. The
+    // whole manifest then includes them only if every entry passed, so a problem is not
+    // reported twice.
+    const soundRes = sounds.map((s) => validate('sound', s));
+    const musicRes = music.map((m) => validate('music', m));
+    soundRes.forEach((r, i) => push(`mod.json sounds[${i}]`, r));
+    musicRes.forEach((r, i) => push(`mod.json music[${i}]`, r));
+    const audioOk = soundRes.every((r) => r.valid) && musicRes.every((r) => r.valid);
+    push('mod.json', validate('mod', buildManifest(meta, paths, audioOk ? { sounds, music } : {})));
     classes.forEach((c, i) => push(paths.classPaths[i], validate('class', c)));
     items.forEach((it, i) => push(paths.itemPaths[i], validate('item', it)));
     monsters.forEach((m, i) => push(paths.monsterPaths[i], validate('monster', m)));
     spells.forEach((s, i) => push(paths.spellPaths[i], validate('spell', s)));
     effects.forEach((e, i) => push(paths.effectPaths[i], validate('effect', e)));
     races.forEach((r, i) => push(paths.racePaths[i], validate('race', r)));
-    sounds.forEach((s, i) => push(paths.soundPaths[i], validate('sound', s)));
     recipes.forEach((r, i) => push(paths.recipePaths[i], validate('recipe', r)));
     patches.forEach((p, i) => push(paths.patchPaths[i], validate('patch', p)));
     return all;
@@ -96,14 +105,14 @@ export default function ModBuilder() {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    const hasContent = classes.length || items.length || monsters.length || spells.length || effects.length || races.length || sounds.length || recipes.length || patches.length || meta.name.trim() || meta.namespace.trim();
+    const hasContent = classes.length || items.length || monsters.length || spells.length || effects.length || races.length || sounds.length || music.length || recipes.length || patches.length || meta.name.trim() || meta.namespace.trim();
     if (hasContent && !window.confirm('Importing replaces the current mod in this session. Continue?')) return;
     setErrors([]); setNotice(''); setImportReport([]); setSavedAs('');
     try {
       const r = await parseModZip(file);
       dispatch({ type: 'loadMod', ...r });
       dispatch({ type: 'setBaseline' });
-      setNotice(`Imported ${r.meta.name || r.meta.namespace || 'mod'}: ${r.classes.length} class(es), ${r.items.length} item(s), ${r.monsters.length} monster(s), ${r.spells.length} spell(s), ${r.effects.length} effect(s), ${r.races.length} race(s), ${r.sounds.length} sound(s), ${r.patches.length} patch(es), ${Object.keys(r.scripts).length} script(s).`);
+      setNotice(`Imported ${r.meta.name || r.meta.namespace || 'mod'}: ${r.classes.length} class(es), ${r.items.length} item(s), ${r.monsters.length} monster(s), ${r.spells.length} spell(s), ${r.effects.length} effect(s), ${r.races.length} race(s), ${r.sounds.length} sound(s), ${r.music.length} music track(s), ${r.patches.length} patch(es), ${Object.keys(r.scripts).length} script(s).`);
       setImportReport(r.report);
     } catch (err) {
       setErrors([{ path: 'import', message: err.message }]);
@@ -168,12 +177,14 @@ export default function ModBuilder() {
   const removeDep = (d) => setMeta({ dependencies: meta.dependencies.filter((x) => x !== d) });
 
   // --- diff since baseline ---
+  // Every collection the baseline snapshot holds, or the panel quietly reports "no changes"
+  // for whatever was left out. `music` and `recipes` were not even passed.
   const diffRows = useMemo(() => {
     if (!baseline) return null;
     const a = canonicalize(baseline);
-    const b = canonicalize({ meta, classes, items, monsters, spells, effects, races, sounds, patches });
+    const b = canonicalize({ meta, classes, items, monsters, spells, effects, races, sounds, music, recipes, patches });
     return collapseHunks(diffLines(a, b));
-  }, [baseline, meta, classes, items, monsters, spells, effects, races, sounds, patches]);
+  }, [baseline, meta, classes, items, monsters, spells, effects, races, sounds, music, recipes, patches]);
   const summary = diffRows ? diffSummary(diffRows) : null;
 
   return (
@@ -318,11 +329,22 @@ export default function ModBuilder() {
         <Panel title="Bundled Sounds">
           <div className="space-y-2">
             {sounds.length === 0 && <EmptyHint where="/sound-editor" what="sounds" />}
+            {/* Only an added sound can be duplicated: two entries replacing one game sound is one too many. */}
             {sounds.map((def) => (
-              <ItemRow key={def.id} icon="🔊" name={def.id.split(':')[1] || def.id} sub={soundSub(def, assets)}
-                onEdit={() => edit('sound', def.id, '/sound-editor')}
-                onClone={() => clone(def, 'saveSound', sounds)}
-                onRemove={() => dispatch({ type: 'removeSound', id: def.id })} />
+              <ItemRow key={audioKey(def)} icon={def.id ? '🔊' : '↻'} name={audioName(def)} sub={audioSub(def, assets, soundBits)}
+                onEdit={() => edit('sound', audioKey(def), '/sound-editor')}
+                onClone={def.id ? () => clone(def, 'saveSound', sounds) : undefined}
+                onRemove={() => dispatch({ type: 'removeSound', key: audioKey(def) })} />
+            ))}
+          </div>
+        </Panel>
+        <Panel title="Bundled Music">
+          <div className="space-y-2">
+            {music.length === 0 && <EmptyHint where="/music-editor" what="music" />}
+            {music.map((def) => (
+              <ItemRow key={audioKey(def)} icon={def.id ? '🎵' : '↻'} name={audioName(def)} sub={audioSub(def, assets, musicBits)}
+                onEdit={() => edit('music', audioKey(def), '/music-editor')}
+                onRemove={() => dispatch({ type: 'removeMusic', key: audioKey(def) })} />
             ))}
           </div>
         </Panel>
@@ -429,7 +451,7 @@ export default function ModBuilder() {
 ├─ spells/*.json
 ├─ effects/*.json
 ├─ races/*.json
-├─ sounds/*.json    sounds/*.ogg
+├─ sounds/*.ogg     music/*.ogg   (their entries are inside mod.json)
 ├─ patches/*.json
 └─ portraits/*.png  (uploaded art)`}
         </pre>
@@ -441,13 +463,42 @@ export default function ModBuilder() {
   );
 }
 
-/** One-line summary of a sound, for the Mod Builder row. Flags a missing .ogg. */
-function soundSub(def, assets) {
-  const have = assets && assets[def.file];
-  const bits = [def.file || '(no file)'];
+/** Row title for a sound or track: its name, or what it replaces. */
+function audioName(def) {
+  return def.id ? (String(def.id).split(':')[1] || def.id) : `replaces ${def.replace}`;
+}
+
+/** Sound-only details for the row. */
+function soundBits(def) {
+  const bits = [];
+  if (def.volume !== undefined && def.volume !== 1) bits.push(`volume ×${def.volume}`);
   if (def.loop) bits.push('loop');
-  if (!have) bits.push('⚠ audio not bundled');
-  return `${def.id} · ${bits.join(', ')}`;
+  return bits;
+}
+
+/** Music-only details for the row. */
+function musicBits(def) {
+  const bits = [];
+  const floors = def.floors === undefined ? [] : [].concat(def.floors);
+  const maps = def.maps === undefined ? [] : [].concat(def.maps);
+  if (floors.length) bits.push(`floor${floors.length === 1 ? '' : 's'} ${floors.join(', ')}`);
+  if (maps.length) bits.push(`map${maps.length === 1 ? '' : 's'} ${maps.join(', ')}`);
+  if (def.combat) bits.push('+ fight track');
+  if (def.loop === true) bits.push('loops');
+  if (def.loop === false) bits.push('plays once');
+  return bits;
+}
+
+/** One-line summary of a sound or track for its Mod Builder row. Flags audio that is not
+ *  bundled (lost on a reload, or a path typed for a file the mod folder may not have): an
+ *  entry with no audio ships and plays nothing. */
+function audioSub(def, assets, extraBits) {
+  const files = audioFiles(def);
+  const main = Array.isArray(def.file) ? def.file : def.file ? [def.file] : [];
+  const bits = [main.length > 1 ? `${main.length} files` : (main[0] || '(no file)'), ...extraBits(def)];
+  const missing = files.filter((f) => !assets?.[f]).length;
+  if (missing) bits.push(missing === files.length ? '⚠ audio not bundled' : `⚠ ${missing} of ${files.length} files not bundled`);
+  return `${def.id ?? String(def.replace)} · ${bits.join(', ')}`;
 }
 
 /** One-line summary of a race, for the Mod Builder row. */

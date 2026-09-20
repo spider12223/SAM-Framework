@@ -16,10 +16,13 @@
  * builder cannot produce a hook, function, or event field that doesn't exist.
  */
 import { useMemo, useState, useEffect, useRef } from 'react';
-import { Panel, Field, Select, TextInput, NumberInput, GoldButton } from '@/components/ui.jsx';
+import { Panel, Field, Select, TextInput, NumberInput, GoldButton, SearchSelect } from '@/components/ui.jsx';
+import { useMod } from '@/state/ModContext.jsx';
+import { VANILLA_SOUNDS } from '@/data/vanillaSounds.js';
+import { vanillaSoundName } from '@/lib/audio.js';
 import {
   TRIGGERS, allConditions, untilCandidates, findTrigger, findCondition, findAction, actionsFor, conditionsFor,
-  EVERY_SECONDS, registerCustom,
+  EVERY_SECONDS, registerCustom, triggerPlayerMayBeMissing, playerAbsentReason,
 } from '@/data/blocks.js';
 import { generateLua, describeRule } from '@/lib/codegen.js';
 import CustomBlockEditor from '@/components/CustomBlockEditor.jsx';
@@ -38,7 +41,49 @@ const newRule = () => ({
   actions: [{ id: 'message', params: defaults(findAction('message')) }],
 });
 
+/** "28 · Damage" for every vanilla sound, in index order — the searchable list behind a number. */
+const VANILLA_SOUND_OPTIONS = VANILLA_SOUNDS.groups
+  .flatMap((g) => g.sounds)
+  .sort((a, b) => a.i - b.i)
+  .map((s) => `${s.i} · ${s.name}`);
+
+/**
+ * A sound for sam_play_sound: one of the mod's own (by id), or a game sound by number with a
+ * searchable name list so nobody has to know that 28 is "Damage". The value is a number for a
+ * game sound and a string for one of yours; the block turns either into the right argument.
+ */
+function SoundParam({ p, value, onChange }) {
+  const { sounds } = useMod();
+  const own = (sounds || []).filter((s) => s.id).map((s) => s.id);
+  const v = value ?? p.default;
+  const isOwn = typeof v === 'string' && v.trim() !== '' && !/^\d+$/.test(v.trim());
+  const options = [
+    { value: '#', label: 'a game sound (by number)' },
+    ...own.map((id) => ({ value: id, label: `mine: ${id}` })),
+  ];
+  if (isOwn && !own.includes(v)) options.push({ value: v, label: `${v} (not in this mod)` });
+  const n = Number(v) || 0;
+  return (
+    <>
+      <Field label={p.label || p.name} className="min-w-[12rem]">
+        <Select value={isOwn ? v : '#'} onChange={(c) => onChange(c === '#' ? p.default : c)} options={options} />
+      </Field>
+      {!isOwn && (
+        <Field label="which game sound" className="min-w-[13rem]">
+          <SearchSelect options={VANILLA_SOUND_OPTIONS} value={`${n} · ${vanillaSoundName(n) || '?'}`}
+            placeholder="type a number or a name — swing, door…" allowCustom
+            onPick={(s) => { const k = parseInt(s, 10); if (Number.isFinite(k) && k >= 0) onChange(k); }} />
+        </Field>
+      )}
+      {!isOwn && own.length === 0 && (
+        <div className="text-xs self-center" style={{ color: '#6b5a35' }}>Your own sounds appear here once you save one in the Sound Editor.</div>
+      )}
+    </>
+  );
+}
+
 function Param({ p, value, onChange }) {
+  if (p.type === 'sound') return <SoundParam p={p} value={value} onChange={onChange} />;
   const common = { value: value ?? p.default, onChange };
   const options = p.labels
     ? p.values.map((v) => ({ value: v, label: p.labels[v] || v }))
@@ -220,6 +265,14 @@ function RuleEditor({ rule, index, total, conditions, onChange, onRemove }) {
         ))}
       </div>
       {trigger?.gotcha && <div className="text-xs mb-2 sam-error">⚠ {trigger.gotcha}</div>}
+      {/* Said here as well as in the generated script, because this is where the author
+          decides. Two of these events do not mention it in their own gotcha. */}
+      {trigger && triggerPlayerMayBeMissing(trigger) && (
+        <div className="text-xs mb-2 sam-error">
+          ⚠ {playerAbsentReason(trigger)} Everything below needs a real player, so the generated
+          script leaves those fires alone rather than calling the game with a player that is not one.
+        </div>
+      )}
 
       <div className="sam-label mt-3 mb-1">② IF (optional)</div>
       {rule.conditions.length === 0 && (

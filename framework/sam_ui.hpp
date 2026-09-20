@@ -61,6 +61,23 @@ namespace SAMUi
 
 	bool isOpen(const std::string& ns, const std::string& id);
 
+	// ---- multiplayer ------------------------------------------------------------------------
+	//
+	// A panel lives on the machine of the player it was opened for, and a click on it is that
+	// player's input. So in multiplayer:
+	//   * a click, pick or enter on a CLIENT (ui.on_click / ui.on_select / ui.on_submit) is sent to
+	//     the host and fired THERE, with player = that client -- where the mod's handlers, timers
+	//     and state live -- instead of in the client's own scripts;
+	//   * each client reports its open panels and what is typed in their text boxes whenever that
+	//     changes, and the host keeps that copy, so sam_ui_is_open / sam_ui_input_text can answer
+	//     for a remote player.
+	// `player` < 0 means the player the current event is about, else this machine's own. A player
+	// on another machine is answered from their last report (the host only), so the answer lags by
+	// the network delay: right after sam_ui_open it can still say "closed" for a moment. Anything
+	// else -- an empty slot, or another player asked about on a client -- is false / "".
+	bool isOpenFor(int player, const std::string& ns, const std::string& id);
+	std::string inputTextFor(int player, const std::string& ns, const std::string& panel, const std::string& id);
+
 	// Remove every widget from a panel but leave the panel itself. This is how a script
 	// redraws a list after the player types in a search box, without the panel flickering.
 	bool clearWidgets(const std::string& ns, const std::string& id);
@@ -143,6 +160,11 @@ namespace SAMUi
 	// outside system taking the keyboard -- it is what the ImGui debug overlay uses -- and
 	// game.cpp consults this the same way.
 	bool keyboardCaptured();
+	// The same, asked for one local player: true only for the player who owns this machine's
+	// keyboard (clientnum in multiplayer, the keyboard player in splitscreen) while a mod text
+	// box has it. game.cpp asks this per local player; asking getPlayerIDAllowedKeyboard() there
+	// instead got 0 in multiplayer, so on a client typing into a panel also walked the player.
+	bool keyboardCapturedFor(int player);
 
 	void ensure();
 

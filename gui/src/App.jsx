@@ -9,6 +9,7 @@ import SpellEditor from '@/pages/SpellEditor.jsx';
 import EffectEditor from '@/pages/EffectEditor.jsx';
 import RaceEditor from '@/pages/RaceEditor.jsx';
 import SoundEditor from '@/pages/SoundEditor.jsx';
+import MusicEditor from '@/pages/MusicEditor.jsx';
 import ModelEditor from '@/pages/ModelEditor.jsx';
 import RecipeEditor from '@/pages/RecipeEditor.jsx';
 import PatchEditor from '@/pages/PatchEditor.jsx';
@@ -37,6 +38,7 @@ const NAV_GROUPS = [
   ]],
   ['Assets', [
     { to: '/sound-editor', icon: '🔊', label: 'Sound Editor' },
+    { to: '/music-editor', icon: '🎵', label: 'Music Editor' },
     { to: '/model-editor', icon: '🧊', label: 'Model Editor' },
   ]],
   ['Tweaks', [
@@ -106,6 +108,7 @@ export default function App() {
                 <Route path="/effect-editor" element={<EffectEditor />} />
                 <Route path="/race-editor" element={<RaceEditor />} />
                 <Route path="/sound-editor" element={<SoundEditor />} />
+                <Route path="/music-editor" element={<MusicEditor />} />
                 <Route path="/model-editor" element={<ModelEditor />} />
                 <Route path="/recipe-editor" element={<RecipeEditor />} />
                 <Route path="/patch-editor" element={<PatchEditor />} />

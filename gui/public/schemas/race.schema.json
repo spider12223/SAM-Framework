@@ -288,7 +288,7 @@
           ]
         },
         "arm_right": {
-          "description": "The right arm. Shown bare; sleeves and gloves cover it. Four forms are accepted, in the order they are tried: a path to a model the game already has (\"gharbad_head.vox\", or the full \"models/creatures/...\" form if that filename is used by more than one creature); an id you declared in mod.json \"models\" (\"<ns>:name\"); a mod-relative path to your own .vox; or a raw model index. Prefer a path: an index says nothing about what it is, and models.txt line N is index N-1, which is easy to get wrong by one. Instead of a bare string you may give an object: { \"model\": \"...\", \"scale\": 1.2, \"offset\": { \"x\": 0, \"y\": 0, \"z\": -1 }, \"pitch\": 0, \"roll\": 0 }. Use that when your race's proportions differ from the host body's and the limb clips or floats; a bare string keeps the host body's proportions.",
+          "description": "The right arm. Shown bare; sleeves and gloves cover it. Four forms are accepted, in the order they are tried: a path to a model the game already has (\"gharbad_head.vox\", or the full \"models/creatures/...\" form if that filename is used by more than one creature); an id you declared in mod.json \"models\" (\"<ns>:name\"); a mod-relative path to your own .vox; or a raw model index. Prefer a path: an index says nothing about what it is, and models.txt line N is index N-1, which is easy to get wrong by one. Instead of a bare string you may give an object: { \"model\": \"...\", \"scale\": 1.2, \"offset\": { \"x\": 0, \"y\": 0, \"z\": -1 }, \"pitch\": 0, \"roll\": 0 }. Use that when your race's proportions differ from the host body's and the limb clips or floats; a bare string keeps the host body's proportions. To make the arm bend when it holds something, use the object form and give it a \"bent\" key beside \"model\": { \"model\": \"mymod:arm_right\", \"bent\": \"mymod:arm_right_bent\" }. \"bent\" is a plain string like \"model\" is, the model of the arm drawn while that hand is full.",
           "oneOf": [
             {
               "type": "string"
@@ -332,13 +332,17 @@
                 "roll": {
                   "type": "number",
                   "description": "Extra roll in radians, added to whatever the animation set."
+                },
+                "bent": {
+                  "type": "string",
+                  "description": "The same arm, drawn while that hand is holding something: a weapon in the right hand, a shield or lantern in the left, and during a spell windup. Same four forms as \"model\". Without it your arm keeps one pose forever, because the base game reaches a bent arm by stepping two entries forward in its own model list (ArmRight, ArmLeft, ArmBentRight, ArmBentLeft) and your arm is a single added model with nothing reserved after it. Leave the arms out of limb_models entirely and you get the host body's arms, which bend on their own."
                 }
               }
             }
           ]
         },
         "arm_left": {
-          "description": "The left arm. Shown bare; sleeves and gloves cover it. Four forms are accepted, in the order they are tried: a path to a model the game already has (\"gharbad_head.vox\", or the full \"models/creatures/...\" form if that filename is used by more than one creature); an id you declared in mod.json \"models\" (\"<ns>:name\"); a mod-relative path to your own .vox; or a raw model index. Prefer a path: an index says nothing about what it is, and models.txt line N is index N-1, which is easy to get wrong by one. Instead of a bare string you may give an object: { \"model\": \"...\", \"scale\": 1.2, \"offset\": { \"x\": 0, \"y\": 0, \"z\": -1 }, \"pitch\": 0, \"roll\": 0 }. Use that when your race's proportions differ from the host body's and the limb clips or floats; a bare string keeps the host body's proportions.",
+          "description": "The left arm. Shown bare; sleeves and gloves cover it. Four forms are accepted, in the order they are tried: a path to a model the game already has (\"gharbad_head.vox\", or the full \"models/creatures/...\" form if that filename is used by more than one creature); an id you declared in mod.json \"models\" (\"<ns>:name\"); a mod-relative path to your own .vox; or a raw model index. Prefer a path: an index says nothing about what it is, and models.txt line N is index N-1, which is easy to get wrong by one. Instead of a bare string you may give an object: { \"model\": \"...\", \"scale\": 1.2, \"offset\": { \"x\": 0, \"y\": 0, \"z\": -1 }, \"pitch\": 0, \"roll\": 0 }. Use that when your race's proportions differ from the host body's and the limb clips or floats; a bare string keeps the host body's proportions. To make the arm bend when it holds something, use the object form and give it a \"bent\" key beside \"model\": { \"model\": \"mymod:arm_left\", \"bent\": \"mymod:arm_left_bent\" }. \"bent\" is a plain string like \"model\" is, the model of the arm drawn while that hand is full.",
           "oneOf": [
             {
               "type": "string"
@@ -382,6 +386,10 @@
                 "roll": {
                   "type": "number",
                   "description": "Extra roll in radians, added to whatever the animation set."
+                },
+                "bent": {
+                  "type": "string",
+                  "description": "The same arm, drawn while that hand is holding something: a weapon in the right hand, a shield or lantern in the left, and during a spell windup. Same four forms as \"model\". Without it your arm keeps one pose forever, because the base game reaches a bent arm by stepping two entries forward in its own model list (ArmRight, ArmLeft, ArmBentRight, ArmBentLeft) and your arm is a single added model with nothing reserved after it. Leave the arms out of limb_models entirely and you get the host body's arms, which bend on their own."
                 }
               }
             }

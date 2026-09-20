@@ -10,7 +10,7 @@ import { useMod } from '@/state/ModContext.jsx';
 import { Panel, GoldButton } from '@/components/ui.jsx';
 
 /** The framework's own version (mods declare their own framework_min_version). */
-const SAM_FRAMEWORK_VERSION = '2.5.2';
+const SAM_FRAMEWORK_VERSION = '3.0.0';
 
 /** Where players get S.A.M itself (the framework is a dependency, not a mod). */
 const WORKSHOP_URL = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472';
@@ -28,12 +28,12 @@ const TRAVELS = [
  * thing a returning modder sees, and the point is 'here is what you can do now that you
  * could not before', not a changelog. */
 const WHATS_NEW = [
-  ["The function list now finds you",
-   "2.5.1 wrote down all 184 functions; this release makes sure people actually see them. Every session header in sam_log.txt now carries a link to the complete reference, which reaches modders who never open GitHub or the Workshop page, because the log is the file they read when something breaks."],
-  ["The Workshop page leads with the reference",
-   "It had been headlined 'NEW IN 2.0' for five releases and never said where the function list lived. It now opens with the reference, the TypeScript definitions, and what 2.5 did for custom models."],
-  ["Everything the docs release added",
-   "A complete function reference generated from the API definition, sixteen functions and eight events restored to this builder, sam.d.ts for TypeScript mods, and a ship gate that refuses to publish if the runtimes, the block definitions and the docs ever disagree again."],
+  ["Your mod works for everyone in the game",
+   "A mod used to work properly only for the host: its windows drew on the host's screen, it read the host's backpack when you asked about a joiner's, and it never heard a joiner press a key. Now every one of the 316 functions has a co-op behaviour the game enforces. You still write one script and name players by number, and the framework carries each call to the machine that has to run it."],
+  ["Sounds and music with no JSON at all",
+   "Drop a file in your mod's sounds/ folder and it is ready to play. Name one after a Barony sound in sounds/replace/ and it takes over for everyone who has your mod, while everyone else hears the original. Music works the same way, per floor, per map or per boss, and there is a Music editor here for the rest."],
+  ["Rules that stack, and a camera",
+   "Stat bonuses now add and multiply across every mod instead of overwriting each other, so two mods that both touch strength both count. Immunities by player, creature or species. An experience curve, which Barony does not have. And a camera you can put behind the player, out in the world, or on a target."],
 ];
 
 /** sam-well stat box: big gold number over a small-caps label. */

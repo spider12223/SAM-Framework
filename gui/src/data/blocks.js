@@ -67,9 +67,77 @@ export const TRIGGERS = [
     })),
 ];
 
+/**
+ * Events that carry a `player` field which is NOT always a player.
+ *
+ * Several hooks sit at a place in the engine where the thing that did it may be a monster
+ * or a trap rather than one of the four players. They still carry `player`, because for a
+ * player's own action it is the useful answer -- but the fire site writes -1 otherwise, and
+ * -1 is not a player index. Every S.A.M function that takes a player refuses it: the loud
+ * ones log "invalid player index -1" and return false, the quiet ones just answer no. So a
+ * generated script that reads `event.player` and hands it straight to an action does
+ * nothing at all on those fires, with no error the author will ever see in game.
+ *
+ * Each entry is the fire site that produces the -1, checked in the source:
+ *
+ *   on_before_effect_applied   framework/sam_rules.cpp:827
+ *       `const int player = ( e->behavior == &actPlayer ) ? e->skill[2] : -1;`
+ *       The hook is inside Entity::setEffect, so it runs for every buff, poison tick and
+ *       shrine on every creature in the game. Monsters are the COMMON case here, not the
+ *       edge case.
+ *   world.on_projectile_hit    Barony/src/actarrow.cpp:568
+ *       -1 when a monster archer or an arrow trap fired the shot.
+ *   world.on_trap_triggered    Barony/src/actmagictrap.cpp:310, actspeartrap.cpp:153
+ *       always -1 for magic traps and spike traps (nobody "fired" them), and
+ *       actarrowtrap.cpp:210 writes -1 when the trap had no player to aim at.
+ *   world.on_item_deployed     Barony/src/item_tool.cpp:2060
+ *       -1 when a monster threw the gadget.
+ *
+ * Re-check this list against those files when an event is added. The manifest scan below
+ * is a safety net for the case where nobody does: an event whose own gotcha says its player
+ * can be -1 is treated as one of these even if it is not named here.
+ */
+const PLAYER_MINUS_ONE_FIRE_SITES = [
+  ['on_before_effect_applied', 'This fires for MONSTERS as well as players -- it sits in the '
+    + 'engine\'s one "give this creature an effect" function, so most of its fires are monsters.'],
+  ['world.on_projectile_hit', 'A monster archer or an arrow trap can have fired the shot.'],
+  ['world.on_trap_triggered', 'Nobody fires a spike trap or a magic trap, and an arrow trap '
+    + 'with no player in front of it has nobody to blame either.'],
+  ['world.on_item_deployed', 'A monster can throw the gadget too.'],
+];
+
+const DEFAULT_ABSENT_REASON = 'This event also fires when no player was involved.';
+
+/** An event whose own documentation says, in words, that its player can be -1. Deliberately
+ *  narrow: it wants "player ... -1" in one clause, not any mention of -1 (several events
+ *  document target_type as -1 for a non-creature, which says nothing about the player). */
+const DOCUMENTS_MINUS_ONE = /\bplayer\b[^.;]{0,48}[^\w-]-1\b/i;
+
+// The manifest scan goes FIRST so a hand-written reason below replaces its generic one for
+// the events that appear in both (a Map keeps the last value for a repeated key).
+const PLAYER_ABSENT_REASONS = new Map([
+  ...SAM_EVENTS
+    .filter((e) => (e.payload || []).some((f) => f.field === 'player'))
+    .filter((e) => DOCUMENTS_MINUS_ONE.test(`${e.gotcha || ''} ${e.notes || ''}`))
+    .map((e) => [e.name, DEFAULT_ABSENT_REASON]),
+  ...PLAYER_MINUS_ONE_FIRE_SITES,
+]);
+
+export const PLAYER_MAY_BE_MISSING = new Set(PLAYER_ABSENT_REASONS.keys());
+
 /** Does this trigger hand us a player, or do we have to assume the host? */
 export function triggerHasPlayer(trigger) {
   return (trigger?.payload || []).some((f) => f.field === 'player');
+}
+
+/** Does this trigger's `player` need checking before it is used as one? */
+export function triggerPlayerMayBeMissing(trigger) {
+  return PLAYER_MAY_BE_MISSING.has(trigger?.id);
+}
+
+/** Why this trigger can hand you a -1, in a sentence, for the generated script's comment. */
+export function playerAbsentReason(trigger) {
+  return PLAYER_ABSENT_REASONS.get(trigger?.id) || DEFAULT_ABSENT_REASON;
 }
 /** Field names this trigger's event actually carries (for uid-taking actions). */
 export function triggerFields(trigger) {
@@ -911,11 +979,42 @@ export const ACTIONS = [
     lua: (p) => `sam_message(player, ${q(p.text)})`,
   },
   {
+    // sam_play_sound(sound, volume) -- NO player argument: it plays for everyone
+    // (lua_sam_play_sound, sam_lua_runtime.cpp). This block used to emit
+    // sam_play_sound(player, N), which the engine reads as "sound #0 at volume N": the host's
+    // index (0 = a leather footstep) played quietly, whatever sound you picked. The param keeps
+    // its old name `id` so blocks saved before the fix still load with their sound.
     id: 'play_sound', label: 'play a sound', category: 'Feedback',
-    params: [{ name: 'id', type: 'number', default: 28, label: 'sound id' }],
-    lua: (p) => `sam_play_sound(player, ${Number(p.id) || 0})`,
+    params: [
+      { name: 'id', type: 'sound', default: 28, label: 'sound' },
+      { name: 'volume', type: 'number', default: 128, min: 0, max: 255, label: 'volume (0-255)' },
+    ],
+    lua: (p) => {
+      const vol = playSoundVolume(p.volume);
+      return `sam_play_sound(${playSoundArg(p.id)}${vol === null ? '' : `, ${vol}`})`;
+    },
+    note: 'A game sound by number, or one of YOUR sounds from the Sound Editor. Everyone hears it (host only). '
+      + '128 is normal volume; a sound\'s own volume from the Sound Editor multiplies this.',
   },
 ];
+
+/** sam_play_sound's first argument: a vanilla index, or a sound id string ("mymod:boom"). */
+export function playSoundArg(v) {
+  if (typeof v === 'number') return String(Number.isFinite(v) ? Math.max(0, Math.trunc(v)) : 0);
+  const s = String(v ?? '').trim();
+  if (/^\d+$/.test(s)) return String(Number(s));
+  return s ? q(s) : '0';
+}
+
+/** The volume argument, or null to leave it at the engine's default of 128. It must be a
+ *  whole number: the engine reads it with luaL_checkinteger, so 99.5 is a Lua error. */
+export function playSoundVolume(v) {
+  if (v === '' || v == null) return null;
+  const n = Math.round(Number(v));
+  if (!Number.isFinite(n)) return null;
+  const c = Math.max(0, Math.min(255, n));
+  return c === 128 ? null : String(c);
+}
 
 /*
  * User-defined bricks ("lego packs") are merged in at runtime. They live in these arrays

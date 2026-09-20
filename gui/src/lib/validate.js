@@ -20,6 +20,9 @@ const validators = {
   race: ajv.compile(raceSchema),
   sound: ajv.compile(soundSchema),
   recipe: ajv.compile(recipeSchema),
+  // Music has no schema file of its own: an entry only ever lives inside mod.json "music", so
+  // one entry is checked against that item definition, straight out of mod.schema.json.
+  music: ajv.compile(modSchema.properties.music.items),
 };
 
 export const SCHEMA_KINDS = Object.keys(validators);

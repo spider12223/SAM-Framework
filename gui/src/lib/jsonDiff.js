@@ -1,10 +1,28 @@
 /*
  * Zero-dependency JSON diff for the Mod Builder "Changes" panel.
- *  canonicalize(state) — stable serialization of { meta, classes, items, monsters }
- *                        (sorted object keys, collections sorted by id) -> line array
+ *  canonicalize(state) — stable serialization of every collection the baseline snapshot
+ *                        holds (sorted object keys, collections sorted by key) -> line array
  *  diffLines(a, b)     — LCS line diff -> [{ kind: 'same'|'add'|'del', text }]
  *  collapseHunks(rows) — folds long unchanged runs into { kind:'gap', count } markers
+ *
+ * COLLECTIONS is the whole list on purpose. This used to destructure four of them, so the
+ * panel that says it "shows exactly what you've changed" reported "no changes since
+ * baseline" after adding a sound, a track, a race, a spell, a recipe or a patch -- the
+ * review step before an export could not see this release's headline feature. It is derived
+ * from the baseline snapshot in state/modReducer.js ('setBaseline'); the two lists must name
+ * the same collections, or a diff is either blind again or compares a collection against
+ * nothing.
  */
+export const COLLECTIONS = [
+  'classes', 'items', 'monsters', 'spells', 'effects', 'races', 'sounds', 'music',
+  'recipes', 'patches',
+];
+
+/** A stable sort key. Content ids use `id`; a sound or track that REPLACES something is
+ *  keyed by what it replaces, and a patch by the file it targets. */
+function entryKey(x) {
+  return String(x?.id ?? x?.replace ?? x?.target ?? '');
+}
 
 /** Recursively sort object keys so serialization is order-independent. */
 function sortKeys(value) {
@@ -18,15 +36,11 @@ function sortKeys(value) {
 }
 
 /** Stable stringify of the diffable slice of mod state -> array of lines. */
-export function canonicalize({ meta, classes, items, monsters }) {
-  const byId = (a, b) => String(a.id ?? '').localeCompare(String(b.id ?? ''));
-  const doc = sortKeys({
-    meta,
-    classes: [...(classes ?? [])].sort(byId),
-    items: [...(items ?? [])].sort(byId),
-    monsters: [...(monsters ?? [])].sort(byId),
-  });
-  return JSON.stringify(doc, null, 2).split('\n');
+export function canonicalize(state) {
+  const byKey = (a, b) => entryKey(a).localeCompare(entryKey(b));
+  const doc = { meta: state?.meta };
+  for (const name of COLLECTIONS) doc[name] = [...(state?.[name] ?? [])].sort(byKey);
+  return JSON.stringify(sortKeys(doc), null, 2).split('\n');
 }
 
 /** Classic LCS line diff — fine at mod scale (a few hundred lines). */

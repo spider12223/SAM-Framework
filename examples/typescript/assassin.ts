@@ -6,17 +6,25 @@
 // running under the embedded QuickJS) and cached by content hash, then run in the
 // same sandbox as a .js script. Host-authoritative; only copied primitives cross in.
 
+// Declarations for the handful of calls this file makes. Do NOT hand-write these for a real
+// mod: the framework ships a generated sam.d.ts covering all of them, in workshop_upload/ and
+// in the Mod Builder's download, and it is rebuilt whenever the API changes. Point your editor
+// at that file and delete this block. It is here only so this example reads on its own.
 declare function sam_log(msg: string): void;
 declare function sam_message(player: number, text: string): boolean;
-declare function sam_grant_item(player: number, item: string): boolean;
+declare function sam_grant_item(player: number, item_name: string, beatitude?: number, status?: number, count?: number): boolean;
 declare function sam_grant_gold(player: number, amount: number): boolean;
-declare function sam_apply_effect(player: number, effect: string, ticks: number): boolean;
+declare function sam_apply_effect(player: number, effect: string, ticks: number, strength?: number): boolean;
 declare function sam_remove_effect(player: number, effect: string): boolean;
-declare function sam_get_stat(player: number, stat: string): number;
+// undefined, not 0, when the read is refused: 0 is a real stat value, so a refusal must not
+// look like one. Check it before you use it.
+declare function sam_get_stat(player: number, stat: string): number | undefined;
 declare function sam_set_stat(player: number, stat: string, value: number): boolean;
 declare function sam_get_floor(): number;
-declare function sam_spawn_item(x: number, y: number, item: string): boolean;
-declare function sam_play_sound(soundId: number, vol?: number): boolean;
+// The new item's uid, or null. It is not a boolean, though a uid is never 0 so an older
+// if (sam_spawn_item(...)) test still reads the same way.
+declare function sam_spawn_item(x: number, y: number, item_name: string, status?: number, beatitude?: number, count?: number): number | null;
+declare function sam_play_sound(sound_id: number | string, vol?: number): boolean;
 declare function sam_get_nearby_entities(player: number, radius: number): number[];
 
 // Types are erased at transpile time; this enum emits a real runtime object, so it
@@ -48,7 +56,10 @@ function onLevelUp(p: number, level: number): void {
 	sam_grant_item(p, "IRON_DAGGER");
 	sam_grant_gold(p, 25);
 
-	const maxhp: number = sam_get_stat(p, "MAXHP");
+	// A stat read can be refused (a client asking about somebody else's player), and it answers
+	// undefined rather than 0 so you cannot mistake the refusal for an answer. Bail if so.
+	const maxhp: number | undefined = sam_get_stat(p, "MAXHP");
+	if (maxhp === undefined) { return; }
 	sam_log("On floor " + sam_get_floor() + " with HP " + sam_get_stat(p, "HP") + "/" + maxhp);
 	sam_set_stat(p, "HP", maxhp);
 	sam_apply_effect(p, Effect.Levitating, 250); // 5 seconds (50 ticks/sec)

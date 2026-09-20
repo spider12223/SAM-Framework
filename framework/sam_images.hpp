@@ -29,10 +29,15 @@
 	is a line in the log at load time rather than a picture that silently never appears.
 
 	MULTIPLAYER. Scripts run on the host, but a picture has to appear on the screen of
-	the player it is aimed at. When the host targets a remote player the overlay is
-	forwarded over a 'SAMI' packet carrying the id, not the pixels -- the client already
-	has the mod, so it resolves the same name against its own copy. Host->client only:
-	the host never accepts one, exactly like 'SAMS' (move speed).
+	the player it is aimed at. sam_show_image / _at / sam_hide_image are "screen"
+	functions (sam_mp_contracts.inc): when the host names a remote player, the script
+	runtime carries the CALL to that player's machine, where show()/hide() run for its
+	own slot and resolve the name against its own copy of the mod -- the id travels,
+	never the pixels. The 'SAMI' packet below is the older route; the host only ever
+	reaches it for a player that is neither local nor carried (never, from a script),
+	and the handler stays so a new client still understands an older host. Like 'SAMB'
+	and 'SAMT' it is not sent to a machine SAMNet has declared stock -- that machine has
+	no handler for it and would log a "mystery packet" line for every picture.
 
 	NO-OP GUARANTEE. The registry is empty and every player's overlay is inactive in
 	vanilla, so drawOverlay() returns on its first branch and nothing is loaded, decoded

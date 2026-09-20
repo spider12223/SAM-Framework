@@ -55,6 +55,9 @@ it agrees with what is drawn on screen rather than guessing from distance.
 
 ## Multiplayer
 
-`sam_show_image` takes a player number, and the picture appears on that player's screen
-even when that player is on another machine. Scripts run on the host, so the host sends
-the image name and the client draws it from its own copy of the mod.
+The runner goes after whichever player is nearest, and the flash, the shake and the picture
+all name that player, so they land on that person's screen and nobody else's.
+`sam_show_image` takes a player number and the picture appears on their screen even when
+they are on another machine: scripts run on the host, so the host sends the image name and
+that client draws it from its own copy of the mod. A player without the mod installed sees
+nothing, which is why every player needs it.

@@ -8,6 +8,7 @@
 #include "sam_bodies.hpp"
 
 #include "main.hpp"
+#include "game.hpp"        // the engine's act* behaviour symbols and the game globals
 #include "entity.hpp"
 #include "stat.hpp"        // Stat::name (the variant name we resolve from)
 #include "monster.hpp"     // actMonster + MONSTER_ATTACK's slot
@@ -16,6 +17,7 @@
 #include "sam_monsters.hpp" // bodyForName / anyBodyDeclared
 #include "sam_models.hpp"   // modelIndexForId
 #include "sam_logger.hpp"  // SAM_WARN: a truncated body name must never be silent
+#include "sam_net.hpp"     // the ordered BODY op, for a client that said HELLO
 
 #include <unordered_map>
 #include <unordered_set>
@@ -54,9 +56,37 @@ namespace
 	// the other rather than to nothing, and so bodyIdFor answers about the script's choice.
 	std::unordered_map<uint32_t, std::string> s_scriptIds;
 
+	// The model a framework SPAWNER gave an entity (sam_spawn_entity and friends), by id. It is
+	// what sam_clear_model falls back to instead of dropping the entity to entity->sprite: sprite
+	// crosses the wire as a raw appended model index and indices follow each machine's own mod
+	// load order, so a client would draw whatever its own table holds at that number -- or
+	// nothing at all, if its table is shorter.
+	std::unordered_map<uint32_t, std::string> s_spawnIds;
+
+	// Entities a SCRIPT deliberately hid (sam_set_visible, sam_set_entity_flag INVISIBLE). The
+	// draw pass asks hiddenByEffect whether a custom model must honour INVISIBLE, and INVISIBLE
+	// means two different things in Barony: a creature's invisibility effect, and "this equipment
+	// slot is empty" on a limb, which the engine rewrites every frame. Only a hide a script asked
+	// for is a real hide; see hiddenByEffect.
+	std::unordered_set<uint32_t> s_scriptHidden;
+
+	// WHICH LAYER a name belongs to on the client. A JSON body name (what hostAnnounce sends)
+	// is the client's stand-in for a Stat it cannot read, and only a monster has one; a model id
+	// a SCRIPT set -- or a spawner announced -- belongs to the script layer, which draws on any
+	// entity at all. The client used to file both as body names, so a model set on anything but
+	// a monster (a prop, a spawned entity, a companion, a player) was drawn by the host alone,
+	// and sam_get_model answered nil on every client.
+	constexpr std::uint8_t SAM_BODY_KIND_NAME = 0;
+	constexpr std::uint8_t SAM_BODY_KIND_SCRIPT = 1;
+
+	// The ordered form of 'SAMB' (sam_mp_entities.cpp documents the EntityFirst block):
+	// [u32 uid][u8 kind][str8 name]. 'SAMB' is reliable but NOT ordered, so a model set and
+	// cleared a moment later could land cleared-then-set and stay wrong for good.
+	constexpr std::uint8_t SAM_OP_BODY = SAMNet::Op::EntityFirst + 3;
+
 	// Announce a model id or body name to every client. Shared by hostAnnounce and by the
 	// runtime setter so there is one wire format, not two.
-	void samSendBody(uint32_t uid, const std::string& payload)
+	void samSendBody(uint32_t uid, const std::string& payload, std::uint8_t kind)
 	{
 		if ( multiplayer != SERVER ) { return; }
 		std::string p = payload;
@@ -79,16 +109,111 @@ namespace
 		{
 			if ( client_disconnected[c] ) { continue; }
 			if ( !players[c] || players[c]->isLocalPlayer() ) { continue; }
+			if ( SAMNet::peerHasSam(c) )
+			{
+				SAMNet::Writer w;
+				w.u32((std::uint32_t)uid);
+				w.u8(kind);
+				w.str8(p);
+				SAMNet::sendToClient(c, SAM_OP_BODY, w.buf);
+				continue;
+			}
+			// A peer SAMNet has already declared stock gets NOTHING, which is the rule sam_net.hpp
+			// states for all three legacy packets: a stock 5.0.2 client has no 'SAMB' handler, so
+			// it logged one "mystery packet" line per announcement -- one per spawned entity --
+			// for the whole game, and now it logs them for at most the HELLO window.
+			// (A mod set with JSON bodies and no scripts never declares anybody stock: SAMNet::tick
+			// returns before the grace window runs, so peerMayHaveSam stays true and those machines
+			// still get the announcement below.)
+			if ( !SAMNet::peerMayHaveSam(c) ) { continue; }
+			// Anybody else -- a game still inside its HELLO grace window, or a mod set with no
+			// scripts (a JSON body needs none) -- gets 'SAMB'.
+			// The kind rides AFTER the name: an older S.A.M reader stops at the name length and
+			// never sees it, and treats every name as a body name, exactly as before.
 			strcpy((char*)net_packet->data, "SAMB");
 			SDLNet_Write32(uid, &net_packet->data[4]);
 			net_packet->data[8] = (Uint8)p.size();
 			if ( !p.empty() ) { memcpy(&net_packet->data[9], p.data(), p.size()); }
+			net_packet->data[9 + p.size()] = kind;
 			net_packet->address.host = net_clients[c - 1].host;
 			net_packet->address.port = net_clients[c - 1].port;
-			net_packet->len = 9 + (int)p.size();
+			net_packet->len = 10 + (int)p.size();
 			sendPacketSafe(net_sock, -1, net_packet, c - 1);
 		}
 	}
+
+	// Script-layer announcements waiting for the tick.
+	//
+	// setBodyById and clearBodyById are reached from inside a SCRIPT CALL -- sam_set_model, and
+	// now every sam_spawn_entity / sam_spawn_projectile / companion with a mod model, through
+	// SAMMpEntities::adopt -- and a script call can be running inside an engine packet handler
+	// (player.on_before_hit fires from Entity::attack, which the host calls from its 'ATAK'
+	// handler). net_packet is ONE global buffer and several handlers read their own packet again
+	// after calling out, so writing it there hands the handler somebody else's bytes to finish
+	// reading. That is the rule sam_net.hpp and sam_mp_entities.cpp both state: nothing goes out
+	// from inside a script call. reannounceAll has the same problem from the other end -- it is
+	// called from the middle of the 'JOIN' handler, which goes on to build its reply.
+	//
+	// hostAnnounce (the JSON body name) is deliberately NOT queued: it is called from actMonster,
+	// on the tick, and a mod set with bodies but no scripts never runs a tick hook at all.
+	struct PendingBody
+	{
+		uint32_t uid = 0;
+		std::string payload;
+		std::uint8_t kind = 0;
+	};
+	std::vector<PendingBody> s_bodyPending;
+	constexpr std::size_t BODY_PENDING_MAX = 4096;
+
+	void samQueueBody(uint32_t uid, const std::string& payload, std::uint8_t kind)
+	{
+		if ( multiplayer != SERVER ) { return; }   // singleplayer and clients send nothing at all
+		if ( s_bodyPending.size() >= BODY_PENDING_MAX )
+		{
+			SAMNet::warnOnce("bodies:pending", "More than 4096 model changes are waiting to be sent in one tick;"
+				" the rest were not sent to the other players.");
+			return;
+		}
+		PendingBody p;
+		p.uid = uid;
+		p.payload = payload;
+		p.kind = kind;
+		s_bodyPending.push_back(p);
+	}
+
+	// Every game tick, on every machine, while scripts are loaded (SAMNet runs the hooks). Only a
+	// script fills the list, so this is one empty() test in every other game.
+	void samBodiesTick()
+	{
+		if ( s_bodyPending.empty() ) { return; }
+		for ( const PendingBody& p : s_bodyPending )
+		{
+			// The entity can have died between the script call and this tick, and uids are recycled
+			// within a level: announcing a model for a uid nothing holds any more would hand it to
+			// whatever is created next. A clear still goes out -- it can only ever remove something.
+			if ( !p.payload.empty() && !uidToEntity((Sint32)p.uid) ) { continue; }
+			samSendBody(p.uid, p.payload, p.kind);
+		}
+		s_bodyPending.clear();
+	}
+
+	// Client: the ordered form arrived.
+	void samOnBodyOp(const std::string& body)
+	{
+		SAMNet::Reader r(body);
+		const std::uint32_t uid = r.u32();
+		const std::uint8_t kind = r.u8();
+		const std::string name = r.str8();
+		if ( !r.ok ) { return; }
+		SAMBodies::applyRemote((uint32_t)uid, name, kind == SAM_BODY_KIND_SCRIPT);
+	}
+
+	struct SamBodyOpRegistrar
+	{
+		SamBodyOpRegistrar() { SAMNet::onClientOp(SAM_OP_BODY, &samOnBodyOp); }
+	};
+	SamBodyOpRegistrar s_samBodyOpRegistrar;
+	SAMNet::TickHook s_samBodyTickHook(&samBodiesTick);
 }
 
 void SAMBodies::setBody(uint32_t uid, int modelIndex)
@@ -108,10 +233,12 @@ void SAMBodies::forget(uint32_t uid)
 	// touched and vanilla pays four compares and nothing else. All four are keyed by uid and
 	// uids are recycled within a level, so any one of them left holding a dead entity would
 	// hand its model to whatever is created next.
-	if ( !s_bodies.empty() )      { s_bodies.erase(uid); }
-	if ( !s_announced.empty() )   { s_announced.erase(uid); }
-	if ( !s_remoteNames.empty() ) { s_remoteNames.erase(uid); }
-	if ( !s_scriptIds.empty() )   { s_scriptIds.erase(uid); }
+	if ( !s_bodies.empty() )       { s_bodies.erase(uid); }
+	if ( !s_announced.empty() )    { s_announced.erase(uid); }
+	if ( !s_remoteNames.empty() )  { s_remoteNames.erase(uid); }
+	if ( !s_scriptIds.empty() )    { s_scriptIds.erase(uid); }
+	if ( !s_spawnIds.empty() )     { s_spawnIds.erase(uid); }
+	if ( !s_scriptHidden.empty() ) { s_scriptHidden.erase(uid); }
 }
 
 void SAMBodies::hostAnnounce(const Entity* entity)
@@ -135,7 +262,7 @@ void SAMBodies::hostAnnounce(const Entity* entity)
 
 	// Host -> client only, exactly like 'SAMI' and 'SAMS'. The host never accepts one, so a
 	// client cannot tell anybody else what a monster looks like.
-	samSendBody(uid, name);
+	samSendBody(uid, name, SAM_BODY_KIND_NAME);
 	// Mark it announced either way: with nobody to tell, re-checking every tick is pure
 	// cost, and a later joiner is handled by reannounceAll rather than by re-testing here.
 	s_announced.insert(uid);
@@ -150,8 +277,16 @@ bool SAMBodies::setBodyById(uint32_t uid, const std::string& modelId)
 	if ( !uidToEntity((Uint32)uid) ) { return false; }
 	s_scriptIds[uid] = modelId;
 	s_bodies.erase(uid);          // force a re-resolve with the new id
-	samSendBody(uid, modelId);
+	samQueueBody(uid, modelId, SAM_BODY_KIND_SCRIPT);
 	return true;
+}
+
+void SAMBodies::setSpawnModel(uint32_t uid, const std::string& modelId)
+{
+	if ( modelId.empty() ) { return; }
+	// Same announcement as sam_set_model, but remembered as the entity's OWN model so that
+	// clearBodyById has something to fall back to (see there).
+	if ( setBodyById(uid, modelId) ) { s_spawnIds[uid] = modelId; }
 }
 
 void SAMBodies::clearBodyById(uint32_t uid)
@@ -162,9 +297,30 @@ void SAMBodies::clearBodyById(uint32_t uid)
 	// Without this a client was told "drop it" and never told what to draw instead, leaving
 	// the host on the JSON body and every client on the base creature permanently.
 	s_announced.erase(uid);
+	// An entity a framework spawner made has neither a JSON body nor a vanilla model behind it:
+	// dropping the layer sends the renderer to entity->sprite, which is an APPENDED model index
+	// and crosses the wire raw, so a client whose mods sorted differently draws a different model
+	// -- or nothing, if that index is past its own nummodels. Put the spawn model back instead.
+	// It is the same model every machine was already drawing, so this behaves identically in
+	// singleplayer, on the host and on a client.
+	auto sit = s_spawnIds.find(uid);
+	if ( sit != s_spawnIds.end() && !sit->second.empty() )
+	{
+		s_scriptIds[uid] = sit->second;
+		samQueueBody(uid, sit->second, SAM_BODY_KIND_SCRIPT);
+		return;
+	}
 	// An empty payload tells a client to drop the SCRIPT layer only; its own announced body
 	// name survives, and the re-announce above refreshes it either way.
-	samSendBody(uid, std::string());
+	samQueueBody(uid, std::string(), SAM_BODY_KIND_SCRIPT);
+}
+
+void SAMBodies::noteScriptVisibility(uint32_t uid, bool visible)
+{
+	// Called by sam_set_visible / sam_set_entity_flag(INVISIBLE) on every machine that runs the
+	// call. hiddenByEffect honours INVISIBLE on a custom model only for what is recorded here.
+	if ( visible ) { if ( !s_scriptHidden.empty() ) { s_scriptHidden.erase(uid); } }
+	else { s_scriptHidden.insert(uid); }
 }
 
 std::string SAMBodies::bodyIdFor(uint32_t uid)
@@ -181,11 +337,11 @@ void SAMBodies::reannounceAll()
 	// would never hear about it. Re-send those now.
 	for ( const auto& kv : s_scriptIds )
 	{
-		if ( !kv.second.empty() ) { samSendBody(kv.first, kv.second); }
+		if ( !kv.second.empty() ) { samQueueBody(kv.first, kv.second, SAM_BODY_KIND_SCRIPT); }
 	}
 }
 
-void SAMBodies::applyRemote(uint32_t uid, const std::string& bodyName)
+void SAMBodies::applyRemote(uint32_t uid, const std::string& bodyName, bool scriptModel)
 {
 	if ( bodyName.empty() )
 	{
@@ -196,20 +352,59 @@ void SAMBodies::applyRemote(uint32_t uid, const std::string& bodyName)
 		s_bodies.erase(uid);
 		return;
 	}
-	// Announced names belong to the remote layer, never the script layer -- mixing them made
-	// bodyIdFor answer differently on the host and on a client for the same entity.
-	s_remoteNames[uid] = bodyName;
-	s_bodies.erase(uid);
+	// Both tables are keyed by a uid the HOST chose, and ~Entity only forgets uids this machine
+	// actually created, so a tag for a uid that never exists here is never collected until the
+	// game ends. A floor holds a few hundred entities; anything past this is not a real game.
+	constexpr std::size_t MAX_REMOTE_TAGS = 8192;
+	if ( scriptModel )
+	{
+		if ( s_scriptIds.size() >= MAX_REMOTE_TAGS && s_scriptIds.find(uid) == s_scriptIds.end() )
+		{
+			SAMNet::warnOnce("bodies:tags", "The host has named models for more entities than this game can hold;"
+				" the newest are being ignored.");
+			return;
+		}
+		// The script layer, exactly as the host keeps it: it draws on any entity (modelForEntity
+		// lets a scripted uid through whatever it is), sam_get_model reads it, and the empty
+		// payload above is what clears it -- so a cleared model can no longer linger here the
+		// way it did when it sat in the body-name layer.
+		s_scriptIds[uid] = bodyName;
+	}
+	else
+	{
+		if ( s_remoteNames.size() >= MAX_REMOTE_TAGS && s_remoteNames.find(uid) == s_remoteNames.end() )
+		{
+			SAMNet::warnOnce("bodies:tags", "The host has named models for more entities than this game can hold;"
+				" the newest are being ignored.");
+			return;
+		}
+		// Announced body names belong to the remote layer, never the script layer -- mixing
+		// them made bodyIdFor answer differently on the host and on a client for one entity.
+		s_remoteNames[uid] = bodyName;
+	}
 	// The entity may already have been drawn and negative-cached before this arrived, so
 	// drop that answer and let it resolve again with the name in hand.
 	s_bodies.erase(uid);
 }
+
+void SAMBodies::resetSession()
+{
+	// Every table here is keyed by uid, and the next game hands the same numbers out again.
+	// ~Entity already forgets each entity it frees; this is the net for anything that outlived
+	// its entity (a tag announced for a uid this machine never created).
+	clear();
+}
+
 void SAMBodies::clear()
 {
 	s_announced.clear();
 	s_remoteNames.clear();
 	s_scriptIds.clear();
+	s_spawnIds.clear();
+	s_scriptHidden.clear();
 	s_bodies.clear();
+	// Anything still waiting for the tick names uids of a game that has ended.
+	s_bodyPending.clear();
 }
 
 int SAMBodies::count()
@@ -424,6 +619,24 @@ int SAMBodies::modelForEntity(const Entity* entity)
 bool SAMBodies::hiddenByEffect(const Entity* entity)
 {
 	if ( !entity ) { return false; }
+	// The draw pass asks this about an entity the engine has already marked INVISIBLE, and the
+	// answer decides whether its custom model honours that or is drawn anyway.
+	//
+	// INVISIBLE means two different things in Barony. On a creature it is the invisibility EFFECT
+	// and a custom body must vanish with it. On an equipment limb it is STRUCTURAL -- "this hand
+	// is empty" -- and the engine rewrites it from the equipment every frame (monster_human.cpp
+	// LIMB_HUMANOID_WEAPON and friends, actplayer.cpp for a player's limbs). Answering "hidden"
+	// for everything that is not a monster made sam_set_model on an empty weapon or shield limb
+	// draw nothing at all, on every machine and in singleplayer too -- and floating a cosmetic in
+	// an empty hand is a use this file's own comment blesses.
+	//
+	// So the only other entity we hide is one a SCRIPT hid on purpose, which it tells us about
+	// (noteScriptVisibility, from sam_set_visible -- the only call that may write this flag; the
+	// flag table refuses INVISIBLE to sam_set_entity_flag). That keeps the reason
+	// this test was added -- a spawned entity or companion with a mod model can still be hidden --
+	// without guessing about a flag the engine owns.
+	if ( !s_scriptHidden.empty() && s_scriptHidden.count(entity->getUID()) > 0 ) { return true; }
+	if ( entity->behavior != &actMonster ) { return false; }
 	Stat* st = const_cast<Entity*>(entity)->getStats();
 	return st && st->getEffectActive(EFF_INVISIBLE) != 0;
 }

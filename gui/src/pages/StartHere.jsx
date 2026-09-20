@@ -96,7 +96,7 @@ export default function StartHere() {
             <p>
               Pick an editor from the sidebar on the left. The Class Editor makes a playable class. The
               Item Editor makes a weapon or item. There are editors for monsters, spells, effects,
-              races, and sounds too.
+              races, sounds and music too.
             </p>
             <p>
               Fill in the fields. Give it a name, set the numbers, choose the starting gear. Everything

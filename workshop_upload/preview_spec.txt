@@ -1,5 +1,5 @@
 ===============================================================================
-  PREVIEW THUMBNAIL SPEC  —  S.A.M Framework Workshop item
+  PREVIEW THUMBNAIL SPEC:  S.A.M Framework Workshop item
 ===============================================================================
 Give this file to any AI image tool (Midjourney, DALL-E, SDXL, Firefly, etc.)
 or a human artist. Goal: a 512x512 icon that matches the S.A.M Mod Builder's
@@ -19,7 +19,7 @@ HARD REQUIREMENTS
   * File size ........... Under 1 MB.
 
 -------------------------------------------------------------------------------
-COLOR PALETTE  (copy these hex values — they are the GUI's exact colors)
+COLOR PALETTE  (copy these hex values; they are the GUI's exact colors)
 -------------------------------------------------------------------------------
   Background stone (darkest) .... #1a1208
   Background wood (panel) ....... #2a1f0e
@@ -42,7 +42,7 @@ COMPOSITION
   2. FRAME: an ornate thin GOLD border just inside the edges, with a small
      diamond ornament ( a "◆" shape ) at each of the four corners or at the
      top-center. This mirrors the app's «◆ TITLE ◆» panel headers.
-  3. CENTRAL EMBLEM (the hero element — pick ONE):
+  3. CENTRAL EMBLEM (the hero element; pick ONE):
        (a) A stylized gold monogram "S.A.M" set as a heraldic crest, OR
        (b) An anvil-and-quill / gear-and-scroll motif (forging + writing =
            "make mods without code"), OR
@@ -89,6 +89,6 @@ AFTER GENERATING
 -------------------------------------------------------------------------------
   * Resize/crop to EXACTLY 512x512 if the tool output differs.
   * Save as  preview.png  in this folder before uploading.
-  * Sanity check: shrink it to 64x64 on screen — can you still tell it says
+  * Sanity check: shrink it to 64x64 on screen. Can you still tell it says
     S.A.M? If not, make the title bigger and drop a word.
 ===============================================================================

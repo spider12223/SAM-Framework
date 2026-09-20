@@ -338,6 +338,37 @@
         }
       }
     },
+    "sounds": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "This monster's own sounds. Each key is a vanilla sound its base creature plays (an exact name like \"RatDie\" or a group like \"GoblinSpot\"), each value a sound id to play instead -- a bare name is one of your own (\"squeak\" = \"<namespace>:squeak\"). See docs/vanilla-sounds.md for which creature plays what."
+    },
+    "music": {
+      "description": "A theme that plays while this monster is alive on the floor, the way Herx and the devil have theirs. A track id (\"boss\" or \"mymod:boss\"), or { \"track\": ..., \"range\": 12 } to play it only while a player is within that many tiles.",
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "track"
+          ],
+          "properties": {
+            "track": {
+              "type": "string"
+            },
+            "range": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      ]
+    },
     "traits": {
       "type": "array",
       "description": "Engine behaviours this monster opts into. Barony answers questions like 'is this a boss?' from hardcoded lists of vanilla monster types, and your monster is a variant of a vanilla type, so it can never be on those lists. Naming a trait here puts it on.",

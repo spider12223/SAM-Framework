@@ -25,6 +25,9 @@
 	- stdout is ANSI colour-coded; the file is always plain UTF-8, append mode
 	- box/divider glyphs are written as explicit UTF-8 bytes so they are correct
 	  regardless of the compiler's source/exec codepage
+	- a SECOND copy of the game started from the same folder (how you test multiplayer
+	  on one computer) writes sam_log_2.txt instead, and leaves the first copy's live
+	  sam_log.txt, its archive and the session counter alone. See claimInstanceSlot.
 
 -------------------------------------------------------------------------------*/
 
@@ -49,9 +52,11 @@
 		#define ENABLE_VIRTUAL_TERMINAL_PROCESSING 0x0004
 	#endif
 #else
-	#include <unistd.h>     // isatty, getpid
+	#include <unistd.h>     // isatty, getpid, close
 	#include <sys/stat.h>   // mkdir
 	#include <dirent.h>     // opendir/readdir
+	#include <fcntl.h>      // open, fcntl (the instance lock)
+	#include <cerrno>       // EACCES/EAGAIN: "another copy holds it" vs "cannot lock here"
 #endif
 
 /*-------------------------------------------------------------------------------
@@ -98,6 +103,7 @@ static void samAtExitSessionSummary()
 }
 
 int SAMLogger::sessionNumber = 0;
+int SAMLogger::instanceIndex = 1;
 SAMLogger::Phase SAMLogger::phase = SAMLogger::Phase::Init;
 std::chrono::steady_clock::time_point SAMLogger::sessionStart;
 std::chrono::steady_clock::time_point SAMLogger::modLoadStart;
@@ -232,21 +238,169 @@ static void samEmitPlain(std::ofstream& file, const std::string& text)
 /*-------------------------------------------------------------------------------
 	Session counter + rotation.
 -------------------------------------------------------------------------------*/
-int SAMLogger::bumpSessionCounter(const std::string& dir)
+int SAMLogger::readSessionCounter(const std::string& dir)
 {
 	const std::string counterPath = dir + "sam_session.txt";
 	int n = 0;
-	{
-		std::ifstream f(counterPath.c_str());
-		if ( f ) { f >> n; }
-	}
-	if ( n < 0 ) { n = 0; }
+	std::ifstream f(counterPath.c_str());
+	if ( f ) { f >> n; }
+	return ( n < 0 ) ? 0 : n;
+}
+
+int SAMLogger::bumpSessionCounter(const std::string& dir)
+{
+	const std::string counterPath = dir + "sam_session.txt";
+	int n = readSessionCounter(dir);
 	++n;
 	{
 		std::ofstream f(counterPath.c_str(), std::ios::out | std::ios::trunc);
 		if ( f ) { f << n; }
 	}
 	return n;
+}
+
+/*-------------------------------------------------------------------------------
+	Instance slots: one log file per copy of the game running from this folder.
+
+	Testing multiplayer alone means starting the same install twice and joining
+	127.0.0.1 from the second copy. Both copies run this logger against the same
+	directory, and sam_log.txt is opened with std::ios::trunc after archiving the
+	previous run -- so without this, the second copy would archive the host's log
+	seconds after it started, empty the file the host is still writing to, and then
+	the two runs would interleave line by line into one unreadable file.
+
+	Each copy claims the lowest free slot by opening "<dir>sam_log[_N].lock" (".sam_log[_N].lock"
+	on Linux and macOS, where a leading dot is the only way to keep it out of sight) so that
+	nobody else can hold it, and keeps that handle for the life of the process. The OS releases
+	it when the process ends, crash included, so the next launch gets slot 1 again with no
+	stale-lock cleanup to go wrong. Windows also deletes the file on close; on POSIX the file
+	stays, on purpose -- removing it would let a later copy lock a new file at the same name
+	while an older one still holds the lock on the old inode, and two copies would then both
+	claim slot 1. Slot 1 writes sam_log.txt and behaves exactly as before; slot 2 writes
+	sam_log_2.txt, and so on.
+
+	If the platform cannot lock at all (a filesystem with no locking, a permission
+	problem, Windows Controlled Folder Access, an antivirus policy), claiming falls
+	back to slot 1: identical to the behaviour before this existed, rather than
+	refusing to log. "Held by another copy" and "could not be created at all" are
+	therefore two DIFFERENT answers, and samTryClaimSlot has to tell them apart --
+	if it could not, a machine that simply cannot make the file would fail all eight
+	attempts, land on slot 8, and quietly write its whole session to sam_log_8.txt
+	while the user, support and the ship gate all read a stale sam_log.txt.
+-------------------------------------------------------------------------------*/
+static const int SAM_MAX_INSTANCES = 8;
+
+// "" for slot 1 (sam_log.txt), "_2" for slot 2 (sam_log_2.txt), and so on.
+static std::string samInstanceSuffix(int slot)
+{
+	return ( slot <= 1 ) ? std::string() : ( "_" + std::to_string(slot) );
+}
+
+#ifdef _WIN32
+static HANDLE samInstanceLock = INVALID_HANDLE_VALUE;
+#else
+static int samInstanceLock = -1;
+#endif
+
+// The three answers a claim can give. "Held" means another live copy of the game owns
+// that slot, so walking on to the next one is right. "CannotCreate" means this machine
+// cannot make the lock file at all, so walking on is pointless (every slot will answer
+// the same) and would end in the silent sam_log_8.txt described above.
+enum class SamSlotClaim { Claimed, Held, CannotCreate };
+
+// Try to take exclusive hold of one slot's lock file.
+static SamSlotClaim samTryClaimSlot(const std::string& dir, int slot)
+{
+	// A leading dot on POSIX, where there is no hidden attribute: the file has no contents worth
+	// seeing and it lives in the player's savegame folder. It is deliberately NOT unlinked at
+	// exit -- unlinking the path while another copy is waiting on that inode's lock would let a
+	// third copy create a new inode at the same name and lock it successfully, and two copies
+	// would then both believe they own slot 1 and both truncate sam_log.txt. The OS releases the
+	// lock when the process ends, crash included, so a file left behind costs nothing.
+#ifdef _WIN32
+	const std::string lockPath = dir + "sam_log" + samInstanceSuffix(slot) + ".lock";
+#else
+	const std::string lockPath = dir + ".sam_log" + samInstanceSuffix(slot) + ".lock";
+#endif
+#ifdef _WIN32
+	// dwShareMode 0: a second process opening the same name fails with a sharing
+	// violation, which is exactly the question being asked. DELETE_ON_CLOSE keeps the
+	// folder clean, since the file has no contents worth keeping.
+	HANDLE h = CreateFileA(lockPath.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+		FILE_ATTRIBUTE_HIDDEN | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
+	if ( h == INVALID_HANDLE_VALUE )
+	{
+		// ERROR_SHARING_VIOLATION is the only failure that means "somebody else has it":
+		// while a live copy holds the handle with dwShareMode 0, that is the error every
+		// other opener gets. Everything else (ERROR_ACCESS_DENIED from Controlled Folder
+		// Access or an AV policy, a read-only or full disk, a share that will not take
+		// the hidden attribute) means we could not create the file, which is not an
+		// answer about other copies.
+		return ( GetLastError() == ERROR_SHARING_VIOLATION ) ? SamSlotClaim::Held : SamSlotClaim::CannotCreate;
+	}
+	samInstanceLock = h;
+	return SamSlotClaim::Claimed;
+#else
+	const int fd = open(lockPath.c_str(), O_CREAT | O_RDWR, 0644);
+	if ( fd < 0 ) { return SamSlotClaim::CannotCreate; } // could not even make the file
+	struct flock fl;
+	fl.l_type = F_WRLCK;
+	fl.l_whence = SEEK_SET;
+	fl.l_start = 0;
+	fl.l_len = 0;
+	if ( fcntl(fd, F_SETLK, &fl) != 0 )
+	{
+		// The file opened, so the folder is writable; only the LOCK failed. EACCES and
+		// EAGAIN mean another copy holds it. Anything else (a filesystem with no record
+		// locking, an NFS mount with no lock daemon) is "this platform cannot lock",
+		// which must fall back to slot 1 rather than walk to slot 8.
+		const int err = errno;
+		close(fd);
+		return ( err == EACCES || err == EAGAIN ) ? SamSlotClaim::Held : SamSlotClaim::CannotCreate;
+	}
+	samInstanceLock = fd;
+	return SamSlotClaim::Claimed;
+#endif
+}
+
+int SAMLogger::claimInstanceSlot(const std::string& dir)
+{
+	for ( int slot = 1; slot <= SAM_MAX_INSTANCES; ++slot )
+	{
+		const SamSlotClaim r = samTryClaimSlot(dir, slot);
+		if ( r == SamSlotClaim::Claimed ) { return slot; }
+		if ( r == SamSlotClaim::CannotCreate )
+		{
+			// Locking is not available here at all. Behave exactly as the logger did
+			// before slots existed: slot 1, sam_log.txt, rotate and archive as usual.
+			// Nothing else holds slot 1 (a holder would have said Held), so there is no
+			// live log to trample. If sam_log.txt cannot be opened either, the logger
+			// already falls back to stdout on its own.
+			return 1;
+		}
+	}
+	// Every slot is genuinely held by another live copy. Slot 1 could not be claimed,
+	// so writing sam_log.txt is the one thing we must not do: take the last slot and
+	// share it rather than trample a live log.
+	return SAM_MAX_INSTANCES;
+}
+
+void SAMLogger::releaseInstanceSlot()
+{
+#ifdef _WIN32
+	if ( samInstanceLock != INVALID_HANDLE_VALUE )
+	{
+		CloseHandle(samInstanceLock);
+		samInstanceLock = INVALID_HANDLE_VALUE;
+	}
+#else
+	if ( samInstanceLock >= 0 )
+	{
+		close(samInstanceLock); // closing drops the fcntl lock
+		samInstanceLock = -1;
+	}
+#endif
+	instanceIndex = 1;
 }
 
 /*-------------------------------------------------------------------------------
@@ -382,11 +536,22 @@ void SAMLogger::rotateAndOpen(const std::string& path)
 
 void SAMLogger::writeSessionHeader()
 {
+	// THE FIRST LINE of a second copy's log says so, before anything else, because the
+	// person reading it opened sam_log_2.txt without knowing why it exists.
+	if ( instanceIndex > 1 )
+	{
+		samEmitPlain(logFile, "S.A.M instance " + std::to_string(instanceIndex)
+			+ ": this is copy " + std::to_string(instanceIndex)
+			+ " of the game running from this folder, writing sam_log"
+			+ samInstanceSuffix(instanceIndex) + ".txt."
+			+ " The first copy owns sam_log.txt and nothing here touched it.");
+	}
 	samEmitPlain(logFile, "");
 	samEmitPlain(logFile, std::string(GX_TL) + samRepeat(GX_H, SAM_BOX_INNER) + GX_TR);
 	samEmitPlain(logFile, samBoxLine(std::string("S.A.M Framework v") + SAM_FRAMEWORK_VERSION));
 	samEmitPlain(logFile, samBoxLine("Session #" + std::to_string(sessionNumber) + " - " + getDateTimeStamp()));
-	samEmitPlain(logFile, samBoxLine(std::string("Barony v") + SAM_BARONY_TARGET + " - PID " + std::to_string(samProcessId())));
+	samEmitPlain(logFile, samBoxLine(std::string("Barony v") + SAM_BARONY_TARGET + " - PID " + std::to_string(samProcessId())
+		+ ( instanceIndex > 1 ? ( " - instance " + std::to_string(instanceIndex) ) : std::string() )));
 	samEmitPlain(logFile, std::string(GX_BL) + samRepeat(GX_H, SAM_BOX_INNER) + GX_BR);
 	// Outside the box on purpose: the box is SAM_BOX_INNER (54) columns and samBoxLine
 	// TRUNCATES anything longer, which would silently cut a URL in half.
@@ -424,10 +589,39 @@ void SAMLogger::init(const std::string& outputDir, bool debugModeEnabled)
 		const char back = dir.back();
 		if ( back != '/' && back != '\\' ) { dir += '/'; }
 	}
-	const std::string path = dir + "sam_log.txt";
+	// Which copy of the game in this folder are we? (See claimInstanceSlot.)
+	instanceIndex = claimInstanceSlot(dir);
+	const std::string path = dir + "sam_log" + samInstanceSuffix(instanceIndex) + ".txt";
 
-	sessionNumber = bumpSessionCounter(dir);
-	rotateAndOpen(path); // trims to last 5 sessions, opens the file in append mode
+	// SAY IT SOMEWHERE THE READER IS ALREADY LOOKING. The banner below names the instance,
+	// but it is written INSIDE the file nobody opened -- and a session that landed on another
+	// slot is exactly the session whose log goes missing, because everyone (the user, support,
+	// the ship gate) opens sam_log.txt. Barony's own log is stderr after openLogFile()'s
+	// freopen, so one fprintf here lands in <outputdir>/log.txt with no dependency on any
+	// Barony header, which this file deliberately has none of.
+	if ( instanceIndex != 1 )
+	{
+		fprintf(stderr, "[S.A.M] this copy of the game is instance %d: its log is %s,"
+			" NOT sam_log.txt (another copy of the game in this folder holds that one).\n",
+			instanceIndex, path.c_str());
+		fflush(stderr);
+	}
+
+	if ( instanceIndex == 1 )
+	{
+		sessionNumber = bumpSessionCounter(dir);
+		rotateAndOpen(path); // archives the previous run, then opens this one's file
+	}
+	else
+	{
+		// A second copy of the game, started to test multiplayer alone. It must not
+		// touch anything the first copy owns: no archiving, no pruning of sam_logs/,
+		// and no bump of the shared session counter -- both copies report the same
+		// session number, which is what a reader comparing the two logs wants.
+		// Truncating THIS file is right: it belongs to this slot, and holds a dead run.
+		sessionNumber = readSessionCounter(dir);
+		logFile.open(path.c_str(), std::ios::out | std::ios::trunc);
+	}
 
 	initialized = true;
 	summaryWritten = false;
@@ -464,6 +658,9 @@ void SAMLogger::shutdown()
 		logFile.flush();
 		logFile.close();
 	}
+	// Give the slot back, so a re-init in the same process reopens the same file
+	// instead of walking to the next one.
+	releaseInstanceSlot();
 	initialized = false;
 }
 

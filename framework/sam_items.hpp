@@ -30,6 +30,7 @@
 #include <cstdint>   // uint32_t in the deferred-destroy queue; this header stays free of SDL
 
 struct SAMModManifest;  // from sam_workshop.hpp (full type only needed in the .cpp)
+class Item;             // items.hpp (only pointers cross this header)
 
 // Custom item ids occupy [5000, NUM_ITEM_SLOTS). Chosen well above NUMITEMS.
 static const int SAM_ITEM_ID_BASE = 5000;
@@ -171,6 +172,7 @@ public:
 	// v0.7.0 Feature 5: override an existing item slot's base fields (vanilla or custom).
 	// Snapshots the slot's originals on the first patch; reverted by clear() on unload.
 	// Returns false if id is out of range [0, NUM_ITEM_SLOTS).
+	// In multiplayer, a client that joins takes the host's whole patched table (sam_items.cpp).
 	static bool patchItem(int id, const SAMItemPatch& patch);
 
 	// Absolute, Image::get-ready path to a custom item's inventory icon PNG, or ""
@@ -236,6 +238,21 @@ public:
 	static bool queueDestroy(uint32_t itemUid, int owner);
 
 	// Called once per frame from game.cpp, after gameLogic() has returned and before any
-	// script runs, so nothing on the stack can be holding what we are about to free.
+	// script runs, so nothing on the stack can be holding what we are about to free. On a
+	// multiplayer CLIENT, game.cpp never calls it (that call is host-only), so the inventory
+	// mirror's tick hook drains it there: a destroy the host carried to the item's owner
+	// (sam_remove_item, sam_set_item_count 0) is queued on the owner's machine and has to be
+	// drained on the owner's machine. It also drains SAMSpells' removal queue, because
+	// removing a spell destroys its spell item and has the same "not while the engine holds
+	// it" rule.
 	static void drainDestroyQueue();
+
+	// Forget every queued destroy without doing it (the game ended). A uid never names a
+	// different item later in the same process, so this is tidiness rather than safety.
+	static void clearDestroyQueue();
+
+	// Destroy one item of `owner`'s backpack NOW, with every precaution the drain takes (UI
+	// pointers dropped, a worn twin's slot restored). Only for callers that are themselves at
+	// the drain's safe point, like SAMSpells::drainRemoveQueue. Refuses a worn item.
+	static void destroyNow(Item* item, int owner);
 };

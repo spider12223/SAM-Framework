@@ -81,6 +81,13 @@ struct SAMRaceDef
 	// is different from 0: index 0 is models/system/null.vox and draws nothing.
 	std::map<std::string, std::string> limbModels;
 
+	// "bent": the arm this race draws while that hand is holding something. Vanilla reaches a
+	// bent arm by adding 2 to the straight one's model index, which works only because the base
+	// game authors the four arms next to each other (ArmRight, ArmLeft, ArmBentRight,
+	// ArmBentLeft). A mod's arm is a single appended index with nothing reserved after it, so a
+	// race names its own bent model instead. Only the two arm slots read it.
+	std::map<std::string, std::string> limbModelsBent;
+
 	// v2.5 "first_person": what YOU see of your own body. Separate from limb_models because
 	// these are different models in every vanilla race too -- the third-person arm and the
 	// first-person arm are not the same .vox -- and because they never leave this machine.
@@ -116,6 +123,7 @@ struct SAMRaceDef
 	int fpArmIdx = -1;         // resolved by resolveLimbModels; -1 = use the host body's
 	int fpHandLeftIdx = -1;
 	std::map<int, int> limbModelIdx;   // LIMB_HUMANOID_* -> engine model index
+	std::map<int, int> limbBentIdx;    // the same, for the arm that is holding something
 	int headModelIdx = -1;
 };
 
@@ -221,6 +229,12 @@ public:
 	// with nothing reserved after it, so the caller must skip that arithmetic. See the
 	// guarded += 2 sites in actplayer.cpp.
 	static bool usesLimbOverride(int raceId, int limbType);
+
+	// The model this race draws for an arm that is holding something -- a weapon in the right
+	// hand, a shield or lantern in the left -- or -1 when it declares none, in which case the
+	// arm keeps the one pose it has. Read at the two sites in actplayer.cpp that walk a vanilla
+	// arm to its bent variant.
+	static int limbBentModelFor(int raceId, int limbType);
 
 	// The transform for one limb, or nullptr when this race declares none. Read every frame
 	// by the player limb loop.

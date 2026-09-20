@@ -1,23 +1,23 @@
 ===============================================================================
-  S.A.M FRAMEWORK  —  STEAM WORKSHOP PUBLISHING CHECKLIST
+  S.A.M FRAMEWORK:  STEAM WORKSHOP PUBLISHING CHECKLIST
   Everything in this file is a MANUAL step only you can do. This package has
   prepared all the files; the actions below require your Steam account,
   your judgement, and (for the image) an art tool.
 ===============================================================================
 
 -------------------------------------------------------------------------------
-  ⚠  READ FIRST — HOW S.A.M CAN ACTUALLY BE DISTRIBUTED
+  ⚠  READ FIRST: HOW S.A.M CAN ACTUALLY BE DISTRIBUTED
 -------------------------------------------------------------------------------
 Steam Workshop items are CONTENT FOLDERS that Barony mounts at runtime. A
 Workshop subscription CANNOT replace the game's executable. S.A.M is compiled
 INTO barony.exe, so:
 
-  * The patched barony.exe (in this folder) must reach players as a FILE —
+  * The patched barony.exe (in this folder) must reach players as a FILE,
     e.g. attached to a GitHub Release, or linked from the Workshop description.
     It is NOT delivered by "Subscribe".
   * Your project already chose "source-only distribution (no prebuilt binary in
     releases)". Distributing a modified copy of a commercial game's .exe is your
-    call to make and may have licensing implications — decide deliberately.
+    call to make and may have licensing implications, so decide deliberately.
 
   Practical options (pick one before publishing):
     (A) Workshop item = a small "pointer" item + rich description that links to
@@ -38,7 +38,7 @@ INTO barony.exe, so:
   [ ] Generate a 512x512 image with an AI tool (prompt is included in the spec)
       or an artist.
   [ ] Crop/resize to EXACTLY 512x512, save as  preview.png  in this folder.
-  [ ] Eyeball it at ~64px — is "S.A.M" still legible? If not, redo bigger.
+  [ ] Eyeball it at ~64px. Is "S.A.M" still legible? If not, redo bigger.
 
 -------------------------------------------------------------------------------
   2. DECIDE THE DISTRIBUTION MODEL  (see the warning above)
@@ -59,7 +59,7 @@ INTO barony.exe, so:
   SteamCMD/Steamworks. There is no generic file you can hand to Steam here.
   [ ] Launch Barony, open its Mods / Workshop upload tool.
   [ ] Create a new Workshop item for "S.A.M Framework".
-  [ ] Title:  S.A.M Framework  (or "S.A.M Framework — Support All Mods").
+  [ ] Title:  S.A.M Framework  (or "S.A.M Framework: Support All Mods").
   [ ] Description: paste the CONTENTS of workshop_description.txt
       (it is already in Steam BBCode: [h1], [b], [url], [list], [*], [hr]).
   [ ] Preview image: upload your preview.png (step 1).
@@ -70,8 +70,8 @@ INTO barony.exe, so:
 -------------------------------------------------------------------------------
   4. CHECK THE WORKSHOP LINKS  (already filled in; re-check if the item id changes)
 -------------------------------------------------------------------------------
-  [ ] INSTALL.md  — Workshop link is filled in (https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472).
-  [ ] README.txt  — add the Workshop URL if you want it there.
+  [ ] INSTALL.md:  Workshop link is filled in (https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472).
+  [ ] README.txt:  add the Workshop URL if you want it there.
   [ ] Re-upload / update the Workshop description if you referenced the URL in it.
 
 -------------------------------------------------------------------------------

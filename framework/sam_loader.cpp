@@ -15,10 +15,13 @@
 #include "sam_effects.hpp"
 #include "sam_races.hpp"
 #include "sam_sounds.hpp"
+#include "sam_music.hpp"   // mod music: tracks, vanilla replacements, floor rules
 #include "sam_recipes.hpp"
 #include "sam_workbench.hpp"
 #include "sam_rooms.hpp"
-#include "sam_combat.hpp"     // prefab rooms injected into vanilla levelsets
+#include "sam_combat.hpp"
+#include "sam_camera.hpp"
+#include "sam_rules.hpp"     // prefab rooms injected into vanilla levelsets
 #ifndef EDITOR
 #include "sam_hud.hpp"   // script HUD, cleared on unload
 #include "sam_images.hpp" // mod-supplied pictures (overlay + HUD art)
@@ -71,10 +74,13 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 	// runs on a mods-on -> mods-on reload.
 	SAMBodies::clear();
 	SAMSounds::clear(); // drop staged custom sounds (engine table reset on next append)
+	SAMMusic::clear();  // release mod music streams; the game picks its own tracks again
 	SAMRecipes::clear(); // drop tinkering recipes -> vanilla craftable grid
 	SAMWorkbench::clear(); // and the built-in bench, so it re-installs this cycle
 	SAMRooms::clear(); // drop injected rooms -> vanilla room pools
 	SAMCombat::clear(); // drop species damage-resistance overrides -> vanilla damagetables
+	SAMCamera::clear(); // hand every camera back to the engine
+	SAMRules::clear();  // drop stat modifiers, effect immunities and the XP curve
 	SAMHud::clearAll(); // a mod's HUD must never outlive the mod that drew it
 	SAMImages::clear(); // drop the image registry + every live overlay
 	SAMUi::closeAll();  // a panel must never outlive the mod that opened it
@@ -172,6 +178,7 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 		SAMEffects::loadFromManifest(m); // custom status effects into slots 135..159
 		SAMRaces::loadFromManifest(m); // custom playable races into ids 200..255
 		SAMSounds::loadFromManifest(m); // stage custom sounds (appended after vanilla reload)
+		SAMMusic::loadFromManifest(m);  // stage music (opened after the vanilla music reload)
 		SAMRecipes::loadFromManifest(m); // tinkering recipes (item ids resolved lazily at kit-open)
 #endif
 
@@ -323,9 +330,12 @@ void SAMLoader::unload()
 	SAMEffects::clear();       // drop custom status effects
 	SAMRaces::clear();         // drop custom playable races
 	SAMSounds::clear();        // drop staged custom sounds
+	SAMMusic::clear();         // release mod music streams
 	SAMRecipes::clear();       // drop tinkering recipes
 	SAMWorkbench::clear();     // drop the built-in bench registration
 	SAMCombat::clear();        // drop species damage-resistance overrides
+	SAMCamera::clear();        // hand every camera back to the engine
+	SAMRules::clear();         // drop stat modifiers, effect immunities and the XP curve
 #endif
 	SAMMonsterPatch::clear();  // reverts sam_patch_monster overrides (F5)
 	// Rooms are NOT optional to clear. The registry holds ABSOLUTE paths, so unmounting the

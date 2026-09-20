@@ -48,12 +48,19 @@ public:
 	// immediately when nothing is registered, which is the vanilla no-op path.
 	static int modelForEntity(const Entity* entity);
 
-	// True when this entity is invisible because of an EFFECT (a potion or a spell) rather
-	// than because its species structurally hides its main entity. The draw pass un-skips a
-	// custom body so the six "AI bodypart" monsters stay visible; without this it also
-	// un-skipped a monster that had drunk invisibility, leaving it fully visible AND
-	// clickable. Answers false for everything in vanilla.
+	// True when this entity's INVISIBLE flag must be honoured even though it carries a custom
+	// body: a monster invisible because of an EFFECT (a potion or a spell) rather than because
+	// its species structurally hides its main entity, and anything a SCRIPT hid on purpose.
+	// The draw pass un-skips a custom body so the six "AI bodypart" monsters stay visible;
+	// without this it also un-skipped a monster that had drunk invisibility, leaving it fully
+	// visible AND clickable. An equipment limb is NOT hidden here: its INVISIBLE only means the
+	// slot is empty, which is exactly where a script floats a cosmetic model. Only ever consulted
+	// for an entity that has a custom body.
 	static bool hiddenByEffect(const Entity* entity);
+
+	// sam_set_visible: record that a SCRIPT, rather than the engine, decided this entity is
+	// hidden. Cheap and safe to call for any entity, in any mode.
+	static void noteScriptVisibility(uint32_t uid, bool visible);
 
 	// Extra rotation (DEGREES about the vertical axis) for this entity's custom body, or 0.
 	// A .vox authored facing a different way than Barony expects would otherwise render
@@ -87,8 +94,15 @@ public:
 	// player joins, because a late joiner has heard none of the earlier announcements.
 	static void reannounceAll();
 
-	// Client: record the body name the host sent for this uid.
-	static void applyRemote(uint32_t uid, const std::string& bodyName);
+	// Client: record what the host sent for this uid. `scriptModel` says which layer: a model id
+	// a script set (or a spawner announced) goes to the script layer, which draws on any entity
+	// and is what sam_get_model reads; otherwise it is a JSON body name for a monster. An empty
+	// name drops the script layer. The host tags the kind after the name in 'SAMB' (an older
+	// host sends no tag, which reads as a body name, as it always did) and in the ordered BODY op.
+	static void applyRemote(uint32_t uid, const std::string& bodyName, bool scriptModel = false);
+
+	// Forget every uid-keyed tag (a game ended: the next one hands the same uids out again).
+	static void resetSession();
 
 	// ---- runtime model control (sam_set_model) -------------------------------------
 	// Give this entity a model by ID at runtime and tell every client. Returns false when
@@ -96,6 +110,11 @@ public:
 	// whatever it would otherwise draw.
 	static bool setBodyById(uint32_t uid, const std::string& modelId);
 	static void clearBodyById(uint32_t uid);
+	// The model a framework SPAWNER gave this entity (SAMMpEntities::adopt). Announced exactly as
+	// setBodyById does, and remembered as the entity's own model: sam_clear_model then puts it
+	// back instead of dropping the entity to entity->sprite, which is a raw appended model index
+	// and means a different model on a machine whose mods loaded in another order.
+	static void setSpawnModel(uint32_t uid, const std::string& modelId);
 	// The id a script set on this entity, or "" if none. Not the JSON body: only what a
 	// script put there, because that is the only thing a script can meaningfully read back.
 	static std::string bodyIdFor(uint32_t uid);

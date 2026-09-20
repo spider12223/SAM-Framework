@@ -210,13 +210,15 @@ namespace SAMLua
 	// consume* calls are non-const and are what would starve vanilla's own readers
 	// (blocking, attacking, the hotbar), so they must never appear in this framework.
 	//
-	// pollActions() runs on EVERY machine (input only exists locally — Input::inputs[]
-	// holds live data for local players only). The host dispatches directly; a client
-	// forwards each edge to the host via the 'SAMA' packet so the hooks fire host-side,
-	// where host-only APIs like sam_cast_spell actually work.
+	// pollActions() is called on EVERY machine (input only exists locally — Input::inputs[]
+	// holds live data for local players only). The host and singleplayer fire the hooks for
+	// every local seat, each with its own edges and binding (SAMMpInput::pollLocalActions). A
+	// client does nothing here: its buttons reach the host on SAMNet's ordered channel
+	// (SAMMpInput), so the hooks fire host-side, where host-only APIs like sam_cast_spell work.
 	void pollActions();
-	// Fire on_action_pressed/on_action_released for a player. Called by pollActions on
-	// the host, and by the 'SAMA' packet handler for a remote client's edges.
+	// Fire on_action_pressed/on_action_released for a player. Now called only for an OLDER S.A.M
+	// client's 'SAMA' packet (SAMMpInput::onLegacyAction); the host's own seats fire from
+	// SAMMpInput::pollLocalActions.
 	void dispatchAction(int player, int actionIndex, bool pressed);
 
 	// ---- v2.4 toolkit: shared between the two runtimes -----------------------------
@@ -324,7 +326,8 @@ namespace SAMLua
 	//
 	// Movement is computed by the machine that OWNS the player, so a host-set multiplier
 	// for a remote player has to travel to that client's exe or it does nothing at all.
-	// setMoveSpeedMult is host-only and syncs via the 'SAMS' packet; applyMoveSpeedMult is
+	// setMoveSpeedMult is host-only and reaches every S.A.M client on SAMNet's ordered channel
+	// (SAMRules::syncMoveSpeed; net.cpp still accepts an older host's 'SAMS'); applyMoveSpeedMult is
 	// the receive side (it stores without re-sending, so there is no echo).
 	//
 	// Range is [0.1, 3.0]. The ceiling is not a safety limit: the engine already clamps

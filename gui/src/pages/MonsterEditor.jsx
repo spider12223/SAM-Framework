@@ -12,6 +12,7 @@ import {
   MONSTER_FLAG_KEYS, STORE_TYPES, SPAWN_MODES, ITEM_TYPES_LOWER,
 } from '@/data/schemas.js';
 import { validate } from '@/lib/validate.js';
+import { carryUnknown } from '@/lib/editorKeys.js';
 import { checkBalance } from '@/lib/balance.js';
 import { useMod } from '@/state/ModContext.jsx';
 
@@ -35,6 +36,7 @@ import {
   Panel, Field, TextInput, NumberInput, Select, Stepper, GoldButton,
   SearchSelect, ErrorList, SavedNote, BalanceHints,
 } from '@/components/ui.jsx';
+import { SoundMapEditor, soundMapToRows, rowsToSoundMap } from '@/components/AudioParts.jsx';
 
 function slugify(name) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'unnamed';
@@ -134,10 +136,16 @@ function EntryRow({ entry, showSlot, onChange, onRemove }) {
 }
 
 export default function MonsterEditor() {
-  const { meta, monsters, editing, dispatch } = useMod();
+  const { meta, monsters, sounds = [], music = [], editing, dispatch } = useMod();
 
   // "Edit" handoff from the Mod Builder: seed the (deep) form from a saved monster.
   const editDef = editing?.kind === 'monster' ? monsters.find((m) => m.id === editing.id) : null;
+
+  // The def as it was when this page opened. `editDef` is derived from `editing`, and the
+  // effect below clears `editing` on mount -- so by the time Save is clicked `editDef` is
+  // already null. Saving has to carry the fields this editor cannot show, so it needs the
+  // definition it started from, captured once.
+  const [openedDef] = useState(() => editDef ?? null);
   const entryFrom = (o, slot) => ({
     ...blankEntry(slot ?? o.slot ?? ''),
     type: o.type ?? '', status: o.status ?? '',
@@ -195,6 +203,10 @@ export default function MonsterEditor() {
     };
   });
   const [spawn, setSpawn] = useState(() => (editDef?.spawn ?? []).map((b) => ({ ...blankSpawn(), ...b, base_species: b.base_species ?? '' })));
+  // "sounds": { vanilla name/group -> sound id }, and "music": a track id or { track, range }.
+  const [soundRows, setSoundRows] = useState(() => soundMapToRows(editDef?.sounds));
+  const [theme, setTheme] = useState(() => (typeof editDef?.music === 'string' ? editDef.music : editDef?.music?.track ?? ''));
+  const [themeRange, setThemeRange] = useState(() => (editDef?.music && typeof editDef.music === 'object' ? editDef.music.range ?? '' : ''));
   const [errors, setErrors] = useState([]);
   const [savedAs, setSavedAs] = useState('');
 
@@ -286,7 +298,17 @@ export default function MonsterEditor() {
     });
     if (spawns.length) def.spawn = spawns;
 
-    return def;
+    const sm = rowsToSoundMap(soundRows);
+    if (sm) def.sounds = sm;
+    if (theme.trim()) {
+      def.music = themeRange === '' || themeRange == null
+        ? theme.trim()
+        : { track: theme.trim(), range: Math.max(0, Math.trunc(Number(themeRange) || 0)) };
+    }
+
+    // Carry anything this editor has no control for straight through -- a field the
+    // author hand-wrote, or one a later schema adds, must survive a save here.
+    return carryUnknown(openedDef, def, 'monster');
   };
 
   const save = () => {
@@ -304,9 +326,11 @@ export default function MonsterEditor() {
 
   const def = useMemo(buildDef,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [name, baseType, sex, appearance, stats, randomStats, profs, flags, propNums, bodyModel,
+    [name, baseType, sex, appearance, stats, randomStats, profs, flags, propNums, traits, bodyModel,
       bodyFly, bodyAttack, bodyFrameTicks, bodyYaw, bodyHitbox, bodyOffset,
-      equip, inventory, numFollowers, followerVariants, shop, spawn, namespace]);
+      equip, inventory, numFollowers, followerVariants, shop, spawn, soundRows, theme, themeRange, namespace]);
+  const ownSoundIds = useMemo(() => sounds.filter((s) => s.id).map((s) => s.id), [sounds]);
+  const ownTrackIds = useMemo(() => music.filter((m) => m.id).map((m) => m.id), [music]);
   const preview = useMemo(() => JSON.stringify(def, null, 2), [def]);
   const hints = useMemo(() => checkBalance('monster', def), [def]);
 
@@ -495,6 +519,33 @@ export default function MonsterEditor() {
             </Field>
             <Field label="Spellbook cooldown" hint="ticks">
               <NumberInput value={propNums.spellbook_cast_cooldown} min={0} onChange={(v) => setPropNums((p) => ({ ...p, spellbook_cast_cooldown: v }))} />
+            </Field>
+          </div>
+        </Panel>
+      </div>
+
+      {/* ------------------------------------------------ sounds + theme music */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+        <Panel title="Sounds">
+          <SoundMapEditor
+            rows={soundRows}
+            onChange={setSoundRows}
+            ownSounds={ownSoundIds}
+            initialQuery={baseType}
+            hint={`Give this monster its own voice: when its base creature (${baseType}) would play a game sound, it plays one of yours instead. Pick the game sound on the left — an exact name like RatDie or a whole group like GoblinSpot.`}
+          />
+        </Panel>
+        <Panel title="Theme Music">
+          <div className="grid grid-cols-[minmax(0,1fr)_8rem] gap-3 items-start">
+            <Field label="Track" hint="Plays while this monster is alive on the floor, the way Herx and the devil have theirs. Make tracks in the Music Editor.">
+              <SearchSelect options={ownTrackIds} value={theme} onPick={setTheme} allowCustom
+                placeholder={ownTrackIds.length ? 'pick one of your tracks' : 'make one in the Music Editor'} />
+              {theme && (
+                <button type="button" className="mt-1 text-xs underline" style={{ color: '#a03327' }} onClick={() => { setTheme(''); setThemeRange(''); }}>clear</button>
+              )}
+            </Field>
+            <Field label="Within (tiles)" hint="Empty = anywhere on the floor.">
+              <NumberInput value={themeRange} min={0} onChange={setThemeRange} placeholder="12" />
             </Field>
           </div>
         </Panel>

@@ -81,6 +81,13 @@
       ],
       "default": "sword"
     },
+    "sounds": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "What whoever holds or wears this item plays instead of these vanilla sounds -- a sword with its own swing ({ \"SwingWeapon\": \"whoosh\" }), boots with their own footsteps ({ \"LeatherSteps\": \"clank\" }). Keys are vanilla names or groups, values are sound ids; a bare name is one of your own."
+    },
     "traits": {
       "type": "array",
       "description": "Engine behaviours this item opts into. Barony answers questions like 'is this a bow?' or 'can this hold arrows?' from hardcoded lists of vanilla item types, and a custom item can never be on those lists. Naming a trait here puts it on. A trait makes the item RECOGNISED; what it then does is up to your script.",
@@ -133,10 +140,19 @@
       "type": "string",
       "description": "Path (relative to the mod folder) to a PNG used as the item's 2D inventory/hotbar icon, e.g. 'items/shadowblade.png'. Loaded at runtime and drawn like the class-select portrait. If the file is missing, a placeholder icon cloned from a similar vanilla item is used. (Only the 2D icon is loaded \u2014 the 3D 'model'/'model_fp' are supported via the model field below.)"
     },
+    "kit_ui": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Your own art for the crafting panel this item opens when a recipe names it as its 'kit'. Keys are panel roles, values are mod-relative PNG paths: { \"base\": \"ui/my_base.png\", \"drawer\": \"ui/my_drawer.png\" }. Every role is optional and anything you leave out keeps the vanilla art. A role the game does not know is simply never asked for, so an older build still loads a newer mod, and a path that points outside the mod folder is dropped with a warning. The role names and the pixel size each one has to match are listed in docs/tinkering-recipes.md."
+    },
     "attributes": {
       "type": "object",
-      "description": "Numeric values the engine reads off this item. Recognised keys: ATK (added by attackGetAttack for weapons), AC (added by armorGetAC for armor and shields), TINKER_SALVAGE_METAL and TINKER_SALVAGE_MAGIC (what this yields when salvaged), spellbook_spell (the spell this SPELLBOOK teaches or casts, as a spell id), and foci_spell (the spell a shield-slot focus channels, as a spell id). Any other key is stored but never read by the engine -- a script can still read it with sam_get_item_attribute, so custom keys are useful for your own logic.",
-      "additionalProperties": false,
+      "description": "Numeric values the engine reads off this item. Recognised keys: ATK (added by attackGetAttack for weapons), AC (added by armorGetAC for armor and shields), TINKER_SALVAGE_METAL and TINKER_SALVAGE_MAGIC (what this yields when salvaged), spellbook_spell (the spell this SPELLBOOK teaches or casts, as a spell id), and foci_spell (the spell a shield-slot focus channels, as a spell id). Any other key is kept on the item and never looked at: there is no script call that reads a custom attribute back, so an invented key like EFF_UNBREAKABLE does nothing. A custom key has to be a whole number; anything else is dropped when the mod loads.",
+      "additionalProperties": {
+        "type": "integer"
+      },
       "properties": {
         "ATK": {
           "type": "integer",

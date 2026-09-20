@@ -5,11 +5,20 @@
  * behavior script (classes/<name>.lua|js|ts), and captures any other file
  * (portraits, icons) as a base64 data URL so a round-trip is lossless.
  *
- * Returns { meta, classes, items, monsters, spells, patches, scripts, assets,
+ * Returns { meta, classes, items, monsters, spells, patches, sounds, music, scripts, assets,
  * report } where report is a list of { path, message } for skipped files.
+ *
+ * mod.json "sounds" may hold any mix of: inline objects, paths to (legacy) sound JSON files,
+ * and bare audio paths. All three become the same inline entries the builder exports. Audio
+ * dropped in sounds/, sounds/replace/, music/ or music/replace/ with no entry at all (the
+ * engine's folder convention) is listed as an explicit entry too, so it can be edited here;
+ * the engine treats the two forms the same.
  */
 import JSZip from 'jszip';
 import { validate } from '@/lib/validate.js';
+import {
+  AUDIO_EXT_RE, audioKey, audioFiles, engineAudioSlug, mimeForPath, normalizeAudioEntry, MUSIC_ENTRY_KEYS,
+} from '@/lib/audio.js';
 
 const SCRIPT_LANGS = ['ts', 'js', 'lua']; // detection order mirrors the loader
 
@@ -114,7 +123,8 @@ export async function parseModZip(file) {
     spells: manifest.spells ?? [],
     effects: manifest.effects ?? [],
     races: manifest.races ?? [],
-    sounds: manifest.sounds ?? [],
+    sounds: Array.isArray(manifest.sounds) ? manifest.sounds : [],
+    music: Array.isArray(manifest.music) ? manifest.music : [],
     recipes: manifest.recipes ?? [],
     patches: manifest.patches ?? [],
   };
@@ -172,11 +182,62 @@ export async function parseModZip(file) {
       }
     }
   }
+  // --- sounds: inline objects, legacy sound JSON paths, bare audio paths -------------------
+  const ns = meta.namespace;
   const sounds = [];
-  for (const p of declared.sounds) {
-    const def = await readDef(zip, p, 'sound', report);
-    if (def) sounds.push(def);
+  const soundJsonPaths = [];
+  // First one wins on a duplicate id/target, exactly as the engine does ("keeping the first").
+  const addAudio = (list, def, where) => {
+    const key = audioKey(def);
+    if (list.some((x) => audioKey(x) === key)) {
+      report.push({ path: where, message: `a second entry for "${def.id ?? def.replace}" — the game keeps the first, so this one was skipped` });
+      return;
+    }
+    list.push(def);
+  };
+  for (const [i, entry] of declared.sounds.entries()) {
+    const where = `mod.json sounds[${i}]`;
+    if (typeof entry === 'string') {
+      if (/\.json$/i.test(entry)) {
+        soundJsonPaths.push(entry);
+        const raw = await readDef(zip, entry, 'sound', report);
+        const def = normalizeAudioEntry(raw, ns);
+        if (def) addAudio(sounds, def, entry);
+      } else if (AUDIO_EXT_RE.test(entry)) {
+        // The engine names a bare audio path after its file: "sounds/Boom.ogg" -> "<ns>:boom".
+        const slug = engineAudioSlug(entry);
+        addAudio(sounds, { id: ns ? `${ns}:${slug}` : slug, file: entry }, where);
+      } else {
+        report.push({ path: where, message: `"${entry}" is neither a sound JSON file nor an audio file — skipped` });
+      }
+      continue;
+    }
+    const def = normalizeAudioEntry(entry, ns);
+    if (!def) { report.push({ path: where, message: 'not a sound entry — skipped' }); continue; }
+    const res = validate('sound', def);
+    if (!res.valid) {
+      const first = res.errors[0];
+      report.push({ path: where, message: `sound validation failed${first ? ` (${first.path} ${first.message})` : ''} — skipped` });
+      continue;
+    }
+    addAudio(sounds, def, where);
   }
+
+  // --- music: objects only ----------------------------------------------------------------
+  const music = [];
+  for (const [i, entry] of declared.music.entries()) {
+    const where = `mod.json music[${i}]`;
+    const def = normalizeAudioEntry(entry, ns, MUSIC_ENTRY_KEYS);
+    if (!def) { report.push({ path: where, message: 'not a music entry (music entries are objects) — skipped' }); continue; }
+    const res = validate('music', def);
+    if (!res.valid) {
+      const first = res.errors[0];
+      report.push({ path: where, message: `music validation failed${first ? ` (${first.path} ${first.message})` : ''} — skipped` });
+      continue;
+    }
+    addAudio(music, def, where);
+  }
+
   const recipes = [];
   for (const p of declared.recipes) {
     const def = await readDef(zip, p, 'recipe', report);
@@ -188,11 +249,13 @@ export async function parseModZip(file) {
     if (def) patches.push(def);
   }
 
-  // Capture any non-declared, non-JSON, non-script file as an asset.
+  // Capture any non-declared, non-JSON, non-script file as an asset. Only the sound JSON
+  // FILES count as declared here: a bare audio path in "sounds" IS the audio, and skipping it
+  // would import the entry and silently drop its file.
   const declaredSet = new Set([
     'mod.json',
     ...declared.classes, ...declared.items, ...declared.monsters,
-    ...declared.spells, ...declared.effects, ...declared.races, ...declared.sounds, ...declared.recipes, ...declared.patches,
+    ...declared.spells, ...declared.effects, ...declared.races, ...soundJsonPaths, ...declared.recipes, ...declared.patches,
     ...scriptPaths,
   ]);
   const assets = {};
@@ -208,9 +271,40 @@ export async function parseModZip(file) {
     const ext = relPath.split('.').pop().toLowerCase();
     const mime = ext === 'png' ? 'image/png'
       : ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg'
+      : AUDIO_EXT_RE.test(relPath) ? mimeForPath(relPath)
       : 'application/octet-stream';
     assets[relPath] = `data:${mime};base64,${base64}`;
   }
 
-  return { meta, classes, items, monsters, spells, effects, races, sounds, recipes, patches, scripts, assets, report };
+  // The engine's folder convention: audio in sounds/ is "<ns>:<file name>", audio in
+  // sounds/replace/ replaces the vanilla sound it is named after (same for music/). The scan is
+  // not recursive, and an entry in mod.json for the same id or target wins. A file some entry
+  // already plays (a variant, a combat track) is left alone.
+  const used = new Set([...sounds, ...music].flatMap(audioFiles));
+  let byFolder = 0;
+  for (const relPath of Object.keys(assets).sort()) {
+    if (used.has(relPath) || !AUDIO_EXT_RE.test(relPath)) continue;
+    const m = relPath.match(/^(sounds|music)\/(replace\/)?([^/]+)$/);
+    if (!m) continue;
+    const list = m[1] === 'sounds' ? sounds : music;
+    const stem = m[3].slice(0, m[3].lastIndexOf('.'));
+    const slug = engineAudioSlug(m[3]);
+    const def = m[2] ? { replace: stem, file: relPath } : { id: ns ? `${ns}:${slug}` : slug, file: relPath };
+    if (list.some((x) => audioKey(x) === audioKey(def))) continue;
+    list.push(def);
+    byFolder++;
+  }
+  if (byFolder) {
+    report.push({ path: 'sounds/, music/', message: `${byFolder} audio file(s) had no entry in mod.json (the folder convention) — listed as entries so you can edit them` });
+  }
+
+  // An entry whose audio is not in the zip is kept (it may be meant for a file you add by
+  // hand), but say so: otherwise it ships as an entry that plays nothing.
+  for (const def of [...sounds, ...music]) {
+    for (const f of audioFiles(def)) {
+      if (!assets[f]) report.push({ path: f, message: `"${def.id ?? def.replace}" plays this file, but it is not in the zip` });
+    }
+  }
+
+  return { meta, classes, items, monsters, spells, effects, races, sounds, music, recipes, patches, scripts, assets, report };
 }

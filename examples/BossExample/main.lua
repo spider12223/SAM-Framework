@@ -16,6 +16,23 @@ local BLADE      = "bossexample:wyvern_blade"
 local fights = {}
 
 
+-- Show the whole party a beat of the fight.
+--
+-- sam_screen_flash takes -1 for "every player", but sam_message and sam_camera_shake each name
+-- one player, so those two need a walk over the slots. Barony has at most four and a slot can
+-- be empty, so ask each one for a body instead of counting: sam_get_player_uid gives nil for a
+-- slot with nobody in it. In singleplayer this is just player 0, so the same code works in both.
+local function announce(text, shake, r, g, b)
+  if r then sam_screen_flash(-1, r, g, b) end
+  for p = 0, 3 do
+    if sam_get_player_uid(p) then
+      if text then sam_message(p, text) end
+      if shake then sam_camera_shake(p, shake) end
+    end
+  end
+end
+
+
 -- =====================================================================================
 -- Finding the boss
 -- =====================================================================================
@@ -25,8 +42,7 @@ local fights = {}
 local function on_spawned(e)
   if not sam_monster_has_trait(e.monster_uid, "boss") then return end
   fights[e.monster_uid] = { phase = 1, breath_cooldown = 0 }
-  sam_message(0, "The " .. BOSS_NAME .. " wakes.")
-  sam_camera_shake(0, 12)
+  announce("The " .. BOSS_NAME .. " wakes.", 12)
 end
 
 
@@ -44,18 +60,14 @@ local function check_phase(uid, f)
 
   if f.phase == 1 and pct <= 66 then
     f.phase = 2
-    sam_message(0, "The " .. BOSS_NAME .. " screams and takes to the air.")
-    sam_screen_flash(0, 255, 120, 0)
-    sam_camera_shake(0, 20)
+    announce("The " .. BOSS_NAME .. " screams and takes to the air.", 20, 255, 120, 0)
     -- "Flight" in Barony is a hover, not a swoop: levitation plus a raised position reads
     -- as airborne. A real dive is not expressible (see the README).
     sam_apply_monster_effect(uid, "LEVITATING", -1)
 
   elseif f.phase == 2 and pct <= 33 then
     f.phase = 3
-    sam_message(0, "The " .. BOSS_NAME .. " is enraged!")
-    sam_screen_flash(0, 255, 40, 0)
-    sam_camera_shake(0, 28)
+    announce("The " .. BOSS_NAME .. " is enraged!", 28, 255, 40, 0)
     -- DEX is the movement-speed dial for a monster. Phase 3 = it comes at you faster.
     local dex = sam_get_monster_stat(uid, "DEX") or 6
     sam_set_monster_stat(uid, "DEX", dex + 8)
@@ -83,12 +95,15 @@ local function try_breath(uid, f)
   if not target then return end
 
   -- Telegraph: a roar and a shake, then the actual breath a beat later.
-  sam_play_sound(173)
-  sam_camera_shake(0, 10)
-  sam_set_timer(function()
+  sam_play_sound(204)  -- DevilRoar-01; /sam_playsound DevilRoar to hear it
+  announce(nil, 10)
+  -- sam_set_timer takes the ID FIRST, then the delay, then the callback. The id has to carry
+  -- the uid: setting a timer replaces any earlier one with the same id, so a shared id would
+  -- mean two wyverns cancelling each other's wind-up. 30 ticks is 0.6 s; Barony runs at 50.
+  sam_set_timer("bossexample_breath_" .. uid, 30, function()
     -- Aimed at whoever it was hunting when the wind-up started.
     sam_monster_cast_spell(uid, BREATH)
-  end, 30)  -- ~half a second at 60 ticks
+  end)
 
   -- Faster in later phases: same attack, more pressure.
   f.breath_cooldown = (f.phase >= 3) and 90 or (f.phase == 2 and 150 or 240)
@@ -104,9 +119,7 @@ local function on_died(e)
   if not f then return end
   fights[e.monster_uid] = nil
 
-  sam_message(0, "The " .. BOSS_NAME .. " falls.")
-  sam_screen_flash(0, 255, 255, 255)
-  sam_camera_shake(0, 24)
+  announce("The " .. BOSS_NAME .. " falls.", 24, 255, 255, 255)
 
   local x, y = sam_get_position(e.monster_uid)
   if not x then return end

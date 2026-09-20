@@ -76,9 +76,15 @@ set-pieces. Phases, telegraphs, adds and an enrage are what players describe aft
 
 ## Multiplayer
 
-The host sees your model. Other players see the base creature (a rat). Nothing breaks and
-nobody desyncs, but model parity across the network is not in yet. The fight logic itself,
-including phases and attacks, is host-authoritative and correct for everyone.
+Every player who has the mod sees your model. The body goes out by name rather than by model
+number, so it is the same model on every machine whatever order each one's mods loaded in, and
+a player who joins part way through is told about it as well. A player running plain Barony with
+no mods at all sees the base creature, a rat, and nothing desyncs either way.
+
+The fight logic runs on the host, so the phases, the telegraph, the adds and the drop are the
+same for everybody. The presentation is shown to the whole party rather than to player 0: see
+the `announce` helper at the top of `main.lua`, which flashes every screen with `-1` and then
+names each player in turn for the message and the shake.
 
 ## Testing it
 

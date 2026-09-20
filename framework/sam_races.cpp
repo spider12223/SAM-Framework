@@ -293,6 +293,33 @@ void SAMRaces::loadFromManifest(const SAMModManifest& manifest)
 					auto num = [&](const char* k, double d) -> double {
 						return ( o.contains(k) && o[k].is_number() ) ? o[k].get<double>() : d;
 					};
+					// The bent arm, if this race authored one. Reported rather than ignored on a
+					// slot that has no bent pose, because a modder who writes it on a leg has
+					// misunderstood something and silence would not tell them.
+					if ( o.contains("bent") )
+					{
+						const bool samArmSlot = ( it.key() == "arm_right" || it.key() == "arm_left" );
+						if ( !o["bent"].is_string() || o["bent"].get<std::string>().empty() )
+						{
+							SAMErrors::reportSemantic(MOD, fileLabel, "/limb_models/" + it.key() + "/bent",
+								o["bent"].dump(), "not a model reference",
+								"a path, a \"<ns>:model\" id, or a model index",
+								"give the model this arm uses while it holds something",
+								"that arm keeps one pose.", true);
+						}
+						else if ( !samArmSlot )
+						{
+							SAMErrors::reportSemantic(MOD, fileLabel, "/limb_models/" + it.key() + "/bent",
+								o["bent"].dump(), "a bent pose on a limb that never bends",
+								"\"bent\" on arm_right or arm_left",
+								"move it to an arm, or remove it", "ignored; the limb loaded.", true);
+						}
+						else
+						{
+							def.limbModelsBent[it.key()] = o["bent"].get<std::string>();
+						}
+					}
+
 					xf.scale = num("scale", 1.0);
 					if ( xf.scale <= 0.0 ) { xf.scale = 1.0; }
 					xf.pitch = num("pitch", 0.0);
@@ -557,6 +584,7 @@ void SAMRaces::resolveLimbModels()
 	{
 		SAMRaceDef& def = kv.second;
 		def.limbModelIdx.clear();
+		def.limbBentIdx.clear();
 		def.headModelIdx = -1;
 		def.fpArmIdx = -1;
 		def.fpHandLeftIdx = -1;
@@ -594,6 +622,13 @@ void SAMRaces::resolveLimbModels()
 			if ( it == def.limbModels.end() ) { continue; }
 			const int idx = resolveModelRef(it->second, def.id, slot.key);
 			if ( idx >= 0 ) { def.limbModelIdx[slot.limbType] = idx; }
+
+			auto bent = def.limbModelsBent.find(slot.key);
+			if ( bent != def.limbModelsBent.end() )
+			{
+				const int bentIdx = resolveModelRef(bent->second, def.id, std::string(slot.key) + " (bent)");
+				if ( bentIdx >= 0 ) { def.limbBentIdx[slot.limbType] = bentIdx; }
+			}
 		}
 
 		for ( size_t ei = 0; ei < def.extraLimbs.size(); ++ei )
@@ -678,6 +713,15 @@ const SAMRaceDef::LimbXform* SAMRaces::limbXformFor(int raceId, int limbType)
 	auto xit = it->second.limbXform.find(limbType);
 	if ( xit == it->second.limbXform.end() || !xit->second.any ) { return nullptr; }
 	return &xit->second;
+}
+
+int SAMRaces::limbBentModelFor(int raceId, int limbType)
+{
+	if ( raceId < SAM_RACE_ID_BASE || s_byId.empty() ) { return -1; }
+	auto it = s_byId.find(raceId);
+	if ( it == s_byId.end() ) { return -1; }
+	auto bit = it->second.limbBentIdx.find(limbType);
+	return ( bit == it->second.limbBentIdx.end() ) ? -1 : bit->second;
 }
 
 bool SAMRaces::usesLimbOverride(int raceId, int limbType)
@@ -768,7 +812,12 @@ std::vector<std::string> SAMRaces::limbModelPaths()
 			if ( SAMModels::vanillaModelIndexForPath(fpRef) >= 0 ) { continue; }
 			if ( std::find(out.begin(), out.end(), fpRef) == out.end() ) { out.push_back(fpRef); }
 		}
-		for ( const auto& lm : kv.second.limbModels )
+		// Both maps: a bent arm is a model this mod ships like any other, and if it is not
+		// collected here its .vox is never appended to the model table and the arm resolves
+		// to nothing.
+		std::vector<const std::map<std::string, std::string>*> samLimbMaps = { &kv.second.limbModels, &kv.second.limbModelsBent };
+		for ( const auto* samMap : samLimbMaps )
+		for ( const auto& lm : *samMap )
 		{
 			const std::string& ref = lm.second;
 			if ( ref.size() < 5 || ref.find('/') == std::string::npos ) { continue; }

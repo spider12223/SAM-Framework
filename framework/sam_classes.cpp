@@ -628,6 +628,40 @@ bool SAMClasses::removeClassPassive(int classnum, int effectId)
 	return true;
 }
 
+void SAMClasses::overlaySnapshot(std::map<int, SAMClassStatPatch>& patches, std::map<int, std::vector<int>>& passives)
+{
+	patches = s_classPatches;
+	passives.clear();
+	for ( const auto& kv : s_classPassives )
+	{
+		passives[kv.first] = std::vector<int>(kv.second.begin(), kv.second.end());
+	}
+}
+
+void SAMClasses::overlayReplace(const std::map<int, SAMClassStatPatch>& patches, const std::map<int, std::vector<int>>& passives)
+{
+	// Wholesale, not merged: a class this machine had patched and the host has not must lose
+	// the patch, or the two would build that class differently the next time it is chosen.
+	// Custom ids are checked against this machine's registry; the caller resolved them by name.
+	s_classPatches.clear();
+	for ( const auto& kv : patches )
+	{
+		if ( kv.first >= SAM_CLASS_ID_BASE && !getClass(kv.first) ) { continue; }
+		s_classPatches[kv.first] = kv.second;
+	}
+	s_classPassives.clear();
+	for ( const auto& kv : passives )
+	{
+		if ( kv.first >= SAM_CLASS_ID_BASE && !getClass(kv.first) ) { continue; }
+		for ( int eff : kv.second )
+		{
+			if ( eff >= 0 ) { s_classPassives[kv.first].insert(eff); }
+		}
+	}
+	SAM_INFO(MOD, "Took the host's class overlay: " + std::to_string(s_classPatches.size()) + " patched class(es), "
+		+ std::to_string(s_classPassives.size()) + " with passives.");
+}
+
 const SAMClassDef* SAMClasses::getClass(int classId)
 {
 	auto it = s_registry.find(classId);

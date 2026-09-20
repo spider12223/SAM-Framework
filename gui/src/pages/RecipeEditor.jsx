@@ -14,6 +14,7 @@
  */
 import { useMemo, useState } from 'react';
 import { validate } from '@/lib/validate.js';
+import { carryUnknown } from '@/lib/editorKeys.js';
 import { useMod } from '@/state/ModContext.jsx';
 import {
   Panel, Field, NumberInput, Select, GoldButton, ErrorList, SavedNote, SearchSelect,
@@ -101,7 +102,11 @@ export default function RecipeEditor() {
       def.magic_cost = Number(magic) || 0;
     }
     if (status !== 'EXCELLENT') def.status = status;
-    return def;
+    // This editor has no "open an existing recipe" route, but saving one whose id already
+    // exists REPLACES it (the reducer upserts by id), so the same loss applies. Carry
+    // anything this editor has no control for -- a hand-written or later-schema field --
+    // off whatever recipe is about to be overwritten.
+    return carryUnknown(recipes.find((r) => r.id === def.id) ?? null, def, 'recipe');
   };
 
   const save = () => {
@@ -134,7 +139,7 @@ export default function RecipeEditor() {
 
   const preview = useMemo(() => JSON.stringify(buildDef(), null, 2),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [item, kit, payWith, metal, magic, matA, matACount, matB, matBCount, tier, status, namespace]);
+    [item, kit, payWith, metal, magic, matA, matACount, matB, matBCount, tier, status, namespace, recipes]);
 
   return (
     <div className="space-y-4 max-w-5xl mx-auto">

@@ -68,6 +68,11 @@ namespace SAMModels
 	// This is what makes an item's `model` field resolvable.
 	int modelIndexForId(const std::string& id);
 
+	// The reverse: the id a MOD model index was registered under, or "" for a vanilla index or
+	// one nothing registered. Multiplayer sends a spawned entity's model by this NAME, because
+	// the index is appended per machine and means another model under another mod list.
+	std::string idForModelIndex(int index);
+
 	// ---- naming a VANILLA model by path instead of by index --------------------------
 	//
 	// Called once per line while init.cpp loads models.txt, before anything else in the

@@ -1,12 +1,14 @@
 # Installing the S.A.M Framework
 
-**S.A.M — "Support All Mods" — is a modding framework for Barony.** It lets mods
-add classes, items, and monsters from plain JSON. It is a **dependency**: on its
-own it does nothing you can play, but any mod built with S.A.M needs it installed.
+**S.A.M, short for "Support All Mods", is a modding framework for Barony.** It lets
+mods add classes, items, monsters, races, spells, status effects, sounds, music and
+models from plain JSON, and drive them with a script if they want to. It is a
+**dependency**: on its own it does nothing you can play, but any mod built with
+S.A.M needs it installed.
 
 Because S.A.M works by extending Barony's own program, it is delivered as a
 **patched `barony.exe`** (included in this package), not as a normal mod folder.
-A second file, **`typescript.js`**, is also included — it is the TypeScript
+A second file, **`typescript.js`**, is also included. It is the TypeScript
 compiler S.A.M uses for `.ts` mod scripts. (Lua and JavaScript mod scripts work
 without it; only TypeScript needs it.)
 
@@ -42,16 +44,16 @@ your mods are untouched either way.
 
 You have two ways to obtain the framework:
 
-### Option A — From this package (recommended, offline)
+### Option A: from this package (recommended, offline)
 This folder already contains the ready-to-use `barony.exe`. Skip to step 3.
 
-### Option B — From Steam Workshop
+### Option B: from Steam Workshop
 > **Workshop link:** https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472
 
 1. Open the S.A.M Framework Workshop page and click **Subscribe**.
 2. Follow the Workshop page's install note (it links to the patched `barony.exe`,
    because Steam Workshop can deliver mod *content* but not a replacement game
-   program — see the note at the bottom of this file).
+   program. See the note at the bottom of this file.)
 
 Either way, you end up with the S.A.M **`barony.exe`**.
 
@@ -75,10 +77,10 @@ Either way, you end up with the S.A.M **`barony.exe`**.
 3. Copy **`typescript.js`** from this package into the **same** folder (right next
    to `barony.exe`). This enables TypeScript (`.ts`) mod scripts; Lua and
    JavaScript scripts work without it.
-4. That's it — nothing else changes.
+4. That's it. Nothing else changes.
 
 > Prefer one click? The **installer** (`SAM_Framework_Installer.exe`) does
-> all of this automatically — it backs up your original `barony.exe`, installs the
+> all of this automatically: it backs up your original `barony.exe`, installs the
 > S.A.M one, and deploys `typescript.js`.
 
 ---
@@ -108,7 +110,7 @@ S.A.M is only useful with mods built on it. To add one:
 2. Place the mod folder in **`Barony/mods/<mod_name>/`** so that
    `Barony/mods/<mod_name>/mod.json` exists.
 3. Launch Barony → **Mods** menu → enable the mod → **Play**.
-4. Check `sam_log.txt` — you should see the mod get scanned and its content
+4. Check `sam_log.txt`. You should see the mod get scanned and its content
    registered, e.g.:
 
    ```
@@ -120,7 +122,7 @@ S.A.M is only useful with mods built on it. To add one:
 
 ## 7. Build your own mod (no coding)
 
-Open the free browser tool — nothing to install:
+Open the free browser tool. There is nothing to install:
 
 **https://spider12223.github.io/SAM-Framework/**
 
@@ -149,7 +151,7 @@ Barony"** that writes the mod straight into your `mods/` folder (Chrome/Edge).
 - The folder must be `Barony/mods/<name>/mod.json` (not zipped, not nested one
   level too deep).
 - Enable it in the in-game **Mods** menu, then start a new game.
-- Open `sam_log.txt` — S.A.M logs a clear reason for anything it skips
+- Open `sam_log.txt`. S.A.M logs a clear reason for anything it skips
   (bad JSON, unknown field, missing dependency) with a "did you mean?" hint.
 
 **Steam updated Barony and now S.A.M is gone.**
@@ -173,7 +175,7 @@ Barony"** that writes the mod straight into your `mods/` folder (Chrome/Edge).
 
 ## Note on Steam Workshop delivery
 
-Steam Workshop items are **content folders that the game mounts** — they cannot
+Steam Workshop items are **content folders that the game mounts**, and they cannot
 replace the game's executable. Since S.A.M is compiled into `barony.exe`, the
 patched executable must be delivered as a file (in this package, or via a link
 on the Workshop page / GitHub release), while the Workshop item itself serves as

@@ -51,7 +51,13 @@ public:
 
 	// Host only (multiplayer == SERVER): send our fingerprint to the given
 	// connected player slot (1..MAXPLAYERS-1) as chunked "SAMF" safe packets.
-	static void sendFingerprint(int player);
+	// `solicited` means the client asked for it (requestFingerprint). With no mods
+	// loaded there is nothing to say, and an unsolicited empty "SAMF" is a packet
+	// vanilla never sends -- a stock client logs it as a mystery packet, and a host
+	// with no mods is supposed to be indistinguishable from a vanilla one. An
+	// ASKED-for empty fingerprint is still answered: the client is waiting for it,
+	// and "the host has no mods" is the answer.
+	static void sendFingerprint(int player, bool solicited = false);
 
 	// Client only (multiplayer == CLIENT): ask the host to (re)send its
 	// fingerprint. Called from the lobby card in case the join-time send was

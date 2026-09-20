@@ -19,7 +19,7 @@
  * It also only ever reads event fields the chosen trigger actually carries (see
  * actionsFor() in blocks.js), so it can't generate a read of a field that's always nil.
  */
-import { findTrigger, findCondition, findAction, triggerHasPlayer, EVERY_SECONDS, TICKS_PER_SECOND } from '@/data/blocks.js';
+import { findTrigger, findCondition, findAction, triggerHasPlayer, triggerPlayerMayBeMissing, playerAbsentReason, EVERY_SECONDS, TICKS_PER_SECOND } from '@/data/blocks.js';
 
 const HEADER = '-- Built with the S.A.M block builder. Edit freely — this is just Lua.';
 
@@ -150,6 +150,18 @@ export function generateLua(spec) {
       if (t.gotcha) out.push(...comment(`NOTE: ${t.gotcha}`, 74, '    '));
       if (triggerHasPlayer(t)) {
         out.push('    local player = event.player');
+        // Some events carry a player that is not always a player. They fire at a place in
+        // the engine where a monster or a trap can be the one doing it, and then event.player
+        // is -1, which is not a player index -- every action here takes a player first, and
+        // the game refuses all of them for -1 (some loudly in sam_log.txt, some in silence).
+        // Without this line the ability looks like it works, does nothing for monsters, and
+        // fills the log. See PLAYER_MAY_BE_MISSING in data/blocks.js for the fire sites.
+        if (triggerPlayerMayBeMissing(t)) {
+          out.push(...comment(`${playerAbsentReason(t)} event.player is then -1, and everything `
+            + 'below needs a real player, so there is nothing to do. Delete this line only if you '
+            + 'replace it with something that works without one.', 74, '    '));
+          out.push('    if type(player) ~= "number" or player < 0 then return end');
+        }
       } else {
         out.push('    -- This event carries no player; in single-player the local host is you.');
         out.push('    local player = 0');

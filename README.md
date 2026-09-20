@@ -106,7 +106,7 @@ end
 
 ### Hooks & API
 
-**As of v2.1 the scripting surface is 168 functions and 65 events**, every one of them available in Lua, JavaScript and TypeScript alike. The full, generated reference lives in the [Mod Builder](https://spider12223.github.io/SAM-Framework/) — it is built from the engine source, so it is the one that is never out of date. What follows is the historical tour, kept because it explains the ideas rather than just listing names.
+**Every script function and event is listed in [docs/function-reference.md](docs/function-reference.md)**, which is generated from the API definition and starts with the current totals — no count is written by hand here, because a number typed into prose is wrong the next time a function lands (this line said "168 functions and 65 events" long after both were true). Every one of them works in Lua, JavaScript and TypeScript alike, and each entry ends with a **Multiplayer:** line saying which machine it runs on. The same reference drives the [Mod Builder](https://spider12223.github.io/SAM-Framework/). What follows is the historical tour, kept because it explains the ideas rather than just listing names.
 
 **41 gameplay hooks and 26 host API functions** — every hook fires in Lua, JavaScript and TypeScript alike, host-authoritative (server/singleplayer only). The tables below are the v0.3–v0.5 core; **[New in v0.6.0](#new-in-v060)** adds 30 hooks and 14 host APIs (timers, persistent data, custom cross-runtime hooks, player queries).
 
@@ -136,7 +136,8 @@ end
 | `sam_apply_effect(player, "EFFECT", ticks)` | apply a status effect (`LEVITATING`, `INVISIBLE`, `POISONED`, …) for N ticks (50/sec) |
 | `sam_remove_effect(player, "EFFECT")` | clear a status effect |
 | `sam_get_floor()` → number | current dungeon floor (0-based) |
-| `sam_play_sound(soundId [, vol])` | play a sound effect for all players |
+| `sam_play_sound(soundId [, vol])` | play a sound effect for all players (a file in `sounds/` is ready to play; see [Sounds and music](docs/sounds-and-music.md)) |
+| `sam_play_music(track)` / `sam_stop_music()` | take over the music for everyone, then hand it back |
 | `sam_get_nearby_entities(player, radius)` → array | UIDs of creatures within `radius` tiles (max 32) |
 
 <a id="new-in-v060"></a>
@@ -258,7 +259,7 @@ Every script runs locked-down so a broken or malicious mod can't take down the g
 - No filesystem / network / OS: Lua has `os`/`io`/`dofile`/`loadfile`/`require` stripped; the JS/TS engine never links quickjs-libc, so there is no `fs`/`require`/`fetch`/`process`.
 - A script error disables **only that script** — it never crashes the host.
 - Scripts only ever receive **copied primitives** (ints, strings, UIDs), never a raw `Entity`/`Item` pointer — so a freed game object can't cause a use-after-free.
-- Gameplay hooks run **host-authoritative only** (server/singleplayer), so multiplayer stays in sync.
+- Gameplay hooks run **host-authoritative** (server/singleplayer), so multiplayer stays in sync. Every function declares how it behaves in co-op and the game enforces it, carrying a call to the player's own machine when that is where the thing lives — see [Multiplayer](docs/multiplayer.md).
 
 Working examples: [`examples/lua/assassin.lua`](examples/lua/assassin.lua) · [`examples/js/assassin.js`](examples/js/assassin.js) · [`examples/typescript/assassin.ts`](examples/typescript/assassin.ts).
 
@@ -312,6 +313,16 @@ of**, the item and monster **traits**, and the console commands for testing with
 If you are about to hardcode an item or effect id, read the "Never hardcode an id" section
 first — the enum values are not what you would guess and a wrong one fails silently.
 
+## Multiplayer
+
+Your script's runtime code runs on the **host**; you name players by index, and S.A.M carries
+each call to the machine it has to run on. Every function carries one of seven kinds (`host`,
+`owner`, `screen`, `read`, `all`, `local`, `any`) that the game enforces, and every event says
+which machine it fires on. How the model works, what a player without S.A.M can and cannot
+receive, and how to test a co-op game alone on one computer:
+
+**[docs/multiplayer.md](docs/multiplayer.md)**
+
 ## Schema reference
 
 All content is validated against JSON Schemas (draft-07), which are the single source of truth for the framework, the GUI, and editor autocomplete:
@@ -325,11 +336,11 @@ All content is validated against JSON Schemas (draft-07), which are the single s
 | [`race.schema.json`](schemas/race.schema.json) | A playable race: host body, its own limb models, allegiances |
 | [`spell.schema.json`](schemas/spell.schema.json) | A castable custom spell |
 | [`effect.schema.json`](schemas/effect.schema.json) | A custom status effect |
-| [`sound.schema.json`](schemas/sound.schema.json) | An `.ogg` your mod ships |
+| [`sound.schema.json`](schemas/sound.schema.json) | A sound your mod adds or replaces (usually not needed: see [Sounds and music](docs/sounds-and-music.md)) |
 | [`recipe.schema.json`](schemas/recipe.schema.json) | What the tinkering kit can build |
 | [`patch.schema.json`](schemas/patch.schema.json) | A layered patch to an existing data file |
 
-A human-readable, always-in-sync field reference is generated from these: **[Schema Reference →](https://spider12223.github.io/SAM-Framework/docs/schema-reference.html)** (or open [`docs/schema-reference.html`](docs/schema-reference.html) locally).
+A human-readable field reference is generated from these by [`tools/gen_schema_docs.mjs`](tools/gen_schema_docs.mjs), and the ship gate refuses a release where it has fallen behind, so it cannot describe a field the schemas do not have: **[Schema Reference →](https://spider12223.github.io/SAM-Framework/docs/schema-reference.html)** (or open [`docs/schema-reference.html`](docs/schema-reference.html) locally).
 
 ---
 

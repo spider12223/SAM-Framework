@@ -33,6 +33,9 @@
 #include "sam_items.hpp"     // SAM_ITEM_ID_BASE
 #include "sam_effects.hpp"       // v1.5.0: resolve on_hit_effect custom "ns:effect" -> slot
 #include "sam_lua_runtime.hpp"   // v1.5.0: SAMLua::effectIdFromName (vanilla EFF_ names)
+#include "sam_mp_inventory.hpp"  // noteOwnerRefusal: a carried grant/removal that failed here
+#include "player.hpp"            // players[]->magic (spell list, selected spells) and the hotbar
+#include "stat.hpp"              // stats[]->inventory (the spell items addSpell creates)
 
 #include <fstream>
 #include <sstream>
@@ -438,6 +441,243 @@ bool SAMSpells::grantCustomSpell(int player, const std::string& namespacedId)
 			+ " (already known or non-local player).");
 	}
 	return ok;
+}
+
+/*-------------------------------------------------------------------------------
+	The script API's spell operations. One copy for both runtimes: the Lua and JS twins of
+	these used to drift (the numeric id path existed in the casters but not in the grant,
+	custom spells came back under two different names).
+-------------------------------------------------------------------------------*/
+int SAMSpells::resolveSpellRef(const std::string& spell)
+{
+	// A numeric id as text. sam_get_tome_spell hands back a NUMBER and Lua turns it into "4"
+	// on the way in, so "read what this book teaches, then grant it" needs this path.
+	{
+		bool digits = !spell.empty();
+		for ( char c : spell ) { if ( c < '0' || c > '9' ) { digits = false; break; } }
+		if ( digits )
+		{
+			if ( spell.size() > 9 ) { return -1; }   // past any id, and past what an int holds
+			const int id = (int)strtol(spell.c_str(), nullptr, 10);
+			return ( ItemTooltips.spellItems.find(id) != ItemTooltips.spellItems.end() ) ? id : -1;
+		}
+	}
+	if ( spell.find(':') != std::string::npos )
+	{
+		const SAMSpellDef* def = getSpellByName(spell);
+		return def ? def->numericId : -1;
+	}
+	const std::string lower = toLowerStr(spell);
+	for ( const auto& kv : ItemTooltips.spellItems )
+	{
+		if ( kv.second.internalName == lower ) { return kv.first; }
+	}
+	return -1;
+}
+
+std::string SAMSpells::scriptName(int spellId)
+{
+	// A mod's spell answers with the id its JSON declared, so a script can compare it with its
+	// own data instead of with the mangled internal name buildEngineSpell made up.
+	if ( const SAMSpellDef* def = getSpell(spellId) )
+	{
+		if ( !def->id.empty() ) { return def->id; }
+	}
+	// allGameSpells, not getSpellFromID: that one asserts on an id nothing defines.
+	auto it = allGameSpells.find(spellId);
+	if ( it != allGameSpells.end() && it->second ) { return std::string(it->second->spell_internal_name); }
+	return std::string();
+}
+
+namespace
+{
+	// The removal queue lives up here, above grantSpell, because a grant has to be able to
+	// take an entry back off it: see the comment in grantSpell.
+	struct SamPendingSpellRemoval { int player; int spellId; };
+	std::vector<SamPendingSpellRemoval> s_pendingSpellRemovals;
+
+	bool samPlayerKnowsSpell(int player, int spellId)
+	{
+		for ( node_t* node = players[player]->magic.spellList.first; node; node = node->next )
+		{
+			const spell_t* sp = (const spell_t*)node->element;
+			if ( sp && sp->ID == spellId ) { return true; }
+		}
+		return false;
+	}
+
+	// Take a queued removal back off the queue, if one is waiting. True if there was one.
+	bool samCancelPendingRemoval(int player, int spellId)
+	{
+		for ( auto it = s_pendingSpellRemovals.begin(); it != s_pendingSpellRemovals.end(); ++it )
+		{
+			if ( it->player == player && it->spellId == spellId )
+			{
+				s_pendingSpellRemovals.erase(it);
+				return true;
+			}
+		}
+		return false;
+	}
+}
+
+bool SAMSpells::grantSpell(int player, int spellId)
+{
+	if ( player < 0 || player >= MAXPLAYERS || !players[player] || !stats[player] ) { return false; }
+	// addSpell asserts on an id with no engine spell, so it is never handed one.
+	if ( allGameSpells.find(spellId) == allGameSpells.end() )
+	{
+		SAM_ERROR(MOD, "grant: spell id " + std::to_string(spellId) + " has no engine spell; nothing granted.");
+		return false;
+	}
+	const std::string name = scriptName(spellId);
+	// addSpell only ever teaches a player who plays on this machine (spell.cpp:155-159): the
+	// spell list and its spell item live there and nowhere else.
+	if ( !players[player]->isLocalPlayer() )
+	{
+		SAMMpInventory::noteOwnerRefusal("sam_grant_spell", "player " + std::to_string(player)
+			+ " does not play on this machine, so '" + name + "' cannot be taught here.", true, "notlocal");
+		return false;
+	}
+	// A removal of this same spell is still waiting to be drained, so the player has not lost
+	// it yet. Swapping a vanilla spell for a mod's own version is written as sam_remove_spell
+	// then sam_grant_spell in one handler, and because the removal is only QUEUED (it has to
+	// be: the engine frame the script is answering may be casting that very spell_t, see
+	// queueRemoveSpell) addSpell below would refuse "already knows it" and the queued removal
+	// would then take the spell away a frame later, leaving the player with neither. Taking
+	// the removal back off the queue is the whole job: the spell is already in the list.
+	// The queue is not drained here instead, because this is not the safe point for it.
+	if ( samCancelPendingRemoval(player, spellId) && samPlayerKnowsSpell(player, spellId) )
+	{
+		SAM_INFO(MOD, "Granted spell " + name + " (id " + std::to_string(spellId) + ") to player "
+			+ std::to_string(player) + " by cancelling the removal queued for it in the same frame.");
+		return true;
+	}
+	// ignoreSkill: a script's grant is not a book being read, so no skill check. With that,
+	// the only way addSpell says no is that the spell is already known (it tells the player so).
+	if ( !addSpell(spellId, player, true) )
+	{
+		SAMMpInventory::noteOwnerRefusal("sam_grant_spell", "player " + std::to_string(player)
+			+ " already knows '" + name + "'; nothing changed.", true, "known");
+		return false;
+	}
+	SAM_INFO(MOD, "Granted spell " + name + " (id " + std::to_string(spellId) + ") to player " + std::to_string(player) + ".");
+	return true;
+}
+
+namespace
+{
+	// A hotbar slot keeps an item uid plus a copy of the last item it held, which it uses to
+	// re-bind a lookalike later. Clearing both is what the engine does when it takes a spell
+	// off the bar (charclass.cpp:3882-3886).
+	void samClearHotbarUid(int player, Uint32 uid)
+	{
+		auto& hotbar = players[player]->hotbar;
+		for ( auto& slot : hotbar.slots() )
+		{
+			if ( slot.item == uid ) { slot.item = 0; slot.resetLastItem(); }
+		}
+		for ( auto& alternate : hotbar.slotsAlternate() )
+		{
+			for ( auto& slot : alternate )
+			{
+				if ( slot.item == uid ) { slot.item = 0; slot.resetLastItem(); }
+			}
+		}
+	}
+}
+
+bool SAMSpells::queueRemoveSpell(int player, int spellId)
+{
+	if ( player < 0 || player >= MAXPLAYERS || !players[player] || !stats[player] ) { return false; }
+	const std::string name = scriptName(spellId);
+	if ( !players[player]->isLocalPlayer() )
+	{
+		SAMMpInventory::noteOwnerRefusal("sam_remove_spell", "player " + std::to_string(player)
+			+ " does not play on this machine, so '" + name + "' cannot be removed here.", true, "notlocal");
+		return false;
+	}
+	if ( !samPlayerKnowsSpell(player, spellId) )
+	{
+		SAMMpInventory::noteOwnerRefusal("sam_remove_spell", "player " + std::to_string(player)
+			+ " does not know '" + name + "'; nothing to remove.", true, "unknown");
+		return false;
+	}
+	for ( const auto& q : s_pendingSpellRemovals )
+	{
+		if ( q.player == player && q.spellId == spellId ) { return true; }   // already queued; not an error
+	}
+	s_pendingSpellRemovals.push_back({ player, spellId });
+	return true;
+}
+
+void SAMSpells::drainRemoveQueue()
+{
+	if ( s_pendingSpellRemovals.empty() ) { return; }
+
+	// Swapped out first, like the item queue: anything a removal causes to be queued belongs
+	// to the next frame.
+	std::vector<SamPendingSpellRemoval> batch;
+	batch.swap(s_pendingSpellRemovals);
+
+	for ( const auto& q : batch )
+	{
+		const int p = q.player;
+		if ( p < 0 || p >= MAXPLAYERS || !players[p] || !stats[p] || !players[p]->isLocalPlayer() ) { continue; }
+		auto& magic = players[p]->magic;
+		node_t* found = nullptr;
+		for ( node_t* node = magic.spellList.first; node; node = node->next )
+		{
+			const spell_t* sp = (const spell_t*)node->element;
+			if ( sp && sp->ID == q.spellId ) { found = node; break; }
+		}
+		if ( !found ) { continue; }   // ordinary play got there first
+		spell_t* const sp = (spell_t*)found->element;
+
+		// list_RemoveNode runs spellDeconstructor, which frees the spell_t (spell.cpp:612-650).
+		// The player keeps three kinds of raw pointer to it outside the list: the selected
+		// spell, the per-hotbar alternates and the quick-cast spell (player.hpp:1767-1771).
+		// Casting through any of them after the free is a use-after-free, so they go first,
+		// the way the engine itself drops a spell it takes away (charclass.cpp:4019-4027).
+		if ( magic.selectedSpell() == sp )
+		{
+			magic.equipSpell(nullptr);
+			magic.selected_spell_last_appearance = -1;
+		}
+		for ( unsigned c = 0; c < NUM_HOTBAR_ALTERNATES; ++c )
+		{
+			if ( magic.selected_spell_alternate[c] == sp ) { magic.selected_spell_alternate[c] = nullptr; }
+		}
+		if ( magic.quickCastSpell() == sp ) { magic.resetQuickCastSpell(); }
+
+		// The spell item addSpell put in the backpack (spell.cpp:458), and its shapeshift twin,
+		// whose appearance is 1000 + id for a vanilla spell (spell.cpp:375-377). Left behind,
+		// either one sits in the bag and on the hotbar and casts nothing.
+		std::vector<Uint32> itemUids;
+		for ( node_t* node = stats[p]->inventory.first; node; node = node->next )
+		{
+			const Item* it = (const Item*)node->element;
+			if ( !it || it->type != SPELL_ITEM ) { continue; }
+			const bool plain = ( it->appearance == (Uint32)q.spellId );
+			const bool shapeshift = ( q.spellId >= 0 && q.spellId < NUM_SPELLS
+				&& it->appearance == (Uint32)(1000 + q.spellId) );
+			if ( plain || shapeshift ) { itemUids.push_back(it->uid); }
+		}
+		for ( const Uint32 uid : itemUids )
+		{
+			samClearHotbarUid(p, uid);
+			if ( Item* it = uidToItem(uid) ) { SAMItems::destroyNow(it, p); }
+		}
+
+		const std::string name = scriptName(q.spellId);
+		list_RemoveNode(found);
+		SAM_INFO(MOD, "Removed spell " + name + " from player " + std::to_string(p) + ".");
+	}
+}
+
+void SAMSpells::clearRemoveQueue()
+{
+	s_pendingSpellRemovals.clear();
 }
 
 void SAMSpells::removeEngineSpells()

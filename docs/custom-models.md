@@ -154,6 +154,36 @@ get wrong by one.
 exist -- and `limb_models` decides what is drawn in each slot. Omit a limb and it keeps the
 host body's model, so this covers "just the head" and "a whole new body" with one field.
 
+### Arms that bend when they hold something
+
+An arm has two poses in Barony: straight, and bent around whatever the hand is holding. The
+base game switches between them by stepping two entries forward in its own model list, which
+works because it authored the four arms next to each other:
+
+```
+110 MaleArmRight   111 MaleArmLeft   112 MaleArmBentRight   113 MaleArmBentLeft
+```
+
+Your arm is a single model added to the end of that list with nothing reserved after it, so
+that step would land on some unrelated model. Name the bent one instead:
+
+```json
+"limb_models": {
+  "arm_right": { "model": "mymod:arm_right", "bent": "mymod:arm_right_bent" },
+  "arm_left":  { "model": "mymod:arm_left",  "bent": "mymod:arm_left_bent" }
+}
+```
+
+The right arm bends while it holds a weapon and during a spell windup; the left while it holds
+a shield, a lantern or a quiver, but not a spellbook, which is exactly what the built-in races
+do. Leave `bent` out and the arm keeps one pose, which is what every custom race did before
+this field existed. Leave the arms out of `limb_models` altogether and you get the host body's
+arms, which bend on their own.
+
+`bent` only means anything on `arm_right` and `arm_left`; on any other limb it is reported and
+ignored. And remember the rule above: an arm is only visible while that armour slot is empty,
+so gloves and gauntlets cover it, bent or not.
+
 Two things follow from that, and neither is a bug:
 
 - **Everything except the head is only visible when that armour slot is empty.** A custom

@@ -1,6 +1,8 @@
 # Lua behavior example
 
-`assassin.lua` is a complete S.A.M behavior script (v0.3.0+).
+`assassin.lua` is a complete S.A.M behavior script. It needs framework v0.5.0 or newer:
+sam_spawn_item, sam_play_sound, sam_apply_effect, sam_get_floor and sam_get_nearby_entities
+all arrived in that release.
 
 Put a `.lua` file next to a class JSON with the **same base name** and S.A.M loads
 it automatically at launch:

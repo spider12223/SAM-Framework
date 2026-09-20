@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { PATCH_OPS } from '@/data/schemas.js';
 import { VANILLA_TARGETS, vanillaTarget, fillPath } from '@/data/vanillaCatalog.js';
 import { validate } from '@/lib/validate.js';
+import { carryUnknown } from '@/lib/editorKeys.js';
 import { useMod } from '@/state/ModContext.jsx';
 import { Panel, Field, TextInput, GoldButton, ErrorList, SavedNote } from '@/components/ui.jsx';
 
@@ -35,6 +36,12 @@ function textToValue(text) {
 export default function PatchEditor() {
   const { patches, editing, dispatch } = useMod();
   const editDef = editing?.kind === 'patch' ? patches.find((p) => p.target === editing.id) : null;
+
+  // The def as it was when this page opened. `editDef` is derived from `editing`, and the
+  // effect below clears `editing` on mount -- so by the time Save is clicked `editDef` is
+  // already null. Saving has to carry the fields this editor cannot show, so it needs the
+  // definition it started from, captured once.
+  const [openedDef] = useState(() => editDef ?? null);
 
   const [target, setTarget] = useState(editDef?.target ?? 'items/items.json');
   const [ops, setOps] = useState(() =>
@@ -66,7 +73,9 @@ export default function PatchEditor() {
         }
         return entry;
       });
-    return { target: canonicalTarget(target), operations };
+    // Carry anything this editor has no control for straight through -- a field the
+    // author hand-wrote, or one a later schema adds, must survive a save here.
+    return carryUnknown(openedDef, { target: canonicalTarget(target), operations }, 'patch');
   };
 
   const save = () => {

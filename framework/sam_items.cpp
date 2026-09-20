@@ -17,6 +17,9 @@
 #endif
 
 #include "sam_items.hpp"
+#ifndef EDITOR
+#include "sam_sounds.hpp"   // an item's own sounds
+#endif
 #include "sam_workshop.hpp"
 #include "sam_logger.hpp"
 #include "sam_errors.hpp"
@@ -31,10 +34,14 @@
 #include <string>
 #include <utility>
 #include <algorithm> // std::find — beatitude_ac trait lookup in def.traits
+#include <vector>
+#include <cstdint>
 
 #include "main.hpp"    // list_t/string_t, stringCopy, stringDeconstructor, list_* helpers
 #include "items.hpp"   // items[], ItemGeneric, ItemType, Category, ItemEquippableSlot, NUM_ITEM_SLOTS
 #ifndef EDITOR
+#include "sam_net.hpp"               // item patches reach a joining client (see samItemsSendPatches)
+#include "sam_rules.hpp"             // SAMRules::NetOp, the rules package's op table
 #include "player.hpp"                // players[], inputs.getUIInteraction, inventoryUI
 #include "stat.hpp"                  // stats[] equipment slots
 #include "interface/interface.hpp"   // GenericGUI transmuteItemTarget
@@ -856,6 +863,23 @@ void SAMItems::loadFromManifest(const SAMModManifest& manifest)
 				}
 			}
 		}
+#ifndef EDITOR
+		{
+			// "sounds": { "SwingWeapon": "mymod:whoosh" } -- what whoever holds or wears THIS item
+			// plays instead of those vanilla sounds. A sword with its own swing, boots with their
+			// own footsteps. Resolved once every sound exists (SAMSounds::appendSounds).
+			auto it = j.find("sounds");
+			if ( it != j.end() && it->is_object() )
+			{
+				std::vector<std::pair<std::string, std::string>> map;
+				for ( auto s = it->begin(); s != it->end(); ++s )
+				{
+					if ( s.value().is_string() ) { map.emplace_back(s.key(), s.value().get<std::string>()); }
+				}
+				SAMSounds::stageItemSounds(def.id, manifest.ns, map, "Item [" + def.id + "] sounds");
+			}
+		}
+#endif
 		if ( !def.weaponSkill.empty()
 			&& def.weaponSkill != "sword" && def.weaponSkill != "axe"
 			&& def.weaponSkill != "mace"  && def.weaponSkill != "polearm" )
@@ -1135,6 +1159,135 @@ bool SAMItems::patchItem(int id, const SAMItemPatch& p)
 		+ std::to_string(p.attributes.size()) + " attribute override(s))");
 	return true;
 }
+
+#ifndef EDITOR
+// ---- multiplayer: the patched item table reaches a client that joins ------------------------
+//
+// Every patched slot as it stands now, whole, so the client can take it wholesale: revert
+// whatever it had patched itself, then write these. Custom item ids are handed out per mod SET,
+// so the same mods give the same ids on both machines, as the save-file id table relies on.
+// Body: [u16 n] per slot (u32 id, u32 weight, u32 gold_value, u32 level, u32 category,
+// u32 item_slot -- all signed values as their bit pattern -- str16 tooltip, str16 identified
+// name, str16 unidentified name, u16 attributes {str8 key, u32 value}).
+namespace
+{
+	std::uint8_t samItemPatchOp() { return (std::uint8_t)(SAMNet::Op::RulesFirst + SAMRules::NetOp::ItemPatches); }
+
+	void samItemsSendPatches(int peer)
+	{
+		if ( multiplayer != SERVER ) { return; }
+		SAMNet::Writer w;
+		std::vector<int> ids;
+		for ( const auto& kv : s_itemPatches ) { if ( kv.first >= 0 && kv.first < NUM_ITEM_SLOTS ) { ids.push_back(kv.first); } }
+		w.u16((std::uint16_t)ids.size());
+		for ( int id : ids )
+		{
+			const ItemGeneric& it = items[id];
+			w.u32((std::uint32_t)id);
+			w.u32((std::uint32_t)(std::int32_t)it.weight);
+			w.u32((std::uint32_t)(std::int32_t)it.gold_value);
+			w.u32((std::uint32_t)(std::int32_t)it.level);
+			w.u32((std::uint32_t)(std::int32_t)static_cast<int>(it.category));
+			w.u32((std::uint32_t)(std::int32_t)static_cast<int>(it.item_slot));
+			w.str16(it.tooltip);
+			w.str16(it.getIdentifiedName());
+			w.str16(it.getUnidentifiedName());
+			w.u16((std::uint16_t)it.attributes.size());
+			for ( const auto& a : it.attributes ) { w.str8(a.first); w.u32((std::uint32_t)a.second); }
+		}
+		SAMNet::sendToClient(peer, samItemPatchOp(), w.buf);
+	}
+
+	struct SamNetItemRecord
+	{
+		int id = -1, weight = 0, gold = 0, level = 0, category = 0, slot = 0;
+		std::string tooltip, nameId, nameUnid;
+		std::map<std::string, Sint32> attributes;
+	};
+
+	void samItemsOnPatches(const std::string& body)
+	{
+		SAMNet::Reader r(body);
+		std::vector<SamNetItemRecord> recs;
+		const int n = r.u16();
+		for ( int i = 0; i < n && r.ok; ++i )
+		{
+			SamNetItemRecord rec;
+			rec.id = (int)r.u32();
+			rec.weight = (int)(std::int32_t)r.u32();
+			rec.gold = (int)(std::int32_t)r.u32();
+			rec.level = (int)(std::int32_t)r.u32();
+			rec.category = (int)(std::int32_t)r.u32();
+			rec.slot = (int)(std::int32_t)r.u32();
+			rec.tooltip = r.str16();
+			rec.nameId = r.str16();
+			rec.nameUnid = r.str16();
+			const int na = r.u16();
+			for ( int k = 0; k < na && r.ok; ++k )
+			{
+				std::string key = r.str8();
+				rec.attributes[key] = (Sint32)r.u32();
+			}
+			recs.push_back(rec);
+		}
+		if ( !r.ok || multiplayer != CLIENT ) { return; }   // half the host's table is worse than ours
+		// Revert this machine's own patches first (the same restore SAMItems::clear() runs).
+		for ( const auto& kv : s_itemPatches )
+		{
+			const int id = kv.first;
+			if ( id < 0 || id >= NUM_ITEM_SLOTS ) { continue; }
+			const SAMItemSaved& s = kv.second;
+			items[id].weight = s.weight;
+			items[id].gold_value = s.gold_value;
+			items[id].level = s.level;
+			items[id].category = s.category;
+			items[id].item_slot = s.item_slot;
+			items[id].tooltip = s.tooltip;
+			items[id].setIdentifiedName(s.nameId);
+			items[id].setUnidentifiedName(s.nameUnid);
+			items[id].attributes = s.attributes;
+		}
+		s_itemPatches.clear();
+		for ( const SamNetItemRecord& rec : recs )
+		{
+			if ( rec.id < 0 || rec.id >= NUM_ITEM_SLOTS ) { continue; }
+			ItemGeneric& slot = items[rec.id];
+			// Originals first, exactly as patchItem snapshots them, so a later clear() restores.
+			SAMItemSaved s;
+			s.weight = slot.weight;
+			s.gold_value = slot.gold_value;
+			s.level = slot.level;
+			s.category = slot.category;
+			s.item_slot = slot.item_slot;
+			s.tooltip = slot.tooltip;
+			s.nameId = slot.getIdentifiedName();
+			s.nameUnid = slot.getUnidentifiedName();
+			s.attributes = slot.attributes;
+			s_itemPatches[rec.id] = s;
+			slot.weight = rec.weight;
+			slot.gold_value = rec.gold;
+			slot.level = rec.level;
+			slot.category = static_cast<Category>(rec.category);
+			slot.item_slot = static_cast<ItemEquippableSlot>(rec.slot);
+			slot.tooltip = rec.tooltip;
+			slot.setIdentifiedName(rec.nameId);
+			slot.setUnidentifiedName(rec.nameUnid);
+			slot.attributes = rec.attributes;
+		}
+		SAM_INFO(MOD, "Took the host's item patches (" + std::to_string(recs.size()) + " slot(s)).");
+	}
+
+	struct SamItemsNet
+	{
+		SamItemsNet()
+		{
+			SAMNet::onClientOp(samItemPatchOp(), &samItemsOnPatches);
+			SAMNet::addHelloHook(&samItemsSendPatches);
+		}
+	};
+	SamItemsNet s_itemsNet;
+}
+#endif
 
 const SAMItemDef* SAMItems::getItem(int itemId)
 {
@@ -1524,6 +1677,8 @@ void SAMItems::registerModModels()
 
 bool SAMItems::queueDestroy(uint32_t, int) { return false; }
 void SAMItems::drainDestroyQueue() {}
+void SAMItems::clearDestroyQueue() {}
+void SAMItems::destroyNow(Item*, int) {}
 
 #else
 
@@ -1603,8 +1758,73 @@ bool SAMItems::queueDestroy(uint32_t itemUid, int owner)
 	return true;
 }
 
+void SAMItems::destroyNow(Item* it, int owner)
+{
+	if ( !it ) { return; }
+
+	// Re-check: the item may have been equipped between queueing and now.
+	for ( int p = 0; p < MAXPLAYERS; ++p )
+	{
+		if ( samItemIsEquippedByPointer(it, p) )
+		{
+			SAM_WARN("ITEM", "destroy skipped: the item was equipped before the queue drained.");
+			return;
+		}
+	}
+
+	samForgetItemPointer(it);
+
+	// consumeItem decrements and only frees at zero (items.cpp:2436). Zero the stack
+	// first so one call really does destroy, instead of shaving one arrow off forty.
+	it->count = 1;
+	Item* tmp = it;
+	if ( owner < 0 || owner >= MAXPLAYERS ) { owner = clientnum; }
+
+	// consumeItem's own cleanup nulls whichever slot itemSlot matches (items.cpp:2445),
+	// and itemSlot matches through itemCompare, which cannot tell two identical items
+	// apart. Destroying a spare sword therefore nulls the slot holding the WORN one, and
+	// the unequip is saved. Deciding by pointer above is not enough, because the damage
+	// happens inside the engine call. Snapshot the slots and put back anything that was
+	// cleared while still holding a live item other than the one we are destroying.
+	Item* before[MAXPLAYERS][10] = {};
+	for ( int p = 0; p < MAXPLAYERS; ++p )
+	{
+		if ( !stats[p] ) { continue; }
+		Item* const slots[10] = { stats[p]->weapon, stats[p]->shield, stats[p]->helmet,
+			stats[p]->breastplate, stats[p]->gloves, stats[p]->shoes, stats[p]->cloak,
+			stats[p]->amulet, stats[p]->ring, stats[p]->mask };
+		for ( int k = 0; k < 10; ++k ) { before[p][k] = slots[k]; }
+	}
+
+	consumeItem(tmp, owner);
+
+	for ( int p = 0; p < MAXPLAYERS; ++p )
+	{
+		if ( !stats[p] ) { continue; }
+		Item** slots[10] = { &stats[p]->weapon, &stats[p]->shield, &stats[p]->helmet,
+			&stats[p]->breastplate, &stats[p]->gloves, &stats[p]->shoes, &stats[p]->cloak,
+			&stats[p]->amulet, &stats[p]->ring, &stats[p]->mask };
+		for ( int k = 0; k < 10; ++k )
+		{
+			// Cleared, but what it held was not the item we destroyed: itemSlot matched a
+			// twin. Put it back.
+			if ( *slots[k] == nullptr && before[p][k] != nullptr && before[p][k] != it )
+			{
+				*slots[k] = before[p][k];
+				SAM_WARN("ITEM", "destroy: the engine cleared an equipment slot holding an"
+					" identical item; restored it.");
+			}
+		}
+	}
+}
+
 void SAMItems::drainDestroyQueue()
 {
+	// Spell removals first. They are queued for the same reason items are (the engine frame a
+	// script answered may be casting that spell), each one destroys a spell item through
+	// destroyNow, and this is the one point per frame where that is known to be safe.
+	SAMSpells::drainRemoveQueue();
+
 	if ( s_pendingDestroy.empty() ) { return; }
 
 	// Swapped out first: destroying an item can run engine code, and anything that queues
@@ -1616,64 +1836,13 @@ void SAMItems::drainDestroyQueue()
 	{
 		Item* it = uidToItem((Uint32)q.uid);
 		if ( !it ) { continue; }   // ordinary gameplay got there first; nothing to do
-
-		// Re-check: the item may have been equipped between queueing and now.
-		bool equipped = false;
-		for ( int p = 0; p < MAXPLAYERS; ++p )
-		{
-			if ( samItemIsEquippedByPointer(it, p) ) { equipped = true; break; }
-		}
-		if ( equipped )
-		{
-			SAM_WARN("ITEM", "destroy skipped: the item was equipped before the queue drained.");
-			continue;
-		}
-
-		samForgetItemPointer(it);
-
-		// consumeItem decrements and only frees at zero (items.cpp:2436). Zero the stack
-		// first so one call really does destroy, instead of shaving one arrow off forty.
-		it->count = 1;
-		Item* tmp = it;
-		const int owner = ( q.owner >= 0 && q.owner < MAXPLAYERS ) ? q.owner : clientnum;
-
-		// consumeItem's own cleanup nulls whichever slot itemSlot matches (items.cpp:2445),
-		// and itemSlot matches through itemCompare, which cannot tell two identical items
-		// apart. Destroying a spare sword therefore nulls the slot holding the WORN one, and
-		// the unequip is saved. Deciding by pointer above is not enough, because the damage
-		// happens inside the engine call. Snapshot the slots and put back anything that was
-		// cleared while still holding a live item other than the one we are destroying.
-		Item* before[MAXPLAYERS][10] = {};
-		for ( int p = 0; p < MAXPLAYERS; ++p )
-		{
-			if ( !stats[p] ) { continue; }
-			Item* const slots[10] = { stats[p]->weapon, stats[p]->shield, stats[p]->helmet,
-				stats[p]->breastplate, stats[p]->gloves, stats[p]->shoes, stats[p]->cloak,
-				stats[p]->amulet, stats[p]->ring, stats[p]->mask };
-			for ( int k = 0; k < 10; ++k ) { before[p][k] = slots[k]; }
-		}
-
-		consumeItem(tmp, owner);
-
-		for ( int p = 0; p < MAXPLAYERS; ++p )
-		{
-			if ( !stats[p] ) { continue; }
-			Item** slots[10] = { &stats[p]->weapon, &stats[p]->shield, &stats[p]->helmet,
-				&stats[p]->breastplate, &stats[p]->gloves, &stats[p]->shoes, &stats[p]->cloak,
-				&stats[p]->amulet, &stats[p]->ring, &stats[p]->mask };
-			for ( int k = 0; k < 10; ++k )
-			{
-				// Cleared, but what it held was not the item we destroyed: itemSlot matched a
-				// twin. Put it back.
-				if ( *slots[k] == nullptr && before[p][k] != nullptr && before[p][k] != it )
-				{
-					*slots[k] = before[p][k];
-					SAM_WARN("ITEM", "destroy: the engine cleared an equipment slot holding an"
-						" identical item; restored it.");
-				}
-			}
-		}
+		destroyNow(it, q.owner);
 	}
+}
+
+void SAMItems::clearDestroyQueue()
+{
+	s_pendingDestroy.clear();
 }
 
 #endif // EDITOR

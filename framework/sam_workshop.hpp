@@ -23,6 +23,28 @@
 #include <vector>
 #include <utility>
 
+// One sound or music entry. Comes from an object in mod.json's "sounds" / "music" array, or
+// from a file dropped in one of the conventional folders, which need no JSON at all:
+//   sounds/<name>.ogg          -> a sound, id "<namespace>:<name>"
+//   sounds/replace/<name>.ogg  -> replaces the vanilla sound (or group) called <name>
+//   music/<name>.ogg           -> a music track, id "<namespace>:<name>"
+//   music/replace/<name>.ogg   -> replaces the vanilla track called <name>
+// An object in mod.json wins over a folder file for the same id or target.
+struct SAMAudioDecl
+{
+	std::string id;                    // "ns:name"; empty when this entry replaces something
+	std::string replace;               // vanilla name, group or index; empty when this entry adds
+	std::vector<std::string> files;    // mod-relative paths; more than one = variants, picked at random
+	double volume = 1.0;               // 0..4, multiplies whatever volume the sound is played at
+	bool loop = false;
+	bool loopSet = false;              // whether "loop" was written (music tracks default to looping)
+	std::vector<int> floors;           // music only: floors this track plays on (sam_get_floor numbering)
+	std::vector<std::string> maps;     // music only: map names this track plays on ("Minetown", a mod's own)
+	std::string combat;                // music only: mod-relative file for fights on those floors/maps
+	std::string origin;                // where it was declared, for log lines
+	bool fromFolder = false;           // found in a folder rather than written in mod.json
+};
+
 // One parsed mod.json. Field names mirror mod.schema.json (except `ns`, since
 // `namespace` is a C++ keyword).
 struct SAMModManifest
@@ -46,7 +68,9 @@ struct SAMModManifest
 	std::vector<std::string> spells;       // relative paths to spell JSON files
 	std::vector<std::string> effects;      // relative paths to custom status-effect JSON files
 	std::vector<std::string> races;        // relative paths to custom playable-race JSON files
-	std::vector<std::string> sounds;       // relative paths to custom sound JSON defs
+	std::vector<std::string> sounds;       // relative paths to custom sound JSON defs (the older form)
+	std::vector<SAMAudioDecl> soundDecls;  // inline "sounds" objects + sounds/ and sounds/replace/ files
+	std::vector<SAMAudioDecl> musicDecls;  // "music" objects + music/ and music/replace/ files
 	std::vector<std::string> recipes;      // relative paths to tinkering recipe JSON defs
 	std::vector<std::string> plugins;      // relative paths to plugin .dll files
 	// Standalone .vox models NOT tied to an item or class — for sam_spawn_companion and

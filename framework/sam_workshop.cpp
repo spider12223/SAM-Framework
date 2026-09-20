@@ -18,6 +18,7 @@
 #include <iterator>   // istreambuf_iterator (contentDigestFor)
 #include <sstream>
 #include <set>
+#include <filesystem>  // the sounds/ and music/ folders a mod may drop files into
 
 using nlohmann::json;
 
@@ -192,6 +193,186 @@ static bool checkVersions(const SAMModManifest& m, const std::string& baronyVers
 	return true;
 }
 
+/*-------------------------------------------------------------------------------
+	Sounds and music
+
+	A modder should be able to add a sound by dropping a file in a folder. Two routes, and
+	the object form in mod.json wins where both name the same thing:
+
+	  sounds/<name>.ogg          -> "<ns>:<name>"
+	  sounds/replace/<name>.ogg  -> replaces the vanilla sound or group <name>
+	  music/<name>.ogg           -> music track "<ns>:<name>"
+	  music/replace/<name>.ogg   -> replaces the vanilla track <name>
+-------------------------------------------------------------------------------*/
+
+static bool samIsAudioFile(const std::string& name)
+{
+	const size_t dot = name.find_last_of('.');
+	if ( dot == std::string::npos ) { return false; }
+	std::string ext = name.substr(dot + 1);
+	for ( char& c : ext ) { c = (char)std::tolower((unsigned char)c); }
+	// Whatever FMOD decodes. .ogg is what Barony itself ships; the rest are what modders have.
+	return ext == "ogg" || ext == "wav" || ext == "mp3" || ext == "flac";
+}
+
+// A file name as an id: lower case, anything outside a-z 0-9 _ becomes _. "Big Boom!.ogg" is
+// "big_boom_" -- predictable, and printed in the log so nobody has to guess.
+static std::string samAudioSlug(const std::string& stem)
+{
+	std::string s = stem;
+	for ( char& c : s )
+	{
+		const unsigned char u = (unsigned char)c;
+		if ( std::isalnum(u) ) { c = (char)std::tolower(u); }
+		else { c = '_'; }
+	}
+	return s;
+}
+
+// One object from "sounds" or "music". `where` names it in any error ("sounds[3]").
+static bool samParseAudioDecl(const json& el, bool isMusic, const std::string& ns,
+	const std::string& fileLabel, const std::string& where, SAMAudioDecl& d)
+{
+	const char* what = isMusic ? "music" : "sounds";
+	auto fail = [&](const std::string& field, const std::string& problem, const std::string& expected,
+		const std::string& fix) {
+		SAMErrors::reportSemantic(MOD, fileLabel, "/" + where + field, "", problem, expected, fix,
+			"that entry ignored.", true);
+		return false;
+	};
+
+	if ( auto it = el.find("id"); it != el.end() )
+	{
+		if ( !it->is_string() || it->get<std::string>().empty() ) { return fail("/id", "not a name", "a name, e.g. \"boom\"", "put the name in quotes"); }
+		d.id = it->get<std::string>();
+		if ( d.id.find(':') == std::string::npos ) { d.id = ns + ":" + d.id; }
+		else if ( d.id.compare(0, ns.size() + 1, ns + ":") != 0 )
+		{
+			SAM_WARN(MOD, std::string("[") + ns + "] " + what + " id '" + d.id + "' uses another mod's"
+				" namespace. It still loads, but two mods can now fight over one name; drop the"
+				" prefix and it becomes '" + ns + ":...' automatically.");
+		}
+	}
+	if ( auto it = el.find("replace"); it != el.end() )
+	{
+		if ( it->is_string() ) { d.replace = it->get<std::string>(); }
+		else if ( it->is_number_integer() ) { d.replace = std::to_string(it->get<long long>()); }
+		else { return fail("/replace", "not a name", "the vanilla name, e.g. \"SwingWeapon\"", "put the name in quotes"); }
+	}
+	if ( d.id.empty() == d.replace.empty() )
+	{
+		return fail("", d.id.empty() ? "has neither \"id\" nor \"replace\"" : "has both \"id\" and \"replace\"",
+			"\"id\" to add a new one, or \"replace\" to swap a vanilla one", "keep exactly one of the two");
+	}
+
+	auto fileOk = [&](const std::string& f) {
+		if ( f.empty() ) { return false; }
+		if ( SAMErrors::relPathEscapes(f) )
+		{
+			SAM_WARN(MOD, std::string("[") + ns + "] " + what + " file '" + f + "' escapes the mod folder -- ignored.");
+			return false;
+		}
+		return true;
+	};
+	if ( auto it = el.find("file"); it != el.end() )
+	{
+		if ( it->is_string() ) { if ( fileOk(it->get<std::string>()) ) { d.files.push_back(it->get<std::string>()); } }
+		else if ( it->is_array() )
+		{
+			for ( const auto& f : *it )
+			{
+				if ( f.is_string() && fileOk(f.get<std::string>()) ) { d.files.push_back(f.get<std::string>()); }
+			}
+		}
+	}
+	if ( d.files.empty() )
+	{
+		return fail("/file", "missing", std::string("a mod-relative audio file, e.g. \"") + (isMusic ? "music" : "sounds")
+			+ "/boom.ogg\", or a list of them to pick from at random", "add a \"file\" field");
+	}
+
+	if ( auto it = el.find("volume"); it != el.end() && it->is_number() )
+	{
+		double v = it->get<double>();
+		if ( !(v >= 0.0) ) { v = 0.0; }
+		if ( v > 4.0 ) { v = 4.0; }
+		d.volume = v;
+	}
+	if ( auto it = el.find("loop"); it != el.end() && it->is_boolean() ) { d.loop = it->get<bool>(); d.loopSet = true; }
+
+	if ( isMusic )
+	{
+		if ( auto it = el.find("floors"); it != el.end() )
+		{
+			if ( it->is_number_integer() ) { d.floors.push_back(it->get<int>()); }
+			else if ( it->is_array() ) { for ( const auto& f : *it ) { if ( f.is_number_integer() ) { d.floors.push_back(f.get<int>()); } } }
+		}
+		if ( auto it = el.find("maps"); it != el.end() )
+		{
+			if ( it->is_string() ) { d.maps.push_back(it->get<std::string>()); }
+			else if ( it->is_array() ) { for ( const auto& m : *it ) { if ( m.is_string() ) { d.maps.push_back(m.get<std::string>()); } } }
+		}
+		if ( auto it = el.find("combat"); it != el.end() && it->is_string() && fileOk(it->get<std::string>()) )
+		{
+			d.combat = it->get<std::string>();
+		}
+		if ( !d.replace.empty() && (!d.floors.empty() || !d.maps.empty()) )
+		{
+			SAM_WARN(MOD, std::string("[") + ns + "] music '" + d.replace + "': \"floors\" and \"maps\""
+				" are for a new track; a replacement plays wherever the vanilla one would. Ignored.");
+			d.floors.clear(); d.maps.clear();
+		}
+	}
+	d.origin = std::string("mod.json ") + where;
+	return true;
+}
+
+// Files dropped in <mod>/<sub>/, sorted so the order -- and every index handed out from it -- is
+// the same on every machine.
+static void samScanAudioFolder(const std::string& modPath, const std::string& sub, bool replaces,
+	const std::string& ns, std::vector<SAMAudioDecl>& out)
+{
+	std::error_code ec;
+	const std::filesystem::path dir = std::filesystem::path(modPath) / sub;
+	if ( !std::filesystem::is_directory(dir, ec) ) { return; }
+	std::vector<std::string> names;
+	for ( const auto& entry : std::filesystem::directory_iterator(dir, ec) )
+	{
+		if ( !entry.is_regular_file(ec) ) { continue; }
+		const std::string name = entry.path().filename().string();
+		if ( samIsAudioFile(name) ) { names.push_back(name); }
+	}
+	std::sort(names.begin(), names.end());
+	for ( const auto& name : names )
+	{
+		const std::string stem = name.substr(0, name.find_last_of('.'));
+		SAMAudioDecl d;
+		d.files.push_back(sub + "/" + name);
+		if ( replaces ) { d.replace = stem; }
+		else { d.id = ns + ":" + samAudioSlug(stem); }
+		d.origin = sub + "/" + name;
+		d.fromFolder = true;
+		out.push_back(d);
+	}
+}
+
+// Folder files join the declared list unless mod.json already names the same id or target.
+static void samMergeFolder(std::vector<SAMAudioDecl>& declared, const std::vector<SAMAudioDecl>& found)
+{
+	for ( const auto& f : found )
+	{
+		bool taken = false;
+		for ( const auto& d : declared )
+		{
+			std::string a = f.id.empty() ? f.replace : f.id, b = d.id.empty() ? d.replace : d.id;
+			for ( char& c : a ) { c = (char)std::tolower((unsigned char)c); }
+			for ( char& c : b ) { c = (char)std::tolower((unsigned char)c); }
+			if ( a == b && f.id.empty() == d.id.empty() ) { taken = true; break; }
+		}
+		if ( !taken ) { declared.push_back(f); }
+	}
+}
+
 // Content digest: FNV-1a 64 over every file the manifest DECLARES, each as its relative
 // path followed by its bytes, in sorted order so mount order cannot change the result.
 // '\r' bytes are dropped so a Windows (CRLF) checkout of the same mod digests like a Linux
@@ -207,7 +388,10 @@ static std::string contentDigestFor(const SAMModManifest& m)
 	for ( const auto& kv : m.models ) { rels.push_back(kv.second); }
 	for ( const auto& kv : m.images ) { rels.push_back(kv.second); }
 	for ( const auto& set : m.rooms ) { addAll(set.second); }
-	if ( rels.empty() ) { return std::string(); }
+	std::vector<std::string> audio;
+	for ( const auto& d : m.soundDecls ) { audio.insert(audio.end(), d.files.begin(), d.files.end()); }
+	for ( const auto& d : m.musicDecls ) { audio.insert(audio.end(), d.files.begin(), d.files.end()); if ( !d.combat.empty() ) { audio.push_back(d.combat); } }
+	if ( rels.empty() && audio.empty() ) { return std::string(); }
 	std::sort(rels.begin(), rels.end());
 	rels.erase(std::unique(rels.begin(), rels.end()), rels.end());
 
@@ -238,6 +422,18 @@ static std::string contentDigestFor(const SAMModManifest& m)
 			static const char kMissing[] = "<missing>";
 			mix(kMissing, sizeof(kMissing) - 1);
 		}
+	}
+	// Audio: path and size only. Two machines with the same file set get the same sound
+	// indices, and that is what this has to catch; hashing the bytes of every music track on
+	// every game start would cost seconds for nothing more.
+	std::sort(audio.begin(), audio.end());
+	audio.erase(std::unique(audio.begin(), audio.end()), audio.end());
+	for ( const auto& rel : audio )
+	{
+		std::error_code ec;
+		const auto size = std::filesystem::file_size(std::filesystem::path(joinPath(m.modPath, rel)), ec);
+		const std::string tag = rel + "#" + (ec ? std::string("<missing>") : std::to_string((unsigned long long)size));
+		mix(tag.data(), tag.size());
 	}
 	char buf[24];
 	snprintf(buf, sizeof(buf), "%016llx", h);
@@ -326,10 +522,10 @@ static bool parseManifest(const std::string& jsonText, const std::string& modPat
 		static const char* const kKnown[] = { "$schema", "namespace", "name", "author", "version",
 			"framework_min_version", "framework_max_version", "barony_min_version", "barony_max_version",
 			"incompatible_with_barony_version", "dependencies", "classes", "items", "patches", "monsters",
-			"spells", "effects", "races", "sounds", "recipes", "plugins", "models", "images", "rooms",
+			"spells", "effects", "races", "sounds", "music", "recipes", "plugins", "models", "images", "rooms",
 			"description", nullptr };
 		static const char* const kArrays[] = { "dependencies", "classes", "items", "patches", "monsters",
-			"spells", "effects", "races", "sounds", "recipes", "plugins", "models", "images", nullptr };
+			"spells", "effects", "races", "sounds", "music", "recipes", "plugins", "models", "images", nullptr };
 		for ( auto it = j.begin(); it != j.end(); ++it )
 		{
 			bool known = false;
@@ -378,7 +574,54 @@ static bool parseManifest(const std::string& jsonText, const std::string& modPat
 	out.spells = getStringArray("spells", true);
 	out.effects = getStringArray("effects", true);
 	out.races = getStringArray("races", true);
-	out.sounds = getStringArray("sounds", true);
+	// "sounds": each entry is either a path to a sound JSON file (the older form, still read) or
+	// the sound itself as an object -- { "id": "boom", "file": "sounds/boom.ogg" } or
+	// { "replace": "SwingWeapon", "file": "sounds/whoosh.ogg" }. "music" takes the objects.
+	for ( const char* key : { "sounds", "music" } )
+	{
+		const bool isMusic = std::string(key) == "music";
+		auto it = j.find(key);
+		if ( it == j.end() || !it->is_array() ) { continue; }
+		int index = 0;
+		for ( const auto& el : *it )
+		{
+			const std::string where = std::string(key) + "[" + std::to_string(index++) + "]";
+			if ( el.is_string() && !isMusic )
+			{
+				const std::string s = el.get<std::string>();
+				// A bare audio path here is the most common first attempt, and it used to be read
+				// as JSON and reported as a syntax error in the sound file. Take it as meant.
+				if ( samIsAudioFile(s) )
+				{
+					if ( SAMErrors::relPathEscapes(s) ) { SAM_WARN(MOD, "Manifest 'sounds' entry '" + s + "' escapes the mod folder -- ignored."); continue; }
+					SAMAudioDecl d;
+					d.files.push_back(s);
+					const size_t slash = s.find_last_of("/\\");
+					const std::string base = (slash == std::string::npos) ? s : s.substr(slash + 1);
+					d.id = getString("namespace") + ":" + samAudioSlug(base.substr(0, base.find_last_of('.')));
+					d.origin = std::string("mod.json ") + where;
+					out.soundDecls.push_back(d);
+					continue;
+				}
+				if ( SAMErrors::relPathEscapes(s) ) { SAM_WARN(MOD, "Manifest 'sounds' entry '" + s + "' escapes the mod folder -- ignored."); continue; }
+				out.sounds.push_back(s);
+				continue;
+			}
+			if ( !el.is_object() )
+			{
+				SAMErrors::reportSemantic(MOD, fileLabel, "/" + where, el.dump().substr(0, 40), "not an entry",
+					isMusic ? "an object: { \"id\": \"boss\", \"file\": \"music/boss.ogg\" }"
+					        : "an object: { \"id\": \"boom\", \"file\": \"sounds/boom.ogg\" }, or a path",
+					"write it as an object", "that entry ignored.", true);
+				continue;
+			}
+			SAMAudioDecl d;
+			if ( samParseAudioDecl(el, isMusic, getString("namespace"), fileLabel, where, d) )
+			{
+				(isMusic ? out.musicDecls : out.soundDecls).push_back(d);
+			}
+		}
+	}
 	out.recipes = getStringArray("recipes", true);
 	out.plugins = getStringArray("plugins", true);
 	// v1.4.0 — standalone .vox models for sam_spawn_companion / decorative entities. An
@@ -429,6 +672,19 @@ static bool parseManifest(const std::string& jsonText, const std::string& modPat
 	}
 	out.modPath = modPath;
 	out.displayName = displayName;
+
+	// The folders. After mod.json, so an object there for the same id or target wins.
+	if ( !out.ns.empty() )
+	{
+		std::vector<SAMAudioDecl> found;
+		samScanAudioFolder(modPath, "sounds", false, out.ns, found);
+		samScanAudioFolder(modPath, "sounds/replace", true, out.ns, found);
+		samMergeFolder(out.soundDecls, found);
+		found.clear();
+		samScanAudioFolder(modPath, "music", false, out.ns, found);
+		samScanAudioFolder(modPath, "music/replace", true, out.ns, found);
+		samMergeFolder(out.musicDecls, found);
+	}
 
 	// Required fields (mirrors mod.schema.json "required").
 	if ( out.ns.empty() )

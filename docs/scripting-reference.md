@@ -4,8 +4,9 @@ What your script can be told, what it can decide, and what it can change.
 
 > **Looking for a specific function?** This page is a guide, organised by what you are trying
 > to do. For the complete list of every function and event, with arguments and return values,
-> see **[function-reference.md](function-reference.md)** (184 functions, 72 events). That page
-> is generated from the API definition, so it is never out of date.
+> see **[function-reference.md](function-reference.md)**. That page is generated from the API
+> definition, so it is never out of date, and every function and event there ends with a
+> **Multiplayer:** line. For co-op as a whole, see **[multiplayer.md](multiplayer.md)**.
 
 A script is a `.lua`, `.js` or `.ts` file. Put it next to a class or item JSON with the same
 name, or call it `main.lua` at your mod's root and it loads on its own.
@@ -238,9 +239,10 @@ because Barony quantises scale on the wire in steps of 1/128 with a cap just und
 larger would look right to you and be wrong for everyone else.
 
 `sam_set_visible(uid, shown)` hides a model without touching the entity, so it still collides
-and still acts. It **refuses** on an entity that has a custom body: the draw pass deliberately
-keeps those visible (six vanilla species hide their main entity and rely on it), so hiding one
-this way would not work consistently. Clear the model first, or move it out of sight.
+and still acts. It **refuses** on players, monsters and ground items, whose visibility the game
+rewrites every frame — use `sam_apply_effect(uid, "INVISIBLE", ticks)` for a creature. On props,
+spawned entities and companions it works, custom model or not. (It used to refuse anything with
+a custom body; it no longer does, so there is no reason to `sam_clear_model` first.)
 
 ### Custom monster bodies now reach every player
 
@@ -281,9 +283,13 @@ id was never declared.
 
 `sam_set_monster_name(uid, "Grimt the Proof")` — renames a living creature. **Host-side
 only**: clients hold no Stat for an ordinary monster, which is also why
-`sam_get_monster_name` already returns nil on a client. So this shows in singleplayer and
-on the host, and carrying names to clients needs its own packet, which is not in this
-release. Also note Barony treats a name containing `lesser`, `young`, `enslaved`,
+`sam_get_monster_name` already returns nil on a client. For an enemy that is enough — the
+host's own enemy HP bar and combat messages carry the new name to every player. A
+**follower** is the exception, because its name is drawn on its owner's own machine from a
+copy the engine sends once when it is recruited: S.A.M now carries the rename there too, so
+a renamed pet shows correctly in its owner's ally panel and nametag if that owner runs
+S.A.M. Vanilla has no rename packet, so an owner without S.A.M keeps the old name.
+Also note Barony treats a name containing `lesser`, `young`, `enslaved`,
 `damaged`, `corrupted`, `cultist` or `encased` as generic and falls back to the species
 name — vanilla behaviour, but surprising if your epithet table contains those words.
 
@@ -555,8 +561,11 @@ creature's brain.
 Three things worth knowing before you build around it:
 
 - **Pick the base for its behaviour, not its looks.** A boss on a `rat` base moves like a rat.
-- **In multiplayer, other players see the base creature.** The host sees your model. Nothing
-  breaks, but model parity across the network is not in yet.
+- **In multiplayer, a player who does not have your mod sees the base creature.** The body is
+  announced by name and each machine resolves it against its own registry, so every player who
+  *does* have the mod sees your model; falling back to the base creature for the others is the
+  correct outcome rather than a desync. (See "Custom monster bodies now reach every player"
+  above — this used to be host-only.)
 - **Limbs stay vanilla on humanoid bases.** On a base creature built from separate body parts,
   your model replaces the main body; the limbs still come from the base. Single-model bases
   (rat, spider, scarab and similar) have no limbs and swap cleanly.
@@ -645,6 +654,20 @@ draws nothing rather than desyncing.
 
 ---
 
+## Multiplayer
+
+Your script's runtime code (its events, `on_tick` and timers) runs on the **host**. You name
+players by index, and S.A.M carries each call to the machine it has to run on: a screen call to
+that player's screen, a backpack or spell change to their own game, a rule change to everyone.
+Every function carries one of seven kinds the game enforces, and every event says which machine
+it fires on and for whom.
+
+**[multiplayer.md](multiplayer.md)** is the whole model, with an example of each kind, what a
+player without S.A.M can and cannot receive, what a client-side script may do, and how to test a
+co-op game by yourself on one computer (two copies of the game, each with its own log file).
+
+---
+
 ## Two other things worth knowing
 
 **Weapons need to say what they are.** A custom weapon with no `weapon_skill` trains no
@@ -672,7 +695,9 @@ skill, gets no damage variance, and its tooltip claims Sword. Set `"weapon_skill
 | `/sam_reload` | Re-read mods from disk (main menu only) |
 
 Everything these print also goes to `sam_log.txt`, and so does `sam_log()` from your script.
-The log is one file per session, with older runs archived in `sam_logs/`.
+The log is one file per session, with older runs archived in `sam_logs/`. A second copy of the
+game started from the same folder (how you test co-op alone) writes `sam_log_2.txt` and leaves
+the first copy's log alone; see [multiplayer.md](multiplayer.md).
 
 ---
 

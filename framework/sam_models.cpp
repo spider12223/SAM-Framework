@@ -746,6 +746,18 @@ int SAMModels::modelIndexForId(const std::string& id)
 	return -1;
 }
 
+std::string SAMModels::idForModelIndex(int index)
+{
+	// Only the appended range can hold a mod model; a vanilla index answers "" at once, which
+	// is also the whole cost of this in a game with no mod models (s_baseIndex stays -1).
+	if ( s_baseIndex < 0 || index < s_baseIndex || s_index.empty() ) { return std::string(); }
+	for ( const auto& kv : s_index )
+	{
+		if ( kv.second.index == index ) { return kv.first; }
+	}
+	return std::string();
+}
+
 std::string SAMModels::pathForId(const std::string& id)
 {
 	auto it = s_index.find(id);

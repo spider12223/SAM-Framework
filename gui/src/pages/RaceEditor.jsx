@@ -5,8 +5,9 @@
  * attribute/HP/MP bonuses at character creation. Only the 18 host bodies below have a
  * proper first-person arm, so both views stay correct.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { validate } from '@/lib/validate.js';
+import { carryUnknown } from '@/lib/editorKeys.js';
 import { useMod } from '@/state/ModContext.jsx';
 import { Panel, Field, TextInput, NumberInput, Select, SearchSelect, GoldButton, ErrorList, SavedNote } from '@/components/ui.jsx';
 import ScriptEditor from '@/components/ScriptEditor.jsx';
@@ -34,6 +35,9 @@ const LIMB_SLOTS = [
   ['leg_right', 'Right leg', 'Covered by boots and greaves.'],
   ['leg_left', 'Left leg', 'Covered by boots and greaves.'],
 ];
+// The two slots that have a second pose: the hand that holds a weapon, and the hand that holds
+// a shield. Everything else is drawn the same whatever the player is carrying.
+const ARM_SLOTS = ['arm_right', 'arm_left'];
 const prettyMonster = (m) => m.split('_').map(cap).join(' ');
 
 // A removable chip list. Same shape the class editor uses for starting spells, so the two
@@ -64,6 +68,12 @@ function slugify(name) {
 export default function RaceEditor() {
   const { meta, races, spells: modSpells, scripts, editing, dispatch } = useMod();
   const editDef = editing?.kind === 'race' ? races.find((r) => r.id === editing.id) : null;
+
+  // The def as it was when this page opened. `editDef` is derived from `editing`, and the
+  // effect below clears `editing` on mount -- so by the time Save is clicked `editDef` is
+  // already null. Saving has to carry the fields this editor cannot show, so it needs the
+  // definition it started from, captured once.
+  const [openedDef] = useState(() => editDef ?? null);
   const existingScript = editDef ? scripts[editDef.id] : null;
 
   const [name, setName] = useState(editDef?.name ?? '');
@@ -76,8 +86,15 @@ export default function RaceEditor() {
   // Declared allegiance. Empty is not "no allies" — it means "inherit the host body's
   // relations", which is why neither list is written to the JSON when it is empty.
   const [allies, setAllies] = useState(editDef?.allies ?? []);
+  // A limb is either a bare model reference or an object carrying a transform and, for the two
+  // arms, the bent pose. Read both forms, and keep whatever else the object held so reopening a
+  // race in the editor cannot quietly drop a scale or an offset it does not show.
+  const limbRaw = (k) => editDef?.limb_models?.[k];
+  const limbModelOf = (k) => { const v = limbRaw(k); return typeof v === 'string' ? v : (v?.model ?? ''); };
   const [limbModels, setLimbModels] = useState(() =>
-    Object.fromEntries(LIMB_SLOTS.map(([k]) => [k, editDef?.limb_models?.[k] ?? ''])));
+    Object.fromEntries(LIMB_SLOTS.map(([k]) => [k, limbModelOf(k)])));
+  const [limbBent, setLimbBent] = useState(() =>
+    Object.fromEntries(ARM_SLOTS.map((k) => [k, (typeof limbRaw(k) === 'object' && limbRaw(k)?.bent) || ''])));
   const [enemies, setEnemies] = useState(editDef?.enemies ?? []);
   const [spellError, setSpellError] = useState('');
   const [scriptLang, setScriptLang] = useState(existingScript?.lang ?? 'lua');
@@ -105,11 +122,21 @@ export default function RaceEditor() {
     if (bloodDiet) def.blood_diet = true;
     if (startingSpells.length) def.starting_spells = startingSpells;
     const lm = {};
-    for (const [k] of LIMB_SLOTS) { const v = (limbModels[k] ?? '').trim(); if (v) lm[k] = v; }
+    for (const [k] of LIMB_SLOTS) {
+      const v = (limbModels[k] ?? '').trim();
+      if (!v) continue;
+      const was = limbRaw(k);
+      const rest = (typeof was === 'object' && was) ? { ...was } : {};
+      delete rest.model; delete rest.bent;
+      const bent = (limbBent[k] ?? '').trim();
+      lm[k] = (bent || Object.keys(rest).length) ? { model: v, ...rest, ...(bent ? { bent } : {}) } : v;
+    }
     if (Object.keys(lm).length) def.limb_models = lm;
     if (allies.length) def.allies = allies;
     if (enemies.length) def.enemies = enemies;
-    return def;
+    // Carry anything this editor has no control for straight through -- a field the
+    // author hand-wrote, or one a later schema adds, must survive a save here.
+    return carryUnknown(openedDef, def, 'race');
   };
 
   // A type in both lists is an enemy in game (the engine says so in the log). Say it here
@@ -141,7 +168,7 @@ export default function RaceEditor() {
 
   const def = useMemo(buildDef,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [name, description, hostBody, mods, bloodDiet, startingSpells, allies, enemies, limbModels, namespace]);
+    [name, description, hostBody, mods, bloodDiet, startingSpells, allies, enemies, limbModels, limbBent, namespace]);
   const preview = useMemo(() => JSON.stringify(def, null, 2), [def]);
   const setMod = (a, v) => setMods((prev) => ({ ...prev, [a]: v }));
 
@@ -210,11 +237,23 @@ export default function RaceEditor() {
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {LIMB_SLOTS.map(([key, label, hint]) => (
-            <Field key={key} label={label} hint={hint}>
-              <TextInput value={limbModels[key]}
-                onChange={(v) => setLimbModels((p) => ({ ...p, [key]: v }))}
-                placeholder="blank = host body" />
-            </Field>
+            <Fragment key={key}>
+              <Field label={label} hint={hint}>
+                <TextInput value={limbModels[key]}
+                  onChange={(v) => setLimbModels((p) => ({ ...p, [key]: v }))}
+                  placeholder="blank = host body" />
+              </Field>
+              {ARM_SLOTS.includes(key) && limbModels[key] ? (
+                <Field label={label + ' (holding something)'}
+                  hint={key === 'arm_right'
+                    ? 'Drawn while this hand holds a weapon, and during a spell windup. Blank keeps one pose.'
+                    : 'Drawn while this hand holds a shield, lantern or quiver. Blank keeps one pose.'}>
+                  <TextInput value={limbBent[key]}
+                    onChange={(v) => setLimbBent((p) => ({ ...p, [key]: v }))}
+                    placeholder="blank = the arm never bends" />
+                </Field>
+              ) : null}
+            </Fragment>
           ))}
         </div>
         <div className="text-xs mt-3" style={{ color: '#6b5a35' }}>

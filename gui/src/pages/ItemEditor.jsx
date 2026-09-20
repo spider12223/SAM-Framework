@@ -27,12 +27,14 @@ const ITEM_TRAITS = [
   ['beatitude_ac',     'Blessing or cursing it changes its AC (needed for custom masks)'],
 ];
 import { validate } from '@/lib/validate.js';
+import { carryUnknown } from '@/lib/editorKeys.js';
 import { checkBalance } from '@/lib/balance.js';
 import { useMod } from '@/state/ModContext.jsx';
 import {
   Panel, Field, TextInput, NumberInput, Select, SearchSelect, GoldButton,
   ErrorList, SavedNote, BalanceHints,
 } from '@/components/ui.jsx';
+import { SoundMapEditor, soundMapToRows, rowsToSoundMap } from '@/components/AudioParts.jsx';
 
 function slugify(name) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'unnamed';
@@ -42,10 +44,16 @@ function slugify(name) {
 const numOr = (v, d) => (v === '' || v === null || v === undefined ? d : v);
 
 export default function ItemEditor() {
-  const { meta, items, editing, dispatch } = useMod();
+  const { meta, items, sounds = [], editing, dispatch } = useMod();
 
   // "Edit" handoff from the Mod Builder: seed the form from a saved item.
   const editDef = editing?.kind === 'item' ? items.find((it) => it.id === editing.id) : null;
+
+  // The def as it was when this page opened. `editDef` is derived from `editing`, and the
+  // effect below clears `editing` on mount -- so by the time Save is clicked `editDef` is
+  // already null. Saving has to carry the fields this editor cannot show, so it needs the
+  // definition it started from, captured once.
+  const [openedDef] = useState(() => editDef ?? null);
 
   const [nameId, setNameId] = useState(editDef?.name_identified ?? '');
   const [nameUnid, setNameUnid] = useState(editDef?.name_unidentified ?? '');
@@ -68,6 +76,8 @@ export default function ItemEditor() {
   );
   const [attrKey, setAttrKey] = useState('');
   const [attrVal, setAttrVal] = useState(0);
+  // "sounds": { vanilla name/group -> sound id }, played for whoever holds or wears the item.
+  const [soundRows, setSoundRows] = useState(() => soundMapToRows(editDef?.sounds));
   const [errors, setErrors] = useState([]);
   const [savedAs, setSavedAs] = useState('');
 
@@ -118,7 +128,11 @@ export default function ItemEditor() {
     if (stackable) def.stackable = true;
     const mag = numOr(magicLevel, 0);
     if (mag !== 0) def.magic_level = mag;
-    return def;
+    const sm = rowsToSoundMap(soundRows);
+    if (sm) def.sounds = sm;
+    // Carry anything this editor has no control for straight through -- a field the
+    // author hand-wrote, or one a later schema adds, must survive a save here.
+    return carryUnknown(openedDef, def, 'item');
   };
 
   const save = () => {
@@ -137,7 +151,8 @@ export default function ItemEditor() {
   const def = useMemo(buildDef,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [nameId, nameUnid, description, category, slot, weaponSkill, traits, weight, goldValue, level, stackable,
-      magicLevel, model, modelFp, modelFromItem, icon, attribs, namespace]);
+      magicLevel, model, modelFp, modelFromItem, icon, attribs, soundRows, namespace]);
+  const ownSoundIds = useMemo(() => sounds.filter((s) => s.id).map((s) => s.id), [sounds]);
   const preview = useMemo(() => JSON.stringify(def, null, 2), [def]);
   const hints = useMemo(() => checkBalance('item', def), [def]);
 
@@ -345,6 +360,15 @@ export default function ItemEditor() {
             </Field>
             <GoldButton onClick={addAttr}>Add</GoldButton>
           </div>
+        </Panel>
+
+        <Panel title="Sounds" className="lg:col-span-2">
+          <SoundMapEditor
+            rows={soundRows}
+            onChange={setSoundRows}
+            ownSounds={ownSoundIds}
+            hint="Whoever holds or wears this item plays your sound instead of the game's: a sword with its own swing (SwingWeapon), boots with their own footsteps (LeatherSteps)."
+          />
         </Panel>
       </div>
 

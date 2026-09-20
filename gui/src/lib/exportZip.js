@@ -9,7 +9,12 @@
  *   spells/<name>.json
  *   patches/<name>.json
  *   portraits/<name>.png     (uploaded assets, at their declared paths)
+ *   sounds/<name>.ogg        music/<name>.ogg   (audio; the ENTRIES are inline in mod.json)
  * Ready to drop into Barony/mods/<folder>/.
+ *
+ * Sounds and music are written as objects straight into mod.json's "sounds" / "music" lists,
+ * not as one JSON file per sound: that is the form the engine documents, it is the only form
+ * music has at all, and it keeps a sound and its settings in one place.
  *
  * buildModFiles() is the single source of truth for layout + $schema stamping;
  * both the zip export (buildModZip) and the direct Test-in-Barony disk writer
@@ -17,6 +22,7 @@
  * outputs can never drift apart.
  */
 import JSZip from 'jszip';
+import { soundManifestEntry, musicManifestEntry } from '@/lib/audio.js';
 
 // Public URLs of the schemas (served from GitHub Pages). Stamped into each
 // exported file as "$schema" so the modder gets autocomplete + validation the
@@ -30,7 +36,6 @@ const SPELL_SCHEMA = `${SCHEMA_BASE}/spell.schema.json`;
 const EFFECT_SCHEMA = `${SCHEMA_BASE}/effect.schema.json`;
 const RACE_SCHEMA = `${SCHEMA_BASE}/race.schema.json`;
 const RECIPE_SCHEMA = `${SCHEMA_BASE}/recipe.schema.json`;
-const SOUND_SCHEMA = `${SCHEMA_BASE}/sound.schema.json`;
 const PATCH_SCHEMA = `${SCHEMA_BASE}/patch.schema.json`;
 
 /** "sam_test:shadow_knight" -> "shadow_knight" (file stem from the id). */
@@ -46,7 +51,9 @@ export function patchStem(target, fallback) {
   return s || fallback;
 }
 
-/** Manifest-relative paths for each collection, exactly as the zip lays them out. */
+/** Manifest-relative paths for each collection, exactly as the zip lays them out.
+ *  (Sounds and music have no files of their own: their entries are inline in mod.json. The
+ *  `sounds` parameter is still accepted so older callers keep their argument positions.) */
 export function contentPaths(classes, items, monsters, spells = [], patches = [], effects = [], races = [], sounds = [], recipes = []) {
   return {
     classPaths: classes.map((c, i) => `classes/${fileStem(c.id, `class_${i + 1}`)}.json`),
@@ -55,15 +62,17 @@ export function contentPaths(classes, items, monsters, spells = [], patches = []
     spellPaths: (spells ?? []).map((s, i) => `spells/${fileStem(s.id, `spell_${i + 1}`)}.json`),
     effectPaths: (effects ?? []).map((e, i) => `effects/${fileStem(e.id, `effect_${i + 1}`)}.json`),
     racePaths: (races ?? []).map((r, i) => `races/${fileStem(r.id, `race_${i + 1}`)}.json`),
-    soundPaths: (sounds ?? []).map((s, i) => `sounds/${fileStem(s.id, `sound_${i + 1}`)}.json`),
     recipePaths: (recipes ?? []).map((r, i) => `recipes/${fileStem(r.id || r.item || r.remove, `recipe_${i + 1}`)}.json`),
     patchPaths: (patches ?? []).map((p, i) => `patches/${patchStem(p.target, `patch_${i + 1}`)}.json`),
   };
 }
 
-/** The mod.json object (sans $schema — callers stamp it when writing). */
-export function buildManifest(meta, paths) {
-  const { classPaths, itemPaths, monsterPaths, spellPaths, effectPaths, racePaths, soundPaths, recipePaths, patchPaths } = paths;
+/** The mod.json object (sans $schema — callers stamp it when writing).
+ *  `audio` = { sounds, music }: saved entries, written inline as objects. */
+export function buildManifest(meta, paths, audio = {}) {
+  const { classPaths, itemPaths, monsterPaths, spellPaths, effectPaths, racePaths, recipePaths, patchPaths } = paths;
+  const sounds = (audio.sounds ?? []).map(soundManifestEntry);
+  const music = (audio.music ?? []).map(musicManifestEntry);
   const manifest = {
     namespace: meta.namespace,
     name: meta.name,
@@ -83,7 +92,8 @@ export function buildManifest(meta, paths) {
   if (spellPaths && spellPaths.length) manifest.spells = spellPaths;
   if (effectPaths && effectPaths.length) manifest.effects = effectPaths;
   if (racePaths && racePaths.length) manifest.races = racePaths;
-  if (soundPaths && soundPaths.length) manifest.sounds = soundPaths;
+  if (sounds.length) manifest.sounds = sounds;
+  if (music.length) manifest.music = music;
   if (recipePaths && recipePaths.length) manifest.recipes = recipePaths;
   // Preserve a hand-authored "models" list (custom .vox declarations). The builder has no
   // model editor, so this is round-tripped verbatim from the imported manifest -- without it
@@ -107,15 +117,15 @@ export function scriptPathFor(classDef, i, scripts) {
  * The complete file list for the mod folder:
  *   [{ path, text }]  for JSON + script files ("$schema" stamped on JSON)
  *   [{ path, base64 }] for binary assets (portraits etc.)
- * mod = { meta, classes, items, monsters, spells, patches, scripts, assets }.
+ * mod = { meta, classes, items, monsters, spells, patches, sounds, music, scripts, assets }.
  */
 export function buildModFiles(mod) {
   const {
-    meta, classes = [], items = [], monsters = [], spells = [], effects = [], races = [], sounds = [], recipes = [], patches = [],
+    meta, classes = [], items = [], monsters = [], spells = [], effects = [], races = [], sounds = [], music = [], recipes = [], patches = [],
     scripts = {}, assets = {},
   } = mod;
   const paths = contentPaths(classes, items, monsters, spells, patches, effects, races, sounds, recipes);
-  const manifest = buildManifest(meta, paths);
+  const manifest = buildManifest(meta, paths, { sounds, music });
 
   const files = [
     // "$schema" first so it sits at the top of each file (editors expect it there).
@@ -143,10 +153,6 @@ export function buildModFiles(mod) {
     ...races.map((r, i) => ({
       path: paths.racePaths[i],
       text: JSON.stringify({ $schema: RACE_SCHEMA, ...r }, null, 2) + '\n',
-    })),
-    ...sounds.map((s, i) => ({
-      path: paths.soundPaths[i],
-      text: JSON.stringify({ $schema: SOUND_SCHEMA, ...s }, null, 2) + '\n',
     })),
     ...recipes.map((r, i) => ({
       path: paths.recipePaths[i],

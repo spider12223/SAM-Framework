@@ -8,6 +8,7 @@
  * and every model it declared was silently discarded. Driving the reducer directly is the only
  * level at which that is catchable, so it lives here.
  */
+import { audioKey, audioFiles, upsertAudio, pruneAudioAssets } from '@/lib/audio.js';
 
 export const initialState = {
   meta: {
@@ -29,7 +30,11 @@ export const initialState = {
   spells: [],    // spell.schema.json-shaped objects
   effects: [],   // effect.schema.json-shaped objects (custom status effects)
   races: [],     // race.schema.json-shaped objects (custom playable races)
-  sounds: [],    // sound.schema.json-shaped objects (custom sounds; .ogg lives in assets)
+  // Sounds and music are exported INLINE into mod.json ("sounds" / "music"), one object each.
+  // An entry either adds ({ id }) or replaces a vanilla one ({ replace }); its key is
+  // audioKey() in lib/audio.js. The audio itself lives in assets under sounds/ and music/.
+  sounds: [],    // sound.schema.json-shaped objects
+  music: [],     // mod.schema.json "music" item-shaped objects
   recipes: [],   // recipe.schema.json-shaped objects (tinkering kit craftables)
   patches: [],   // patch.schema.json-shaped objects
   scripts: {},   // classId -> { lang, code }
@@ -85,10 +90,32 @@ export function reducer(state, action) {
       return { ...state, recipes: upsert(state.recipes, action.def) };
     case 'deleteRecipe':
       return { ...state, recipes: state.recipes.filter((r) => r.id !== action.id) };
-    case 'saveSound':
-      return { ...state, sounds: upsert(state.sounds, action.def) };
-    case 'removeSound':
-      return { ...state, sounds: state.sounds.filter((s) => s.id !== action.id) };
+    // Sounds and music are updated IN PLACE: `prevKey` is the key the editor opened the entry
+    // with, so renaming it replaces that entry instead of adding a second one. Audio the entry
+    // no longer points at is dropped from assets unless another entry still uses it -- a file
+    // left in sounds/ would still ship, and the engine's folder scan would still register it.
+    case 'saveSound': {
+      const { list, old } = upsertAudio(state.sounds ?? [], action.def, action.prevKey);
+      return { ...state, sounds: list, assets: pruneAudioAssets(state.assets, audioFiles(old), list, state.music) };
+    }
+    case 'removeSound': {
+      const key = action.key ?? (action.id ? audioKey({ id: action.id }) : '');
+      const all = state.sounds ?? [];
+      const gone = all.filter((s) => audioKey(s) === key);
+      const sounds = all.filter((s) => audioKey(s) !== key);
+      return { ...state, sounds, assets: pruneAudioAssets(state.assets, gone.flatMap(audioFiles), sounds, state.music) };
+    }
+    case 'saveMusic': {
+      const music = state.music ?? [];
+      const { list, old } = upsertAudio(music, action.def, action.prevKey);
+      return { ...state, music: list, assets: pruneAudioAssets(state.assets, audioFiles(old), state.sounds ?? [], list) };
+    }
+    case 'removeMusic': {
+      const music = state.music ?? [];
+      const gone = music.filter((m) => audioKey(m) === action.key);
+      const next = music.filter((m) => audioKey(m) !== action.key);
+      return { ...state, music: next, assets: pruneAudioAssets(state.assets, gone.flatMap(audioFiles), state.sounds ?? [], next) };
+    }
     case 'savePatch': {
       // Patches have no id; key them by target (one merged op-list per file).
       const i = state.patches.findIndex((p) => p.target === action.def.target);
@@ -136,6 +163,7 @@ export function reducer(state, action) {
         effects: action.effects ?? [],
         races: action.races ?? [],
         sounds: action.sounds ?? [],
+        music: action.music ?? [],
         recipes: action.recipes ?? [],
         patches: action.patches ?? [],
         scripts: action.scripts ?? {},
@@ -154,6 +182,7 @@ export function reducer(state, action) {
           effects: state.effects,
           races: state.races,
           sounds: state.sounds,
+          music: state.music,
           recipes: state.recipes,
           patches: state.patches,
         }),

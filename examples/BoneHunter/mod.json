@@ -4,7 +4,7 @@
   "name": "Bone Hunter",
   "author": "S.A.M Framework",
   "version": "1.0.0",
-  "framework_min_version": "1.9.0",
+  "framework_min_version": "1.10.3",
   "description": "A worked example. Monsters drop bones, bones craft gear at the Hunter's Workbench, and a thrown snare becomes a real trap. Every capability added in v1.9.0 appears here exactly once - copy this folder, rename the namespace, and change the parts you want.",
 
   "items": [

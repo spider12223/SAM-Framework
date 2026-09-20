@@ -41,6 +41,7 @@
 #include <vector>
 
 struct SAMModManifest;  // from sam_workshop.hpp (full type only needed in the .cpp)
+class Entity;           // Barony entity.hpp -- the follower helpers take a live monster
 
 // Nominal id base for logging/count symmetry with classes (5000) and items
 // (5000). The engine keys custom monsters by filename, not a numeric id — this is
@@ -139,4 +140,20 @@ public:
 	static int count();          // monster variant files written
 	static int declared();       // monster entries declared across all mods
 	static int curveLevels();    // distinct levels a spawn curve was written for
+
+	// ---- a follower of a player on another machine ---------------------------------------
+	//
+	// The ally panel and the follower's nametag are drawn on the LEADER's machine, from a
+	// copy the host sends: level, HP and max HP by the engine's 'NPCI'/'NPCU', the name only
+	// once, by 'LEAD', when the monster was recruited. So a script that changed a follower's
+	// max HP, level or name on the host changed nothing on its owner's screen until the next
+	// natural level-up or floor change -- and the name never.
+	//
+	// syncFollowerSheet sends 'NPCI' (a vanilla packet, so a stock client is fixed too).
+	// syncFollowerName uses S.A.M's channel, since vanilla has no rename packet and sending
+	// 'LEAD' again would add the follower to the owner's list a second time; a stock owner
+	// keeps the old name. Both are host-side, and do nothing for an enemy, for a follower of
+	// the host's own player (whose screen reads the real Stat), or outside multiplayer.
+	static void syncFollowerSheet(Entity* monster);
+	static void syncFollowerName(Entity* monster);
 };

@@ -101,6 +101,39 @@ public:
 	// the grant was refused (already known / non-local player).
 	static bool grantCustomSpell(int player, const std::string& namespacedId);
 
+	// ---- the script API's spell operations (sam_grant_spell / sam_remove_spell / readers) ----
+	// Shared by the Lua and JS bindings so the two cannot drift, and by the multiplayer
+	// inventory mirror.
+
+	// A script's spell reference -> engine spell id, or -1. Accepts a numeric id as text (what
+	// sam_get_tome_spell hands back), a mod's "namespace:spell", or a vanilla internal name
+	// ("spell_fireball", any case).
+	static int resolveSpellRef(const std::string& spell);
+
+	// The name scripts see for a spell id: the "namespace:spell" a mod declared, else the
+	// engine's internal name, else "" for an id nothing defines.
+	static std::string scriptName(int spellId);
+
+	// Teach spell `spellId` to `player` on THIS machine, through the engine's own addSpell (the
+	// spell list plus its spell item). The player must play here; in multiplayer the
+	// trampoline carries a remote player's grant to their machine before this runs. False
+	// (logged) when the spell is not built, the player is not on this machine, or they already
+	// know it. A removal of the same spell that is still queued (see queueRemoveSpell) is
+	// cancelled instead and the grant succeeds, so "remove it, then grant my own version of
+	// it" in one handler leaves the player with the spell rather than with neither.
+	static bool grantSpell(int player, int spellId);
+
+	// Forget spell `spellId` for `player` on this machine. Queued, never immediate: the engine
+	// frame that fired the event a script is answering may be casting that very spell_t (the
+	// player's selected spell IS the list element) or using its spell item. Returns false when
+	// the player does not know it or is not on this machine. drainRemoveQueue does the work at
+	// the same safe point as SAMItems::drainDestroyQueue, which calls it. Until it does, the
+	// player still knows the spell: a reader asked in the same frame says so, and a grant of
+	// the same spell cancels the removal (grantSpell).
+	static bool queueRemoveSpell(int player, int spellId);
+	static void drainRemoveQueue();
+	static void clearRemoveQueue();
+
 	// Absolute, Image::get-ready path to a custom spell's icon PNG (from the mod folder),
 	// or "" if the runtime id isn't a registered custom spell / has no icon / the file is
 	// missing. The spell-icon UI calls this for id >= SAM_SPELL_ID_BASE.

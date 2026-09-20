@@ -7,6 +7,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { validate } from '@/lib/validate.js';
+import { carryUnknown } from '@/lib/editorKeys.js';
 import { useMod } from '@/state/ModContext.jsx';
 import { Panel, Field, TextInput, NumberInput, GoldButton, ErrorList, SavedNote } from '@/components/ui.jsx';
 
@@ -21,6 +22,12 @@ function slugify(name) {
 export default function EffectEditor() {
   const { meta, effects, editing, dispatch } = useMod();
   const editDef = editing?.kind === 'effect' ? effects.find((e) => e.id === editing.id) : null;
+
+  // The def as it was when this page opened. `editDef` is derived from `editing`, and the
+  // effect below clears `editing` on mount -- so by the time Save is clicked `editDef` is
+  // already null. Saving has to carry the fields this editor cannot show, so it needs the
+  // definition it started from, captured once.
+  const [openedDef] = useState(() => editDef ?? null);
 
   const [name, setName] = useState(editDef?.name ?? '');
   const [tooltip, setTooltip] = useState(editDef?.tooltip ?? '');
@@ -65,7 +72,9 @@ export default function EffectEditor() {
     if (Array.isArray(grants) && grants.length) def.grants = grants;
     if (hudHidden) def.hud_hidden = true;
     if (curable) def.curable = true;
-    return def;
+    // Carry anything this editor has no control for straight through -- a field the
+    // author hand-wrote, or one a later schema adds, must survive a save here.
+    return carryUnknown(openedDef, def, 'effect');
   };
 
   const save = () => {

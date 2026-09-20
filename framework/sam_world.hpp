@@ -53,6 +53,16 @@ public:
 	// Refuses out of bounds rather than corrupting the map array.
 	static bool setTile(int x, int y, int layer, int tileId);
 
+	// ---- multiplayer: terrain the HOST changed, arriving on a client ------------------
+	//
+	// A client writes the host's edit through the same bounds checks setTile uses (the values
+	// are off the wire) and marks its path maps stale, so sam_tiles_connected on a client
+	// answers from the map as it is now rather than as it was loaded. Called from the ordered
+	// terrain op (sam_mp_entities.cpp) and the legacy 'SAMT' handler in net.cpp.
+	static void applyRemoteTile(int x, int y, int layer, int tileId);
+	// A vanilla wall packet ('WALD', 'WACD', 'WALC') changed the obstacle layer here.
+	static void markPathMapsDirty();
+
 	// Is this a sane place to put something: in bounds, not inside a wall, not lava.
 	static bool spawnable(int x, int y);
 

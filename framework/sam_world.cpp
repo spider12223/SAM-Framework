@@ -17,7 +17,8 @@
 #	include "items.hpp"
 #	include "stat.hpp"
 #	include "net.hpp"
-#	include "player.hpp"     // players[] / isLocalPlayer -- the tile broadcast skips local players
+#	include "player.hpp"     // players[] / isLocalPlayer
+#	include "sam_mp_entities.hpp"   // tileChanged: how an edit reaches every client, stock ones included
 #	define SAM_WORLD_HAVE_BARONY 1
 #endif
 
@@ -71,32 +72,17 @@ namespace
 	// Deferred rather than immediate: a script digging a corridor writes many tiles in a
 	// loop, and regenerating per tile would make that quadratic for no benefit. Nothing reads
 	// the path maps until connected() asks, so rebuild there, once.
+	//
+	// On a CLIENT the same flag is raised by terrain the host changed (applyRemoteTile and the
+	// vanilla wall packets). A client builds its path maps once, at level load, and nothing else
+	// ever refreshed them, so connected() answered there from the map as it was loaded.
 	bool s_pathMapsDirty = false;
 
-	// Tell every client about a tile the host just changed.
-	//
-	// Barony has no general tile-sync packet -- 'MAPT' carries tile ATTRIBUTES, not ids --
-	// so this mirrors what the wall buster does for its own hole ('WACD', actwallbuster.cpp:56).
-	// Without it a script that digs a passage opens it on the host alone: the host walks
-	// through, every client still sees and collides with solid rock.
-	void broadcastTile(int x, int y, int layer, int tileId)
-	{
-		if ( multiplayer != SERVER ) { return; }
-		for ( int c = 1; c < MAXPLAYERS; ++c )
-		{
-			if ( client_disconnected[c] || !players[c] || players[c]->isLocalPlayer() ) { continue; }
-			strcpy((char*)net_packet->data, "SAMT");
-			SDLNet_Write16((Uint16)x, &net_packet->data[4]);
-			SDLNet_Write16((Uint16)y, &net_packet->data[6]);
-			net_packet->data[8] = (Uint8)layer;
-			// Tile ids run to numtiles, which is well past 255 with mod tiles loaded.
-			SDLNet_Write16((Uint16)tileId, &net_packet->data[9]);
-			net_packet->address.host = net_clients[c - 1].host;
-			net_packet->address.port = net_clients[c - 1].port;
-			net_packet->len = 11;
-			sendPacketSafe(net_sock, -1, net_packet, c - 1);
-		}
-	}
+	// Telling the clients about an edit lives in sam_mp_entities.cpp (tileChanged): S.A.M
+	// clients get it on the ordered channel, keyed to the floor it was made on and replayed to
+	// a late HELLO; a stock client gets the engine's own 'WALD' for a dug wall, the only edit
+	// it can understand. The one-packet 'SAMT' this file used to send reached nobody without
+	// S.A.M, and arrived in no particular order for anybody with it.
 #endif
 }
 
@@ -137,8 +123,29 @@ bool SAMWorld::setTile(int x, int y, int layer, int tileId)
 	// A wall appearing or disappearing changes what can be walked to. Mark it; connected()
 	// rebuilds before it answers.
 	if ( layer == OBSTACLELAYER ) { s_pathMapsDirty = true; }
-	broadcastTile(x, y, layer, tileId);
+	SAMMpEntities::tileChanged(x, y, layer, tileId);   // host only inside; a no-op in singleplayer
 	return true;
+#endif
+}
+
+void SAMWorld::applyRemoteTile(int x, int y, int layer, int tileId)
+{
+#ifndef SAM_WORLD_HAVE_BARONY
+	(void)x; (void)y; (void)layer; (void)tileId;
+#else
+	// Every value is re-checked: it came off the wire, and map.tiles is a flat heap array.
+	if ( !map.tiles || !inBounds(x, y) ) { return; }
+	if ( layer < 0 || layer >= MAPLAYERS ) { return; }
+	if ( tileId < 0 || tileId >= (int)numtiles ) { return; }
+	map.tiles[layer + y * MAPLAYERS + x * MAPLAYERS * map.height] = tileId;
+	if ( layer == OBSTACLELAYER ) { s_pathMapsDirty = true; }
+#endif
+}
+
+void SAMWorld::markPathMapsDirty()
+{
+#ifdef SAM_WORLD_HAVE_BARONY
+	s_pathMapsDirty = true;
 #endif
 }
 
@@ -353,9 +360,18 @@ std::vector<uint32_t> SAMWorld::findEntities(int x, int y, double radiusTiles,
 		// the loop started, so anything reaching this point is one of them.
 		if ( !match ) { continue; }
 
+		// Only an entity a uid can name. 0 and the negatives are shared engine markers: -2 is
+		// every entity a CLIENT made for itself, -3 every torch flame, particle and gib. Written
+		// unsigned they come out as 4294967294 and friends, which every resolver in this API
+		// refuses -- and they counted toward the cap below, so on a client a room full of
+		// sparks pushed the real entities off the end of the list. The same bound as
+		// samResolveEntityQuiet, so a uid this returns always resolves.
+		const Uint32 samUid = (Uint32)e->getUID();
+		if ( samUid == 0 || samUid > 0x7FFFFFFFu ) { continue; }
+
 		const real_t ddx = e->x - cx, ddy = e->y - cy;
 		if ( (ddx * ddx + ddy * ddy) > (maxDist * maxDist) ) { continue; }
-		out.push_back((uint32_t)e->getUID());
+		out.push_back((uint32_t)samUid);
 		if ( out.size() >= 64 ) { break; }   // same spirit as the 32 cap on nearby_entities
 	}
 #else

@@ -241,7 +241,7 @@ std::string SAMSync::stripDigests(const std::string& fingerprint)
 	return out;
 }
 
-void SAMSync::sendFingerprint(int player)
+void SAMSync::sendFingerprint(int player, bool solicited)
 {
 	if ( multiplayer != SERVER )
 	{
@@ -268,7 +268,17 @@ void SAMSync::sendFingerprint(int player)
 
 	if ( numchunks == 0 )
 	{
-		// empty fingerprint: we run S.A.M but no mods are loaded
+		// empty fingerprint: we run S.A.M but no mods are loaded.
+		// Unsolicited, say nothing at all. A host with no mods must look exactly like a vanilla
+		// host, and a stock client that has no 'SAMF' handler logs an unasked-for one as a
+		// mystery packet. A client that ASKED is waiting for an answer, and "no mods" is the
+		// answer, so a solicited empty fingerprint is still sent.
+		if ( !solicited )
+		{
+			SAM_DEBUG(MOD, "No S.A.M mods loaded; sending no fingerprint to player "
+				+ std::to_string(player) + " unless they ask.");
+			return;
+		}
 		memcpy(net_packet->data, "SAMF", 4);
 		net_packet->data[4] = 0;
 		net_packet->len = 5;
