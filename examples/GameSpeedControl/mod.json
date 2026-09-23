@@ -1,0 +1,9 @@
+{
+  "$schema": "https://spider12223.github.io/SAM-Framework/schemas/mod.schema.json",
+  "namespace": "gamespeed",
+  "name": "Game Speed Control",
+  "author": "S.A.M Framework",
+  "version": "1.0.0",
+  "framework_min_version": "3.1.0",
+  "description": "Run the game faster or slower with four preset keys, each with its own speed slider in the settings. A S.A.M version of the community mod of the same name: no patched executable, and the keys and sliders live in the game's own Settings menu. Singleplayer only, because in co-op every joiner's own body is moved by their own machine."
+}

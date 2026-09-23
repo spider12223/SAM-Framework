@@ -4,7 +4,7 @@
 // Drop this beside your mod's .ts files, or reference it:
 //   /// <reference path="sam.d.ts" />
 //
-// 316 functions, 76 events. Each function's "Multiplayer:" line starts with
+// 336 functions, 87 events. Each function's "Multiplayer:" line starts with
 // its kind (host, owner, screen, read, all, local, any); see docs/multiplayer.md.
 
 declare global {
@@ -21,6 +21,13 @@ declare global {
    * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
    */
   function sam_add_damage_multiplier(fraction: number): boolean;
+
+  /**
+   * Put an item into a chest (open or closed), a mimic, a creature's pockets, or a shopkeeper's stock. Defaults: one, EXCELLENT, uncursed, identified, a random appearance. A shopkeeper's stock is laid out again by price so the new item has a slot the window can show; a potion added to a shop takes its standard appearance, as generated stock does.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Host only. A chest's contents are served to whoever opens it and a shop's when it is entered, so nothing else needs sending. A player on another machine who is browsing the shop has their window closed with the engine's own SHPC; their next talk serves the new stock. A chest they have open gets the item as a new stack, so their window shows it.
+   */
+  function sam_add_item_to_container(uid: number, item: any, count?: number, status?: number, beatitude?: number, identified?: boolean, appearance?: number): number | undefined;
 
   /**
    * The same for one creature.
@@ -464,6 +471,13 @@ declare global {
   function sam_get_fps(): number;
 
   /**
+   * How fast the world is running compared with real time, as set by sam_set_game_speed or /sam_gamespeed. 1.0 with nothing set, and always 1.0 in a netgame, where a speed cannot be set.
+   *
+   * Multiplayer: any. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
+   */
+  function sam_get_game_speed(): number;
+
+  /**
    * The regeneration bonus this creature carries. It is what makes sam_get_regen_interval shorter.
    *
    * Multiplayer: read. The host can read every creature; a client can read only its own player's uid (entity_uid), and anything else is refused with a one-time warning and returns nil (undefined in JavaScript).
@@ -588,6 +602,13 @@ declare global {
    * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nothing at all -- no value in Lua, undefined in JavaScript. The shared lightmap the monster AI reads exists only on the host, so a client's call is refused with a warning. It answers with nothing at all rather than 0, because 0 is a real light level: pitch darkness.
    */
   function sam_get_light_at(x: number, y: number, player?: number): number | undefined;
+
+  /**
+   * The set of items a random roll of that category and level window would draw from: the sheet's item_level test (so a sam_patch_item level counts), mod-registered items, and the loot tables (an item weighted 0, outside its floor window, or kept out of the given context is absent). Without a context the context rule is not tested. The per-roll chance drops the engine makes on five items (tin opener, lantern, frying pan, backpack, grass sprig), the store-type exclusions and the GEM shortcut (nine gem rolls in ten return glass before the pool is read) are not in it; they happen inside the roll.
+   *
+   * Multiplayer: any. The same answer on every machine; safe to call anywhere, including a client's on_packet handler. Reads tables every S.A.M machine keeps a copy of, so a client answers the same as the host once the host's table calls have reached it.
+   */
+  function sam_get_loot_pool(category: string, min_level: number, max_level: number, context?: string): any;
 
   /**
    * The raw magic-resistance point count. Each point is a separate reduction: this is the input, sam_get_damage_resist(uid, "magic") is the result.
@@ -819,6 +840,13 @@ declare global {
    * Multiplayer: any. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
    */
   function sam_get_seed(): number;
+
+  /**
+   * The value one of your settings holds right now on THIS machine: what the player confirmed in Settings, else what your settings file held at load, else the default. Cheap: read it when you need it rather than caching it.
+   *
+   * Multiplayer: local. Answers for the machine running the script. Per machine. The host's slider is the host's; a joiner's slider is the joiner's. A mod that needs one value everywhere reads it on the host and sends it with sam_send_packet.
+   */
+  function sam_get_setting(id: string): boolean | undefined;
 
   /**
    * A proficiency rank. Accepts both spellings — "PRO_SWORD" (the class schema) and "sword" (what player.on_proficiency_increased hands you). effective (default true) includes the equipment bonus the game actually uses; pass false for the raw trained rank. Ranks were completely unreadable before this, even though the framework has always fired the event.
@@ -1262,6 +1290,13 @@ declare global {
   function sam_list_music(): string[];
 
   /**
+   * Everything your mod declared with sam_register_setting and what each one holds now. min and max appear only when declared, step only for a slider, options only for a dropdown. For a debug print or a panel of your own; the game's Settings screen already shows the same rows.
+   *
+   * Multiplayer: local. Answers for the machine running the script.
+   */
+  function sam_list_settings(): any;
+
+  /**
    * The ids sam_play_sound accepts. /sam_sounds in the console prints the same; /sam_sounds vanilla <text> searches the game's own.
    *
    * Multiplayer: any. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
@@ -1535,6 +1570,13 @@ declare global {
   function sam_random_weighted(stream: string, weights: any): any;
 
   /**
+   * Give your mod its own rebindable row in Settings > Controls > Bindings, under your mod's name. The action's full name is "<namespace>:<id>": that is what on_action_pressed / on_action_released carry in action, and what sam_is_action_held and sam_get_action_binding take. id is letters, digits, '_', '-' and '.'. default_key is the name the Bindings page shows for a key: a letter or digit ("F", "3"), "F1".."F12", "Keypad 0".."Keypad 9" (NOT "KP0"), "Space", "Return", "Tab", "Left Shift", "Left Ctrl", "Left Alt", "Escape", "Backspace", "Up"/"Down"/"Left"/"Right", "Home", "End", "Page Up"/"Page Down", "Insert", "Delete", a punctuation key as its character, "Mouse1".."Mouse15", "MouseWheelUp", "MouseWheelDown", or "[unbound]". default_pad is a controller input without the seat prefix: "ButtonA/B/X/Y" (or just "Y"), "ButtonBack", "ButtonStart", "ButtonLeftBumper", "ButtonRightBumper", "ButtonLeftStick", "ButtonRightStick", "LeftTrigger", "RightTrigger", "DpadX+/X-/Y+/Y-", "StickLeftX+".."StickRightY-", or "[unbound]" (the default). They are DEFAULTS: whatever the player already has bound to this action in config.json wins, survives a restart and survives the mod being unloaded, and Restore Defaults puts your default back. Call it at top level: the registry is rebuilt on every load, registering the same id again is a no-op that refreshes the label, and a row registered from an event only exists from that moment.
+   *
+   * Multiplayer: all. Changes a table every machine keeps its own copy of: a host call runs on the host and on every S.A.M client, and is replayed to a client that joins later. A client's call is refused with a one-time warning and returns false. Call it on the host or when your mod loads. A host call applies on every S.A.M player's machine, and a player who joins later gets the host's whole table.
+   */
+  function sam_register_action(id: string, label: string, default_key: string, default_pad?: string): boolean;
+
+  /**
    * Give a name to a function that will BE an entity's brain. Barony runs every entity through a function pointer once per frame; this puts yours behind one. Your function is called with the entity's uid, once per frame, for every entity you spawned with that behaviour — and everything else in this reference is available inside it, so it can look around, move, shoot, damage, or open a window. Nothing about what it does comes from a list. Register at the top of your script rather than inside a handler, so the name exists before you spawn anything with it. Registering the same name twice replaces the function, and entities already in the world follow the new code. Behaviours are dropped when mods reload.
    *
    * Multiplayer: any. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
@@ -1547,6 +1589,13 @@ declare global {
    * Multiplayer: any. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
    */
   function sam_register_hook(name: string): void;
+
+  /**
+   * Give your mod its own row in Settings > General, in a MOD SETTINGS section under your mod's name, in both the main menu and the pause menu. A slider needs min and max and takes an optional step (values are snapped to it); a toggle takes a boolean default; a dropdown needs options and defaults to the first one; a number takes an optional min and max; a text holds up to 31 characters and may leave the default out (empty). The default must fit the declaration. The value in force is what the player confirmed in Settings, else what your mod's own settings file holds from an earlier run, else the default: it is read from the file the first time each id is registered per load, so a value survives a restart and survives the mod being unloaded, and it is never in config.json. Call it at top level, next to sam_register_action; registering the same id again refreshes the declaration and keeps the current value when the new declaration still accepts it.
+   *
+   * Multiplayer: all. Changes a table every machine keeps its own copy of: a host call runs on the host and on every S.A.M client, and is replayed to a client that joins later. A client's call is refused with a one-time warning and returns false. Call it on the host or when your mod loads. A host call applies on every S.A.M player's machine, and a player who joins later gets the host's whole table.
+   */
+  function sam_register_setting(id: string, spec: any): boolean;
 
   /**
    * Remove a class passive effect previously added.
@@ -1575,6 +1624,13 @@ declare global {
    * Multiplayer: owner. The state lives on the player's own machine: on the host, a call about a player on another machine (named by item_uid) is carried to that machine and done there, and returns true once it is sent. A player whose game does not run S.A.M is refused with a warning. A client's call is refused with a one-time warning and returns false. Call it on the host. An item uid that sam_get_inventory(p) gave you for a player on another machine is carried to that player's machine and changed there, so true means the change was SENT; if their game refuses it (the item was used up, it is equipped, it is over the stack limit) the reason shows in the host's log. The host's copy shows the change after that player's next report, a few ticks later, so reading it back in the same tick still gives the old value. Do NOT call one of these every tick for another player's item: every call is carried over the reliable channel whether or not it changes anything, so call it when the value changes. If the item is one that player is WEARING, the host's own copy of it (the one combat, AC and sam_can_unequip read) is corrected too; if they swap to a different item in the same instant the correction is dropped and logged rather than applied to the wrong item, unless the two share a type AND an appearance, which the host cannot tell apart. A player whose game does not run S.A.M is refused with a warning.
    */
   function sam_remove_item(item_uid: number): boolean;
+
+  /**
+   * Take an item out of a chest, a mimic, a creature's pockets or a shop's stock: by the item's own uid, or by type (the first stack of that type). count takes that many from the stack; 0 or omitted removes it.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. Host only; see sam_add_item_to_container.
+   */
+  function sam_remove_item_from_container(uid: number, item: any, count?: number): boolean;
 
   /**
    * Clear a status effect from a monster by UID — the monster counterpart of sam_remove_effect.
@@ -1617,6 +1673,13 @@ declare global {
    * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. Revives any player in co-op whose game runs S.A.M; a player without S.A.M is refused with a warning, because only their own machine can take their ghost down. The gear the death dropped or bagged is removed from the revived player, so nothing is duplicated.
    */
   function sam_revive_player(player: number, x?: number, y?: number): boolean;
+
+  /**
+   * One roll of the engine's own loot curve, exactly as a chest or a shop makes it: the level window, the loot tables, world.on_before_loot_roll, the spellbook re-draw, world.on_loot_rolled. Use it for your own drops instead of re-implementing the curve. The context (default "other") is what the tables and the events see.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nothing at all -- no value in Lua, undefined in JavaScript. Draws happen on the host only and are not synchronized between machines: roll on the host and send the result with sam_send_packet if a client needs it.
+   */
+  function sam_roll_loot(category: string, min_level: number, max_level: number, context?: string): number | undefined;
 
   /**
    * Persist a value (number/string/bool/table) for the calling mod under savegames/sam_mod_data/<ns>/.
@@ -1752,6 +1815,13 @@ declare global {
   function sam_set_entity_size(uid: number, size: number, size_y?: number): boolean;
 
   /**
+   * Singleplayer only. Run the simulation at multiplier times real time, 0.1 to 8. Everything counted in game ticks scales with it (monsters, hunger, effect durations, the run timer, your timers and on_tick); everything on a wall clock does not (rendering, the message feed, sam_hitstop, a screen flash, sam_get_real_time). ticks > 0 makes it temporary: after that many GAME ticks at the new speed it goes back to what it was, which is how a mod does bullet time on a critical hit (ticks = real_seconds * 50 * multiplier, so half a real second at 0.25x is 6). A window opened inside a window still returns to the original speed. Setting the value already set does nothing and fires nothing, so a preset key may call it every frame. 0, NaN and anything outside 0.1-8 are refused and change nothing. Above 1x is best effort: 8x needs every game tick to finish inside 2.5 ms, and a slower machine gets less than it asked for.
+   *
+   * Multiplayer: local. Answers for the machine running the script. In a netgame it does nothing and says so once in the log: the host's world would run at Nx while every joiner's own body, moved by its own machine, stayed at 1x.
+   */
+  function sam_set_game_speed(multiplier: number, ticks?: number): boolean;
+
+  /**
    * Make a player immune to a named effect — poison, curse, polymorph, anything the game has.
    *
    * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
@@ -1799,6 +1869,41 @@ declare global {
    * Multiplayer: owner. The state lives on the player's own machine: on the host, a call about a player on another machine (named by uid) is carried to that machine and done there, and returns true once it is sent. A player whose game does not run S.A.M is refused with a warning. A client's call is refused with a one-time warning and returns false. Call it on the host. An item uid that sam_get_inventory(p) gave you for a player on another machine is carried to that player's machine and changed there, so true means the change was SENT; if their game refuses it (the item was used up, it is equipped, it is over the stack limit) the reason shows in the host's log. The host's copy shows the change after that player's next report, a few ticks later, so reading it back in the same tick still gives the old value. Do NOT call one of these every tick for another player's item: every call is carried over the reliable channel whether or not it changes anything, so call it when the value changes. If the item is one that player is WEARING, the host's own copy of it (the one combat, AC and sam_can_unequip read) is corrected too; if they swap to a different item in the same instant the correction is dropped and logged rather than applied to the wrong item, unless the two share a type AND an appearance, which the host cannot tell apart. A player whose game does not run S.A.M is refused with a warning.
    */
   function sam_set_item_status(uid: number, status: string): boolean;
+
+  /**
+   * How often the "any category" draw lands on a category. Four places make that draw: a random floor item, a completely-random chest, the general store, and a troll's hoard. 1 is vanilla, 0 never, N is N times as likely. With no category weighted the draw is the vanilla code, including its quirks (a floor THROWN result is re-rolled two times in three, a floor BOOK half the time); the moment any category is weighted the draw becomes one weighted pick and those quirks are gone for it.
+   *
+   * Multiplayer: all. Changes a table every machine keeps its own copy of: a host call runs on the host and on every S.A.M client, and is replayed to a client that joins later. A client's call is refused with a one-time warning and returns false. Call it on the host or when your mod loads. A host call applies on every S.A.M player's machine, and a player who joins later gets the host's whole table.
+   */
+  function sam_set_loot_category_weight(category: string, weight: number): boolean;
+
+  /**
+   * Keep an item out of one kind of roll (false) or let it back in (true, the default): "artifacts on the floor and in chests, never in a store" is sam_set_loot_context("ARTIFACT_SWORD", "shop", false). The contexts: floor (items placed while the level is built), chest (a chest or mimic being filled), shop (a shopkeeper stocking), monster (a creature's starting gear), recipe (the potion an alchemy skill-up teaches), console (/sam_loot, /itemlevelcurve), other (sam_roll_loot with no context).
+   *
+   * Multiplayer: all. Changes a table every machine keeps its own copy of: a host call runs on the host and on every S.A.M client, and is replayed to a client that joins later. A client's call is refused with a one-time warning and returns false. Call it on the host or when your mod loads. A host call applies on every S.A.M player's machine, and a player who joins later gets the host's whole table.
+   */
+  function sam_set_loot_context(item: any, context: string, allowed: boolean): boolean;
+
+  /**
+   * What a roll returns when NOTHING in the category fits its window, instead of the engine's GEM_ROCK. The Hamlet's Arms & Armour store rolls weapons from level 10 up: a sheet where every weapon is level 0 fills it with fourteen rocks. A fallback swaps each rock for the one named item, so it does not make that store work: widen its window in world.on_before_loot_roll (e.min_level) for that. Set per category, and per context when it should differ (a rock in a chest is fine, in a shop it is a bug); "ANY" is the any-category draw the lockpick capstone reward makes. item nil removes the rule.
+   *
+   * Multiplayer: all. Changes a table every machine keeps its own copy of: a host call runs on the host and on every S.A.M client, and is replayed to a client that joins later. A client's call is refused with a one-time warning and returns false. Call it on the host or when your mod loads. A host call applies on every S.A.M player's machine, and a player who joins later gets the host's whole table.
+   */
+  function sam_set_loot_fallback(category: string, item: any, context?: string): boolean;
+
+  /**
+   * A window on the CURRENT FLOOR NUMBER inside which the item may roll, checked beside the sheet's item_level. max_floor is the ceiling vanilla has no knob for ("leather armour stops appearing after floor 10"); leave it out for no ceiling. sam_set_loot_floor_range(item, 0) removes the rule.
+   *
+   * Multiplayer: all. Changes a table every machine keeps its own copy of: a host call runs on the host and on every S.A.M client, and is replayed to a client that joins later. A client's call is refused with a one-time warning and returns false. Call it on the host or when your mod loads. A host call applies on every S.A.M player's machine, and a player who joins later gets the host's whole table.
+   */
+  function sam_set_loot_floor_range(item: any, min_floor: number, max_floor?: number): boolean;
+
+  /**
+   * How likely one item is inside any roll that considers it: 1 is vanilla, 0 is never, 5 is five times as likely as a weight-1 item in the same draw. Applies everywhere the engine rolls from the item sheet: floor items, chests, shops, monster gear, the lockpick reward, sam_roll_loot. Last call wins.
+   *
+   * Multiplayer: all. Changes a table every machine keeps its own copy of: a host call runs on the host and on every S.A.M client, and is replayed to a client that joins later. A client's call is refused with a one-time warning and returns false. Call it on the host or when your mod loads. A host call applies on every S.A.M player's machine, and a player who joins later gets the host's whole table. A client of a host without S.A.M, and a stock 5.0.2 client, roll vanilla floor loot from the seed, so their floors differ from the host's.
+   */
+  function sam_set_loot_weight(item: any, weight: number): boolean;
 
   /**
    * Swap any entity's model while the game is running. What crosses the wire is the model ID, never an index, so machines with different mod orders still agree. This is what makes transformations, boss phases and damage states possible; before it, a model was fixed at spawn.
@@ -1899,6 +2004,27 @@ declare global {
   function sam_set_scale(uid: number, scale: number): boolean;
 
   /**
+   * Change one of your settings from the script: validated against the declaration (a slider is snapped to its step), written to your settings file at once, and announced with mod.on_setting_changed with source "script". Setting the value already in force is true and silent. The Settings screen shows the new value the next time it opens.
+   *
+   * Multiplayer: local. Answers for the machine running the script. Changes this machine's value only.
+   */
+  function sam_set_setting(id: string, value: number): boolean;
+
+  /**
+   * Replace a shopkeeper's stock with exactly this list, then run the engine's price-sorted slot layout. The data-driven consumables the store type always sells (the bottom-right row) stay. Meant for world.on_before_shop_stock (return false, then stock it from world.on_shop_stocked) or for any shop at any time. An empty list empties the shop of everything but the consumables.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. Host only. A player on another machine who has the shop open has their window closed with the engine's own SHPC; their next talk serves the new stock.
+   */
+  function sam_set_shop_stock(shopkeeper_uid: number, items: any): boolean;
+
+  /**
+   * What kind of store a shopkeeper opens. Only before it has stocked: the tick it was spawned with sam_spawn_monster, or a shopkeeper placed by the map before its first tick. After that the type has been read and the call is refused with the reason.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. Host only; the store type travels with the shopkeeper's stats.
+   */
+  function sam_set_shop_type(shopkeeper_uid: number, store_type: number): boolean;
+
+  /**
    * Change how much of a weapon class an entire species takes. 1.0 normal, 0.5 halves it, 2.0 doubles it. Every creature of that species, now and later.
    *
    * Multiplayer: all. Changes a table every machine keeps its own copy of: a host call runs on the host and on every S.A.M client, and is replayed to a client that joins later. A client's call is refused with a one-time warning and returns false.
@@ -1911,6 +2037,13 @@ declare global {
    * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
    */
   function sam_set_species_immunity(species: string, effect: string, on?: boolean): boolean;
+
+  /**
+   * Whether a spell's book (or tome) may come out of a spellbook roll, from min_floor (default 0), or never. Every rolled spellbook is re-drawn by the engine from the spell table after the item roll, using each spell's drop_table floor and hiding class, race and monster spells outright; this overrides that rule for one spell. This is the way to put a class spellbook into the loot pool: a level patch on the book alone is undone by the re-draw.
+   *
+   * Multiplayer: all. Changes a table every machine keeps its own copy of: a host call runs on the host and on every S.A.M client, and is replayed to a client that joins later. A client's call is refused with a one-time warning and returns false. Call it on the host or when your mod loads. A host call applies on every S.A.M player's machine, and a player who joins later gets the host's whole table.
+   */
+  function sam_set_spell_droppable(spell: any, allowed: boolean, min_floor?: number): boolean;
 
   /**
    * Set a live player stat, bounded (HP never exceeds MAXHP, stats clamped, etc.). The change reaches the player's own machine, and a LVL write updates every player's party display at once.
@@ -2037,6 +2170,13 @@ declare global {
    * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns 0. Reaches S.A.M players in order after the play it stops.
    */
   function sam_stop_sound(sound: string): number;
+
+  /**
+   * End an unattended test run started with barony.exe -samtest=YourMod. Writes the verdict to sam_log.txt and quits the game, setting the process exit code to 0 when failed is 0 and 1 otherwise, so a script can run your mod's tests and read the answer without anyone playing.
+   *
+   * Multiplayer: local. Answers for the machine running the script.
+   */
+  function sam_test_done(passed: number, failed: number): boolean;
 
   /**
    * Can something WALK (or fly) from A to B at all? The softlock check: after a mod edits terrain, ask whether the exit is still reachable before committing.
@@ -2230,6 +2370,10 @@ declare global {
     | "game.on_game_start"
     /** Fires a floor finishes loading. Multiplayer: Fires on the host, once for every connected player on every arrival (ladders, portals, teleports and sam_travel_to_level alike). */
     | "game.on_level_entered"
+    /** Fires the simulation speed really changes: a sam_set_game_speed or /sam_gamespeed that set a different value, a temporary window ending, and the reset to 1x when a run ends or a new one starts. Multiplayer: Fires on the host, in singleplayer. */
+    | "game.on_speed_changed"
+    /** Fires the value one of a mod's settings holds really changes: the player pressed Confirm in Settings (source "ui"), pressed Restore Defaults and then Confirm ("reset"), or a script called sam_set_setting ("script"). Multiplayer: Fires on the machine whose setting changed. */
+    | "mod.on_setting_changed"
     /** Fires a BOUND action goes down — e.g. the player presses whatever they have "Use" mapped to. Multiplayer: Fires on the host (and in singleplayer), for every player: each local seat, and each joiner's buttons as their game reports them. A joiner whose game does not run S.A.M produces none. */
     | "on_action_pressed"
     /** Fires a bound action goes back up. Multiplayer: Fires on the host (and in singleplayer), for every player, the same way as on_action_pressed. */
@@ -2348,24 +2492,42 @@ declare global {
     | "ui.on_select"
     /** Fires the player commits the contents of a text box placed with sam_ui_input. Multiplayer: Fires on the host (in singleplayer, locally), with player = who typed. A client's submit is sent to the host and does not fire in the client's own scripts. */
     | "ui.on_submit"
+    /** Fires a chest (or a mimic, which is a chest with legs) is about to be filled, after its type and quality floor are decided and before any item is made. Multiplayer: Fires on the host, on the main thread only, for a chest filled during play. */
+    | "world.on_before_chest_fill"
     /** Fires before a chest opens. Multiplayer: Fires on the host, for every player. */
     | "world.on_before_chest_open"
+    /** Fires before the engine rolls a random item from the item sheet during play: a shopkeeper stocking, a creature's starting gear, a chest summoned during play, the lockpick capstone reward, the potion an alchemy skill-up teaches, /sam_loot, /itemlevelcurve and sam_roll_loot. It does NOT fire for the rolls made while a floor is generated (floor items, the map's own chests, the mimics made from them): those run on the level loader's thread, where scripts cannot be entered, and are governed by the loot tables. Multiplayer: Fires on the host, on the main thread only (never on the level loader's thread, never on a client), for every roll during play. */
+    | "world.on_before_loot_roll"
+    /** Fires a shopkeeper is about to stock its store, after the map's and the editor's flags decided the store type, the item count, the shop level and the blessing tier, and before any item is made. Multiplayer: Fires on the host, for every shopkeeper on its first tick. */
+    | "world.on_before_shop_stock"
+    /** Fires a roll produced a spellbook and the engine is about to replace it with a spell drawn from the spell table (its drop_table floor, its school rotation, its difficulty ladder), before that candidate list is built. Multiplayer: Fires on the host, on the main thread only, for every spellbook rolled during play (shops, monster pockets, a summoned chest, sam_roll_loot). */
+    | "world.on_before_spellbook_reroll"
     /** Fires a boulder trap launches. Multiplayer: Fires on the host. */
     | "world.on_boulder_triggered"
+    /** Fires a chest's (or mimic's) inventory has been generated and laid out, or left empty because world.on_before_chest_fill said so. Multiplayer: Fires on the host, on the main thread only, for a chest filled during play. */
+    | "world.on_chest_filled"
     /** Fires a player first walks up close to a chest (proximity — fires once per chest, NOT on opening it). Multiplayer: Fires on the host, for every player. */
     | "world.on_chest_found"
     /** Fires a player opens a wooden door. Multiplayer: Fires on the host, for every player. */
     | "world.on_door_opened"
+    /** Fires one of the small fixtures that never consult the item sheet is about to hand out an item: a fountain's potion splash (goatmen), a sink's ring, the luckstone a boulder leaves when it blocks the only way on, and the lockpick capstone's chest reward. Multiplayer: Fires on the host, for the player who used the fixture (player is -1 for a boulder). */
+    | "world.on_fixture_loot"
     /** Fires a player drinks from / uses a fountain. Multiplayer: Fires on the host, for every player. */
     | "world.on_fountain_used"
     /** Fires a thrown gadget lands and something must be built there. Multiplayer: Fires on the host (a thrown gadget lands there), for every player. */
     | "world.on_item_deployed"
+    /** Fires after a rolled item's final type is known (after the spellbook re-draw and the thrown-weapon status rule) and the item exists: every roll world.on_before_loot_roll covers, plus a monster's rolled worn slots and pockets and a troll's or ghoul's rolled loot, which run no post-processing in vanilla and get this event directly. Multiplayer: Fires on the host, on the main thread only, for every rolled item during play. */
+    | "world.on_loot_rolled"
+    /** Fires a creature's species init has finished making its starting gear (worn slots and pockets alike), on its first tick. Multiplayer: Fires on the host, for every creature on its first tick. */
+    | "world.on_monster_inventory"
     /** Fires a monster is summoned at runtime. Multiplayer: Fires on the host. */
     | "world.on_monster_spawned"
     /** Fires a player places an orb on a pedestal. Multiplayer: Fires on the host, for every player. */
     | "world.on_orb_placed"
     /** Fires a fired projectile strikes an entity. Multiplayer: Fires on the host. */
     | "world.on_projectile_hit"
+    /** Fires a shopkeeper's stock has been generated, laid out by price and had its consumables added (potions are normalised right after). Multiplayer: Fires on the host, for every shopkeeper on its first tick. */
+    | "world.on_shop_stocked"
     /** Fires a player uses a sink. Multiplayer: Fires on the host, for every player. */
     | "world.on_sink_used"
     /** Fires a player flips a lever or switch. Multiplayer: Fires on the host, for every player. */

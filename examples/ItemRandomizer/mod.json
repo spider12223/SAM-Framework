@@ -1,0 +1,9 @@
+{
+  "$schema": "https://spider12223.github.io/SAM-Framework/schemas/mod.schema.json",
+  "namespace": "randomizer",
+  "name": "Item Randomizer",
+  "author": "S.A.M Framework",
+  "version": "1.0.0",
+  "framework_min_version": "3.1.0",
+  "description": "Every item in the game joins the common loot pool on every floor: artifacts, orbs, keys, class gear, the lot, on the ground, in chests and in shops, and class and race spellbooks wherever an item is rolled during play (shops, creatures' pockets, summoned chests). A S.A.M version of the community mod of the same name: it changes the loot rules instead of replacing items.json, so it composes with every mod that adds items, and the deep stores keep selling instead of falling back to rocks. A Lite toggle in the settings keeps artifacts and orbs out of shops."
+}

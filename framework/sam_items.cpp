@@ -28,6 +28,9 @@
 #include "sam_monsters.hpp" // body-model resolution report
 #include "sam_spells.hpp" // resolve "ns:spell" / vanilla spell-name payloads to ids
 #include "sam_classes.hpp" // class appearance model paths (whole-body + heads) to append
+#ifndef EDITOR
+#include "sam_loot.hpp"    // the loot tables are keyed by the item ids this registry hands out: cleared with it (game only)
+#endif
 #include "nlohmann/json.hpp"
 
 #include <map>
@@ -83,6 +86,41 @@ struct SAMItemSaved
 	std::map<std::string, Sint32> attributes;
 };
 static std::map<int, SAMItemSaved> s_itemPatches;
+
+// The same slots AS THEY STAND AFTER THE PATCH, refreshed on every patchItem and when a client
+// takes the host's table. s_itemPatches remembers what to put back on unload; this remembers what
+// to put back after a vanilla data reload (/loaditems, initGameDatafiles), which rewrites every
+// built-in slot from items.json and used to drop the one field a randomizer relies on: the level
+// that lets an artifact roll as loot.
+static std::map<int, SAMItemSaved> s_itemPatchedNow;
+
+static void samSnapshotSlot(int id, SAMItemSaved& s)
+{
+	const ItemGeneric& slot = items[id];
+	s.weight = slot.weight;
+	s.gold_value = slot.gold_value;
+	s.level = slot.level;
+	s.category = slot.category;
+	s.item_slot = slot.item_slot;
+	s.tooltip = slot.tooltip;
+	s.nameId = slot.getIdentifiedName();
+	s.nameUnid = slot.getUnidentifiedName();
+	s.attributes = slot.attributes;
+}
+
+static void samRestoreSlot(int id, const SAMItemSaved& s)
+{
+	ItemGeneric& slot = items[id];
+	slot.weight = s.weight;
+	slot.gold_value = s.gold_value;
+	slot.level = s.level;
+	slot.category = s.category;
+	slot.item_slot = s.item_slot;
+	slot.tooltip = s.tooltip;
+	slot.setIdentifiedName(s.nameId);
+	slot.setUnidentifiedName(s.nameUnid);
+	slot.attributes = s.attributes;
+}
 
 /*-------------------------------------------------------------------------------
 	Local helpers
@@ -982,6 +1020,12 @@ void SAMItems::clear()
 		}
 	}
 	s_itemPatches.clear();
+	s_itemPatchedNow.clear();
+#ifndef EDITOR
+	// The loot tables (sam_loot.cpp: weights, floor windows, contexts, fallbacks, spell
+	// overrides) are keyed by the item ids this registry hands out per load. Same lifetime.
+	SAMLoot::clear();
+#endif
 
 	// Free the image lists we allocated for custom slots, and reset those slots so
 	// nothing lingers or gets picked up by a later lookup.
@@ -1031,6 +1075,18 @@ void SAMItems::reapplyAfterDataReload()
 	{
 		SAM_INFO(MOD, "Re-applied " + std::to_string(s_registry.size())
 			+ " custom item(s) after a vanilla data reload (tooltips restored).");
+	}
+	// The vanilla reload rewrote every built-in slot from items.json, and the loop above rewrote
+	// every custom slot from its definition: both undid sam_patch_item. Put the patched values
+	// back, last, so a patch on a custom item survives too.
+	for ( const auto& kv : s_itemPatchedNow )
+	{
+		if ( kv.first >= 0 && kv.first < NUM_ITEM_SLOTS ) { samRestoreSlot(kv.first, kv.second); }
+	}
+	if ( !s_itemPatchedNow.empty() )
+	{
+		SAM_INFO(MOD, "Re-applied " + std::to_string(s_itemPatchedNow.size())
+			+ " item patch(es) after a vanilla data reload.");
 	}
 #endif
 }
@@ -1154,6 +1210,7 @@ bool SAMItems::patchItem(int id, const SAMItemPatch& p)
 	if ( p.hasNameId )   { slot.setIdentifiedName(p.nameIdentified); }
 	if ( p.hasNameUnid ) { slot.setUnidentifiedName(p.nameUnidentified); }
 	for ( const auto& kv : p.attributes ) { slot.attributes[kv.first] = (Sint32)kv.second; } // MERGE
+	samSnapshotSlot(id, s_itemPatchedNow[id]);   // what a data reload must put back
 
 	SAM_INFO(MOD, "Patched item slot " + std::to_string(id) + " ("
 		+ std::to_string(p.attributes.size()) + " attribute override(s))");
@@ -1248,6 +1305,7 @@ namespace
 			items[id].attributes = s.attributes;
 		}
 		s_itemPatches.clear();
+		s_itemPatchedNow.clear();
 		for ( const SamNetItemRecord& rec : recs )
 		{
 			if ( rec.id < 0 || rec.id >= NUM_ITEM_SLOTS ) { continue; }
@@ -1273,6 +1331,7 @@ namespace
 			slot.setIdentifiedName(rec.nameId);
 			slot.setUnidentifiedName(rec.nameUnid);
 			slot.attributes = rec.attributes;
+			samSnapshotSlot(rec.id, s_itemPatchedNow[rec.id]);
 		}
 		SAM_INFO(MOD, "Took the host's item patches (" + std::to_string(recs.size()) + " slot(s)).");
 	}
@@ -1824,6 +1883,11 @@ void SAMItems::drainDestroyQueue()
 	// script answered may be casting that spell), each one destroys a spell item through
 	// destroyNow, and this is the one point per frame where that is known to be safe.
 	SAMSpells::drainRemoveQueue();
+
+	// Then the one container removal the loot module defers: an item taken out of its chest or
+	// shop from inside the loot event that was about it, while the engine still wrote to it.
+	// Same rule, same safe point; that queue is not keyed by a player's backpack, so it is its own.
+	SAMLoot::drainDeferredRemovals();
 
 	if ( s_pendingDestroy.empty() ) { return; }
 

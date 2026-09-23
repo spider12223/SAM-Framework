@@ -26,6 +26,7 @@
 #include "sam_hud.hpp"   // script HUD, cleared on unload
 #include "sam_images.hpp" // mod-supplied pictures (overlay + HUD art)
 #include "sam_ui.hpp"     // interactive mod panels, closed on (un)load
+#include "sam_settings.hpp" // mod actions and mod settings, cleared on (un)load
 #endif   // the framework's built-in Hunter's Workbench
 #include "sam_monster_patches.hpp" // v0.7.0 F5 monster stat overrides — both builds
 #ifndef EDITOR
@@ -52,10 +53,21 @@
 
 bool SAMLoader::loaded = false;
 
+// How many scripts failed in the most recent load(): a parse error, or an error while running
+// the top level, either of which leaves the mod with no handlers. Mods::loadMods() is void and
+// the runtimes only log, so nothing above this file could tell a mod that did not load from one
+// that loaded and is quiet. An unattended test run (sam_test.cpp) reads it to answer with exit
+// code 3, "the mods could not be loaded", instead of waiting for the watchdog and calling the run
+// HUNG with advice about --floor 1. A plain function declared beside its one caller, so the
+// loader's header stays as it is.
+static int s_scriptLoadFailures = 0;
+int samScriptLoadFailures() { return s_scriptLoadFailures; }
+
 void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mountedPaths,
 	const std::string& baronyVersion)
 {
 	SAMLogger::beginModLoad(); // opens the MOD LOAD section + starts the load-time clock
+	s_scriptLoadFailures = 0;
 	SAM_INFO("CORE", "S.A.M initializing..." + (baronyVersion.empty() ? std::string() : (" (Barony " + baronyVersion + ")")));
 	SAM_INFO("CORE", "Scanning " + std::to_string(mountedPaths.size()) + " mounted mod path(s) for mod.json...");
 
@@ -81,6 +93,7 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 	SAMCombat::clear(); // drop species damage-resistance overrides -> vanilla damagetables
 	SAMCamera::clear(); // hand every camera back to the engine
 	SAMRules::clear();  // drop stat modifiers, effect immunities and the XP curve
+	SAMSettings::clear(); // drop mod actions and mod settings; the player's keys stay in config.json and the values stay in each mod's file
 	SAMHud::clearAll(); // a mod's HUD must never outlive the mod that drew it
 	SAMImages::clear(); // drop the image registry + every live overlay
 	SAMUi::closeAll();  // a panel must never outlive the mod that opened it
@@ -211,25 +224,36 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 		auto loadCompanionScripts = [&](const std::string& base, const std::string& readableId, const char* kind)
 		{
 			// TypeScript (transpiled to JS, cached under <outputdir>/sam_ts_cache).
+			// A script that exists and will not load is counted (the runtime has already said why);
+			// a test run turns the count into its exit code, see s_scriptLoadFailures.
 			const std::string tsPath = m.modPath + "/" + base + ".ts";
-			if ( samExists(tsPath) && loadedScriptPaths.insert(tsPath).second
-				&& SAMJs::loadScriptTS(tsPath, tsCacheDir, tsCompilerPath, m.ns) )
+			if ( samExists(tsPath) && loadedScriptPaths.insert(tsPath).second )
 			{
-				SAM_INFO("JS", std::string("Loaded script: ") + samFileName(tsPath) + " (TypeScript) for " + kind + " [" + readableId + "]");
+				if ( SAMJs::loadScriptTS(tsPath, tsCacheDir, tsCompilerPath, m.ns) )
+				{
+					SAM_INFO("JS", std::string("Loaded script: ") + samFileName(tsPath) + " (TypeScript) for " + kind + " [" + readableId + "]");
+				}
+				else { ++s_scriptLoadFailures; }
 			}
 			// JavaScript.
 			const std::string jsPath = m.modPath + "/" + base + ".js";
-			if ( samExists(jsPath) && loadedScriptPaths.insert(jsPath).second
-				&& SAMJs::loadScriptJS(jsPath, m.ns) )
+			if ( samExists(jsPath) && loadedScriptPaths.insert(jsPath).second )
 			{
-				SAM_INFO("JS", std::string("Loaded script: ") + samFileName(jsPath) + " (JavaScript) for " + kind + " [" + readableId + "]");
+				if ( SAMJs::loadScriptJS(jsPath, m.ns) )
+				{
+					SAM_INFO("JS", std::string("Loaded script: ") + samFileName(jsPath) + " (JavaScript) for " + kind + " [" + readableId + "]");
+				}
+				else { ++s_scriptLoadFailures; }
 			}
 			// Lua.
 			const std::string luaPath = m.modPath + "/" + base + ".lua";
-			if ( samExists(luaPath) && loadedScriptPaths.insert(luaPath).second
-				&& SAMLua::loadScript(luaPath, m.ns) )
+			if ( samExists(luaPath) && loadedScriptPaths.insert(luaPath).second )
 			{
-				SAM_INFO("LUA", std::string("Loaded script: ") + samFileName(luaPath) + " (Lua) for " + kind + " [" + readableId + "]");
+				if ( SAMLua::loadScript(luaPath, m.ns) )
+				{
+					SAM_INFO("LUA", std::string("Loaded script: ") + samFileName(luaPath) + " (Lua) for " + kind + " [" + readableId + "]");
+				}
+				else { ++s_scriptLoadFailures; }
 			}
 		};
 
@@ -336,6 +360,7 @@ void SAMLoader::unload()
 	SAMCombat::clear();        // drop species damage-resistance overrides
 	SAMCamera::clear();        // hand every camera back to the engine
 	SAMRules::clear();         // drop stat modifiers, effect immunities and the XP curve
+	SAMSettings::clear();      // drop mod actions and mod settings (files and config.json untouched)
 #endif
 	SAMMonsterPatch::clear();  // reverts sam_patch_monster overrides (F5)
 	// Rooms are NOT optional to clear. The registry holds ABSOLUTE paths, so unmounting the

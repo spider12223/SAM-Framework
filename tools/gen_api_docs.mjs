@@ -172,6 +172,117 @@ for (const f of FUNCS) {
   }
 }
 
+// ---------------------------------------------------------------- arity
+// The contract check above verifies ONE argument, the one the trampoline reads. An entry with a
+// parameter too many or too few passed it, so the reference could show an argument the runtime
+// never reads, or hide one it does, and the .d.ts would compile a call the game refuses. Three
+// independent measures, each compared with params.length:
+//
+//   * the length samJsRegister passes, which is the function's declared arity (Function.length);
+//     four of these had gone stale by the first time this ran;
+//   * the JavaScript body: the highest argv index it reads, directly or through the
+//     (ctx, argc, argv, i) helpers, plus one;
+//   * the Lua body: the highest positive literal index it reads through a lua_/luaL_ reader or
+//     one of the file's own (lua_State* Ls, int idx) helpers.
+//
+// A body that hands its arguments to a helper (`return samSetTimerImpl(Ls, false)`,
+// `samSetJsTimer(ctx, argc, argv, true)`) is measured through that helper. Comments and string
+// literals are blanked first, so a brace or an "argv[3]" in a comment cannot skew a body.
+//
+// One exception, which is the trampoline's rule and not a tolerance: for an OptPlayer contract
+// the trailing player is stripped before the body runs (stripOpt in both trampolines), so the
+// body's own arity is params.length - 1, and that is what all three measures see for every
+// such function.
+const expectedArity = f => {
+  const c = contract.get(f.name)
+  return (f.params || []).length - (c && c.target === 'OptPlayer' ? 1 : 0)
+}
+const arityWords = (f, want) => `samApi.js lists ${(f.params || []).length} parameter(s)` + (want !== (f.params || []).length ? ` (the last is the stripped OptPlayer, so ${want} is expected)` : '')
+// Comments and string/char literals become spaces of the same length, so offsets still line up.
+const blankNonCode = t => {
+  let out = '', i = 0
+  const n = t.length
+  const keep = ch => (ch === '\n' ? '\n' : ' ')
+  while (i < n) {
+    const c = t[i], d = t[i + 1]
+    if (c === '/' && d === '/') { while (i < n && t[i] !== '\n') { out += ' '; i++ } continue }
+    if (c === '/' && d === '*') { out += '  '; i += 2; while (i < n && !(t[i] === '*' && t[i + 1] === '/')) { out += keep(t[i]); i++ } if (i < n) { out += '  '; i += 2 } continue }
+    if (c === '"' || c === "'") { out += c; i++; while (i < n && t[i] !== c && t[i] !== '\n') { if (t[i] === '\\' && i + 1 < n) { out += '  '; i += 2; continue } out += ' '; i++ } if (i < n) { out += t[i]; i++ } continue }
+    out += c; i++
+  }
+  return out
+}
+const blockAt = (text, open) => {   // the { ... } block whose opening brace is at `open`
+  let depth = 0
+  for (let i = open; i < text.length; i++) {
+    if (text[i] === '{') depth++
+    else if (text[i] === '}' && --depth === 0) return text.slice(open, i + 1)
+  }
+  return text.slice(open)
+}
+const luaSan = blankNonCode(luaText)
+const jsSan = blankNonCode(jsText)
+
+// Every function in the Lua runtime that takes the state first: its body, and whether its second
+// parameter is an index (a reader such as samResolveItemArg) or not (a delegate such as
+// samSetTimerImpl, whose body is measured in place of the caller's).
+const luaFns = new Map()
+for (const m of luaSan.matchAll(/^[ \t]*[^\n(]*?\b(\w+)\s*\(\s*lua_State\s*\*\s*Ls\b([^)]*)\)\s*\{/gm)) {
+  const second = (m[2].split(',')[1] || '').trim()
+  luaFns.set(m[1], { reader: /^int\s+\w+$/.test(second), body: blockAt(luaSan, m.index + m[0].length - 1) })
+}
+// luaL_checkstack takes a slot count, not an index, hence the exclusion.
+const LUA_READER = /\b(luaL_check(?!stack)\w*|luaL_opt\w*|lua_to\w*|lua_is\w*|lua_type|lua_getfield|lua_geti|lua_gettable|lua_rawgeti|lua_rawlen|lua_len|lua_next|lua_pushvalue|sam\w+)\s*\(\s*Ls\s*,\s*(\d+)\b/g
+const luaTopIndex = (fn, seen = new Set()) => {
+  const def = luaFns.get(fn)
+  if (!def || seen.has(fn)) return 0
+  seen.add(fn)
+  let hi = 0
+  for (const m of def.body.matchAll(LUA_READER)) {
+    if (m[1].startsWith('sam') && !(luaFns.get(m[1]) || {}).reader) continue
+    hi = Math.max(hi, +m[2])
+  }
+  for (const m of def.body.matchAll(/\b(sam\w+)\s*\(\s*Ls\b/g)) {
+    const d = luaFns.get(m[1])
+    if (d && !d.reader) hi = Math.max(hi, luaTopIndex(m[1], seen))
+  }
+  return hi
+}
+for (const m of luaText.matchAll(/samLuaRegister\(\s*\w+\s*,\s*"(sam_[A-Za-z0-9_]+)"\s*,\s*(\w+)\s*\)/g)) {
+  const f = FUNCS.find(x => x.name === m[1])
+  if (!f) continue
+  if (!luaFns.has(m[2])) { problems.push(`cannot find the body of ${m[2]} (${m[1]}) to check its arity`); continue }
+  const hi = luaTopIndex(m[2]), want = expectedArity(f)
+  if (hi !== want) problems.push(`${m[1]}: the Lua body reads up to argument ${hi} but ${arityWords(f, want)}`)
+}
+
+// The same for the JavaScript runtime: every function that takes the context first. A binding
+// with no arguments comments its argv out (`JSValueConst* /*argv*/`) and a delegate such as
+// samSetJsTimer takes something after argv, so the parameter list is not matched on argv.
+const jsFns = new Map()
+for (const m of jsSan.matchAll(/^[ \t]*[^\n(]*?\b(\w+)\s*\(\s*JSContext\s*\*\s*ctx\s*,[^)]*\)\s*\{/gm)) {
+  jsFns.set(m[1], blockAt(jsSan, m.index + m[0].length - 1))
+}
+const JS_READER = /\bargv\s*(?:\[\s*(\d+)\s*\]|,\s*(\d+)\b)/g
+const jsTopIndex = (fn, seen = new Set()) => {
+  const body = jsFns.get(fn)
+  if (!body || seen.has(fn)) return 0
+  seen.add(fn)
+  let hi = 0
+  for (const m of body.matchAll(JS_READER)) hi = Math.max(hi, +(m[1] ?? m[2]) + 1)
+  for (const m of body.matchAll(/\b(sam\w+)\s*\(\s*ctx\s*,\s*argc\s*,\s*argv\b/g)) if (jsFns.has(m[1])) hi = Math.max(hi, jsTopIndex(m[1], seen))
+  return hi
+}
+for (const m of jsText.matchAll(/samJsRegister\(\s*\w+\s*,\s*\w+\s*,\s*"(sam_[A-Za-z0-9_]+)"\s*,\s*(\w+)\s*,\s*(\d+)\s*\)/g)) {
+  const f = FUNCS.find(x => x.name === m[1])
+  if (!f) continue
+  const want = expectedArity(f)
+  if (+m[3] !== want) problems.push(`${m[1]}: samJsRegister declares length ${m[3]} but ${arityWords(f, want)}`)
+  if (!jsFns.has(m[2])) { problems.push(`cannot find the body of ${m[2]} (${m[1]}) to check its arity`); continue }
+  const hi = jsTopIndex(m[2])
+  if (hi !== want) problems.push(`${m[1]}: the JavaScript body reads up to argument ${hi} but ${arityWords(f, want)}`)
+}
+
 // Events fired by the engine must appear in the catalog for the same reason. Two things this
 // scan used to be blind to, and both are the drift the tool exists to stop:
 //
@@ -184,15 +295,17 @@ for (const f of FUNCS) {
 //     and compares hashes and counts. Meanwhile ../Barony/src fires 53 of these names.
 //
 // So: find the FIRE SITES rather than any string that looks like an event name. A site is a
-// SamEvent construction, a setName(), a SAMNet::sendEventToHost() or an AllowEvent -- which
-// also takes the ternary form `SamEvent ev(down ? "on_key_pressed" : "on_key_released")` --
-// and only string literals shaped like an event name are taken from it. That is precise
+// SamEvent construction (named, or a temporary: `SamEvent(  "player.on_damage_taken" ).i(..)`,
+// which the scan used to miss because it demanded a variable name), a setName(), a
+// SAMNet::sendEventToHost() or an AllowEvent -- which also takes the ternary form
+// `SamEvent ev(down ? "on_key_pressed" : "on_key_released")` -- and only string literals
+// shaped like an event name are taken from it. That is precise
 // enough to have no false positives across both trees, where a plain "looks like on_*" scan
 // picked up JSON field names (on_hit_effect, on_degraded, on_use) and doc comments.
 //
 // The Barony tree is scanned only when it is there, like EXTRA above, so a checkout of
 // SAM-Framework on its own still works. The tool stays dependency-free either way.
-const EV_SITE = /(?:SamEvent\s+\w+\s*\(|\.setName\s*\(|sendEventToHost\s*\(|AllowEvent\s+\w+\s*\()([^;{}]*)/g
+const EV_SITE = /(?:SamEvent\s*(?:\w+\s*)?\(|\.setName\s*\(|sendEventToHost\s*\(|AllowEvent\s+\w+\s*\()([^;{}]*)/g
 const EV_NAME = /"((?:[a-z]+\.)?on_[a-z_]+)"/g
 const evFired = new Set()
 const scanEvents = (dir) => {
@@ -216,6 +329,13 @@ if (existsSync(ENGINE_SRC)) scanEvents(ENGINE_SRC)
 else console.warn('note: ../Barony/src not found beside the repo, skipped the engine-side event scan')
 const evDeclared = new Set(EVENTS.map(e => e.name))
 diff(evFired, evDeclared, 'event fired but MISSING from samApi.js')
+// And the other way: an event samApi.js declares that no site fires is a phantom, and a handler
+// written for it waits forever. Two catalog names are not fire sites by design and are allowed:
+// on_tick is not an event at all (each runtime calls the script's global on_tick function
+// directly), and "<namespace>:<hook_name>" is the template every custom hook a mod fires with
+// sam_fire_hook is named after.
+const EV_NOT_A_SITE = new Set(['on_tick', '<namespace>:<hook_name>'])
+diff(new Set([...evDeclared].filter(n => !EV_NOT_A_SITE.has(n))), evFired, 'event declared in samApi.js but never FIRED by the framework or the engine (a handler for it would wait forever)')
 dupes(FUNCS, 'function')
 dupes(EVENTS, 'event')
 // Which machine an event fires on is the first thing a co-op mod needs to know about it.
@@ -228,6 +348,7 @@ if (problems.length) {
 }
 console.log(`ok  ${lua.size} functions and ${EVENTS.length} events agree across both runtimes and samApi.js`)
 console.log(`ok  every function registers through the trampoline and has a contract; samApi.js mp matches all ${contract.size}; every event says where it fires`)
+console.log(`ok  every function's parameter count matches both runtime bodies and the JavaScript declared length; every declared event has a fire site`)
 // NOT an early exit any more. --check used to stop here, which meant the ship gate never
 // reached the TypeScript parse or the parameter-type check below: the only two checks that
 // look at what mod authors actually receive. It now runs everything and skips the writes.

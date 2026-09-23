@@ -111,6 +111,7 @@ SAM_MP(sam_modify_value,                  Host,   None,      0, False)
 SAM_MP(sam_get_action_binding,            Read,   Player,    1, Nil)
 SAM_MP(sam_is_action_held,                Read,   Player,    1, None)
 SAM_MP(sam_is_key_held,                   Read,   Player,    2, None)
+SAM_MP(sam_register_action,               All,    None,      0, False)
 
 // ---- Inventory
 SAM_MP(sam_can_items_stack,               Read,   Player,    1, Nil)
@@ -156,6 +157,20 @@ SAM_MP(sam_unpatch_class,                 All,    None,      0, False)
 SAM_MP(sam_log,                           Local,  None,      0, None)
 SAM_MP(sam_message,                       Host,   None,      0, False)
 
+// ---- Loot
+SAM_MP(sam_add_item_to_container,         Host,   None,      0, Nil)
+SAM_MP(sam_get_loot_pool,                 Any,    None,      0, Nil)
+SAM_MP(sam_remove_item_from_container,    Host,   None,      0, False)
+SAM_MP(sam_roll_loot,                     Host,   None,      0, None)
+SAM_MP(sam_set_loot_category_weight,      All,    None,      0, False)
+SAM_MP(sam_set_loot_context,              All,    None,      0, False)
+SAM_MP(sam_set_loot_fallback,             All,    None,      0, False)
+SAM_MP(sam_set_loot_floor_range,          All,    None,      0, False)
+SAM_MP(sam_set_loot_weight,               All,    None,      0, False)
+SAM_MP(sam_set_shop_stock,                Host,   None,      0, False)
+SAM_MP(sam_set_shop_type,                 Host,   None,      0, False)
+SAM_MP(sam_set_spell_droppable,           All,    None,      0, False)
+
 // ---- Mechanisms
 SAM_MP(sam_power_entity,                  Host,   None,      0, False)
 SAM_MP(sam_set_door,                      Host,   None,      0, False)
@@ -191,6 +206,9 @@ SAM_MP(sam_set_monster_target_uid,        Host,   None,      0, False)
 SAM_MP(sam_spawn_monsters,                Host,   None,      0, Zero)
 
 // ---- Multiplayer
+SAM_MP(sam_test_done,                     Local,  None,      0, False)
+SAM_MP(sam_get_game_speed,                Any,    None,      0, Zero)
+SAM_MP(sam_set_game_speed,                Local,  None,      0, False)
 SAM_MP(sam_is_host,                       Local,  None,      0, False)
 SAM_MP(sam_local_player,                  Local,  None,      0, Zero)
 SAM_MP(sam_player_count,                  Any,    None,      0, Zero)
@@ -298,6 +316,12 @@ SAM_MP(sam_set_immunity,                  Host,   None,      0, False)
 SAM_MP(sam_set_monster_immunity,          Host,   None,      0, False)
 SAM_MP(sam_set_species_immunity,          Host,   None,      0, False)
 SAM_MP(sam_set_xp_curve,                  Host,   None,      0, False)
+
+// ---- Settings
+SAM_MP(sam_get_setting,                   Local,  None,      0, None)
+SAM_MP(sam_list_settings,                 Local,  None,      0, Empty)
+SAM_MP(sam_register_setting,              All,    None,      0, False)
+SAM_MP(sam_set_setting,                   Local,  None,      0, False)
 
 // ---- Sound & music
 SAM_MP(sam_get_music,                     Local,  None,      0, Nil)

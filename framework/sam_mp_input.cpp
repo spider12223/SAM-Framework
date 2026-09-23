@@ -12,6 +12,7 @@
 #include "sam_logger.hpp"
 #include "sam_lua_runtime.hpp"   // actionNameForIndex, dispatchAction, isKeyHeld
 #include "sam_mp_inventory.hpp"  // listFor: the host's mirror of a remote player's backpack
+#include "sam_settings.hpp"      // the actions mods registered (sam_register_action), polled by name
 
 #include <cstdint>
 #include <cstdlib>
@@ -105,18 +106,32 @@ namespace
 		return false;
 	}
 
-	// The bound actions pollActions watches, in its own order (the runtime owns the list).
+	// The bound actions pollActions watches: the vanilla names the runtime owns, in the order
+	// that is also the legacy 'SAMA' wire format, then every action a loaded mod registered
+	// (sam_register_action, "<ns>:<id>"), in registration order. The vanilla names stay first
+	// so an index an older client sends still means what it meant. Rebuilt when SAMSettings
+	// says its registry changed -- a registration, a reload -- and only at the top of a call:
+	// every poller takes the reference once per tick, and nothing a fired handler reaches
+	// (sam_is_action_held, sam_register_action itself) comes back in here, so the vector a
+	// caller is walking is never rebuilt under it.
 	const std::vector<std::string>& actionList()
 	{
 		static std::vector<std::string> v;
-		if ( v.empty() )
+		static unsigned builtFor = 0;
+		static bool built = false;
+		const unsigned gen = SAMSettings::actionGeneration();
+		if ( !built || builtFor != gen )
 		{
+			v.clear();
 			for ( int i = 0; i < 64; ++i )
 			{
 				const char* n = SAMLua::actionNameForIndex(i);
 				if ( !n || !n[0] ) { break; }
 				v.push_back(n);
 			}
+			for ( const SAMSettings::Action& a : SAMSettings::actions() ) { v.push_back(a.name); }
+			builtFor = gen;
+			built = true;
 		}
 		return v;
 	}
@@ -382,8 +397,14 @@ namespace
 
 		// Bindings go with the state, and again whenever the player rebinds something. Checked
 		// about once a second: reading twelve strings a tick for a menu change is not worth it.
+		// Checked NOW when the list itself grew -- a mod registering an action mid-game
+		// (sam_register_action from game.on_game_start, or the host's registration arriving
+		// here as a forwarded call) -- so the new action's binding goes to the host in this
+		// tick's full STATE rather than riding the next second's edges with an empty binding.
+		// The vanilla names stay in front, so the entries already sent keep their index.
+		const bool listGrew = ( c.primed && c.actionPrev.size() != acts.size() );
 		bool bindingsChanged = false;
-		if ( !c.primed || (Uint32)(ticks - c.bindingCheckTick) >= (Uint32)TICKS_PER_SECOND )
+		if ( !c.primed || listGrew || (Uint32)(ticks - c.bindingCheckTick) >= (Uint32)TICKS_PER_SECOND )
 		{
 			c.bindingCheckTick = ticks;
 			std::vector<std::string> now(acts.size());
@@ -551,6 +572,25 @@ namespace
 
 	// ---------------------------------------------------------------- host side
 
+	// A joiner's action or key the host has no use for is dropped, and the drop is written
+	// down once per name. The joiner polls from ITS OWN registry, so a mod it runs and the
+	// host does not (or one the host registers later, from an event) sends names that fail
+	// isKnownAction here; that is a supported situation, but a press that vanishes with no
+	// line in either log is not, since the modder's first question is "why does the host not
+	// hear my key". A key outside the reported set never comes from a S.A.M client, so that
+	// line points at a version mismatch or a hand-made packet.
+	void noteDroppedAction(int from, const std::string& name)
+	{
+		SAMNet::warnOnce("input:action:" + name, "Player " + std::to_string(from) + " sent the action '" + name
+			+ "', which no mod loaded on this machine registered; it is dropped. A joiner's mod action reaches scripts only while the host runs a mod that registers the same name.");
+	}
+
+	void noteDroppedKey(int from, const std::string& name)
+	{
+		SAMNet::warnOnce("input:sentkey:" + name, "Player " + std::to_string(from) + " sent the key '" + name
+			+ "', which is not one a client reports (A-Z, 0-9, F1-F12); it is dropped.");
+	}
+
 	void onEdges(int from, const std::string& body)
 	{
 		if ( from <= 0 || from >= MAXPLAYERS ) { return; }
@@ -566,7 +606,7 @@ namespace
 			RemoteInput& row = s_remote[from];
 			if ( kind == 0 )
 			{
-				if ( !isReportedKey(name) ) { continue; }
+				if ( !isReportedKey(name) ) { noteDroppedKey(from, name); continue; }
 				if ( down ) { row.keys.insert(name); } else { row.keys.erase(name); }
 				// The same event, fields and order pollInput fires for the host's own keyboard.
 				SamEvent ev(down ? "on_key_pressed" : "on_key_released");
@@ -576,7 +616,7 @@ namespace
 			}
 			else if ( kind == 1 )
 			{
-				if ( !isKnownAction(name) ) { continue; }
+				if ( !isKnownAction(name) ) { noteDroppedAction(from, name); continue; }
 				if ( down ) { row.actions.insert(name); } else { row.actions.erase(name); }
 				row.bindings[name] = binding;
 				// dispatchAction's event, with the binding the PLAYER has -- the host's own
@@ -597,7 +637,9 @@ namespace
 		for ( int i = 0; i < nKeys && r.ok; ++i )
 		{
 			const std::string k = r.str8();
-			if ( r.ok && isReportedKey(k) ) { fresh.keys.insert(k); }
+			if ( !r.ok ) { break; }
+			if ( !isReportedKey(k) ) { noteDroppedKey(from, k); continue; }
+			fresh.keys.insert(k);
 		}
 		const int nActs = r.u8();
 		for ( int i = 0; i < nActs && r.ok; ++i )
@@ -605,7 +647,8 @@ namespace
 			const std::string a = r.str8();
 			const bool held = r.u8() != 0;
 			const std::string b = r.str8();
-			if ( !r.ok || !isKnownAction(a) ) { continue; }
+			if ( !r.ok ) { break; }
+			if ( !isKnownAction(a) ) { noteDroppedAction(from, a); continue; }
 			if ( held ) { fresh.actions.insert(a); }
 			fresh.bindings[a] = b;
 		}
@@ -897,7 +940,11 @@ void pollLocalActions()
 			prev.clear();
 			continue;
 		}
-		if ( prev.size() != acts.size() ) { prev.assign(acts.size(), false); }
+		// resize, not assign: a mod registering an action mid-game (game.on_game_start is the
+		// usual place) appends to the list, and the vanilla entries in front keep their index. A
+		// re-prime of the whole vector here would read every action the player was holding at
+		// that moment as newly pressed.
+		if ( prev.size() != acts.size() ) { prev.resize(acts.size(), false); }
 		for ( std::size_t i = 0; i < acts.size(); ++i )
 		{
 			// binary() is const: it reads binding_t::binary and never sets `consumed`, which is

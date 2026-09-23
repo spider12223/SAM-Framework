@@ -47,3 +47,7 @@ public:
 private:
 	static bool loaded;
 };
+
+// sam_loader.cpp: how many scripts failed to parse or to run their top level in the last
+// load(); a -samtest run turns a non-zero count into exit code 3.
+int samScriptLoadFailures();

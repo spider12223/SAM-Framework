@@ -144,6 +144,7 @@ namespace SAMRules
 		constexpr int BindBody     = 7;   // "player n's new body is uid u"               sam_combat.cpp
 		constexpr int FollowerName = 8;   // a follower of the receiving player renamed   sam_monsters.cpp
 		constexpr int ItemPatches  = 9;   // every item patch (sam_items.cpp, by spec)    sam_items.cpp
+		constexpr int LootTables   = 10;  // every loot table, whole, at HELLO (sam_loot.cpp)
 		// client -> host
 		constexpr int Resync       = 0;   // "I have started a run: send me the rules"    sam_rules.cpp
 	}

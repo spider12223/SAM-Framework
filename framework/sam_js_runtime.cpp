@@ -29,6 +29,10 @@
 
 #include "sam_js_runtime.hpp"
 #include "sam_lua_runtime.hpp" // Part 2: sam_fire_hook cross-dispatches to Lua scripts too
+#include "sam_test.hpp"   // sam_test_done: end an unattended -samtest run
+#include "sam_speed.hpp"  // sam_set_game_speed / sam_get_game_speed: the simulation speed
+#include "sam_loot.hpp"   // P_ITEMS: the loot pool, its tables, the containers and the shops
+#include "sam_settings.hpp"  // sam_register_action / sam_register_setting / sam_get_setting / sam_set_setting / sam_list_settings
 #include "sam_logger.hpp"
 #include "sam_errors.hpp"   // writeFileAtomic
 
@@ -3949,6 +3953,54 @@ namespace
 
 	// ---- multiplayer awareness (Lua parity: sam_is_host / _player_count / _local_player) --
 
+	// sam_test_done(passed, failed) -> boolean. The JavaScript twin of the Lua binding: ends
+	// an unattended -samtest run and sets the process exit code from `failed`. False outside
+	// a test run, so a published mod may keep the call.
+	JSValue js_sam_test_done(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t passed = 0, failed = 0;
+		if ( !samJsReqI32(ctx, argc, argv, 0, &passed, "sam_test_done") ) { return JS_NewBool(ctx, 0); }
+		if ( !samJsReqI32(ctx, argc, argv, 1, &failed, "sam_test_done") ) { return JS_NewBool(ctx, 0); }
+#ifdef SAM_JS_HAVE_BARONY
+		return JS_NewBool(ctx, SAMTest::done((int)passed, (int)failed) ? 1 : 0);
+#else
+		return JS_NewBool(ctx, 0);
+#endif
+	}
+
+	// sam_set_game_speed(multiplier [, ticks]) -> bool. JS twin. Singleplayer only.
+	JSValue js_sam_set_game_speed(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		double mult = 1.0;
+		int64_t forTicks = 0;
+		// Required, as luaL_checknumber makes it in Lua: a missing multiplier is refused, not read as 1x.
+		if ( !samJsReqF64(ctx, argc, argv, 0, &mult, "sam_set_game_speed") ) { return JS_FALSE; }
+		// Read wide and clamp as the Lua twin does: past INT_MAX ticks means "for the rest of the
+		// run". The plain int32 cast in samJsOptI32 turned 1e10 into a negative number and then
+		// into 0 = not a window, so the same script ended at a different speed in JavaScript.
+		samJsOptI64(ctx, argc, argv, 1, &forTicks, "sam_set_game_speed");
+#ifdef SAM_JS_HAVE_BARONY
+		const int window = forTicks > 2147483647LL ? 2147483647 : ( forTicks < 0 ? 0 : (int)forTicks );
+		return JS_NewBool(ctx, SAMSpeed::set(mult, window) ? 1 : 0);
+#else
+		(void)mult; (void)forTicks;
+		return JS_FALSE;
+#endif
+	}
+
+	// sam_get_game_speed() -> number. JS twin.
+	JSValue js_sam_get_game_speed(JSContext* ctx, JSValueConst /*this_val*/, int /*argc*/, JSValueConst* /*argv*/)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_JS_HAVE_BARONY
+		return JS_NewFloat64(ctx, SAMSpeed::multiplier());
+#else
+		return JS_NewFloat64(ctx, 1.0);
+#endif
+	}
+
 	JSValue js_sam_is_host(JSContext* ctx, JSValueConst /*this_val*/, int /*argc*/, JSValueConst* /*argv*/)
 	{
 		SAMLogger::noteApiCall();
@@ -6306,6 +6358,221 @@ namespace
 	}
 #endif
 
+	// ===== mod actions and mod settings (sam_settings.cpp) -- the Lua twins' rules, one for one =====
+
+#ifdef SAM_JS_HAVE_BARONY
+	// A JS value as a setting value: a boolean, a number or a string, and nothing else.
+	static void samJsToSettingValue(JSContext* ctx, JSValueConst v, SAMSettings::Value& out)
+	{
+		out = SAMSettings::Value();
+		if ( JS_IsBool(v) ) { out.kind = SAMSettings::Kind::Bool; out.flag = ( JS_ToBool(ctx, v) > 0 ); }
+		else if ( JS_IsNumber(v) )
+		{
+			double d = 0.0;
+			if ( JS_ToFloat64(ctx, &d, v) == 0 ) { out.kind = SAMSettings::Kind::Number; out.number = d; }
+		}
+		else if ( JS_IsString(v) )
+		{
+			const char* s = JS_ToCString(ctx, v);
+			if ( s ) { out.kind = SAMSettings::Kind::String; out.text = s; JS_FreeCString(ctx, s); }
+		}
+	}
+
+	static JSValue samJsFromSettingValue(JSContext* ctx, const SAMSettings::Value& v)
+	{
+		switch ( v.kind )
+		{
+			case SAMSettings::Kind::Number: return JS_NewFloat64(ctx, v.number);   // a whole number prints as 2, not 2.0
+			case SAMSettings::Kind::Bool:   return JS_NewBool(ctx, v.flag ? 1 : 0);
+			case SAMSettings::Kind::String: return JS_NewString(ctx, v.text.c_str());
+			default: return JS_UNDEFINED;
+		}
+	}
+
+	// samJsGetIntProp's twin for a double: min, max and step are not integers.
+	static bool samJsGetNumProp(JSContext* ctx, JSValueConst obj, const char* key, double& out)
+	{
+		JSValue v = samJsGetPropCI(ctx, obj, key);
+		bool ok = false;
+		if ( JS_IsNumber(v) ) { double d = 0.0; if ( JS_ToFloat64(ctx, &d, v) == 0 ) { out = d; ok = true; } }
+		JS_FreeValue(ctx, v);
+		return ok;
+	}
+
+	// The object sam_register_setting takes: the Lua twin's keys, case-insensitive, a number
+	// only from a number and a string only from a string.
+	static bool samJsReadSettingSpec(JSContext* ctx, JSValueConst obj, SAMSettings::Spec& spec, std::string& why)
+	{
+		std::string sv;
+		if ( !samJsGetStrProp(ctx, obj, "type", sv) )
+		{
+			why = "'" + spec.id + "': the object needs type: \"slider\" | \"toggle\" | \"dropdown\" | \"number\" | \"text\"";
+			return false;
+		}
+		if ( !SAMSettings::typeFromName(sv, spec.type) )
+		{
+			why = "'" + spec.id + "': unknown type \"" + sv + "\" (slider, toggle, dropdown, number or text)";
+			return false;
+		}
+		if ( samJsGetStrProp(ctx, obj, "label", sv) ) { spec.label = sv; }
+		if ( samJsGetStrProp(ctx, obj, "tip", sv) || samJsGetStrProp(ctx, obj, "tooltip", sv) ) { spec.tooltip = sv; }
+		double d = 0.0;
+		if ( samJsGetNumProp(ctx, obj, "min", d) ) { spec.hasMin = true; spec.min = d; }
+		if ( samJsGetNumProp(ctx, obj, "max", d) ) { spec.hasMax = true; spec.max = d; }
+		if ( samJsGetNumProp(ctx, obj, "step", d) ) { spec.step = d; }
+		JSValue def = samJsGetPropCI(ctx, obj, "default");
+		samJsToSettingValue(ctx, def, spec.def);
+		JS_FreeValue(ctx, def);
+		JSValue opts = samJsGetPropCI(ctx, obj, "options");
+		if ( JS_IsArray(opts) )
+		{
+			int64_t len = 0;
+			JSValue lenv = JS_GetPropertyStr(ctx, opts, "length");
+			JS_ToInt64(ctx, &len, lenv);
+			JS_FreeValue(ctx, lenv);
+			for ( int64_t i = 0; i < len && i < 256; ++i )
+			{
+				JSValue o = JS_GetPropertyUint32(ctx, opts, (uint32_t)i);
+				if ( JS_IsString(o) ) { const char* s = JS_ToCString(ctx, o); if ( s ) { spec.options.push_back(s); JS_FreeCString(ctx, s); } }
+				JS_FreeValue(ctx, o);
+			}
+		}
+		JS_FreeValue(ctx, opts);
+		return true;
+	}
+#endif
+
+	// An optional string argument, or `fallback` when it is missing, null or undefined.
+	static std::string samJsStrArgOr(JSContext* ctx, int argc, JSValueConst* argv, int i, const char* fallback)
+	{
+		std::string out = fallback;
+		if ( samHasArg(argc, argv, i) )
+		{
+			const char* s = JS_ToCString(ctx, argv[i]);
+			if ( s ) { out = s; JS_FreeCString(ctx, s); }
+		}
+		return out;
+	}
+
+	// sam_register_action(id, label, default_key [, default_pad]) -> bool. JS twin.
+	JSValue js_sam_register_action(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		std::string id;
+		if ( !samJsReqStr(ctx, argc, argv, 0, "sam_register_action", &id) ) { return JS_FALSE; }
+		const std::string label = samJsStrArgOr(ctx, argc, argv, 1, "");
+		const std::string key = samJsStrArgOr(ctx, argc, argv, 2, "");
+		const std::string pad = samJsStrArgOr(ctx, argc, argv, 3, "");
+#ifdef SAM_JS_HAVE_BARONY
+		if ( g_currentNs.empty() ) { SAM_WARN("JS", "sam_register_action: no owning mod namespace; ignored."); return JS_FALSE; }
+		std::string why;
+		if ( !SAMSettings::registerAction(g_currentNs, id, label, key, pad, &why) )
+		{
+			SAM_WARN("JS", "sam_register_action refused: " + why);
+			return JS_FALSE;
+		}
+		return JS_TRUE;
+#else
+		(void)label; (void)key; (void)pad;
+		return JS_FALSE;
+#endif
+	}
+
+	// sam_register_setting(id, { type, label, tip, default, min, max, step, options }) -> bool. JS twin.
+	JSValue js_sam_register_setting(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		std::string id;
+		if ( !samJsReqStr(ctx, argc, argv, 0, "sam_register_setting", &id) ) { return JS_FALSE; }
+#ifdef SAM_JS_HAVE_BARONY
+		if ( g_currentNs.empty() ) { SAM_WARN("JS", "sam_register_setting: no owning mod namespace; ignored."); return JS_FALSE; }
+		if ( !samHasArg(argc, argv, 1) || !JS_IsObject(argv[1]) )
+		{
+			SAM_WARN("JS", "sam_register_setting('" + id + "'): the second argument must be an object { type, label, default, ... }.");
+			return JS_FALSE;
+		}
+		SAMSettings::Spec spec;
+		spec.id = id;
+		std::string why;
+		if ( !samJsReadSettingSpec(ctx, argv[1], spec, why) || !SAMSettings::registerSetting(g_currentNs, spec, &why) )
+		{
+			SAM_WARN("JS", "sam_register_setting refused: " + why);
+			return JS_FALSE;
+		}
+		return JS_TRUE;
+#else
+		return JS_FALSE;
+#endif
+	}
+
+	// sam_get_setting(id) -> number | boolean | string | undefined. JS twin.
+	JSValue js_sam_get_setting(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		std::string id;
+		if ( !samJsReqStr(ctx, argc, argv, 0, "sam_get_setting", &id) ) { return JS_UNDEFINED; }
+#ifdef SAM_JS_HAVE_BARONY
+		const SAMSettings::Setting* s = SAMSettings::find(g_currentNs, id);
+		if ( !s ) { return JS_UNDEFINED; }
+		return samJsFromSettingValue(ctx, s->value);
+#else
+		return JS_UNDEFINED;
+#endif
+	}
+
+	// sam_set_setting(id, value) -> bool. JS twin.
+	JSValue js_sam_set_setting(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		std::string id;
+		if ( !samJsReqStr(ctx, argc, argv, 0, "sam_set_setting", &id) ) { return JS_FALSE; }
+#ifdef SAM_JS_HAVE_BARONY
+		SAMSettings::Value v;
+		samJsToSettingValue(ctx, samHasArg(argc, argv, 1) ? argv[1] : JS_UNDEFINED, v);
+		std::string why;
+		if ( !SAMSettings::set(g_currentNs, id, v, SAMSettings::Source::Script, &why) )
+		{
+			SAM_WARN("JS", "sam_set_setting refused: " + why);
+			return JS_FALSE;
+		}
+		return JS_TRUE;
+#else
+		return JS_FALSE;
+#endif
+	}
+
+	// sam_list_settings() -> array of { id, type, label, value, default, min?, max?, step?, options? }. JS twin.
+	JSValue js_sam_list_settings(JSContext* ctx, JSValueConst /*this_val*/, int /*argc*/, JSValueConst* /*argv*/)
+	{
+		SAMLogger::noteApiCall();
+		JSValue arr = JS_NewArray(ctx);
+#ifdef SAM_JS_HAVE_BARONY
+		uint32_t n = 0;
+		for ( const SAMSettings::Setting& s : SAMSettings::settings() )
+		{
+			if ( s.ns != g_currentNs ) { continue; }
+			JSValue o = JS_NewObject(ctx);
+			JS_SetPropertyStr(ctx, o, "id", JS_NewString(ctx, s.id.c_str()));
+			JS_SetPropertyStr(ctx, o, "type", JS_NewString(ctx, SAMSettings::typeName(s.type)));
+			JS_SetPropertyStr(ctx, o, "label", JS_NewString(ctx, s.label.c_str()));
+			JS_SetPropertyStr(ctx, o, "value", samJsFromSettingValue(ctx, s.value));
+			JS_SetPropertyStr(ctx, o, "default", samJsFromSettingValue(ctx, s.def));
+			if ( s.hasMin ) { JS_SetPropertyStr(ctx, o, "min", JS_NewFloat64(ctx, s.min)); }
+			if ( s.hasMax ) { JS_SetPropertyStr(ctx, o, "max", JS_NewFloat64(ctx, s.max)); }
+			if ( s.type == SAMSettings::Type::Slider ) { JS_SetPropertyStr(ctx, o, "step", JS_NewFloat64(ctx, s.step)); }
+			if ( s.type == SAMSettings::Type::Dropdown )
+			{
+				JSValue opts = JS_NewArray(ctx);
+				uint32_t k = 0;
+				for ( const std::string& opt : s.options ) { JS_SetPropertyUint32(ctx, opts, k++, JS_NewString(ctx, opt.c_str())); }
+				JS_SetPropertyStr(ctx, o, "options", opts);
+			}
+			JS_SetPropertyUint32(ctx, arr, n++, o);
+		}
+#endif
+		return arr;
+	}
+
 	JSValue js_sam_patch_class(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
@@ -7459,7 +7726,7 @@ namespace
 	}
 
 	// =====================================================================================
-	//  CAMERA (unreleased), the JS twins. Same units, same refusals, same reasons; both runtimes
+	//  CAMERA (v3.0.0), the JS twins. Same units, same refusals, same reasons; both runtimes
 	//  call one shared SAMCamera so the two cannot drift apart.
 	// =====================================================================================
 
@@ -7599,7 +7866,7 @@ namespace
 	}
 
 	// =====================================================================================
-	//  THE RULES (unreleased), the JS twins. Same tables, same refusals; both runtimes call one
+	//  THE RULES (v3.0.0), the JS twins. Same tables, same refusals; both runtimes call one
 	//  shared SAMRules so the two cannot drift apart.
 	// =====================================================================================
 
@@ -7943,6 +8210,338 @@ namespace
 #endif
 	}
 
+	// ===== P_ITEMS: the loot pool (sam_loot.cpp) -- JS twins of the Lua bindings ==============
+
+#ifdef SAM_JS_HAVE_BARONY
+	// A category argument: a name or the numeric Category; -1 when it is neither. With allowAny,
+	// "ANY" sets isAny and returns -1.
+	static int samJsLootCategoryArg(JSContext* ctx, int argc, JSValueConst* argv, int i, bool allowAny, bool& isAny)
+	{
+		isAny = false;
+		if ( !samHasArg(argc, argv, i) ) { return -1; }
+		if ( JS_IsNumber(argv[i]) ) { int32_t n = 0; JS_ToInt32(ctx, &n, argv[i]); return n; }
+		if ( !JS_IsString(argv[i]) ) { return -1; }
+		const char* s = JS_ToCString(ctx, argv[i]);
+		if ( !s ) { return -1; }
+		int cat = -1;
+		if ( allowAny && SAMLoot::isAnyCategoryName(s) ) { isAny = true; }
+		else { cat = SAMLoot::categoryFromName(s); }
+		JS_FreeCString(ctx, s);
+		return cat;
+	}
+
+	// A context argument: -1 absent (undefined or null), -2 not a context (logged), else the kind.
+	static int samJsLootContextArg(JSContext* ctx, int argc, JSValueConst* argv, int i, const char* who)
+	{
+		if ( !samHasArg(argc, argv, i) ) { return -1; }
+		std::string s;
+		samJsOptStr(ctx, argc, argv, i, &s);
+		const int kind = SAMLoot::kindFromName(s);
+		if ( kind < 0 )
+		{
+			SAM_ERROR("JS", std::string(who) + ": '" + s + "' is not a loot context. Valid: floor chest shop monster recipe console other.");
+			return -2;
+		}
+		return kind;
+	}
+#endif
+
+	// sam_get_loot_pool(category, min_level, max_level [, context]) -> array | undefined. JS twin.
+	JSValue js_sam_get_loot_pool(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_JS_HAVE_BARONY
+		bool any = false;
+		const int cat = samJsLootCategoryArg(ctx, argc, argv, 0, false, any);
+		int32_t minLevel = 0, maxLevel = 0;
+		if ( !samJsReqI32(ctx, argc, argv, 1, &minLevel, "sam_get_loot_pool") ) { return JS_UNDEFINED; }
+		if ( !samJsReqI32(ctx, argc, argv, 2, &maxLevel, "sam_get_loot_pool") ) { return JS_UNDEFINED; }
+		const int kind = samJsLootContextArg(ctx, argc, argv, 3, "sam_get_loot_pool");
+		if ( kind == -2 ) { return JS_UNDEFINED; }
+		std::vector<SAMLoot::PoolEntry> out;
+		if ( !SAMLoot::pool(cat, minLevel, maxLevel, kind, out) ) { return JS_UNDEFINED; }
+		JSValue arr = JS_NewArray(ctx);
+		uint32_t n = 0;
+		for ( const SAMLoot::PoolEntry& e : out )
+		{
+			JSValue o = JS_NewObject(ctx);
+			JS_SetPropertyStr(ctx, o, "type", JS_NewInt32(ctx, e.type));
+			JS_SetPropertyStr(ctx, o, "name", JS_NewString(ctx, e.name.c_str()));
+			JS_SetPropertyStr(ctx, o, "level", JS_NewInt32(ctx, e.level));
+			JS_SetPropertyStr(ctx, o, "weight", JS_NewInt32(ctx, e.weight));
+			JS_SetPropertyUint32(ctx, arr, n++, o);
+		}
+		return arr;
+#else
+		return JS_UNDEFINED;
+#endif
+	}
+
+	// sam_set_loot_weight(item, weight) -> bool. JS twin.
+	JSValue js_sam_set_loot_weight(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_JS_HAVE_BARONY
+		// A call with no arguments names itself in the log, as the Lua twin's "unknown item" does;
+		// a bare false left a data-driven table silently short.
+		if ( argc < 1 ) { SAM_ERROR("JS", "sam_set_loot_weight: argument 1 (the item) is required."); return JS_FALSE; }
+		const int id = samJsResolveItem(ctx, argv[0]);
+		if ( id < 0 ) { SAM_ERROR("JS", "sam_set_loot_weight: unknown item."); return JS_FALSE; }
+		int32_t weight = 1;
+		if ( !samJsReqI32(ctx, argc, argv, 1, &weight, "sam_set_loot_weight") ) { return JS_FALSE; }
+		return SAMLoot::setWeight(id, weight) ? JS_TRUE : JS_FALSE;
+#else
+		return JS_FALSE;
+#endif
+	}
+
+	// sam_set_loot_category_weight(category, weight) -> bool. JS twin.
+	JSValue js_sam_set_loot_category_weight(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_JS_HAVE_BARONY
+		bool any = false;
+		const int cat = samJsLootCategoryArg(ctx, argc, argv, 0, false, any);
+		int32_t weight = 1;
+		if ( !samJsReqI32(ctx, argc, argv, 1, &weight, "sam_set_loot_category_weight") ) { return JS_FALSE; }
+		return SAMLoot::setCategoryWeight(cat, weight) ? JS_TRUE : JS_FALSE;
+#else
+		return JS_FALSE;
+#endif
+	}
+
+	// sam_set_loot_floor_range(item, min_floor [, max_floor]) -> bool. JS twin.
+	JSValue js_sam_set_loot_floor_range(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_JS_HAVE_BARONY
+		if ( argc < 1 ) { SAM_ERROR("JS", "sam_set_loot_floor_range: argument 1 (the item) is required."); return JS_FALSE; }
+		const int id = samJsResolveItem(ctx, argv[0]);
+		if ( id < 0 ) { SAM_ERROR("JS", "sam_set_loot_floor_range: unknown item."); return JS_FALSE; }
+		int32_t minFloor = 0, maxFloor = -1;
+		if ( !samJsReqI32(ctx, argc, argv, 1, &minFloor, "sam_set_loot_floor_range") ) { return JS_FALSE; }
+		samJsOptI32(ctx, argc, argv, 2, &maxFloor, "sam_set_loot_floor_range");
+		return SAMLoot::setFloorRange(id, minFloor, maxFloor) ? JS_TRUE : JS_FALSE;
+#else
+		return JS_FALSE;
+#endif
+	}
+
+	// sam_set_loot_context(item, context, allowed) -> bool. JS twin.
+	JSValue js_sam_set_loot_context(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_JS_HAVE_BARONY
+		if ( argc < 1 ) { SAM_ERROR("JS", "sam_set_loot_context: argument 1 (the item) is required."); return JS_FALSE; }
+		const int id = samJsResolveItem(ctx, argv[0]);
+		if ( id < 0 ) { SAM_ERROR("JS", "sam_set_loot_context: unknown item."); return JS_FALSE; }
+		const int kind = samJsLootContextArg(ctx, argc, argv, 1, "sam_set_loot_context");
+		if ( kind < 0 )
+		{
+			if ( kind == -1 ) { SAM_ERROR("JS", "sam_set_loot_context: argument 2 (the context) is required."); }
+			return JS_FALSE;
+		}
+		bool allowed = false;
+		if ( !samBoolReqJs(ctx, argc, argv, 2, "sam_set_loot_context", &allowed) ) { return JS_FALSE; }
+		return SAMLoot::setContextAllowed(id, kind, allowed) ? JS_TRUE : JS_FALSE;
+#else
+		return JS_FALSE;
+#endif
+	}
+
+	// sam_set_spell_droppable(spell, allowed [, min_floor]) -> bool. JS twin.
+	JSValue js_sam_set_spell_droppable(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_JS_HAVE_BARONY
+		if ( argc < 1 ) { SAM_ERROR("JS", "sam_set_spell_droppable: argument 1 (the spell) is required."); return JS_FALSE; }
+		int spell = -1;
+		if ( JS_IsNumber(argv[0]) ) { int32_t n = 0; JS_ToInt32(ctx, &n, argv[0]); spell = n; }
+		else if ( JS_IsString(argv[0]) )
+		{
+			const char* s = JS_ToCString(ctx, argv[0]);
+			if ( s ) { spell = SAMSpells::resolveSpellRef(s); JS_FreeCString(ctx, s); }
+		}
+		if ( spell < 0 )
+		{
+			SAM_ERROR("JS", "sam_set_spell_droppable: unknown spell (expected a SPELL_ name, \"namespace:spell\" or a spell id).");
+			return JS_FALSE;
+		}
+		bool allowed = false;
+		if ( !samBoolReqJs(ctx, argc, argv, 1, "sam_set_spell_droppable", &allowed) ) { return JS_FALSE; }
+		int32_t minFloor = 0;
+		samJsOptI32(ctx, argc, argv, 2, &minFloor, "sam_set_spell_droppable");
+		return SAMLoot::setSpellDroppable(spell, allowed, minFloor) ? JS_TRUE : JS_FALSE;
+#else
+		return JS_FALSE;
+#endif
+	}
+
+	// sam_set_loot_fallback(category, item [, context]) -> bool. JS twin (item null/undefined =
+	// vanilla again).
+	JSValue js_sam_set_loot_fallback(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_JS_HAVE_BARONY
+		bool any = false;
+		const int cat = samJsLootCategoryArg(ctx, argc, argv, 0, true, any);
+		if ( cat < 0 && !any )
+		{
+			SAM_ERROR("JS", "sam_set_loot_fallback: not a category. Valid: ANY WEAPON ARMOR AMULET POTION SCROLL MAGICSTAFF RING SPELLBOOK GEM THROWN TOOL FOOD BOOK");
+			return JS_FALSE;
+		}
+		int item = -1;
+		if ( samHasArg(argc, argv, 1) )
+		{
+			item = samJsResolveItem(ctx, argv[1]);
+			if ( item < 0 ) { SAM_ERROR("JS", "sam_set_loot_fallback: unknown item."); return JS_FALSE; }
+		}
+		const int kind = samJsLootContextArg(ctx, argc, argv, 2, "sam_set_loot_fallback");
+		if ( kind == -2 ) { return JS_FALSE; }
+		return SAMLoot::setFallback(cat, item, kind) ? JS_TRUE : JS_FALSE;
+#else
+		return JS_FALSE;
+#endif
+	}
+
+	// sam_roll_loot(category, min_level, max_level [, context]) -> item type | undefined. JS twin.
+	JSValue js_sam_roll_loot(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_JS_HAVE_BARONY
+		bool any = false;
+		const int cat = samJsLootCategoryArg(ctx, argc, argv, 0, false, any);
+		int32_t minLevel = 0, maxLevel = 0;
+		if ( !samJsReqI32(ctx, argc, argv, 1, &minLevel, "sam_roll_loot") ) { return JS_UNDEFINED; }
+		if ( !samJsReqI32(ctx, argc, argv, 2, &maxLevel, "sam_roll_loot") ) { return JS_UNDEFINED; }
+		const int kind = samJsLootContextArg(ctx, argc, argv, 3, "sam_roll_loot");
+		if ( kind == -2 ) { return JS_UNDEFINED; }
+		const int type = SAMLoot::roll(cat, minLevel, maxLevel, kind);
+		if ( type < 0 ) { return JS_UNDEFINED; }
+		return JS_NewInt32(ctx, type);
+#else
+		return JS_UNDEFINED;
+#endif
+	}
+
+	// sam_add_item_to_container(uid, item [, count [, status [, beatitude [, identified [, appearance]]]]])
+	//   -> item uid | undefined. JS twin.
+	JSValue js_sam_add_item_to_container(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_JS_HAVE_BARONY
+		int64_t uid = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_add_item_to_container") ) { return JS_UNDEFINED; }
+		if ( argc < 2 ) { SAM_ERROR("JS", "sam_add_item_to_container: argument 2 (the item) is required."); return JS_UNDEFINED; }
+		const int type = samJsResolveItem(ctx, argv[1]);
+		if ( type < 0 ) { SAM_ERROR("JS", "sam_add_item_to_container: unknown item."); return JS_UNDEFINED; }
+		int32_t count = 1, status = (int32_t)EXCELLENT, beatitude = 0;
+		int64_t appearance = -1;
+		samJsOptI32(ctx, argc, argv, 2, &count, "sam_add_item_to_container");
+		samJsOptI32(ctx, argc, argv, 3, &status, "sam_add_item_to_container");
+		samJsOptI32(ctx, argc, argv, 4, &beatitude, "sam_add_item_to_container");
+		const bool identified = samBoolArgJs(ctx, argc, argv, 5, true);
+		samJsOptI64(ctx, argc, argv, 6, &appearance, "sam_add_item_to_container");
+		const long long itemUid = SAMLoot::addToContainer((std::uint32_t)uid, type, count, status, beatitude, identified, (long long)appearance);
+		if ( itemUid < 0 ) { return JS_UNDEFINED; }
+		return JS_NewInt64(ctx, (int64_t)itemUid);
+#else
+		return JS_UNDEFINED;
+#endif
+	}
+
+	// sam_remove_item_from_container(uid, item_or_uid [, count]) -> bool. JS twin.
+	JSValue js_sam_remove_item_from_container(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_JS_HAVE_BARONY
+		int64_t uid = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_remove_item_from_container") ) { return JS_FALSE; }
+		if ( argc < 2 ) { SAM_ERROR("JS", "sam_remove_item_from_container: argument 2 (an item uid or type) is required."); return JS_FALSE; }
+		long long what = -1;
+		if ( JS_IsNumber(argv[1]) ) { double d = 0.0; if ( !samJsNum(ctx, argv[1], &d) ) { return JS_FALSE; } what = (long long)d; }
+		else
+		{
+			what = samJsResolveItem(ctx, argv[1]);
+			if ( what < 0 ) { SAM_ERROR("JS", "sam_remove_item_from_container: unknown item."); return JS_FALSE; }
+		}
+		int32_t count = 0;
+		samJsOptI32(ctx, argc, argv, 2, &count, "sam_remove_item_from_container");
+		return SAMLoot::removeFromContainer((std::uint32_t)uid, what, count) ? JS_TRUE : JS_FALSE;
+#else
+		return JS_FALSE;
+#endif
+	}
+
+	// sam_set_shop_stock(shopkeeper_uid, items) -> bool. JS twin: an array of { item, count,
+	// status, beatitude, identified } objects or bare item names / ids.
+	JSValue js_sam_set_shop_stock(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_JS_HAVE_BARONY
+		int64_t uid = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_set_shop_stock") ) { return JS_FALSE; }
+		if ( argc < 2 || !JS_IsArray(argv[1]) )
+		{
+			SAM_ERROR("JS", "sam_set_shop_stock: argument 2 must be an array of items.");
+			return JS_FALSE;
+		}
+		JSValue lenV = JS_GetPropertyStr(ctx, argv[1], "length");
+		uint32_t n = 0;
+		JS_ToUint32(ctx, &n, lenV);
+		JS_FreeValue(ctx, lenV);
+		std::vector<SAMLoot::StockEntry> entries;
+		for ( uint32_t i = 0; i < n; ++i )
+		{
+			JSValue v = JS_GetPropertyUint32(ctx, argv[1], i);
+			SAMLoot::StockEntry en;
+			if ( JS_IsObject(v) && !JS_IsArray(v) )
+			{
+				JSValue it = samJsGetPropCI(ctx, v, "item");
+				if ( JS_IsUndefined(it) ) { JS_FreeValue(ctx, it); it = samJsGetPropCI(ctx, v, "type"); }
+				en.type = samJsResolveItem(ctx, it);
+				JS_FreeValue(ctx, it);
+				int iv = 0;
+				if ( samJsGetIntProp(ctx, v, "count", iv) ) { en.count = iv; }
+				if ( samJsGetIntProp(ctx, v, "status", iv) ) { en.status = iv; }
+				if ( samJsGetIntProp(ctx, v, "beatitude", iv) ) { en.beatitude = iv; }
+				JSValue idv = samJsGetPropCI(ctx, v, "identified");
+				if ( !JS_IsUndefined(idv) ) { en.identified = ( JS_ToBool(ctx, idv) != 0 ); }
+				JS_FreeValue(ctx, idv);
+			}
+			else
+			{
+				en.type = samJsResolveItem(ctx, v);
+			}
+			JS_FreeValue(ctx, v);
+			if ( en.type < 0 )
+			{
+				SAM_ERROR("JS", "sam_set_shop_stock: entry " + std::to_string(i + 1) + " is not an item this game has. Nothing was changed.");
+				return JS_FALSE;
+			}
+			entries.push_back(en);
+		}
+		return SAMLoot::setShopStock((std::uint32_t)uid, entries) ? JS_TRUE : JS_FALSE;
+#else
+		return JS_FALSE;
+#endif
+	}
+
+	// sam_set_shop_type(shopkeeper_uid, store_type) -> bool. JS twin.
+	JSValue js_sam_set_shop_type(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_JS_HAVE_BARONY
+		int64_t uid = 0;
+		int32_t storeType = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_set_shop_type") ) { return JS_FALSE; }
+		if ( !samJsReqI32(ctx, argc, argv, 1, &storeType, "sam_set_shop_type") ) { return JS_FALSE; }
+		return SAMLoot::setShopType((std::uint32_t)uid, storeType) ? JS_TRUE : JS_FALSE;
+#else
+		return JS_FALSE;
+#endif
+	}
+
 	// ---- sandbox construction -------------------------------------------------
 	JSContext* newSandboxContext(JSRuntime* rt)
 	{
@@ -7961,7 +8560,7 @@ namespace
 	{
 		JSValue g = JS_GetGlobalObject(ctx);
 		samJsRegister(ctx, g, "sam_log", js_sam_log, 1);
-		// ---- the rules (unreleased) --------------------------------------------
+		// ---- the rules (v3.0.0) -----------------------------------------------
 		samJsRegister(ctx, g, "sam_add_stat_modifier", js_sam_add_stat_modifier, 5);
 		samJsRegister(ctx, g, "sam_add_monster_stat_modifier", js_sam_add_monster_stat_modifier, 5);
 		samJsRegister(ctx, g, "sam_remove_stat_modifier", js_sam_remove_stat_modifier, 2);
@@ -7977,7 +8576,7 @@ namespace
 		samJsRegister(ctx, g, "sam_clear_xp_curve", js_sam_clear_xp_curve, 0);
 		samJsRegister(ctx, g, "sam_get_xp_threshold", js_sam_get_xp_threshold, 1);
 		samJsRegister(ctx, g, "sam_grant_xp", js_sam_grant_xp, 2);
-		// ---- the camera (unreleased) -------------------------------------------
+		// ---- the camera (v3.0.0) ----------------------------------------------
 		samJsRegister(ctx, g, "sam_set_camera_offset", js_sam_set_camera_offset, 4);
 		samJsRegister(ctx, g, "sam_set_camera_position", js_sam_set_camera_position, 4);
 		samJsRegister(ctx, g, "sam_set_camera_angle", js_sam_set_camera_angle, 3);
@@ -8019,14 +8618,14 @@ namespace
 		samJsRegister(ctx, g, "sam_set_species_damage_resist", js_sam_set_species_damage_resist, 3);
 		samJsRegister(ctx, g, "sam_clear_species_damage_resist", js_sam_clear_species_damage_resist, 2);
 		samJsRegister(ctx, g, "sam_add_damage_multiplier", js_sam_add_damage_multiplier, 1);
-		samJsRegister(ctx, g, "sam_grant_item", js_sam_grant_item, 2);
+		samJsRegister(ctx, g, "sam_grant_item", js_sam_grant_item, 5);
 		samJsRegister(ctx, g, "sam_save_data", js_sam_save_data, 2);
 		samJsRegister(ctx, g, "sam_load_data", js_sam_load_data, 1);
 		samJsRegister(ctx, g, "sam_delete_data", js_sam_delete_data, 1);
 		samJsRegister(ctx, g, "sam_set_timer", js_sam_set_timer, 3);
 		samJsRegister(ctx, g, "sam_set_repeating_timer", js_sam_set_repeating_timer, 3);
 		samJsRegister(ctx, g, "sam_cancel_timer", js_sam_cancel_timer, 1);
-		samJsRegister(ctx, g, "sam_register_hook", js_sam_register_hook, 2);
+		samJsRegister(ctx, g, "sam_register_hook", js_sam_register_hook, 1);
 		samJsRegister(ctx, g, "sam_fire_hook", js_sam_fire_hook, 2);
 		samJsRegister(ctx, g, "sam_modify_damage", js_sam_modify_damage, 2);
 		samJsRegister(ctx, g, "sam_modify_monster_damage", js_sam_modify_monster_damage, 1);
@@ -8040,6 +8639,7 @@ namespace
 		samJsRegister(ctx, g, "sam_get_effect_strength", js_sam_get_effect_strength, 2);
 		samJsRegister(ctx, g, "sam_get_effects", js_sam_get_effects, 1);
 		samJsRegister(ctx, g, "sam_get_monster_stat", js_sam_get_monster_stat, 2);
+		samJsRegister(ctx, g, "sam_test_done", js_sam_test_done, 2);
 		samJsRegister(ctx, g, "sam_is_host", js_sam_is_host, 0);
 		samJsRegister(ctx, g, "sam_play_sound_at", js_sam_play_sound_at, 4);
 		samJsRegister(ctx, g, "sam_play_music", js_sam_play_music, 4);
@@ -8056,7 +8656,7 @@ namespace
 		samJsRegister(ctx, g, "sam_is_spawnable", js_sam_is_spawnable, 2);
 		samJsRegister(ctx, g, "sam_line_of_sight", js_sam_line_of_sight, 5);
 		samJsRegister(ctx, g, "sam_tiles_connected", js_sam_tiles_connected, 5);
-		samJsRegister(ctx, g, "sam_get_light_at", js_sam_get_light_at, 2);
+		samJsRegister(ctx, g, "sam_get_light_at", js_sam_get_light_at, 3);
 		samJsRegister(ctx, g, "sam_find_entities", js_sam_find_entities, 4);
 		samJsRegister(ctx, g, "sam_get_container_items", js_sam_get_container_items, 1);
 		samJsRegister(ctx, g, "sam_set_door", js_sam_set_door, 2);
@@ -8158,7 +8758,7 @@ namespace
 		samJsRegister(ctx, g, "sam_remove_spell", js_sam_remove_spell, 2);
 #ifdef SAM_JS_HAVE_BARONY
 		samJsRegister(ctx, g, "sam_grant_gold", js_sam_grant_gold, 2);
-		samJsRegister(ctx, g, "sam_apply_effect", js_sam_apply_effect, 3);
+		samJsRegister(ctx, g, "sam_apply_effect", js_sam_apply_effect, 4);
 		samJsRegister(ctx, g, "sam_remove_effect", js_sam_remove_effect, 2);
 		// v1.5.0 player effect control + monster effect read/remove parity
 		samJsRegister(ctx, g, "sam_clear_effects", js_sam_clear_effects, 1);
@@ -8191,6 +8791,12 @@ namespace
 		samJsRegister(ctx, g, "sam_is_defending", js_sam_is_defending, 1);
 		samJsRegister(ctx, g, "sam_is_action_held", js_sam_is_action_held, 2);
 		samJsRegister(ctx, g, "sam_get_action_binding", js_sam_get_action_binding, 2);
+		// P_SETTINGS: a mod's own rows in the Bindings page and the General tab (sam_settings.cpp).
+		samJsRegister(ctx, g, "sam_register_action", js_sam_register_action, 4);
+		samJsRegister(ctx, g, "sam_register_setting", js_sam_register_setting, 2);
+		samJsRegister(ctx, g, "sam_get_setting", js_sam_get_setting, 1);
+		samJsRegister(ctx, g, "sam_set_setting", js_sam_set_setting, 2);
+		samJsRegister(ctx, g, "sam_list_settings", js_sam_list_settings, 0);
 		samJsRegister(ctx, g, "sam_get_inventory_count", js_sam_get_inventory_count, 2);
 		samJsRegister(ctx, g, "sam_has_effect", js_sam_has_effect, 2);
 		samJsRegister(ctx, g, "sam_get_class", js_sam_get_class, 1);
@@ -8229,6 +8835,22 @@ namespace
 		samJsRegister(ctx, g, "sam_impact_frame", js_sam_impact_frame, 7);
 		samJsRegister(ctx, g, "sam_camera_shake", js_sam_camera_shake, 2);
 		samJsRegister(ctx, g, "sam_hitstop", js_sam_hitstop, 1);
+		// The simulation speed (sam_speed.cpp).
+		samJsRegister(ctx, g, "sam_set_game_speed", js_sam_set_game_speed, 2);
+		samJsRegister(ctx, g, "sam_get_game_speed", js_sam_get_game_speed, 0);
+		// P_ITEMS: the loot pool, its tables, the containers and the shops (sam_loot.cpp).
+		samJsRegister(ctx, g, "sam_get_loot_pool", js_sam_get_loot_pool, 4);
+		samJsRegister(ctx, g, "sam_set_loot_weight", js_sam_set_loot_weight, 2);
+		samJsRegister(ctx, g, "sam_set_loot_category_weight", js_sam_set_loot_category_weight, 2);
+		samJsRegister(ctx, g, "sam_set_loot_floor_range", js_sam_set_loot_floor_range, 3);
+		samJsRegister(ctx, g, "sam_set_loot_context", js_sam_set_loot_context, 3);
+		samJsRegister(ctx, g, "sam_set_spell_droppable", js_sam_set_spell_droppable, 3);
+		samJsRegister(ctx, g, "sam_set_loot_fallback", js_sam_set_loot_fallback, 3);
+		samJsRegister(ctx, g, "sam_roll_loot", js_sam_roll_loot, 4);
+		samJsRegister(ctx, g, "sam_add_item_to_container", js_sam_add_item_to_container, 7);
+		samJsRegister(ctx, g, "sam_remove_item_from_container", js_sam_remove_item_from_container, 3);
+		samJsRegister(ctx, g, "sam_set_shop_stock", js_sam_set_shop_stock, 2);
+		samJsRegister(ctx, g, "sam_set_shop_type", js_sam_set_shop_type, 2);
 		// ---- v2.6 batch 1: reads and dice -------------------------------------
 		samJsRegister(ctx, g, "sam_get_position_precise", js_sam_get_position_precise, 1);
 		samJsRegister(ctx, g, "sam_get_distance", js_sam_get_distance, 2);

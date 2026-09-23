@@ -8,19 +8,21 @@ Barony was never built to be modded. S.A.M is the layer that makes it modded any
 
 [hr][/hr]
 
-[h1]NEW: MULTIPLAYER[/h1]
+[h1]20 NEW FUNCTIONS: 316 TO 336[/h1]
 
-A S.A.M mod used to work properly only for the host. Now every one of the 316 functions has a defined co-op behaviour and the game enforces it. You write one script, name players by number, and S.A.M carries each call to the machine it has to run on: a HUD line to that player's screen, a spell to their own game, a rule change to everybody.
+Two community mods, Game Speed Control and Item Randomizer, rebuilt as tools any S.A.M mod can use. The originals each replace a game file, so they clash with other mods. These do not, and both ship as examples.
 
-[b]Stats, effects, backpacks, spells, keys, panels, cameras, spawned entities and terrain all reach the right player now.[/b] A player who joins halfway through is caught up on what they missed. A player running plain unmodified Barony can still join and play.
+[b]Game speed.[/b] Run the world from 0.1x to 8x in singleplayer, or slow it for a moment. Bullet time on a kill is one line.
 
-[b]Sounds and music, without writing a script.[/b] Drop an .ogg, .wav, .mp3 or .flac into your mod's sounds/ folder and it is ready to play. Name one after a Barony sound in sounds/replace/ and it takes over, for everyone who has your mod. Give a floor or a boss its own music.
+[b]Your mod in the game's own Settings.[/b] Rebindable keys under Controls > Bindings, and sliders, toggles and dropdowns in a MOD SETTINGS section under General. Saved, with Restore Defaults, and no UI code.
 
-[b]It is all documented.[/b] Every function and event says which machine it runs on, and there is a guide to testing a co-op game by yourself on one computer.
+[b]The loot pool.[/b] Make any rolled item rarer, commoner or never, choose the floors it drops on, keep it out of shops, and pick what an empty pool gives instead of a rock. Nine new events let a mod rewrite a shop, a creature's gear, or any roll made during play.
 
-[h1]29 NEW FUNCTIONS: 287 TO 316[/h1]
+[b]Test a mod without playing it.[/b] One command starts the game, runs your mod's own checks and answers pass or fail.
 
-Rules you can rewrite: stat modifiers, immunities, and your own XP curve. A camera you can move, aim, pin to a spot or lock onto a target, which is a third-person mod or a cutscene. Sound and music control from a script.
+[h1]MULTIPLAYER[/h1]
+
+Every function has a defined co-op behaviour and the game enforces it. You write one script, name players by number, and S.A.M carries each call to the machine it has to run on. A player who joins halfway is caught up, and a player on plain unmodified Barony can still join and play.
 
 [b]The complete reference[/b], every function and event with arguments, types, return values and what it does in co-op:
 https://github.com/spider12223/SAM-Framework/blob/main/docs/function-reference.md
@@ -47,7 +49,7 @@ A mod here is not a guest that can only react. It can be told a player was hit a
 [h1]WHAT YOU CAN MAKE[/h1]
 [list]
 [*][b]Creatures with their own logic.[/b] Not a reskin. Your script runs once per frame and decides what the thing does.
-[*][b]Rules that really change.[/b] Armour that reduces a hit. A curse that rewrites a chest as it opens. A class that cannot be poisoned.
+[*][b]Rules that really change.[/b] Armour that reduces a hit. A curse that rewrites a chest as it opens. A class that cannot be poisoned. Loot tables, and the speed of the world.
 [*][b]Your own windows.[/b] Panels with buttons, pictures, scrolling lists and text boxes, for a shop, a quest log or a bestiary.
 [*][b]A home you can go back to.[/b] Send the party to any floor, including back UP, which the game never does, plus a chest that survives every floor and save.
 [*][b]Classes.[/b] Attributes, skills, starting gear, spells, level up growth, and a character select portrait with real stat bars.
@@ -72,7 +74,7 @@ Build a class, item, monster, spell or effect with dropdowns and sliders, watch 
 
 JSON says what your content [i]is[/i]. A script says what it [i]does[/i]. Drop a .lua, .js or .ts file next to any JSON and it loads automatically. TypeScript is compiled for you.
 
-[b]76 events[/b] to react to, and now to change. [b]316 functions[/b] to act with: grant items and gold, read and set stats, apply effects, cast spells, deal or change damage, teleport, spawn monsters, run your own per frame logic, open windows, timers, saved data, screen effects, and live patching that reverts when your mod unloads.
+[b]87 events[/b] to react to, and now to change. [b]336 functions[/b] to act with: grant items and gold, read and set stats, apply effects, cast spells, deal or change damage, teleport, spawn monsters, run your own per frame logic, open windows, timers, saved data, screen effects, and live patching that reverts when your mod unloads.
 
 Only two functions ever get called: [b]on_event(event)[/b] and [b]on_tick(event)[/b].
 

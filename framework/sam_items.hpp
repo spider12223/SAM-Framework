@@ -244,7 +244,8 @@ public:
 	// (sam_remove_item, sam_set_item_count 0) is queued on the owner's machine and has to be
 	// drained on the owner's machine. It also drains SAMSpells' removal queue, because
 	// removing a spell destroys its spell item and has the same "not while the engine holds
-	// it" rule.
+	// it" rule, and SAMLoot's deferred container removals (an item removed from its chest or
+	// shop inside the loot event about it) for the same reason again.
 	static void drainDestroyQueue();
 
 	// Forget every queued destroy without doing it (the game ended). A uid never names a

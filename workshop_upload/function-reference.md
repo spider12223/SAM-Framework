@@ -1,6 +1,6 @@
 # S.A.M function reference
 
-Every script function the framework exposes: **316 functions** and **76 events**.
+Every script function the framework exposes: **336 functions** and **87 events**.
 All of them work identically in Lua, JavaScript and TypeScript.
 
 This page is generated from the API definition, so it cannot fall behind the code. If a
@@ -15,13 +15,13 @@ the kind, so the line is always what really happens:
 
 | kind | what it means for your script |
 |---|---|
-| `host` (145) | Runs on the host, where your events and timers already run. A client's call is refused with a one-time warning. The result reaches every player. |
+| `host` (150) | Runs on the host, where your events and timers already run. A client's call is refused with a one-time warning. The result reaches every player. |
 | `owner` (10) | Changes something that lives on the player's own machine (their backpack, their spells). Call it on the host; S.A.M carries it to that player's machine. |
 | `screen` (29) | Shows something on one player's screen. Name the player, or leave it out inside an event about a player; -1 means every player. S.A.M carries it to their machine. |
 | `read` (50) | Reads a player. The host can read everyone; a client can read only its own player. |
-| `all` (7) | Changes a table every machine keeps (class and item patches, species resists). A host call runs everywhere and reaches players who join later. |
-| `local` (21) | Answers for the machine running it: its clock, its files, its music. |
-| `any` (54) | The same answer on every machine. Safe anywhere. |
+| `all` (15) | Changes a table every machine keeps (class and item patches, species resists). A host call runs everywhere and reaches players who join later. |
+| `local` (26) | Answers for the machine running it: its clock, its files, its music. |
+| `any` (56) | The same answer on every machine. Safe anywhere. |
 
 Every event ends with a **Multiplayer:** line that says which machine it fires on and for
 whom. The whole model, with examples, and how to test co-op on one computer:
@@ -33,17 +33,18 @@ For guides and worked examples, see [scripting-reference.md](scripting-reference
 
 - [Camera](#camera) (8)
 - [Combat](#combat) (20)
-- [Context](#context) (11)
+- [Context](#context) (13)
 - [Custom events](#custom-events) (2)
 - [Damage](#damage) (10)
 - [Entities](#entities) (10)
 - [Game content](#game-content) (5)
 - [HUD](#hud) (3)
 - [Hooks](#hooks) (2)
-- [Input](#input) (3)
+- [Input](#input) (4)
 - [Inventory](#inventory) (30)
 - [Live patching](#live-patching) (6)
-- [Logging](#logging) (2)
+- [Logging](#logging) (3)
+- [Loot](#loot) (12)
 - [Mechanisms](#mechanisms) (4)
 - [Monsters](#monsters) (26)
 - [Multiplayer](#multiplayer) (3)
@@ -55,6 +56,7 @@ For guides and worked examples, see [scripting-reference.md](scripting-reference
 - [Presentation](#presentation) (9)
 - [Rewards](#rewards) (5)
 - [Rules](#rules) (15)
+- [Settings](#settings) (4)
 - [Sound & music](#sound-music) (6)
 - [Spells](#spells) (9)
 - [Status effects](#status-effects) (9)
@@ -63,7 +65,7 @@ For guides and worked examples, see [scripting-reference.md](scripting-reference
 - [Truth](#truth) (17)
 - [World](#world) (23)
 - [Your own logic](#your-own-logic) (7)
-- [Events](#events) (76)
+- [Events](#events) (87)
 
 
 ## Camera
@@ -491,6 +493,14 @@ How fast this machine is drawing. Local to whoever asks, so never let it decide 
 
 **Multiplayer:** `local`. Answers for the machine running the script.
 
+### `sam_get_game_speed()`
+
+How fast the world is running compared with real time, as set by sam_set_game_speed or /sam_gamespeed. 1.0 with nothing set, and always 1.0 in a netgame, where a speed cannot be set.
+
+**Returns:** the simulation speed multiplier (number, 1.0 = normal)
+
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
+
 ### `sam_get_level_info()`
 
 Everything about the current floor. sam_get_floor returns a bare number that cannot tell a secret branch from the main one, so location-gated content was impossible before this.
@@ -566,6 +576,21 @@ Whether the player has the game paused. Each machine has its own answer in multi
 **Returns:** true if this machine has the game paused (boolean)
 
 **Multiplayer:** `local`. Answers for the machine running the script.
+
+### `sam_set_game_speed(multiplier, [ticks])`
+
+Singleplayer only. Run the simulation at multiplier times real time, 0.1 to 8. Everything counted in game ticks scales with it (monsters, hunger, effect durations, the run timer, your timers and on_tick); everything on a wall clock does not (rendering, the message feed, sam_hitstop, a screen flash, sam_get_real_time). ticks > 0 makes it temporary: after that many GAME ticks at the new speed it goes back to what it was, which is how a mod does bullet time on a critical hit (ticks = real_seconds * 50 * multiplier, so half a real second at 0.25x is 6). A window opened inside a window still returns to the original speed. Setting the value already set does nothing and fires nothing, so a preset key may call it every frame. 0, NaN and anything outside 0.1-8 are refused and change nothing. Above 1x is best effort: 8x needs every game tick to finish inside 2.5 ms, and a slower machine gets less than it asked for.
+
+Mouse look turns once per game tick, so at 0.1x it steps five times a second; the engine has no per-frame look path that does not also move the body. The run timer, playtime and hunger count game seconds, not real ones. sam_hitstop is on the wall clock, so a 200 ms hitstop at 4x freezes 40 ticks of monster logic instead of 10. While the game is paused the multiplier does not reach the clock, so the pause menu runs at normal speed and a temporary window does not count down; the speed is kept and sam_get_game_speed still reports it.
+
+| argument | type |
+|---|---|
+| `multiplier` | number |
+| `ticks` *(optional)* | int |
+
+**Returns:** true if accepted (boolean)
+
+**Multiplayer:** `local`. Answers for the machine running the script. In a netgame it does nothing and says so once in the log: the host's world would run at Nx while every joiner's own body, moved by its own machine, stayed at 1x.
 
 
 ## Custom events
@@ -1042,6 +1067,23 @@ Check whether a RAW key is currently held. Takes any key name the game itself us
 **Returns:** whether the key is down (boolean)
 
 **Multiplayer:** `read`. The host can read every player; a client can read only its own player (`player`), and asking about another is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript. Left out, `player` is the player the current event is about, else this machine's own. On the host, a player on another machine reads the keys their game reported: A-Z, 0-9 and F1-F12 only, and false for a player whose game does not run S.A.M.
+
+### `sam_register_action(id, label, default_key, [default_pad])`
+
+Give your mod its own rebindable row in Settings > Controls > Bindings, under your mod's name. The action's full name is "<namespace>:<id>": that is what on_action_pressed / on_action_released carry in `action`, and what sam_is_action_held and sam_get_action_binding take. `id` is letters, digits, '_', '-' and '.'. `default_key` is the name the Bindings page shows for a key: a letter or digit ("F", "3"), "F1".."F12", "Keypad 0".."Keypad 9" (NOT "KP0"), "Space", "Return", "Tab", "Left Shift", "Left Ctrl", "Left Alt", "Escape", "Backspace", "Up"/"Down"/"Left"/"Right", "Home", "End", "Page Up"/"Page Down", "Insert", "Delete", a punctuation key as its character, "Mouse1".."Mouse15", "MouseWheelUp", "MouseWheelDown", or "[unbound]". `default_pad` is a controller input without the seat prefix: "ButtonA/B/X/Y" (or just "Y"), "ButtonBack", "ButtonStart", "ButtonLeftBumper", "ButtonRightBumper", "ButtonLeftStick", "ButtonRightStick", "LeftTrigger", "RightTrigger", "DpadX+/X-/Y+/Y-", "StickLeftX+".."StickRightY-", or "[unbound]" (the default). They are DEFAULTS: whatever the player already has bound to this action in config.json wins, survives a restart and survives the mod being unloaded, and Restore Defaults puts your default back. Call it at top level: the registry is rebuilt on every load, registering the same id again is a no-op that refreshes the label, and a row registered from an event only exists from that moment.
+
+The game has no conflict check: an action on the same key as a vanilla one (or another mod's) fires alongside it. Pick a default nothing uses (the keypad is empty in every vanilla layout) and let the player rebind. Bare letters are stored in SDL's spelling ("f" becomes "F"); pass "Keypad 0", not "KP0", which is refused. A mod action is polled and reported exactly like a vanilla one, on every machine.
+
+| argument | type |
+|---|---|
+| `id` | string |
+| `label` | string |
+| `default_key` | string |
+| `default_pad` *(optional)* | string |
+
+**Returns:** true if the action exists now (boolean); false, with the reason in the log, for a bad id or a key name the game does not know
+
+**Multiplayer:** `all`. Changes a table every machine keeps its own copy of: a host call runs on the host and on every S.A.M client, and is replayed to a client that joins later. A client's call is refused with a one-time warning and returns false. Call it on the host or when your mod loads. A host call applies on every S.A.M player's machine, and a player who joins later gets the host's whole table.
 
 
 ## Inventory
@@ -1533,6 +1575,218 @@ Show a line in a player's in-game message log.
 **Returns:** true on success (boolean)
 
 **Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. A line sent to a player on another machine is shown with one leading space, so that player's game can never mistake it for one of Barony's own messages that it acts on.
+
+### `sam_test_done(passed, failed)`
+
+End an unattended test run started with barony.exe -samtest=YourMod. Writes the verdict to sam_log.txt and quits the game, setting the process exit code to 0 when failed is 0 and 1 otherwise, so a script can run your mod's tests and read the answer without anyone playing.
+
+Outside a -samtest run it does nothing and returns false, so it is safe to leave in a published mod. A run that never calls it is stopped by the watchdog and reports exit code 2: a test that hangs has failed, not passed.
+
+| argument | type |
+|---|---|
+| `passed` | int (how many checks passed) |
+| `failed` | int (how many failed) |
+
+**Returns:** true if this was an unattended test run and it has now ended (boolean)
+
+**Multiplayer:** `local`. Answers for the machine running the script.
+
+
+## Loot
+
+### `sam_add_item_to_container(uid, item, [count], [status], [beatitude], [identified], [appearance])`
+
+Put an item into a chest (open or closed), a mimic, a creature's pockets, or a shopkeeper's stock. Defaults: one, EXCELLENT, uncursed, identified, a random appearance. A shopkeeper's stock is laid out again by price so the new item has a slot the window can show; a potion added to a shop takes its standard appearance, as generated stock does.
+
+A creature's pockets are what it DROPS when it dies, so this is also "give this monster a drop". A worn slot (helmet, weapon) is not a container: use sam_monster_equip for those. A chest a player has open goes through the engine's own add path, which tells that player's machine; a closed chest is served whole on the next open.
+
+| argument | type |
+|---|---|
+| `uid` | int (a chest, or a creature) |
+| `item` | any — one of: `item type (int)`, `vanilla name`, `"namespace:item"` |
+| `count` *(optional)* | int |
+| `status` *(optional)* | int (0 BROKEN .. 4 EXCELLENT) |
+| `beatitude` *(optional)* | int |
+| `identified` *(optional)* | boolean |
+| `appearance` *(optional)* | int |
+
+**Returns:** the new item's uid (int), or nil/undefined when refused
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Host only. A chest's contents are served to whoever opens it and a shop's when it is entered, so nothing else needs sending. A player on another machine who is browsing the shop has their window closed with the engine's own SHPC; their next talk serves the new stock. A chest they have open gets the item as a new stack, so their window shows it.
+
+### `sam_get_loot_pool(category, min_level, max_level, [context])`
+
+The set of items a random roll of that category and level window would draw from: the sheet's item_level test (so a sam_patch_item level counts), mod-registered items, and the loot tables (an item weighted 0, outside its floor window, or kept out of the given context is absent). Without a context the context rule is not tested. The per-roll chance drops the engine makes on five items (tin opener, lantern, frying pan, backpack, grass sprig), the store-type exclusions and the GEM shortcut (nine gem rolls in ten return glass before the pool is read) are not in it; they happen inside the roll.
+
+level in each entry is the sheet's item_level, the floor threshold; weight is the table's weight (1 unless you set one). An empty array means the roll would return the fallback (GEM_ROCK, or what sam_set_loot_fallback named).
+
+| argument | type |
+|---|---|
+| `category` | string — one of: `WEAPON`, `ARMOR`, `AMULET`, `POTION`, `SCROLL`, `MAGICSTAFF`, `RING`, `SPELLBOOK`, `GEM`, `THROWN`, `TOOL`, `FOOD`, `BOOK` |
+| `min_level` | int |
+| `max_level` | int |
+| `context` *(optional)* | string — one of: `floor`, `chest`, `shop`, `monster`, `recipe`, `console`, `other` |
+
+**Returns:** array of { type, name, level, weight }, or nil/undefined for a category that is not one
+
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler. Reads tables every S.A.M machine keeps a copy of, so a client answers the same as the host once the host's table calls have reached it.
+
+### `sam_remove_item_from_container(uid, item, [count])`
+
+Take an item out of a chest, a mimic, a creature's pockets or a shop's stock: by the item's own uid, or by type (the first stack of that type). count takes that many from the stack; 0 or omitted removes it.
+
+sam_get_container_items does not list item uids, so removal by type is the usual form. A chest a player has open is closed first (there is no packet for "the host took this out"); the next open serves the contents as they now are. A shop window open on it is closed the same way. Called from inside world.on_loot_rolled or world.on_before_spellbook_reroll on the very item the event is about, the removal happens at the next frame (the engine is still writing to that item); it is gone before anyone can see it.
+
+| argument | type |
+|---|---|
+| `uid` | int (a chest, or a creature) |
+| `item` | any — one of: `an item uid the container's list holds`, `item type (int)`, `vanilla name`, `"namespace:item"` |
+| `count` *(optional)* | int (0 or omitted: the whole stack) |
+
+**Returns:** true if something was removed (boolean)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. Host only; see sam_add_item_to_container.
+
+### `sam_roll_loot(category, min_level, max_level, [context])`
+
+One roll of the engine's own loot curve, exactly as a chest or a shop makes it: the level window, the loot tables, world.on_before_loot_roll, the spellbook re-draw, world.on_loot_rolled. Use it for your own drops instead of re-implementing the curve. The context (default "other") is what the tables and the events see.
+
+It draws from the game's own local generator, the one gameplay uses for a monster's attack roll: a seeded run's floors come from the seed and are unchanged by it; in an unseeded run each call advances the stream the next floor's seed is drawn from, exactly as that attack roll does. It answers with a TYPE, not an item: make the item with sam_spawn_item or sam_add_item_to_container. Refused from inside a loot event handler (world.on_before_loot_roll, world.on_loot_rolled, ...): a nested roll would fire a nested event into the store the outer handler is writing.
+
+| argument | type |
+|---|---|
+| `category` | string — one of: `WEAPON`, `ARMOR`, `AMULET`, `POTION`, `SCROLL`, `MAGICSTAFF`, `RING`, `SPELLBOOK`, `GEM`, `THROWN`, `TOOL`, `FOOD`, `BOOK` |
+| `min_level` | int |
+| `max_level` | int |
+| `context` *(optional)* | string — one of: `floor`, `chest`, `shop`, `monster`, `recipe`, `console`, `other` |
+
+**Returns:** an item type (int), or nothing (Lua: no value, JS: undefined) when refused
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript. Draws happen on the host only and are not synchronized between machines: roll on the host and send the result with sam_send_packet if a client needs it.
+
+### `sam_set_loot_category_weight(category, weight)`
+
+How often the "any category" draw lands on a category. Four places make that draw: a random floor item, a completely-random chest, the general store, and a troll's hoard. 1 is vanilla, 0 never, N is N times as likely. With no category weighted the draw is the vanilla code, including its quirks (a floor THROWN result is re-rolled two times in three, a floor BOOK half the time); the moment any category is weighted the draw becomes one weighted pick and those quirks are gone for it.
+
+Weighting every category 0 is refused at roll time (the vanilla draw is used and the log says so once). This does not affect rolls that name their category (a scroll chest rolls SCROLL whatever you set). The host re-sends every loot table to a joiner when they say hello, so a value set at the main menu, from mod.on_setting_changed or in an earlier run reaches them too.
+
+| argument | type |
+|---|---|
+| `category` | string — one of: `WEAPON`, `ARMOR`, `AMULET`, `POTION`, `SCROLL`, `MAGICSTAFF`, `RING`, `SPELLBOOK`, `GEM`, `THROWN`, `TOOL`, `FOOD`, `BOOK` |
+| `weight` | int |
+
+**Returns:** true on success (boolean)
+
+**Multiplayer:** `all`. Changes a table every machine keeps its own copy of: a host call runs on the host and on every S.A.M client, and is replayed to a client that joins later. A client's call is refused with a one-time warning and returns false. Call it on the host or when your mod loads. A host call applies on every S.A.M player's machine, and a player who joins later gets the host's whole table.
+
+### `sam_set_loot_context(item, context, allowed)`
+
+Keep an item out of one kind of roll (false) or let it back in (true, the default): "artifacts on the floor and in chests, never in a store" is sam_set_loot_context("ARTIFACT_SWORD", "shop", false). The contexts: floor (items placed while the level is built), chest (a chest or mimic being filled), shop (a shopkeeper stocking), monster (a creature's starting gear), recipe (the potion an alchemy skill-up teaches), console (/sam_loot, /itemlevelcurve), other (sam_roll_loot with no context).
+
+The recipe context exists so a randomizer does not teach the player to brew an artifact: keep everything that is not a potion out of "recipe" if you open the POTION pool. The lockpick capstone reward rolls in the chest context. The host re-sends every loot table to a joiner when they say hello, so a value set at the main menu, from mod.on_setting_changed or in an earlier run reaches them too.
+
+| argument | type |
+|---|---|
+| `item` | any — one of: `item type (int)`, `vanilla name`, `"namespace:item"` |
+| `context` | string — one of: `floor`, `chest`, `shop`, `monster`, `recipe`, `console`, `other` |
+| `allowed` | boolean |
+
+**Returns:** true on success (boolean)
+
+**Multiplayer:** `all`. Changes a table every machine keeps its own copy of: a host call runs on the host and on every S.A.M client, and is replayed to a client that joins later. A client's call is refused with a one-time warning and returns false. Call it on the host or when your mod loads. A host call applies on every S.A.M player's machine, and a player who joins later gets the host's whole table.
+
+### `sam_set_loot_fallback(category, item, [context])`
+
+What a roll returns when NOTHING in the category fits its window, instead of the engine's GEM_ROCK. The Hamlet's Arms & Armour store rolls weapons from level 10 up: a sheet where every weapon is level 0 fills it with fourteen rocks. A fallback swaps each rock for the one named item, so it does not make that store work: widen its window in world.on_before_loot_roll (e.min_level) for that. Set per category, and per context when it should differ (a rock in a chest is fine, in a shop it is a bug); "ANY" is the any-category draw the lockpick capstone reward makes. item nil removes the rule.
+
+The fallback is not weighed, windowed or context-tested: it is returned as named. world.on_loot_rolled reports is_fallback = 1 for these rolls, so a handler can tell a fallback rock from a garbage-chest rock. The host re-sends every loot table to a joiner when they say hello, so a value set at the main menu, from mod.on_setting_changed or in an earlier run reaches them too.
+
+| argument | type |
+|---|---|
+| `category` | string — one of: `ANY`, `WEAPON`, `ARMOR`, `AMULET`, `POTION`, `SCROLL`, `MAGICSTAFF`, `RING`, `SPELLBOOK`, `GEM`, `THROWN`, `TOOL`, `FOOD`, `BOOK` |
+| `item` | any — one of: `item type (int)`, `vanilla name`, `"namespace:item"`, `nil: vanilla again` |
+| `context` *(optional)* | string — one of: `floor`, `chest`, `shop`, `monster`, `recipe`, `console`, `other` |
+
+**Returns:** true on success (boolean)
+
+**Multiplayer:** `all`. Changes a table every machine keeps its own copy of: a host call runs on the host and on every S.A.M client, and is replayed to a client that joins later. A client's call is refused with a one-time warning and returns false. Call it on the host or when your mod loads. A host call applies on every S.A.M player's machine, and a player who joins later gets the host's whole table.
+
+### `sam_set_loot_floor_range(item, min_floor, [max_floor])`
+
+A window on the CURRENT FLOOR NUMBER inside which the item may roll, checked beside the sheet's item_level. max_floor is the ceiling vanilla has no knob for ("leather armour stops appearing after floor 10"); leave it out for no ceiling. sam_set_loot_floor_range(item, 0) removes the rule.
+
+This is the dungeon floor the roll happens on, not the roll's level window: a chest on floor 3 rolls its contents with max_level 8, and this rule still asks about floor 3. Refused when max_floor is below min_floor. The host re-sends every loot table to a joiner when they say hello, so a value set at the main menu, from mod.on_setting_changed or in an earlier run reaches them too.
+
+| argument | type |
+|---|---|
+| `item` | any — one of: `item type (int)`, `vanilla name`, `"namespace:item"` |
+| `min_floor` | int |
+| `max_floor` *(optional)* | int |
+
+**Returns:** true on success (boolean)
+
+**Multiplayer:** `all`. Changes a table every machine keeps its own copy of: a host call runs on the host and on every S.A.M client, and is replayed to a client that joins later. A client's call is refused with a one-time warning and returns false. Call it on the host or when your mod loads. A host call applies on every S.A.M player's machine, and a player who joins later gets the host's whole table.
+
+### `sam_set_loot_weight(item, weight)`
+
+How likely one item is inside any roll that considers it: 1 is vanilla, 0 is never, 5 is five times as likely as a weight-1 item in the same draw. Applies everywhere the engine rolls from the item sheet: floor items, chests, shops, monster gear, the lockpick reward, sam_roll_loot. Last call wins.
+
+Weight 0 removes the item from the pool but does not change how many random numbers the engine draws, so a seeded dungeon still walks the same rooms; any weight above 1 turns that roll into a weighted draw and the dungeon's item sequence changes from that roll on. A weight does not put an item INTO the pool: an item with item_level -1 (artifacts, orbs, class books) needs sam_patch_item(item, { level = N }) first. The host re-sends every loot table to a joiner when they say hello, so a value set at the main menu, from mod.on_setting_changed or in an earlier run reaches them too.
+
+| argument | type |
+|---|---|
+| `item` | any — one of: `item type (int)`, `vanilla name, e.g. "ARTIFACT_SWORD"`, `"namespace:item"` |
+| `weight` | int |
+
+**Returns:** true on success (boolean)
+
+**Multiplayer:** `all`. Changes a table every machine keeps its own copy of: a host call runs on the host and on every S.A.M client, and is replayed to a client that joins later. A client's call is refused with a one-time warning and returns false. Call it on the host or when your mod loads. A host call applies on every S.A.M player's machine, and a player who joins later gets the host's whole table. A client of a host without S.A.M, and a stock 5.0.2 client, roll vanilla floor loot from the seed, so their floors differ from the host's.
+
+### `sam_set_shop_stock(shopkeeper_uid, items)`
+
+Replace a shopkeeper's stock with exactly this list, then run the engine's price-sorted slot layout. The data-driven consumables the store type always sells (the bottom-right row) stay. Meant for world.on_before_shop_stock (return false, then stock it from world.on_shop_stocked) or for any shop at any time. An empty list empties the shop of everything but the consumables.
+
+Each entry defaults to one, SERVICABLE, uncursed, identified. The whole list is validated before the shop is touched, so false always means the shop is as it was. The mysterious merchant keeps his fixed arrangement: new items there take the next free slot.
+
+| argument | type |
+|---|---|
+| `shopkeeper_uid` | int |
+| `items` | table (array of { item, count, status, beatitude, identified } tables, or bare item names / ids) |
+
+**Returns:** true on success (boolean); false and nothing changed when an entry is not an item
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. Host only. A player on another machine who has the shop open has their window closed with the engine's own SHPC; their next talk serves the new stock.
+
+### `sam_set_shop_type(shopkeeper_uid, store_type)`
+
+What kind of store a shopkeeper opens. Only before it has stocked: the tick it was spawned with sam_spawn_monster, or a shopkeeper placed by the map before its first tick. After that the type has been read and the call is refused with the reason.
+
+For a shopkeeper that has already stocked, world.on_before_shop_stock is too late as well; change what it SELLS with sam_set_shop_stock instead. sam_spawn_monster's own shop_type argument does the same thing at spawn time.
+
+| argument | type |
+|---|---|
+| `shopkeeper_uid` | int |
+| `store_type` | int (0 arms, 1 hats, 2 jewelry, 3 books, 4 apothecary, 5 staves, 6 food, 7 hardware, 8 hunting, 9 general, 10 mysterious) |
+
+**Returns:** true on success (boolean)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. Host only; the store type travels with the shopkeeper's stats.
+
+### `sam_set_spell_droppable(spell, allowed, [min_floor])`
+
+Whether a spell's book (or tome) may come out of a spellbook roll, from min_floor (default 0), or never. Every rolled spellbook is re-drawn by the engine from the spell table after the item roll, using each spell's drop_table floor and hiding class, race and monster spells outright; this overrides that rule for one spell. This is the way to put a class spellbook into the loot pool: a level patch on the book alone is undone by the re-draw.
+
+A spell that has no spellbook or tome can never be produced by a roll however droppable it is declared; the call warns and keeps the entry. The difficulty ladder (spell difficulty against floor) still applies to an allowed spell; force one from world.on_before_spellbook_reroll to skip it. The host re-sends every loot table to a joiner when they say hello, so a value set at the main menu, from mod.on_setting_changed or in an earlier run reaches them too.
+
+| argument | type |
+|---|---|
+| `spell` | any — one of: `"SPELL_FIREBALL" (a SPELL_ name)`, `"namespace:spell"`, `spell id (int)` |
+| `allowed` | boolean |
+| `min_floor` *(optional)* | int |
+
+**Returns:** true on success (boolean)
+
+**Multiplayer:** `all`. Changes a table every machine keeps its own copy of: a host call runs on the host and on every S.A.M client, and is replayed to a client that joins later. A client's call is refused with a one-time warning and returns false. Call it on the host or when your mod loads. A host call applies on every S.A.M player's machine, and a player who joins later gets the host's whole table.
 
 
 ## Mechanisms
@@ -3212,6 +3466,59 @@ Level -1 sets the flat value for EVERY level, which is the one-line version of a
 **Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. A curve declared when your mod loads reaches clients on the first floor. The XP bar and a client's own EXP stay correct above 255 on S.A.M clients; a player whose game does not run S.A.M sees EXP modulo 256 on the bar.
 
 
+## Settings
+
+### `sam_get_setting(id)`
+
+The value one of your settings holds right now on THIS machine: what the player confirmed in Settings, else what your settings file held at load, else the default. Cheap: read it when you need it rather than caching it.
+
+| argument | type |
+|---|---|
+| `id` | string |
+
+**Returns:** the value in force: a number for a slider or number, a boolean for a toggle, a string for a dropdown or text; nil/undefined for an id this mod never registered
+
+**Multiplayer:** `local`. Answers for the machine running the script. Per machine. The host's slider is the host's; a joiner's slider is the joiner's. A mod that needs one value everywhere reads it on the host and sends it with sam_send_packet.
+
+### `sam_list_settings()`
+
+Everything your mod declared with sam_register_setting and what each one holds now. min and max appear only when declared, step only for a slider, options only for a dropdown. For a debug print or a panel of your own; the game's Settings screen already shows the same rows.
+
+**Returns:** array of { id, type, label, value, default, min?, max?, step?, options? } for this mod's settings, in registration order (array)
+
+**Multiplayer:** `local`. Answers for the machine running the script.
+
+### `sam_register_setting(id, spec)`
+
+Give your mod its own row in Settings > General, in a MOD SETTINGS section under your mod's name, in both the main menu and the pause menu. A slider needs min and max and takes an optional step (values are snapped to it); a toggle takes a boolean default; a dropdown needs options and defaults to the first one; a number takes an optional min and max; a text holds up to 31 characters and may leave the default out (empty). The default must fit the declaration. The value in force is what the player confirmed in Settings, else what your mod's own settings file holds from an earlier run, else the default: it is read from the file the first time each id is registered per load, so a value survives a restart and survives the mod being unloaded, and it is never in config.json. Call it at top level, next to sam_register_action; registering the same id again refreshes the declaration and keeps the current value when the new declaration still accepts it.
+
+The player's edits are a copy until Confirm: Discard changes nothing and fires nothing, Restore Defaults stages every mod setting's default and Confirm makes it real. Read a value with sam_get_setting when you need it, or listen to mod.on_setting_changed; do not cache it at load. A mod with many settings makes the General tab long (it scrolls).
+
+| argument | type |
+|---|---|
+| `id` | string |
+| `spec` | table — one of: `type: "slider" | "toggle" | "dropdown" | "number" | "text"`, `label: string`, `tip: string (tooltip)`, `default: number | boolean | string`, `min, max: number (slider: required, within +-1e9, at most 1000000 steps apart; number: optional, finite)`, `step: number (slider: 0 = continuous)`, `options: array of strings (dropdown)` |
+
+**Returns:** true if the setting exists now (boolean); false, with the reason in the log, for a bad declaration
+
+**Multiplayer:** `all`. Changes a table every machine keeps its own copy of: a host call runs on the host and on every S.A.M client, and is replayed to a client that joins later. A client's call is refused with a one-time warning and returns false. Call it on the host or when your mod loads. A host call applies on every S.A.M player's machine, and a player who joins later gets the host's whole table.
+
+### `sam_set_setting(id, value)`
+
+Change one of your settings from the script: validated against the declaration (a slider is snapped to its step), written to your settings file at once, and announced with mod.on_setting_changed with source "script". Setting the value already in force is true and silent. The Settings screen shows the new value the next time it opens.
+
+If the player has the Settings window open and has moved that same setting, their Confirm wins over your call.
+
+| argument | type |
+|---|---|
+| `id` | string |
+| `value` | number | boolean | string |
+
+**Returns:** true if the value is now in force (boolean); false, with the reason in the log, for an unregistered id, a value of the wrong kind, a slider or number outside its range, a dropdown value that is not one of its options, or a text longer than 31 characters
+
+**Multiplayer:** `local`. Answers for the machine running the script. Changes this machine's value only.
+
+
 ## Sound & music
 
 ### `sam_get_music()`
@@ -4343,6 +4650,41 @@ Fires a floor finishes loading.
 
 **Multiplayer:** Fires on the host, once for every connected player on every arrival (ladders, portals, teleports and sam_travel_to_level alike).
 
+### `game.on_speed_changed`
+
+Fires the simulation speed really changes: a sam_set_game_speed or /sam_gamespeed that set a different value, a temporary window ending, and the reset to 1x when a run ends or a new one starts.
+
+| field | type |
+|---|---|
+| `old_percent` | int |
+| `new_percent` | int |
+| `temporary` | int |
+
+A HUD that shows the speed listens here and reads sam_get_game_speed(); it does not need to poll.
+
+Percent, because event fields are whole numbers: 100 is 1x, 250 is 2.5x. temporary is 0/1: 1 while a timed window is running, 0 when one has ended or a plain set was made. The value is already stored when this fires, so sam_get_game_speed() inside the handler is the exact new multiplier. Setting the value already set fires nothing.
+
+**Multiplayer:** Fires on the host, in singleplayer.
+
+### `mod.on_setting_changed`
+
+Fires the value one of a mod's settings holds really changes: the player pressed Confirm in Settings (source "ui"), pressed Restore Defaults and then Confirm ("reset"), or a script called sam_set_setting ("script").
+
+| field | type |
+|---|---|
+| `mod` | string |
+| `id` | string |
+| `type` | string ("slider", "toggle", "dropdown", "number", "text") |
+| `old` | string |
+| `new` | string |
+| `source` | string ("ui", "script", "reset") |
+
+A mod that keeps a derived value (a speed table, a HUD line) recomputes it here instead of polling sam_get_setting every tick.
+
+old and new are TEXT, because an event field is a whole number or a string and a slider's 0.5 is neither: "2.5", "true", "run". Use tonumber(e.new) / e.new == "true", or simply call sam_get_setting(e.id), which already answers the new value (it is stored and written to disk before this fires). Once per setting that changed: nothing fires for a Confirm that changed nothing, for Discard, or for sam_set_setting with the value already in force. Every loaded mod hears every mod's changes, so check e.mod against your own namespace first.
+
+**Multiplayer:** Fires on the machine whose setting changed.
+
 ### `on_action_pressed`
 
 Fires a BOUND action goes down — e.g. the player presses whatever they have "Use" mapped to.
@@ -5207,6 +5549,28 @@ you can also read the box at any time with sam_ui_input_text; this event just te
 
 **Multiplayer:** Fires on the host (in singleplayer, locally), with player = who typed. A client's submit is sent to the host and does not fire in the client's own scripts.
 
+### `world.on_before_chest_fill`
+
+> Cancellable: return `false` to stop it.
+
+Fires a chest (or a mimic, which is a chest with legs) is about to be filled, after its type and quality floor are decided and before any item is made.
+
+| field | type |
+|---|---|
+| `chest_uid` | int |
+| `is_mimic` | int (0/1) |
+| `x` | int (tile) |
+| `y` | int (tile) |
+| `floor` | int |
+| `chest_type` | int (0 random, 1 garbage, 2 food, 3 treasure, 4 equipment, 5 tools, 6 magic, 7 potions, 8 empty) |
+| `min_quality` | int (the level floor deep chests use for weapons and armour: 0, 5 from floor 18, 10 from floor 32) |
+
+Rewrite chest_type to change what the engine fills it with, min_quality to raise or drop the deep-floor threshold, or return false to leave it EMPTY and fill it yourself from world.on_chest_filled with sam_add_item_to_container (the vampire quest book is still placed).
+
+The map's own chests are filled while the level is built, on the loader thread, so this fires only for a chest summoned during play (a spell, a script). For the chests a floor came with, use game.on_level_entered + sam_find_entities(x, y, r, "chest") + the container functions; the loot TABLES do apply to them.
+
+**Multiplayer:** Fires on the host, on the main thread only, for a chest filled during play.
+
 ### `world.on_before_chest_open`
 
 > Cancellable: return `false` to stop it.
@@ -5222,6 +5586,74 @@ Return false to keep the chest shut. Combine with sam_spawn_monsters for a mimic
 
 **Multiplayer:** Fires on the host, for every player.
 
+### `world.on_before_loot_roll`
+
+Fires before the engine rolls a random item from the item sheet during play: a shopkeeper stocking, a creature's starting gear, a chest summoned during play, the lockpick capstone reward, the potion an alchemy skill-up teaches, /sam_loot, /itemlevelcurve and sam_roll_loot. It does NOT fire for the rolls made while a floor is generated (floor items, the map's own chests, the mimics made from them): those run on the level loader's thread, where scripts cannot be entered, and are governed by the loot tables.
+
+| field | type |
+|---|---|
+| `category` | string (WEAPON .. BOOK; "ANY" for the any-category gold-value draw) |
+| `min_level` | int (-1 for a gold-value draw) |
+| `max_level` | int (-1 for a gold-value draw) |
+| `min_value` | int (-1 for a level draw) |
+| `max_value` | int (-1 for a level draw) |
+| `item_type` | int (-1; set it to force a type) |
+| `context` | string (floor chest shop monster recipe console other) |
+| `floor` | int |
+| `shop_type` | int (-1 unless context is shop) |
+| `shop_uid` | int (-1 unless context is shop) |
+| `chest_uid` | int (-1 unless context is chest) |
+| `chest_type` | int (-1 unless context is chest) |
+| `monster_uid` | int (-1 unless context is monster) |
+| `monster_type` | int (-1 unless context is monster) |
+
+Rewrite category, min_level and max_level to change the pool the roll draws from (the Hamlet rock fix is `if e.context == "shop" then e.min_level = 0 end`), or set item_type to a valid item to skip the roll entirely. A forced type costs the dungeon's random generator nothing; a handler that changes nothing leaves it exactly where vanilla leaves it. Not cancellable: every caller makes an item of whatever comes back, so "no item" is a per-site decision (world.on_before_chest_fill, world.on_before_shop_stock, world.on_fixture_loot).
+
+context == "recipe" is an alchemy recipe being learned, not a drop: a randomizer that forces artifacts here teaches the player to brew one. A chest's uid is -1 while the chest is a mimic being built. The lockpick reward arrives with min_value/max_value (80..600 gold) and category "ANY".
+
+**Multiplayer:** Fires on the host, on the main thread only (never on the level loader's thread, never on a client), for every roll during play.
+
+### `world.on_before_shop_stock`
+
+> Cancellable: return `false` to stop it.
+
+Fires a shopkeeper is about to stock its store, after the map's and the editor's flags decided the store type, the item count, the shop level and the blessing tier, and before any item is made.
+
+| field | type |
+|---|---|
+| `shopkeeper_uid` | int |
+| `floor` | int |
+| `store_type` | int (0 arms, 1 hats, 2 jewelry, 3 books, 4 apothecary, 5 staves, 6 food, 7 hardware, 8 hunting, 9 general, 10 mysterious; -1 = generate nothing) |
+| `num_items` | int |
+| `shop_level` | int (the level window's top; the floor number, at least 15 in a Shopping Spree run) |
+| `blessed` | int (1..3, how blessed the good gear may be) |
+
+Rewrite the four fields, or return false to have the shopkeeper generate nothing (it keeps its store label) and stock it yourself from world.on_shop_stocked with sam_set_shop_stock. shop_level is the top of the level window the store rolls with; store 0 and 8 also apply MINIMUMS from floor 18 (weapons from level 10), which is what an all-level-0 sheet trips over -- see world.on_before_loot_roll for that fix.
+
+Fires on the shopkeeper's first tick, not at map generation, so it fires for every shopkeeper (placed by the map or spawned). The data-driven consumables (the bottom-right row) are added after this whatever you return.
+
+**Multiplayer:** Fires on the host, for every shopkeeper on its first tick.
+
+### `world.on_before_spellbook_reroll`
+
+Fires a roll produced a spellbook and the engine is about to replace it with a spell drawn from the spell table (its drop_table floor, its school rotation, its difficulty ladder), before that candidate list is built.
+
+| field | type |
+|---|---|
+| `item_type` | int (the spellbook the item roll picked) |
+| `item_level` | int (the floor the re-draw is for) |
+| `keep` | int (0; set 1 to keep the picked book and skip the re-draw) |
+| `spell_id` | int (-1; set a spell with a book to force it, skipping the school rotation and the ladder) |
+| `allow_hidden` | int (0; set 1 to let sheet-hidden spells -- class, race, monster books -- into the normal draw) |
+| `context` | string |
+| `floor` | int |
+
+keep = 1 is what makes a level-patched class spellbook survive: without it the re-draw throws the book away whatever its level. sam_set_spell_droppable is the table form of allow_hidden for one spell at a time and needs no handler.
+
+A forced spell_id with no spellbook or tome is ignored with a log line and the normal re-draw goes ahead. Keeping the book costs the random generator nothing; forcing or allowing changes what the draw consumes.
+
+**Multiplayer:** Fires on the host, on the main thread only, for every spellbook rolled during play (shops, monster pockets, a summoned chest, sam_roll_loot).
+
 ### `world.on_boulder_triggered`
 
 Fires a boulder trap launches.
@@ -5232,6 +5664,26 @@ Fires a boulder trap launches.
 | `floor_y` | int |
 
 **Multiplayer:** Fires on the host.
+
+### `world.on_chest_filled`
+
+Fires a chest's (or mimic's) inventory has been generated and laid out, or left empty because world.on_before_chest_fill said so.
+
+| field | type |
+|---|---|
+| `chest_uid` | int |
+| `is_mimic` | int (0/1) |
+| `x` | int (tile) |
+| `y` | int (tile) |
+| `floor` | int |
+| `chest_type` | int |
+| `item_count` | int |
+
+Add or remove with sam_add_item_to_container / sam_remove_item_from_container; read with sam_get_container_items.
+
+Same limit as world.on_before_chest_fill: not for the chests a floor is generated with.
+
+**Multiplayer:** Fires on the host, on the main thread only, for a chest filled during play.
 
 ### `world.on_chest_found`
 
@@ -5262,6 +5714,30 @@ Fires a player opens a wooden door.
 opens only (not closes); wooden doors only, not iron gates. status is the swing direction (1 or 2)
 
 **Multiplayer:** Fires on the host, for every player.
+
+### `world.on_fixture_loot`
+
+> Cancellable: return `false` to stop it.
+
+Fires one of the small fixtures that never consult the item sheet is about to hand out an item: a fountain's potion splash (goatmen), a sink's ring, the luckstone a boulder leaves when it blocks the only way on, and the lockpick capstone's chest reward.
+
+| field | type |
+|---|---|
+| `source` | string (fountain, sink, boulder, lockpick) |
+| `player` | int (-1 for a boulder: nobody in particular caused it) |
+| `x` | int (tile) |
+| `y` | int (tile) |
+| `floor` | int |
+| `item_type` | int |
+| `status` | int |
+| `beatitude` | int |
+| `count` | int |
+
+Rewrite the item, or return false for no item at all (the fixture still counts as used; a boulder is still removed and its message still shown; the lockpick still trains the skill).
+
+A fountain potion whose type you change loses the potion's standard appearance (it belonged to the old type) and takes 0. The lockpick reward was ALSO a world.on_before_loot_roll (category "ANY", min_value/max_value) a moment earlier, in the chest context.
+
+**Multiplayer:** Fires on the host, for the player who used the fixture (player is -1 for a boulder).
 
 ### `world.on_fountain_used`
 
@@ -5297,6 +5773,55 @@ Return false after spawning your own thing, to skip the engine's built-in gadget
 player is -1 when a monster threw it
 
 **Multiplayer:** Fires on the host (a thrown gadget lands there), for every player.
+
+### `world.on_loot_rolled`
+
+Fires after a rolled item's final type is known (after the spellbook re-draw and the thrown-weapon status rule) and the item exists: every roll world.on_before_loot_roll covers, plus a monster's rolled worn slots and pockets and a troll's or ghoul's rolled loot, which run no post-processing in vanilla and get this event directly.
+
+| field | type |
+|---|---|
+| `item_type` | int |
+| `status` | int (0 BROKEN .. 4 EXCELLENT) |
+| `beatitude` | int |
+| `count` | int |
+| `appearance` | int |
+| `identified` | int (0/1) |
+| `is_fallback` | int (1 when the pool was empty and the roll returned GEM_ROCK or the sam_set_loot_fallback item) |
+| `was_spellbook_rerolled` | int (1 when the engine re-drew a spellbook from the spell table) |
+| `context` | string |
+| `floor` | int |
+| `shop_type` | int |
+| `shop_uid` | int |
+| `chest_uid` | int |
+| `chest_type` | int |
+| `monster_uid` | int |
+| `monster_type` | int |
+
+Rewrite any of the six writable fields and the item takes them (a floor entity's skill[10..15], or the Item itself). item_type must be a valid item or the rolled one is kept and the log says so. is_fallback is the honest way to catch the rock: a garbage chest's rock is a real rock.
+
+For the floor items placed while a level is generated this event does not fire (loader thread); read them from game.on_level_entered with sam_find_entities(x, y, r, "item") instead. At a monster's worn slots and pockets was_spellbook_rerolled is always 0, because vanilla never re-draws those.
+
+**Multiplayer:** Fires on the host, on the main thread only, for every rolled item during play.
+
+### `world.on_monster_inventory`
+
+Fires a creature's species init has finished making its starting gear (worn slots and pockets alike), on its first tick.
+
+| field | type |
+|---|---|
+| `monster_uid` | int |
+| `monster_type` | int |
+| `monster_name` | string (the creature's own name, else the species name) |
+| `floor` | int |
+| `item_count` | int (pockets) |
+| `worn_count` | int (equipped slots) |
+| `is_shopkeeper` | int (0/1) |
+
+This is the one place to reach the ~700 hardcoded species gear tables without an engine edit per species: read with sam_get_container_items, rewrite pockets with sam_add_item_to_container / sam_remove_item_from_container and worn slots with sam_monster_equip. Pockets are what the creature drops on death.
+
+A shopkeeper's store has already been stocked by now (world.on_before_shop_stock and world.on_shop_stocked fired inside its init). Player allies summoned by a script get it too.
+
+**Multiplayer:** Fires on the host, for every creature on its first tick.
 
 ### `world.on_monster_spawned`
 
@@ -5342,6 +5867,21 @@ Fires a fired projectile strikes an entity.
 player is the shooter's index, or -1 when a monster or trap fired it. target_type is the struck monster's type, or -1 for a non-creature (chest, etc.)
 
 **Multiplayer:** Fires on the host.
+
+### `world.on_shop_stocked`
+
+Fires a shopkeeper's stock has been generated, laid out by price and had its consumables added (potions are normalised right after).
+
+| field | type |
+|---|---|
+| `shopkeeper_uid` | int |
+| `store_type` | int |
+| `floor` | int |
+| `item_count` | int (the consumables included) |
+
+Rewrite the stock with sam_set_shop_stock, or adjust it with sam_add_item_to_container / sam_remove_item_from_container; both lay the slots out again.
+
+**Multiplayer:** Fires on the host, for every shopkeeper on its first tick.
 
 ### `world.on_sink_used`
 

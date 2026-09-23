@@ -29,6 +29,10 @@
 
 #include "sam_lua_runtime.hpp"
 #include "sam_js_runtime.hpp"  // Part 2: sam_fire_hook cross-dispatches to JS scripts too
+#include "sam_test.hpp"   // sam_test_done: end an unattended -samtest run
+#include "sam_speed.hpp"  // sam_set_game_speed / sam_get_game_speed: the simulation speed
+#include "sam_loot.hpp"   // P_ITEMS: the loot pool, its tables, the containers and the shops
+#include "sam_settings.hpp"  // sam_register_action / sam_register_setting / sam_get_setting / sam_set_setting / sam_list_settings
 #include "sam_logger.hpp"
 #include "sam_errors.hpp"   // writeFileAtomic
 
@@ -98,6 +102,7 @@ extern "C" {
 #	include "sam_mp_entities.hpp" // multiplayer: script-made entities, pinned props, terrain, gibs
 #	include "sam_mp_input.hpp" // keys, bound actions and client-raised events in multiplayer
 #	include "magic/magic.hpp" // addSpell (grant a spell to a player)
+#	include "ui/MainMenu.hpp" // MainMenu::emptyBinding / hiddenBinding: the engine's "nothing here" binding texts
 #	include <cctype>
 #endif
 
@@ -2260,6 +2265,242 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		return 1;
 	}
 
+	// ===== mod actions and mod settings (sam_settings.cpp) ==================================
+	//
+	// A mod's own rows in the game's Settings screens. The namespace is the calling mod's
+	// (g_currentNs), the same rule sam_save_data follows, so two mods cannot collide and an
+	// action's full name is "<ns>:<id>".
+
+#ifdef SAM_LUA_HAVE_BARONY
+	// A Lua value as a setting value: a number, a boolean or a string, and nothing else (a
+	// table, nil or a missing argument is Kind::None, which the declaration refuses with
+	// "takes a number/boolean/string"). A number is any Lua number, integer or float.
+	void samLuaToSettingValue(lua_State* Ls, int idx, SAMSettings::Value& out)
+	{
+		out = SAMSettings::Value();
+		switch ( lua_type(Ls, idx) )
+		{
+			case LUA_TNUMBER:  out.kind = SAMSettings::Kind::Number; out.number = (double)lua_tonumber(Ls, idx); break;
+			case LUA_TBOOLEAN: out.kind = SAMSettings::Kind::Bool;   out.flag = ( lua_toboolean(Ls, idx) != 0 ); break;
+			case LUA_TSTRING:  out.kind = SAMSettings::Kind::String; out.text = lua_tostring(Ls, idx); break;
+			default: break;
+		}
+	}
+
+	// The value back to Lua. A whole number is pushed as an INTEGER (2, not 2.0), which is what
+	// a script compares against and what JSON gives the JS twin; anything else is a float.
+	void samLuaPushSettingValue(lua_State* Ls, const SAMSettings::Value& v)
+	{
+		switch ( v.kind )
+		{
+			case SAMSettings::Kind::Number:
+				if ( v.number == std::floor(v.number) && std::fabs(v.number) < 9.0e15 ) { lua_pushinteger(Ls, (lua_Integer)v.number); }
+				else { lua_pushnumber(Ls, (lua_Number)v.number); }
+				break;
+			case SAMSettings::Kind::Bool:   lua_pushboolean(Ls, v.flag ? 1 : 0); break;
+			case SAMSettings::Kind::String: lua_pushstring(Ls, v.text.c_str()); break;
+			default: lua_pushnil(Ls); break;
+		}
+	}
+
+	// The table sam_register_setting takes, read the way sam_patch_item reads its table: keys
+	// case-insensitive, a number only from a number, a string only from a string, so a table
+	// means the same thing in both languages. `type` is required; `tip` and `tooltip` are one
+	// key. The stack is left as it was found, on every path.
+	bool samLuaReadSettingSpec(lua_State* Ls, int idx, SAMSettings::Spec& spec, std::string& why)
+	{
+		bool haveType = false;
+		lua_pushnil(Ls);
+		while ( lua_next(Ls, idx) != 0 )
+		{
+			if ( lua_type(Ls, -2) == LUA_TSTRING )
+			{
+				const std::string uk = samUpper(lua_tostring(Ls, -2));
+				const bool isNum = ( lua_type(Ls, -1) == LUA_TNUMBER );
+				const bool isStr = ( lua_type(Ls, -1) == LUA_TSTRING );
+				if ( uk == "TYPE" && isStr )
+				{
+					const std::string tname = lua_tostring(Ls, -1);
+					if ( !SAMSettings::typeFromName(tname, spec.type) )
+					{
+						why = "'" + spec.id + "': unknown type \"" + tname + "\" (slider, toggle, dropdown, number or text)";
+						lua_pop(Ls, 2);   // the value and the key: the loop is not continued
+						return false;
+					}
+					haveType = true;
+				}
+				else if ( uk == "LABEL" && isStr ) { spec.label = lua_tostring(Ls, -1); }
+				else if ( (uk == "TIP" || uk == "TOOLTIP") && isStr ) { spec.tooltip = lua_tostring(Ls, -1); }
+				else if ( uk == "MIN" && isNum ) { spec.hasMin = true; spec.min = (double)lua_tonumber(Ls, -1); }
+				else if ( uk == "MAX" && isNum ) { spec.hasMax = true; spec.max = (double)lua_tonumber(Ls, -1); }
+				else if ( uk == "STEP" && isNum ) { spec.step = (double)lua_tonumber(Ls, -1); }
+				else if ( uk == "DEFAULT" ) { samLuaToSettingValue(Ls, lua_gettop(Ls), spec.def); }
+				else if ( uk == "OPTIONS" && lua_istable(Ls, -1) )
+				{
+					const int oIdx = lua_gettop(Ls);
+					const lua_Integer n = luaL_len(Ls, oIdx);
+					for ( lua_Integer i = 1; i <= n && i <= 256; ++i )
+					{
+						lua_rawgeti(Ls, oIdx, i);
+						if ( lua_type(Ls, -1) == LUA_TSTRING ) { spec.options.push_back(lua_tostring(Ls, -1)); }
+						lua_pop(Ls, 1);
+					}
+				}
+			}
+			lua_pop(Ls, 1);
+		}
+		if ( !haveType )
+		{
+			why = "'" + spec.id + "': the table needs type = \"slider\" | \"toggle\" | \"dropdown\" | \"number\" | \"text\"";
+			return false;
+		}
+		return true;
+	}
+#endif   // SAM_LUA_HAVE_BARONY: the three helpers above are only called under the guard
+
+	// sam_register_action(id, label, default_key [, default_pad]) -> bool. One rebindable row in
+	// Settings > Controls > Bindings under the mod's name. The action's full name is "<ns>:<id>":
+	// what on_action_pressed carries in `action`, and what sam_is_action_held and
+	// sam_get_action_binding take. The defaults are only defaults: a key the player already
+	// bound (config.json) wins. Registering the same id again refreshes the label and defaults
+	// and adds nothing, so top-level code may call it on every load.
+	int lua_sam_register_action(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* id = luaL_checkstring(Ls, 1);
+		const char* label = lua_isnoneornil(Ls, 2) ? "" : luaL_checkstring(Ls, 2);
+		const char* key = lua_isnoneornil(Ls, 3) ? "" : luaL_checkstring(Ls, 3);
+		const char* pad = lua_isnoneornil(Ls, 4) ? "" : luaL_checkstring(Ls, 4);
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( g_currentNs.empty() ) { SAM_WARN("LUA", "sam_register_action: no owning mod namespace; ignored."); lua_pushboolean(Ls, 0); return 1; }
+		std::string why;
+		if ( !SAMSettings::registerAction(g_currentNs, id ? id : "", label ? label : "", key ? key : "", pad ? pad : "", &why) )
+		{
+			SAM_WARN("LUA", "sam_register_action refused: " + why);
+			lua_pushboolean(Ls, 0);
+			return 1;
+		}
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)id; (void)label; (void)key; (void)pad;
+		lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_register_setting(id, { type=, label=, tip=, default=, min=, max=, step=, options= })
+	// -> bool. One row in Settings > General under MOD SETTINGS. The value in force is read from
+	// the mod's settings file the first time an id is registered each load (the file wins over
+	// the default). Registering the same id again refreshes the declaration and keeps the value
+	// when the new declaration still accepts it.
+	int lua_sam_register_setting(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* id = luaL_checkstring(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( g_currentNs.empty() ) { SAM_WARN("LUA", "sam_register_setting: no owning mod namespace; ignored."); lua_pushboolean(Ls, 0); return 1; }
+		if ( !lua_istable(Ls, 2) )
+		{
+			SAM_WARN("LUA", "sam_register_setting('" + std::string(id ? id : "") + "'): the second argument must be a table { type=, label=, default=, ... }.");
+			lua_pushboolean(Ls, 0);
+			return 1;
+		}
+		SAMSettings::Spec spec;
+		spec.id = id ? id : "";
+		std::string why;
+		if ( !samLuaReadSettingSpec(Ls, 2, spec, why) || !SAMSettings::registerSetting(g_currentNs, spec, &why) )
+		{
+			SAM_WARN("LUA", "sam_register_setting refused: " + why);
+			lua_pushboolean(Ls, 0);
+			return 1;
+		}
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)id;
+		lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_get_setting(id) -> number | boolean | string | nil. The value in force: what the player
+	// confirmed in Settings, else what the mod's file holds, else the default. nil for an id this
+	// mod never registered (silently: a mod may poll this every tick).
+	int lua_sam_get_setting(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* id = luaL_checkstring(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		const SAMSettings::Setting* s = SAMSettings::find(g_currentNs, id ? id : "");
+		if ( !s ) { lua_pushnil(Ls); return 1; }
+		samLuaPushSettingValue(Ls, s->value);
+		return 1;
+#else
+		(void)id;
+		lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_set_setting(id, value) -> bool. Validated against the declaration (a slider is snapped
+	// to its step and must be inside its range, a dropdown value must be one of its options, a
+	// toggle takes a boolean only, a text at most 31 characters), written to the mod's file, and
+	// announced with mod.on_setting_changed (source "script"). false with the reason in the log;
+	// the value already in force is true and silent.
+	int lua_sam_set_setting(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* id = luaL_checkstring(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		SAMSettings::Value v;
+		samLuaToSettingValue(Ls, 2, v);
+		std::string why;
+		if ( !SAMSettings::set(g_currentNs, id ? id : "", v, SAMSettings::Source::Script, &why) )
+		{
+			SAM_WARN("LUA", "sam_set_setting refused: " + why);
+			lua_pushboolean(Ls, 0);
+			return 1;
+		}
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)id;
+		lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_list_settings() -> array of { id, type, label, value, default [, min, max] [, step]
+	// [, options] } for the calling mod, in registration order. min/max only when declared,
+	// step only for a slider, options only for a dropdown.
+	int lua_sam_list_settings(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		lua_newtable(Ls);
+#ifdef SAM_LUA_HAVE_BARONY
+		int n = 0;
+		for ( const SAMSettings::Setting& s : SAMSettings::settings() )
+		{
+			if ( s.ns != g_currentNs ) { continue; }
+			lua_newtable(Ls);
+			lua_pushstring(Ls, s.id.c_str());                     lua_setfield(Ls, -2, "id");
+			lua_pushstring(Ls, SAMSettings::typeName(s.type));    lua_setfield(Ls, -2, "type");
+			lua_pushstring(Ls, s.label.c_str());                  lua_setfield(Ls, -2, "label");
+			samLuaPushSettingValue(Ls, s.value);                  lua_setfield(Ls, -2, "value");
+			samLuaPushSettingValue(Ls, s.def);                    lua_setfield(Ls, -2, "default");
+			if ( s.hasMin ) { lua_pushnumber(Ls, (lua_Number)s.min); lua_setfield(Ls, -2, "min"); }
+			if ( s.hasMax ) { lua_pushnumber(Ls, (lua_Number)s.max); lua_setfield(Ls, -2, "max"); }
+			if ( s.type == SAMSettings::Type::Slider ) { lua_pushnumber(Ls, (lua_Number)s.step); lua_setfield(Ls, -2, "step"); }
+			if ( s.type == SAMSettings::Type::Dropdown )
+			{
+				lua_newtable(Ls);
+				int k = 0;
+				for ( const std::string& o : s.options ) { lua_pushstring(Ls, o.c_str()); lua_rawseti(Ls, -2, ++k); }
+				lua_setfield(Ls, -2, "options");
+			}
+			lua_rawseti(Ls, -2, ++n);
+		}
+#endif
+		return 1;
+	}
+
 	int lua_sam_get_inventory_count(lua_State* Ls)
 	{
 		SAMLogger::noteApiCall();
@@ -2530,6 +2771,57 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 	// Most S.A.M functions are host-only and warn-and-return-false on a client, but until now a
 	// script had no way to ASK. So a co-op mod either spammed the log with refusals or guessed.
 	// These three are the cheap fix and are safe to call from anywhere.
+
+	// sam_test_done(passed, failed) -> boolean. Ends an unattended -samtest run and sets the
+	// process exit code from `failed`. Outside a test run it does nothing and answers false,
+	// which is what lets a mod keep the call in when it is published.
+	int lua_sam_test_done(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int passed = (int)luaL_checkinteger(Ls, 1);
+		const int failed = (int)luaL_checkinteger(Ls, 2);
+#ifdef SAM_LUA_HAVE_BARONY
+		lua_pushboolean(Ls, SAMTest::done(passed, failed) ? 1 : 0);
+#else
+		(void)passed; (void)failed;
+		lua_pushboolean(Ls, 0);
+#endif
+		return 1;
+	}
+
+	// sam_set_game_speed(multiplier [, ticks]) -> bool. Run the simulation at `multiplier` times
+	// real time, 0.1..8: everything counted in game ticks scales (monsters, hunger, effects, timers,
+	// on_tick), nothing on a wall clock does (rendering, UI, sam_hitstop, a screen flash). ticks > 0
+	// makes it a temporary window that ends by itself, which is how a mod does bullet time.
+	// SINGLEPLAYER ONLY: SAMSpeed::set refuses a netgame and says why, once.
+	int lua_sam_set_game_speed(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const double mult = (double)luaL_checknumber(Ls, 1);
+		const lua_Integer forTicks = luaL_optinteger(Ls, 2, 0);
+#ifdef SAM_LUA_HAVE_BARONY
+		// Past INT_MAX ticks means "for the rest of the run"; clamp rather than wrap. Negative is
+		// "not a window".
+		const int window = forTicks > 2147483647LL ? 2147483647 : ( forTicks < 0 ? 0 : (int)forTicks );
+		lua_pushboolean(Ls, SAMSpeed::set(mult, window) ? 1 : 0);
+#else
+		(void)mult; (void)forTicks;
+		lua_pushboolean(Ls, 0);
+#endif
+		return 1;
+	}
+
+	// sam_get_game_speed() -> number. 1.0 with nothing set, and always 1.0 in a netgame.
+	int lua_sam_get_game_speed(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_LUA_HAVE_BARONY
+		lua_pushnumber(Ls, (lua_Number)SAMSpeed::multiplier());
+#else
+		lua_pushnumber(Ls, (lua_Number)1.0);
+#endif
+		return 1;
+	}
 
 	// sam_is_host() -> boolean. True in singleplayer and on the server; false on a client.
 	int lua_sam_is_host(lua_State* Ls)
@@ -9263,7 +9555,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 	}
 
 	// =====================================================================================
-	//  CAMERA (unreleased)
+	//  CAMERA (v3.0.0)
 	//
 	//  Every one of these is LOCAL. A camera belongs to the machine that draws it, so these
 	//  are not host-only like most of the API -- a client running a camera mod for itself is
@@ -9459,7 +9751,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 	}
 
 	// =====================================================================================
-	//  THE RULES (unreleased): stat modifiers, effect immunity, the XP curve
+	//  THE RULES (v3.0.0): stat modifiers, effect immunity, the XP curve
 	//
 	//  The idea these share: a value Barony computes for itself, which a mod should be able to
 	//  influence WITHOUT overwriting what another mod did. Every modifier carries an id so a
@@ -9844,6 +10136,376 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 #endif
 	}
 
+	// ===== P_ITEMS: the loot pool (sam_loot.cpp) =============================================
+	//
+	// Categories are the names /sam_loot takes (WEAPON ARMOR AMULET POTION SCROLL MAGICSTAFF RING
+	// SPELLBOOK GEM THROWN TOOL FOOD BOOK) or the numeric Category; contexts are floor / chest /
+	// shop / monster / recipe / console / other. Items resolve as everywhere else: a numeric id,
+	// a vanilla name or "ns:item". Every table writer is `all`: the host's call reaches every
+	// S.A.M client, because each client rolls its own floor from the same seed.
+
+#ifdef SAM_LUA_HAVE_BARONY
+	// A category argument: a name or the numeric Category; -1 when it is neither. With allowAny,
+	// "ANY" sets isAny and returns -1 (sam_set_loot_fallback takes it for the lockpick reward's
+	// any-category draw).
+	static int samLootCategoryArg(lua_State* Ls, int idx, bool allowAny, bool& isAny)
+	{
+		isAny = false;
+		if ( lua_type(Ls, idx) == LUA_TNUMBER ) { return (int)lua_tointeger(Ls, idx); }
+		const char* s = lua_isstring(Ls, idx) ? lua_tostring(Ls, idx) : nullptr;
+		if ( !s ) { return -1; }
+		if ( allowAny && SAMLoot::isAnyCategoryName(s) ) { isAny = true; return -1; }
+		return SAMLoot::categoryFromName(s);
+	}
+
+	// A context argument: -1 when absent or nil (each function says what that means for it),
+	// -2 for a word that is not a context (logged), else the kind.
+	static int samLootContextArg(lua_State* Ls, int idx, const char* who)
+	{
+		if ( lua_isnoneornil(Ls, idx) ) { return -1; }
+		const char* s = lua_isstring(Ls, idx) ? lua_tostring(Ls, idx) : nullptr;
+		const int kind = s ? SAMLoot::kindFromName(s) : -1;
+		if ( kind < 0 )
+		{
+			SAM_ERROR("LUA", std::string(who) + ": '" + (s ? s : "?")
+				+ "' is not a loot context. Valid: floor chest shop monster recipe console other.");
+			return -2;
+		}
+		return kind;
+	}
+#endif
+
+	// sam_get_loot_pool(category, min_level, max_level [, context]) -> array of { type, name,
+	// level, weight } | nil. The exact candidate set itemLevelCurve would draw from for that
+	// window: the sheet's level test, sam_patch_item levels, mod items, and the loot tables
+	// (weight 0, floor window, context) applied. Without a context the context rule is not
+	// tested. nil for a category that is not one.
+	int lua_sam_get_loot_pool(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_LUA_HAVE_BARONY
+		bool any = false;
+		const int cat = samLootCategoryArg(Ls, 1, false, any);
+		const int minLevel = (int)luaL_checkinteger(Ls, 2);
+		const int maxLevel = (int)luaL_checkinteger(Ls, 3);
+		const int kind = samLootContextArg(Ls, 4, "sam_get_loot_pool");
+		if ( kind == -2 ) { lua_pushnil(Ls); return 1; }
+		std::vector<SAMLoot::PoolEntry> out;
+		if ( !SAMLoot::pool(cat, minLevel, maxLevel, kind, out) ) { lua_pushnil(Ls); return 1; }
+		lua_newtable(Ls);
+		int n = 0;
+		for ( const SAMLoot::PoolEntry& e : out )
+		{
+			lua_newtable(Ls);
+			lua_pushinteger(Ls, e.type);         lua_setfield(Ls, -2, "type");
+			lua_pushstring(Ls, e.name.c_str());  lua_setfield(Ls, -2, "name");
+			lua_pushinteger(Ls, e.level);        lua_setfield(Ls, -2, "level");
+			lua_pushinteger(Ls, e.weight);       lua_setfield(Ls, -2, "weight");
+			lua_rawseti(Ls, -2, ++n);
+		}
+		return 1;
+#else
+		lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_set_loot_weight(item, weight) -> boolean. 1 is vanilla, 0 is never, N is N times as
+	// likely as a weight-1 item in the same draw. A table of only 0s and 1s keeps the vanilla
+	// RNG stream (the pick stays rng.rand() % n); any weight above 1 makes it a weighted draw.
+	int lua_sam_set_loot_weight(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_LUA_HAVE_BARONY
+		const int id = samResolveItemArg(Ls, 1);
+		if ( id < 0 ) { SAM_ERROR("LUA", "sam_set_loot_weight: unknown item."); lua_pushboolean(Ls, 0); return 1; }
+		const int weight = (int)luaL_checkinteger(Ls, 2);
+		lua_pushboolean(Ls, SAMLoot::setWeight(id, weight) ? 1 : 0);
+		return 1;
+#else
+		lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_set_loot_category_weight(category, weight) -> boolean. The "any category" draw a
+	// floor item, a random chest, the general store and a troll's hoard make. With a weight set
+	// that draw becomes ONE weighted pick and the vanilla THROWN/BOOK re-roll quirks are gone
+	// for it; with none set it is the vanilla code, re-rolls included.
+	int lua_sam_set_loot_category_weight(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_LUA_HAVE_BARONY
+		bool any = false;
+		const int cat = samLootCategoryArg(Ls, 1, false, any);
+		const int weight = (int)luaL_checkinteger(Ls, 2);
+		lua_pushboolean(Ls, SAMLoot::setCategoryWeight(cat, weight) ? 1 : 0);
+		return 1;
+#else
+		lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_set_loot_floor_range(item, min_floor [, max_floor]) -> boolean. A window on the
+	// CURRENT FLOOR checked beside the sheet's level: max_floor is the ceiling vanilla never had.
+	// Leave max_floor out for none; (item, 0) removes the rule.
+	int lua_sam_set_loot_floor_range(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_LUA_HAVE_BARONY
+		const int id = samResolveItemArg(Ls, 1);
+		if ( id < 0 ) { SAM_ERROR("LUA", "sam_set_loot_floor_range: unknown item."); lua_pushboolean(Ls, 0); return 1; }
+		const int minFloor = (int)luaL_checkinteger(Ls, 2);
+		const int maxFloor = (int)luaL_optinteger(Ls, 3, -1);
+		lua_pushboolean(Ls, SAMLoot::setFloorRange(id, minFloor, maxFloor) ? 1 : 0);
+		return 1;
+#else
+		lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_set_loot_context(item, context, allowed) -> boolean. Keep an item out of (false) or
+	// back in (true, the default) one kind of roll: floor chest shop monster recipe console other.
+	int lua_sam_set_loot_context(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_LUA_HAVE_BARONY
+		const int id = samResolveItemArg(Ls, 1);
+		if ( id < 0 ) { SAM_ERROR("LUA", "sam_set_loot_context: unknown item."); lua_pushboolean(Ls, 0); return 1; }
+		const int kind = samLootContextArg(Ls, 2, "sam_set_loot_context");
+		if ( kind < 0 )
+		{
+			if ( kind == -1 ) { SAM_ERROR("LUA", "sam_set_loot_context: argument 2 (the context) is required."); }
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		bool allowed = false;
+		if ( !samBoolReq(Ls, 3, "sam_set_loot_context", &allowed) ) { lua_pushboolean(Ls, 0); return 1; }
+		lua_pushboolean(Ls, SAMLoot::setContextAllowed(id, kind, allowed) ? 1 : 0);
+		return 1;
+#else
+		lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_set_spell_droppable(spell, allowed [, min_floor]) -> boolean. Overrides the sheet's
+	// drop_table / hidden rule for one spell in the spellbook re-roll: its book (or tome) may
+	// come out of a spellbook roll from min_floor (default 0), or never. A SPELL_ name,
+	// "namespace:spell" or a spell id.
+	int lua_sam_set_spell_droppable(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_LUA_HAVE_BARONY
+		int spell = -1;
+		if ( lua_type(Ls, 1) == LUA_TNUMBER ) { spell = (int)lua_tointeger(Ls, 1); }
+		else if ( lua_isstring(Ls, 1) ) { spell = SAMSpells::resolveSpellRef(lua_tostring(Ls, 1)); }
+		if ( spell < 0 )
+		{
+			SAM_ERROR("LUA", "sam_set_spell_droppable: unknown spell (expected a SPELL_ name, \"namespace:spell\" or a spell id).");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		bool allowed = false;
+		if ( !samBoolReq(Ls, 2, "sam_set_spell_droppable", &allowed) ) { lua_pushboolean(Ls, 0); return 1; }
+		const int minFloor = (int)luaL_optinteger(Ls, 3, 0);
+		lua_pushboolean(Ls, SAMLoot::setSpellDroppable(spell, allowed, minFloor) ? 1 : 0);
+		return 1;
+#else
+		lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_set_loot_fallback(category, item [, context]) -> boolean. What an EMPTY pool returns
+	// instead of GEM_ROCK, for that category ("ANY" is the any-category draw the lockpick reward
+	// uses) and that context (nil = every context). item nil puts vanilla back.
+	int lua_sam_set_loot_fallback(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_LUA_HAVE_BARONY
+		bool any = false;
+		const int cat = samLootCategoryArg(Ls, 1, true, any);
+		if ( cat < 0 && !any )
+		{
+			SAM_ERROR("LUA", "sam_set_loot_fallback: not a category. Valid: ANY WEAPON ARMOR AMULET POTION SCROLL MAGICSTAFF RING SPELLBOOK GEM THROWN TOOL FOOD BOOK");
+			lua_pushboolean(Ls, 0); return 1;
+		}
+		int item = -1;
+		if ( !lua_isnoneornil(Ls, 2) )
+		{
+			item = samResolveItemArg(Ls, 2);
+			if ( item < 0 ) { SAM_ERROR("LUA", "sam_set_loot_fallback: unknown item."); lua_pushboolean(Ls, 0); return 1; }
+		}
+		const int kind = samLootContextArg(Ls, 3, "sam_set_loot_fallback");
+		if ( kind == -2 ) { lua_pushboolean(Ls, 0); return 1; }
+		lua_pushboolean(Ls, SAMLoot::setFallback(cat, item, kind) ? 1 : 0);
+		return 1;
+#else
+		lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_roll_loot(category, min_level, max_level [, context]) -> item type | nothing. ONE roll
+	// of the engine's own curve, the tables, both loot events and the spellbook re-roll included,
+	// from the game's own local generator, the gameplay stream: a seeded run's floors come from
+	// the seed and are unchanged, an unseeded run's next floor seed moves on as after any attack
+	// roll. Nothing for a bad category, on a client, or from inside a loot event handler (a
+	// nested roll would wipe the outer handler's write-backs).
+	int lua_sam_roll_loot(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_LUA_HAVE_BARONY
+		bool any = false;
+		const int cat = samLootCategoryArg(Ls, 1, false, any);
+		const int minLevel = (int)luaL_checkinteger(Ls, 2);
+		const int maxLevel = (int)luaL_checkinteger(Ls, 3);
+		const int kind = samLootContextArg(Ls, 4, "sam_roll_loot");
+		if ( kind == -2 ) { return 0; }
+		const int type = SAMLoot::roll(cat, minLevel, maxLevel, kind);
+		if ( type < 0 ) { return 0; }
+		lua_pushinteger(Ls, type);
+		return 1;
+#else
+		return 0;
+#endif
+	}
+
+	// sam_add_item_to_container(uid, item [, count [, status [, beatitude [, identified [, appearance]]]]])
+	//   -> the new item's uid | nil. A chest (open or closed), a creature's pockets or a shop's
+	// stock (laid out again, consumables kept). Defaults: 1, EXCELLENT, 0, identified, random.
+	int lua_sam_add_item_to_container(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_LUA_HAVE_BARONY
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const int type = samResolveItemArg(Ls, 2);
+		if ( type < 0 ) { SAM_ERROR("LUA", "sam_add_item_to_container: unknown item."); lua_pushnil(Ls); return 1; }
+		const int count = (int)luaL_optinteger(Ls, 3, 1);
+		const int status = (int)luaL_optinteger(Ls, 4, (int)EXCELLENT);
+		const int beatitude = (int)luaL_optinteger(Ls, 5, 0);
+		const bool identified = samBoolArg(Ls, 6, true);
+		const long long appearance = (long long)luaL_optinteger(Ls, 7, -1);
+		const long long itemUid = SAMLoot::addToContainer((std::uint32_t)uid, type, count, status, beatitude, identified, appearance);
+		if ( itemUid < 0 ) { lua_pushnil(Ls); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)itemUid);
+		return 1;
+#else
+		lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_remove_item_from_container(uid, item_or_uid [, count]) -> boolean. An item uid from
+	// the container's own list, or a type (name or id): the first stack of that type. count 0 or
+	// omitted removes the whole stack. An open chest is closed first (there is no "the host took
+	// this out" packet); an open shop window is closed the same way.
+	int lua_sam_remove_item_from_container(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_LUA_HAVE_BARONY
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		long long what = -1;
+		if ( lua_type(Ls, 2) == LUA_TNUMBER ) { what = (long long)lua_tointeger(Ls, 2); }
+		else
+		{
+			what = samResolveItemArg(Ls, 2);
+			if ( what < 0 ) { SAM_ERROR("LUA", "sam_remove_item_from_container: unknown item."); lua_pushboolean(Ls, 0); return 1; }
+		}
+		const int count = (int)luaL_optinteger(Ls, 3, 0);
+		lua_pushboolean(Ls, SAMLoot::removeFromContainer((std::uint32_t)uid, what, count) ? 1 : 0);
+		return 1;
+#else
+		lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// Push t[key] with the key matched case-insensitively, nil when absent: the exact spelling
+	// first (one lookup, the common case), then a walk of the table's string keys. This is the
+	// rule every other table this file takes already follows (sam_patch_item and
+	// sam_register_setting upper-case their keys) and the rule the JS twin applies through
+	// samJsGetPropCI, so that { Item = "IRON_SWORD", Count = 5 } means the same thing in both
+	// languages; it used to stock five swords in JS and resolve nothing in Lua. Leaves the stack
+	// as it was plus the one pushed value, and needs three free slots.
+	static void samLuaGetFieldCI(lua_State* Ls, int idx, const char* key)
+	{
+		idx = lua_absindex(Ls, idx);
+		lua_getfield(Ls, idx, key);
+		if ( !lua_isnil(Ls, -1) ) { return; }
+		lua_pop(Ls, 1);
+		const std::string want = samUpper(key);
+		lua_pushnil(Ls);
+		while ( lua_next(Ls, idx) != 0 )
+		{
+			if ( lua_type(Ls, -2) == LUA_TSTRING && samUpper(lua_tostring(Ls, -2)) == want )
+			{
+				lua_remove(Ls, -2);   // keep the value, drop the key
+				return;
+			}
+			lua_pop(Ls, 1);
+		}
+		lua_pushnil(Ls);
+	}
+
+	// sam_set_shop_stock(shopkeeper_uid, items) -> boolean. Replaces the stock (the data-driven
+	// consumables stay) with `items`: an array of { item, count, status, beatitude, identified }
+	// tables or bare item names / ids, then runs the price-sorted layout again. The whole list is
+	// checked first: a bad entry changes nothing and names itself.
+	int lua_sam_set_shop_stock(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_LUA_HAVE_BARONY
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		luaL_checktype(Ls, 2, LUA_TTABLE);
+		if ( !lua_checkstack(Ls, 6) ) { SAM_ERROR("LUA", "sam_set_shop_stock: Lua stack exhausted."); lua_pushboolean(Ls, 0); return 1; }
+		std::vector<SAMLoot::StockEntry> entries;
+		const lua_Integer n = (lua_Integer)lua_rawlen(Ls, 2);
+		for ( lua_Integer i = 1; i <= n; ++i )
+		{
+			lua_rawgeti(Ls, 2, i);
+			const int entryIdx = lua_gettop(Ls);
+			SAMLoot::StockEntry en;
+			if ( lua_istable(Ls, entryIdx) )
+			{
+				// Keys case-insensitive, as the JS twin reads them and as every other table here is read.
+				samLuaGetFieldCI(Ls, entryIdx, "item");
+				if ( lua_isnil(Ls, -1) ) { lua_pop(Ls, 1); samLuaGetFieldCI(Ls, entryIdx, "type"); }
+				en.type = samResolveItemArg(Ls, lua_gettop(Ls));
+				lua_pop(Ls, 1);
+				samLuaGetFieldCI(Ls, entryIdx, "count");     if ( lua_type(Ls, -1) == LUA_TNUMBER ) { en.count = (int)lua_tointeger(Ls, -1); }     lua_pop(Ls, 1);
+				samLuaGetFieldCI(Ls, entryIdx, "status");    if ( lua_type(Ls, -1) == LUA_TNUMBER ) { en.status = (int)lua_tointeger(Ls, -1); }    lua_pop(Ls, 1);
+				samLuaGetFieldCI(Ls, entryIdx, "beatitude"); if ( lua_type(Ls, -1) == LUA_TNUMBER ) { en.beatitude = (int)lua_tointeger(Ls, -1); } lua_pop(Ls, 1);
+				samLuaGetFieldCI(Ls, entryIdx, "identified"); en.identified = samBoolArg(Ls, lua_gettop(Ls), true); lua_pop(Ls, 1);
+			}
+			else
+			{
+				en.type = samResolveItemArg(Ls, entryIdx);
+			}
+			lua_pop(Ls, 1);
+			if ( en.type < 0 )
+			{
+				SAM_ERROR("LUA", "sam_set_shop_stock: entry " + std::to_string((long long)i) + " is not an item this game has. Nothing was changed.");
+				lua_pushboolean(Ls, 0); return 1;
+			}
+			entries.push_back(en);
+		}
+		lua_pushboolean(Ls, SAMLoot::setShopStock((std::uint32_t)uid, entries) ? 1 : 0);
+		return 1;
+#else
+		lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_set_shop_type(shopkeeper_uid, store_type) -> boolean. 0 arms, 1 hats, 2 jewelry, 3
+	// books, 4 apothecary, 5 staves, 6 food, 7 hardware, 8 hunting, 9 general, 10 mysterious.
+	// Only BEFORE the shopkeeper has stocked (the tick it was spawned); after that the type is
+	// read, so use world.on_before_shop_stock, or sam_set_shop_stock for the stock itself.
+	int lua_sam_set_shop_type(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_LUA_HAVE_BARONY
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const int storeType = (int)luaL_checkinteger(Ls, 2);
+		lua_pushboolean(Ls, SAMLoot::setShopType((std::uint32_t)uid, storeType) ? 1 : 0);
+		return 1;
+#else
+		lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
 	int lua_panic(lua_State* Ls)
 	{
 		const char* msg = lua_tostring(Ls, -1);
@@ -10017,11 +10679,18 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		samLuaRegister(L, "sam_is_defending", lua_sam_is_defending);
 		samLuaRegister(L, "sam_is_action_held", lua_sam_is_action_held);
 		samLuaRegister(L, "sam_get_action_binding", lua_sam_get_action_binding);
+		// P_SETTINGS: a mod's own rows in the Bindings page and the General tab (sam_settings.cpp).
+		samLuaRegister(L, "sam_register_action", lua_sam_register_action);
+		samLuaRegister(L, "sam_register_setting", lua_sam_register_setting);
+		samLuaRegister(L, "sam_get_setting", lua_sam_get_setting);
+		samLuaRegister(L, "sam_set_setting", lua_sam_set_setting);
+		samLuaRegister(L, "sam_list_settings", lua_sam_list_settings);
 		samLuaRegister(L, "sam_get_inventory_count", lua_sam_get_inventory_count);
 		samLuaRegister(L, "sam_has_effect", lua_sam_has_effect);
 		samLuaRegister(L, "sam_get_class", lua_sam_get_class);
 		samLuaRegister(L, "sam_get_race", lua_sam_get_race);
 		samLuaRegister(L, "sam_get_kills", lua_sam_get_kills);
+		samLuaRegister(L, "sam_test_done", lua_sam_test_done);
 		samLuaRegister(L, "sam_is_host", lua_sam_is_host);
 		samLuaRegister(L, "sam_play_sound_at", lua_sam_play_sound_at);
 		samLuaRegister(L, "sam_play_music", lua_sam_play_music);
@@ -10122,7 +10791,23 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		samLuaRegister(L, "sam_impact_frame", lua_sam_impact_frame);
 		samLuaRegister(L, "sam_camera_shake", lua_sam_camera_shake);
 		samLuaRegister(L, "sam_hitstop", lua_sam_hitstop);
-		// ---- the rules (unreleased) -------------------------------------------
+		// The simulation speed (sam_speed.cpp).
+		samLuaRegister(L, "sam_set_game_speed", lua_sam_set_game_speed);
+		samLuaRegister(L, "sam_get_game_speed", lua_sam_get_game_speed);
+		// P_ITEMS: the loot pool, its tables, the containers and the shops (sam_loot.cpp).
+		samLuaRegister(L, "sam_get_loot_pool", lua_sam_get_loot_pool);
+		samLuaRegister(L, "sam_set_loot_weight", lua_sam_set_loot_weight);
+		samLuaRegister(L, "sam_set_loot_category_weight", lua_sam_set_loot_category_weight);
+		samLuaRegister(L, "sam_set_loot_floor_range", lua_sam_set_loot_floor_range);
+		samLuaRegister(L, "sam_set_loot_context", lua_sam_set_loot_context);
+		samLuaRegister(L, "sam_set_spell_droppable", lua_sam_set_spell_droppable);
+		samLuaRegister(L, "sam_set_loot_fallback", lua_sam_set_loot_fallback);
+		samLuaRegister(L, "sam_roll_loot", lua_sam_roll_loot);
+		samLuaRegister(L, "sam_add_item_to_container", lua_sam_add_item_to_container);
+		samLuaRegister(L, "sam_remove_item_from_container", lua_sam_remove_item_from_container);
+		samLuaRegister(L, "sam_set_shop_stock", lua_sam_set_shop_stock);
+		samLuaRegister(L, "sam_set_shop_type", lua_sam_set_shop_type);
+		// ---- the rules (v3.0.0) ----------------------------------------------
 		samLuaRegister(L, "sam_add_stat_modifier", lua_sam_add_stat_modifier);
 		samLuaRegister(L, "sam_add_monster_stat_modifier", lua_sam_add_monster_stat_modifier);
 		samLuaRegister(L, "sam_remove_stat_modifier", lua_sam_remove_stat_modifier);
@@ -10138,7 +10823,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		samLuaRegister(L, "sam_clear_xp_curve", lua_sam_clear_xp_curve);
 		samLuaRegister(L, "sam_get_xp_threshold", lua_sam_get_xp_threshold);
 		samLuaRegister(L, "sam_grant_xp", lua_sam_grant_xp);
-		// ---- the camera (unreleased) ------------------------------------------
+		// ---- the camera (v3.0.0) ---------------------------------------------
 		samLuaRegister(L, "sam_set_camera_offset", lua_sam_set_camera_offset);
 		samLuaRegister(L, "sam_set_camera_position", lua_sam_set_camera_position);
 		samLuaRegister(L, "sam_set_camera_angle", lua_sam_set_camera_angle);
@@ -11253,7 +11938,11 @@ namespace SAMLua
 		if ( player < 0 || player >= MAXPLAYERS ) { return ""; }
 		// The binding that player's own machine reported ("" until it has, and always on a client).
 		if ( SAMMpInput::onOtherMachine(player) ) { return SAMMpInput::remoteActionBinding(player, action); }
-		return Input::inputs[player].binding(action.c_str()); // "" when unbound
+		const char* b = Input::inputs[player].binding(action.c_str()); // "" when unbound
+		// "[unbound]" and "[hidden]" are the engine's own sentinels for "nothing here"; the
+		// reference promises nil for those, and a prompt must not print them.
+		if ( b && (strcmp(b, MainMenu::emptyBinding) == 0 || strcmp(b, MainMenu::hiddenBinding) == 0) ) { return ""; }
+		return b;
 #else
 		(void)player; (void)action; return "";
 #endif

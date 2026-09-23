@@ -79,6 +79,12 @@ namespace SAMMpInput
 	// machine -- splitscreen players 1-3 included, each with their own edges and their own
 	// binding. A client does nothing here: its tick hook reports its player's buttons to the
 	// host instead, so nothing is sent as a 'SAMA' any more.
+	//
+	// The list it walks is the twelve vanilla actions followed by every action a loaded mod
+	// registered with sam_register_action (SAMSettings), by NAME: "<ns>:<id>". A mod action
+	// is polled, reported by a joiner and understood by the host exactly like a vanilla one,
+	// because every path here already carried the name and not an index. Only the legacy
+	// 'SAMA' packet is index-based, and it stays vanilla-only.
 	void pollLocalActions();
 
 	// Host: a 'SAMA' edge from a client on an older S.A.M build (this build reports buttons on

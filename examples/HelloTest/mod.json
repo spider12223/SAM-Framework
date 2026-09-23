@@ -1,0 +1,9 @@
+{
+  "$schema": "https://spider12223.github.io/SAM-Framework/schemas/mod.schema.json",
+  "namespace": "hellotest",
+  "name": "Hello Test",
+  "author": "S.A.M Framework",
+  "version": "1.0.0",
+  "framework_min_version": "3.1.0",
+  "description": "The smallest mod tools/run_mod_test.sh can run: a second after the game starts it checks a few things about game speed, the loot pool and its own setting, logs each check, and reports with sam_test_done. Copy it as the start of your own test mod."
+}

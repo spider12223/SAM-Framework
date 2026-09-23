@@ -323,6 +323,30 @@ receive, and how to test a co-op game alone on one computer:
 
 **[docs/multiplayer.md](docs/multiplayer.md)**
 
+## Keys and sliders in the game's menus, the loot pool, and game speed
+
+A mod can register a rebindable action that appears in Settings > Controls > Bindings and a
+slider, toggle, dropdown or text box in a MOD SETTINGS section of Settings > General, both
+persisted; shape the loot pool with six tables and nine generation events instead of replacing
+`items.json`; and run the world faster or slower in singleplayer. `examples/GameSpeedControl` and
+`examples/ItemRandomizer` are two community mods rebuilt on those.
+
+**[docs/mod-settings.md](docs/mod-settings.md)** · **[docs/loot-and-shops.md](docs/loot-and-shops.md)** · **[docs/game-speed.md](docs/game-speed.md)**
+
+## Testing a mod without playing it
+
+`barony.exe -samtest=YourMod` loads the mod, starts a game, lets it run its own checks and exits
+with a code: 0 everything passed, 1 something failed, 2 it never finished, 3 the mod could not be
+loaded (a folder that would not mount, or a script that failed to parse or errored at load). One
+command, no menus, nobody at the keyboard. `examples/HelloTest` is the smallest mod it can run and
+the one to copy:
+
+```bash
+tools/run_mod_test.sh HelloTest
+```
+
+**[docs/testing-mods.md](docs/testing-mods.md)**
+
 ## Schema reference
 
 All content is validated against JSON Schemas (draft-07), which are the single source of truth for the framework, the GUI, and editor autocomplete:
