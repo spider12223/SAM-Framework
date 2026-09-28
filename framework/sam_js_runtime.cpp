@@ -7876,7 +7876,7 @@ namespace
 		const int k = SAMRules::statKindFromName(name);
 		if ( k >= 0 ) { *out = k; return true; }
 		SAM_ERROR("JS", std::string(who) + ": '" + (name ? name : "") + "' is not a stat this can"
-			" modify. The nine are STR, DEX, CON, INT, PER, CHR, AC, ATTACK and SPEED.");
+			" modify. The eleven are STR, DEX, CON, INT, PER, CHR, AC, ATTACK, SPEED, VISION and SNEAK_VISION.");
 		return false;
 	}
 #endif

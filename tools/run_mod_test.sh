@@ -14,6 +14,7 @@ set -u
 
 MODS=""
 CLASS=""
+RACE=""
 SEED=""
 FLOOR=""
 TIMEOUT="180"
@@ -25,6 +26,7 @@ usage() {
 	sed -n '2,12p' "$0" | sed 's/^# \?//'
 	echo
 	echo "  --class <name>     class to start as (default barbarian)"
+	echo "  --race <ns:race>   a custom race to play as, by its JSON id (default the class's own)"
 	echo "  --seed <n>         dungeon seed (default fixed, so a failure repeats)"
 	echo "  --floor <n>        take the stairs down to floor n before leaving the mod to it."
 	echo "                     Needed by any mod whose checks run on game.on_level_entered,"
@@ -39,6 +41,7 @@ usage() {
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--class)    CLASS="$2"; shift 2;;
+		--race)     RACE="$2"; shift 2;;
 		--seed)     SEED="$2"; shift 2;;
 		--floor)    FLOOR="$2"; shift 2;;
 		--timeout)  TIMEOUT="$2"; shift 2;;
@@ -70,6 +73,7 @@ fi
 
 ARGS=(-samtest="$MODS" -samtesttimeout="$TIMEOUT" -windowed -size="$SIZE")
 [ -n "$CLASS" ] && ARGS+=(-samtestclass="$CLASS")
+[ -n "$RACE" ] && ARGS+=(-samtestrace="$RACE")
 [ -n "$SEED" ]  && ARGS+=(-samtestseed="$SEED")
 [ -n "$FLOOR" ] && ARGS+=(-samtestfloor="$FLOOR")
 
@@ -88,6 +92,9 @@ if [ -f "$LOG" ]; then
 	# deliberately exercises a refusal logs errors on a PASSING run, so these are printed
 	# as context, never as a verdict: the exit code is the verdict.
 	grep -E "RESULT|  failed:" "$LOG" | sed 's/^/  /'
+	# The reason the run stopped, whoever stopped it: the test mode logs it on the line just before
+	# "Test run finished". A mount failure or a --race nobody registered shows up nowhere else.
+	grep -B1 "Test run finished with exit code" "$LOG" | grep -v "Test run finished" | grep -v "^--" | sed 's/^/  /'
 	errs=$(grep -cE "ERROR " "$LOG")
 	warns=$(grep -cE "WARN " "$LOG")
 	echo "  framework log: $errs error(s), $warns warning(s)  ($LOG)"
@@ -100,8 +107,9 @@ case $code in
 	2) echo "HUNG  (${elapsed}s) - no mod called sam_test_done before the watchdog. A mod whose"
 	   echo "      checks run on game.on_level_entered needs --floor 1, and a mod that needs the"
 	   echo "      player to move cannot be run this way at all.";;
-	3) echo "LOAD  (${elapsed}s) - the mods could not be loaded: a folder that would not mount, or a"
-	   echo "      script that failed to parse or errored at load. sam_log.txt says which.";;
+	3) echo "LOAD  (${elapsed}s) - the run could not start: a folder that would not mount, a script"
+	   echo "      that failed to parse or errored at load, or a --race no loaded mod registers."
+	   echo "      The line above says which.";;
 	*) echo "EXIT $code  (${elapsed}s) - the game itself failed to start or crashed on the way out";;
 esac
 exit $code

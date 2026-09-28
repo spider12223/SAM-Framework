@@ -8,21 +8,25 @@ Barony was never built to be modded. S.A.M is the layer that makes it modded any
 
 [hr][/hr]
 
-[h1]20 NEW FUNCTIONS: 316 TO 336[/h1]
+[h1]NEW: RACES THAT SEE IN THE DARK[/h1]
 
-Two community mods, Game Speed Control and Item Randomizer, rebuilt as tools any S.A.M mod can use. The originals each replace a game file, so they clash with other mods. These do not, and both ship as examples.
+A custom race can now have the Gremlin's Improved Sneak Vision: [b]"sneak_vision": 2[/b] in its JSON. Or [b]"vision"[/b] for sight in the dark at all times. Scripts can grant either.
 
-[b]Game speed.[/b] Run the world from 0.1x to 8x in singleplayer, or slow it for a moment. Bullet time on a kill is one line.
+[h1]GAME SPEED, MOD SETTINGS, THE LOOT POOL[/h1]
 
-[b]Your mod in the game's own Settings.[/b] Rebindable keys under Controls > Bindings, and sliders, toggles and dropdowns in a MOD SETTINGS section under General. Saved, with Restore Defaults, and no UI code.
+Game Speed Control and Item Randomizer, rebuilt as tools any S.A.M mod can use. Unlike the originals, they replace no game file, so they clash with no other mod.
 
-[b]The loot pool.[/b] Make any rolled item rarer, commoner or never, choose the floors it drops on, keep it out of shops, and pick what an empty pool gives instead of a rock. Nine new events let a mod rewrite a shop, a creature's gear, or any roll made during play.
+[b]Game speed.[/b] Run the world from 0.1x to 8x in singleplayer, or bullet time on a kill.
 
-[b]Test a mod without playing it.[/b] One command starts the game, runs your mod's own checks and answers pass or fail.
+[b]Your mod in the game's own Settings.[/b] Rebindable keys, and sliders, toggles and dropdowns under General. Saved, with Restore Defaults, and no UI code.
+
+[b]The loot pool.[/b] Make any rolled item rarer, commoner or never, choose its floors, keep it out of shops, and pick what an empty pool gives instead of a rock. Nine events rewrite a shop, a creature's gear, or any roll made during play.
+
+[b]Test a mod without playing it.[/b] One command runs your mod's own checks and answers pass or fail.
 
 [h1]MULTIPLAYER[/h1]
 
-Every function has a defined co-op behaviour and the game enforces it. You write one script, name players by number, and S.A.M carries each call to the machine it has to run on. A player who joins halfway is caught up, and a player on plain unmodified Barony can still join and play.
+Every function has a defined co-op behaviour, enforced by the game. Write one script and S.A.M carries each call to the machine it has to run on. A late joiner is caught up, and a player on plain Barony can still join and play.
 
 [b]The complete reference[/b], every function and event with arguments, types, return values and what it does in co-op:
 https://github.com/spider12223/SAM-Framework/blob/main/docs/function-reference.md

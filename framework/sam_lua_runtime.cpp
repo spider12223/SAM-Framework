@@ -9779,7 +9779,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		const int k = SAMRules::statKindFromName(name);
 		if ( k >= 0 ) { *out = k; return true; }
 		SAM_ERROR("LUA", std::string(who) + ": '" + (name ? name : "") + "' is not a stat this can"
-			" modify. The nine are STR, DEX, CON, INT, PER, CHR, AC, ATTACK and SPEED. The rest"
+			" modify. The eleven are STR, DEX, CON, INT, PER, CHR, AC, ATTACK, SPEED, VISION and SNEAK_VISION. The rest"
 			" are stored numbers rather than computed ones, so a modifier on them would be"
 			" overwritten by the next write -- use sam_set_stat for those.");
 		return false;

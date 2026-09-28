@@ -57,7 +57,7 @@ export const EDITOR_KEYS = {
   ],
   // RaceEditor.jsx buildDef(). `first_person` and `extra_limbs` have no control.
   race: [
-    'id', 'name', 'host_body', 'description', 'stat_modifiers', 'blood_diet',
+    'id', 'name', 'host_body', 'description', 'stat_modifiers', 'blood_diet', 'vision', 'sneak_vision',
     'starting_spells', 'limb_models', 'allies', 'enemies',
   ],
   // RecipeEditor.jsx buildDef() -- complete against recipe.schema.json today.

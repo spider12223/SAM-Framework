@@ -46,6 +46,10 @@ namespace SAMRules
 	{
 		SAM_ST_STR = 0, SAM_ST_DEX, SAM_ST_CON, SAM_ST_INT, SAM_ST_PER, SAM_ST_CHR,
 		SAM_ST_AC, SAM_ST_ATTACK, SAM_ST_SPEED,
+		// (v3.2.0) A player's own light radius, in tiles: VISION wherever Perception's light
+		// bonus goes, SNEAK_VISION only while sneaking without a light source (the Gremlin's
+		// "Improved Sneak Vision"). Players only; a monster carries no light of its own.
+		SAM_ST_VISION, SAM_ST_SNEAK_VISION,
 		SAM_ST_COUNT
 	};
 
@@ -85,6 +89,19 @@ namespace SAMRules
 	// which is how AC() -- the one that has no Entity -- is served.
 	bool anyStatMod();
 	double apply(const Stat* s, const Entity* my, int kind, double base);
+
+	// (v3.2.0) The player's light-radius bonuses, for the light code in actplayer.cpp and the
+	// character sheet. `vanilla` is the engine's own number: Perception's clamp(PER / 5, 0, 2) for
+	// visionRange, and the eyepatch-plus-Gremlin bonus for sneakVisionRange. Each returns `vanilla`
+	// plus S.A.M's part: (the race's "vision" / "sneak_vision" + the VISION / SNEAK_VISION adds) *
+	// their multipliers, clamped to -4..6 and -6..6 because a shadowed light costs the square of its
+	// radius every tick. The engine's part is never scaled or clamped. With vanilla 0 the result is
+	// S.A.M's part alone, which the four monster bodies' sneaking lights and the sheet add.
+	// anyVision() is the gate: false with no race mod and no modifier, and then both callers keep
+	// the vanilla number without calling these at all.
+	bool anyVision();
+	int visionRange(const Stat* s, const Entity* my, int vanilla);
+	int sneakVisionRange(const Stat* s, const Entity* my, int vanilla);
 
 	// Everything keyed by a creature's uid -- modifiers and per-creature immunities -- is dropped
 	// on every floor. Players survive the floor, but not the run:

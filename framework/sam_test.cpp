@@ -20,6 +20,9 @@
 #include "mod_tools.hpp"   // Mods::mountedFilepaths, Mods::loadMods
 #include "game.hpp"        // loadnextlevel, currentlevel, intro
 #include "player.hpp"      // players[]
+#include "stat.hpp"        // stats[0]: -samtestrace puts the race on
+#include "sam_races.hpp"   // -samtestrace: the race registry
+#include <algorithm>       // std::max
 
 #include <cstdio>
 #include <cstdlib>
@@ -35,6 +38,8 @@ namespace
 	bool s_active = false;
 	std::vector<std::string> s_mods;
 	std::string s_class = "barbarian";
+	// (v3.2.0) -samtestrace: a custom race's "namespace:race", or empty for the class's own.
+	std::string s_race;
 	// A fixed default, not a random one: the whole point is that the same command twice
 	// walks the same dungeon, so a failure can be looked at again.
 	unsigned int s_seed = 0x5A4D0001u;
@@ -125,6 +130,11 @@ bool parseArg(const char* arg)
 		if ( *v ) { s_class = v; }
 		return true;
 	}
+	if ( const char* v = valueOf(arg, "-samtestrace=") )
+	{
+		s_race = v;
+		return true;
+	}
 	if ( const char* v = valueOf(arg, "-samtestseed=") )
 	{
 		s_seed = (unsigned int)std::strtoul(v, nullptr, 10);
@@ -206,6 +216,32 @@ bool loadMods()
 		stop(3, std::to_string(failed) + " script(s) failed to load (a parse error, or an error while"
 			" running the top level); the LUA/JS lines above say which.");
 		return false;
+	}
+
+	// -samtestrace. The quickstart built the character (clearStats + initClass) before any mod was
+	// loaded, so no custom race existed yet. It is put on now, the two ways a character made at
+	// the menu gets one: its stat deltas (the tail of initClassStats) and its innate spells (the
+	// isLocalPlayer branch of initClass). Building the character again instead would hand out the
+	// class's starting gear twice, because clearStats leaves the inventory alone.
+	if ( !s_race.empty() )
+	{
+		const int id = SAMRaces::raceIdForIdString(s_race);
+		if ( id < 0 || !stats[0] )
+		{
+			stop(3, "-samtestrace=" + s_race + ": no mod in this run registered that race. It is the"
+				" race's \"id\" from its JSON, \"namespace:race\".");
+			return false;
+		}
+		stats[0]->playerRace = id;
+		stats[0]->stat_appearance = 0;   // 0 keeps the race's abilities on, as the menu's default does
+		SAMRaces::applyStats(id, stats[0]);
+		stats[0]->HP = std::max(1, stats[0]->HP);
+		stats[0]->MAXHP = std::max(1, stats[0]->MAXHP);
+		stats[0]->MP = std::max(1, stats[0]->MP);
+		stats[0]->MAXMP = std::max(1, stats[0]->MAXMP);
+		stats[0]->OLDHP = stats[0]->HP;
+		SAMRaces::applySpells(0);
+		SAM_INFO(MOD, "Playing as race " + s_race + " (id " + std::to_string(id) + ").");
 	}
 	return true;
 }

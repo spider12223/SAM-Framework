@@ -3258,7 +3258,7 @@ Spawn a ground item at a map tile. status, beatitude and count let you put an it
 
 The same for one creature.
 
-DIES WITH THE FLOOR. Monster tables are dropped on every level change, because the engine reuses entity uids and a remembered one can come to name something else. All nine stats work on a creature; SPEED scales how fast it walks, chases and flees. Refused for a uid that is not a living monster, a player's included: players have sam_add_stat_modifier.
+DIES WITH THE FLOOR. Monster tables are dropped on every level change, because the engine reuses entity uids and a remembered one can come to name something else. All the stats except VISION and SNEAK_VISION work on a creature (a creature has no light of its own, so those two are refused); SPEED scales how fast it walks, chases and flees. Refused for a uid that is not a living monster, a player's included: players have sam_add_stat_modifier.
 
 | argument | type |
 |---|---|
@@ -3274,14 +3274,14 @@ DIES WITH THE FLOOR. Monster tables are dropped on every level change, because t
 
 ### `sam_add_stat_modifier(player, stat, id, [add], [multiply])`
 
-Contribute to one of a player's computed stats. Adds are summed and multipliers multiplied ACROSS EVERY MOD, then applied as (base + adds) * multipliers — so two mods each giving +2 STR give +4, and two each halving give a quarter. Neither mod has to know the other exists. SPEED takes a multiplier only (add must be 0): a player's speed and a monster's are scaled from different bases, so an add would mean different things on each. Add is limited to +-10000 and multiply to 100.
+Contribute to one of a player's computed stats. Adds are summed and multipliers multiplied ACROSS EVERY MOD, then applied as (base + adds) * multipliers — so two mods each giving +2 STR give +4, and two each halving give a quarter. Neither mod has to know the other exists. SPEED takes a multiplier only (add must be 0): a player's speed and a monster's are scaled from different bases, so an add would mean different things on each. VISION and SNEAK_VISION are EXTRA tiles on the radius of the player's own light, for seeing in the dark: VISION wherever Perception's light bonus goes (every light they carry, sneaking or not), SNEAK_VISION only while sneaking without a light source, which is the Gremlin's Improved Sneak Vision (+2 in the engine). For these two the formula runs over S.A.M's part only: (the custom race's vision / sneak_vision + adds) * multipliers, capped at -4..6 and -6..6, then the engine's own bonus (Perception, an eyepatch, the Gremlin's +2) is added untouched. So grant sight with add; a multiplier scales only what the race and other mods gave, and x0 cancels that without blinding anyone. Add is limited to +-10000 and multiply to 100.
 
 The id is yours, and scoped to your mod: another mod using the same word gets an entry of its own, and cannot replace or remove yours. Adding again with the same id REPLACES that contribution, which makes a per-tick "recalculate my buff" loop safe, and sam_remove_stat_modifier takes back everything under it and touches nothing else. Survives floors (these are keyed by player slot, because a player's entity is rebuilt on the stairs and its uid changes) but not a new run: a new character, or a loaded save, starts with none, so re-apply anything permanent in game.on_game_start. The totals reach every S.A.M player's machine in order, since a player's own character sheet and walking speed are computed there.
 
 | argument | type |
 |---|---|
 | `player` | int |
-| `stat` | string — one of: `STR`, `DEX`, `CON`, `INT`, `PER`, `CHR`, `AC`, `ATTACK`, `SPEED` |
+| `stat` | string — one of: `STR`, `DEX`, `CON`, `INT`, `PER`, `CHR`, `AC`, `ATTACK`, `SPEED`, `VISION`, `SNEAK_VISION` |
 | `id` | string |
 | `add` *(optional)* | number |
 | `multiply` *(optional)* | number |
@@ -3327,7 +3327,7 @@ Read back what your own id currently contributes, so a mod does not have to reme
 | argument | type |
 |---|---|
 | `player` | int |
-| `stat` | string — one of: `STR`, `DEX`, `CON`, `INT`, `PER`, `CHR`, `AC`, `ATTACK`, `SPEED` |
+| `stat` | string — one of: `STR`, `DEX`, `CON`, `INT`, `PER`, `CHR`, `AC`, `ATTACK`, `SPEED`, `VISION`, `SNEAK_VISION` |
 | `id` | string |
 
 **Returns:** a table/object with add and multiply, or nil

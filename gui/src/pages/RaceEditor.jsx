@@ -82,6 +82,10 @@ export default function RaceEditor() {
   const [mods, setMods] = useState(() =>
     Object.fromEntries([...ATTRS, 'HP', 'MP'].map((a) => [a, editDef?.stat_modifiers?.[a] ?? 0])));
   const [bloodDiet, setBloodDiet] = useState(editDef?.blood_diet ?? false);
+  // Sight in the dark, in tiles of the player's own light radius. sneak_vision is the Gremlin's
+  // "Improved Sneak Vision" (+2 in the engine).
+  const [vision, setVision] = useState(editDef?.vision ?? 0);
+  const [sneakVision, setSneakVision] = useState(editDef?.sneak_vision ?? 0);
   const [startingSpells, setStartingSpells] = useState(editDef?.starting_spells ?? []);
   // Declared allegiance. Empty is not "no allies" — it means "inherit the host body's
   // relations", which is why neither list is written to the JSON when it is empty.
@@ -120,6 +124,9 @@ export default function RaceEditor() {
     for (const a of [...ATTRS, 'HP', 'MP']) { const v = num(mods[a]); if (v != null && v !== 0) sm[a] = v; }
     if (Object.keys(sm).length) def.stat_modifiers = sm;
     if (bloodDiet) def.blood_diet = true;
+    const vis = num(vision), sneakVis = num(sneakVision);
+    if (vis) def.vision = vis;
+    if (sneakVis) def.sneak_vision = sneakVis;
     if (startingSpells.length) def.starting_spells = startingSpells;
     const lm = {};
     for (const [k] of LIMB_SLOTS) {
@@ -168,7 +175,7 @@ export default function RaceEditor() {
 
   const def = useMemo(buildDef,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [name, description, hostBody, mods, bloodDiet, startingSpells, allies, enemies, limbModels, limbBent, namespace]);
+    [name, description, hostBody, mods, bloodDiet, vision, sneakVision, startingSpells, allies, enemies, limbModels, limbBent, namespace]);
   const preview = useMemo(() => JSON.stringify(def, null, 2), [def]);
   const setMod = (a, v) => setMods((prev) => ({ ...prev, [a]: v }));
 
@@ -196,6 +203,14 @@ export default function RaceEditor() {
             <input type="checkbox" className="sam-check" checked={bloodDiet} onChange={(e) => setBloodDiet(e.target.checked)} />
             Blood diet (sustains on blood instead of food, like a vampire)
           </label>
+          <div className="grid grid-cols-2 gap-3 mt-3">
+            <Field label="Vision" hint="Extra tiles of sight in the dark, always, added on top of Perception's own light bonus. -4 to 6; 0 = normal.">
+              <NumberInput value={vision} min={-4} max={6} onChange={setVision} />
+            </Field>
+            <Field label="Sneak vision" hint="Extra tiles of sight while sneaking without a torch or lantern. The Gremlin has 2, and a race on the gremlin body already gets that 2, so this adds to it. -6 to 6.">
+              <NumberInput value={sneakVision} min={-6} max={6} onChange={setSneakVision} />
+            </Field>
+          </div>
         </Panel>
 
         <Panel title="Attribute bonuses">

@@ -357,7 +357,7 @@ All content is validated against JSON Schemas (draft-07), which are the single s
 | [`class.schema.json`](schemas/class.schema.json) | A custom class |
 | [`item.schema.json`](schemas/item.schema.json) | A custom item / weapon |
 | [`monster.schema.json`](schemas/monster.schema.json) | A monster variant, with its own stats, gear and spawns |
-| [`race.schema.json`](schemas/race.schema.json) | A playable race: host body, its own limb models, allegiances |
+| [`race.schema.json`](schemas/race.schema.json) | A playable race: host body, its own limb models, allegiances, sight in the dark |
 | [`spell.schema.json`](schemas/spell.schema.json) | A castable custom spell |
 | [`effect.schema.json`](schemas/effect.schema.json) | A custom status effect |
 | [`sound.schema.json`](schemas/sound.schema.json) | A sound your mod adds or replaces (usually not needed: see [Sounds and music](docs/sounds-and-music.md)) |

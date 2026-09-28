@@ -30,7 +30,7 @@ The exit code is the answer, so this works in a script:
 | 0 | every check passed |
 | 1 | the mod reported a failed check |
 | 2 | no mod finished before the watchdog stopped the run |
-| 3 | the mods could not be loaded: a folder that would not mount, or a script that failed to parse or errored while running its top level (the `Failed to parse` / `disabled` lines in `sam_log.txt` say which) |
+| 3 | the run could not start: a folder that would not mount, a script that failed to parse or errored while running its top level, or a `-samtestrace` race that no loaded mod registers (the runner prints the reason; in `sam_log.txt` it is the line before "Test run finished") |
 | other | the game itself failed to start, or crashed on the way out |
 
 It is a real run of the real engine on a real dungeon: a small window opens and closes itself.
@@ -48,6 +48,7 @@ barony.exe -samtest=HelloTest -windowed -size=640x480
 |---|---|
 | `-samtest=<mod>[,<mod>...]` | mod FOLDER names under `mods/`, in load order. This flag alone is enough. |
 | `-samtestclass=<class>` | the class to start as. Default `barbarian`. |
+| `-samtestrace=<ns:race>` | a custom race to play as, by the `id` in its JSON. The race's stat changes and innate spells are applied as they would be for a character made in the menu. A race no loaded mod registers is exit code 3. |
 | `-samtestseed=<n>` | the dungeon seed. Fixed by default, so the same command twice walks the same dungeon and a failure can be looked at again. |
 | `-samtestfloor=<n>` | take the stairs down to floor `n` before leaving the mod to it. |
 | `-samtesttimeout=<s>` | the watchdog, default 180. `0` disables it, which you should not do unattended. |

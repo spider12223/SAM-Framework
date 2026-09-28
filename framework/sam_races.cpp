@@ -218,6 +218,30 @@ void SAMRaces::loadFromManifest(const SAMModManifest& manifest)
 		}
 		def.bloodDiet = getBool("blood_diet", false);
 
+		// vision / sneak_vision: whole tiles of light radius. Clamped rather than refused, with a
+		// warning, because a light's cost grows with the square of its radius and the engine's own
+		// largest sneaking bonus (a blessed eyepatch on a Gremlin) is +6.
+		auto readVision = [&](const char* k, int lo, int hi, int& out) {
+			auto v = j.find(k);
+			if ( v == j.end() ) { return; }
+			if ( !v->is_number() )
+			{
+				SAM_WARN(MOD, "Race '" + def.id + "' " + k + " is not a number; ignored.");
+				return;
+			}
+			const double d = v->get<double>();
+			if ( d < lo || d > hi )
+			{
+				SAM_WARN(MOD, "Race '" + def.id + "' " + k + " is outside "
+					+ std::to_string(lo) + ".." + std::to_string(hi) + "; clamped.");
+				out = d < lo ? lo : hi;
+				return;
+			}
+			out = (int)d;   // whole tiles; a fraction is dropped
+		};
+		readVision("vision", -4, 6, def.vision);
+		readVision("sneak_vision", -6, 6, def.sneakVision);
+
 		// allies / enemies: monster-type names, resolved to Monster enum values now so the
 		// hot path (checkEnemy, once per entity pair) never touches a string. An unknown
 		// name is reported and dropped rather than silently ignored -- a typo'd "goatmen"
@@ -869,6 +893,20 @@ const SAMRaceDef* SAMRaces::get(int raceId)
 {
 	auto it = s_byId.find(raceId);
 	return (it != s_byId.end()) ? &it->second : nullptr;
+}
+
+int SAMRaces::visionBonus(int raceId, int statAppearance)
+{
+	if ( statAppearance != 0 ) { return 0; }
+	const SAMRaceDef* def = get(raceId);
+	return def ? def->vision : 0;
+}
+
+int SAMRaces::sneakVisionBonus(int raceId, int statAppearance)
+{
+	if ( statAppearance != 0 ) { return 0; }
+	const SAMRaceDef* def = get(raceId);
+	return def ? def->sneakVision : 0;
 }
 
 bool SAMRaces::requiresBloodDiet(int raceId)

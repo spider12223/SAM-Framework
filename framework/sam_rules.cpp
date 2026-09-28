@@ -21,6 +21,7 @@
 #include "sam_combat.hpp"       // the species-resist snapshot in a client's catch-up
 #include "sam_classes.hpp"      // the class-patch snapshot in a client's catch-up
 #include "sam_effects.hpp"      // a custom class passive crosses by its "ns:effect" name
+#include "sam_races.hpp"        // a race's declared vision / sneak_vision (visionRange)
 
 #include <cstdint>
 #include <cstdlib>   // atoi: a vanilla class or effect number, sent as text beside mods' names
@@ -38,7 +39,7 @@ namespace SAMRules
 	// ---- names ------------------------------------------------------------------------------
 
 	static const char* const kStatNames[SAM_ST_COUNT] = {
-		"STR", "DEX", "CON", "INT", "PER", "CHR", "AC", "ATTACK", "SPEED"
+		"STR", "DEX", "CON", "INT", "PER", "CHR", "AC", "ATTACK", "SPEED", "VISION", "SNEAK_VISION"
 	};
 
 	const char* statKindName(int kind)
@@ -209,8 +210,8 @@ namespace SAMRules
 	static bool samStatKindOk(int kind, const char* who)
 	{
 		if ( kind >= 0 && kind < SAM_ST_COUNT ) { return true; }
-		SAM_ERROR("RULES", std::string(who) + ": that is not a stat this can modify. The nine are"
-			" STR, DEX, CON, INT, PER, CHR, AC, ATTACK and SPEED.");
+		SAM_ERROR("RULES", std::string(who) + ": that is not a stat this can modify. The eleven are"
+			" STR, DEX, CON, INT, PER, CHR, AC, ATTACK, SPEED, VISION and SNEAK_VISION.");
 		return false;
 	}
 
@@ -249,6 +250,12 @@ namespace SAMRules
 			return false;
 		}
 		if ( !samStatKindOk(kind, "sam_add_monster_stat_modifier") ) { return false; }
+		if ( kind == SAM_ST_VISION || kind == SAM_ST_SNEAK_VISION )
+		{
+			SAM_ERROR("RULES", "sam_add_monster_stat_modifier: VISION and SNEAK_VISION are a player's"
+				" own light radius, and a monster carries no light of its own. Nothing was changed.");
+			return false;
+		}
 		if ( !samIdOk(id, "sam_add_monster_stat_modifier") ) { return false; }
 		if ( !samSaneMod(kind, add, mult, "sam_add_monster_stat_modifier") ) { return false; }
 		Mod m; m.add = add; m.mult = mult;
@@ -436,6 +443,49 @@ namespace SAMRules
 		if ( out > 2000000000.0 ) { out = 2000000000.0; }
 		if ( out < -2000000000.0 ) { out = -2000000000.0; }
 		return out;
+	}
+
+	// ---- vision (v3.2.0) --------------------------------------------------------------------------
+	//
+	// S.A.M's part and the engine's part are kept apart. S.A.M's part is the race's number plus
+	// every VISION / SNEAK_VISION modifier, with the modifiers' multipliers applied to it alone:
+	// (race + adds) * multipliers, capped. The engine's part (`vanilla`: Perception, the eyepatch,
+	// the Gremlin's +2) is added afterwards and is never scaled or capped away, so a mod's x0.5 halves
+	// what mods added and a Gremlin keeps its own +2. It also means S.A.M's part is one number, the
+	// same whatever the engine's part is, so the character sheet and the four monster-body sneaking
+	// lights (which never read the eyepatch) show exactly what the humanoid light adds.
+	//
+	// The first version ran the multiplier over (vanilla + race): x0 erased Perception's bonus and a
+	// gremlin-bodied race's +2, and the sheet and the monster bodies disagreed with the humanoid light.
+
+	bool anyVision()
+	{
+		return SAMRaces::any() || anyStatMod() || (multiplayer == CLIENT && s_netAny);
+	}
+
+	static int samVisionClamp(double v, int lo, int hi)
+	{
+		if ( !std::isfinite(v) ) { return 0; }
+		const long long n = std::llround(v);
+		return (int)(n < lo ? lo : n > hi ? hi : n);
+	}
+
+	int visionRange(const Stat* s, const Entity* my, int vanilla)
+	{
+		if ( !s ) { return vanilla; }
+		const int race = SAMRaces::visionBonus(s->playerRace, s->stat_appearance);
+		const double part = apply(s, my, SAM_ST_VISION, (double)race);
+		if ( part == 0.0 ) { return vanilla; }   // nothing from S.A.M: exactly the engine's number
+		return vanilla + samVisionClamp(part, -4, 6);
+	}
+
+	int sneakVisionRange(const Stat* s, const Entity* my, int vanilla)
+	{
+		if ( !s ) { return vanilla; }
+		const int race = SAMRaces::sneakVisionBonus(s->playerRace, s->stat_appearance);
+		const double part = apply(s, my, SAM_ST_SNEAK_VISION, (double)race);
+		if ( part == 0.0 ) { return vanilla; }
+		return vanilla + samVisionClamp(part, -6, 6);
 	}
 
 	// ---- the wire: stat totals ------------------------------------------------------------------
@@ -1258,9 +1308,17 @@ namespace SAMRules
 	{
 		SAMNet::Reader r(body);
 		const int player = (int)r.u8();
+		// As many stats as the host sent, not as many as this build knows. A host one version
+		// older sends fewer (VISION and SNEAK_VISION arrived later), and reading past its end
+		// used to fail the whole summary, STR and SPEED included. The ones it did not send stay
+		// at no-change; any extra ones from a newer host are left unread.
+		const int sent = body.size() > 1 ? (int)((body.size() - 1) / 8) : 0;
+		const int n = sent < SAM_ST_COUNT ? sent : SAM_ST_COUNT;
 		double add[SAM_ST_COUNT], mult[SAM_ST_COUNT];
 		for ( int i = 0; i < SAM_ST_COUNT; ++i )
 		{
+			add[i] = 0.0; mult[i] = 1.0;
+			if ( i >= n ) { continue; }
 			add[i] = (double)(std::int32_t)r.u32() / 100.0;
 			mult[i] = (double)r.u32() / 1000.0;
 		}

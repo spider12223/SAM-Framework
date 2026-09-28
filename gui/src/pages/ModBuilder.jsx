@@ -510,6 +510,8 @@ function raceSub(def, scripts) {
   }
   if (def.limb_models) bits.push(`${Object.keys(def.limb_models).length}/6 custom limbs`);
   if (def.blood_diet) bits.push('blood diet');
+  if (def.vision) bits.push(`${def.vision > 0 ? '+' : ''}${def.vision} vision`);
+  if (def.sneak_vision) bits.push(`${def.sneak_vision > 0 ? '+' : ''}${def.sneak_vision} sneak vision`);
   if (def.starting_spells?.length) bits.push(`${def.starting_spells.length} innate spell${def.starting_spells.length === 1 ? '' : 's'}`);
   if (def.allies?.length) bits.push(`allied: ${def.allies.join('/')}`);
   if (def.enemies?.length) bits.push(`hostile: ${def.enemies.join('/')}`);

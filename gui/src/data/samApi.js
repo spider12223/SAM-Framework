@@ -71,7 +71,9 @@ export const LOOT_CATEGORIES = ["WEAPON", "ARMOR", "AMULET", "POTION", "SCROLL",
 // The nine values a stat modifier can contribute to. Deliberately NOT the whole stat list:
 // LVL, GOLD, HUNGER and the rest are stored numbers rather than computed ones, so a modifier on
 // them would be overwritten by the next write. Use sam_set_stat for those.
-export const MODIFIABLE_STATS = ["STR", "DEX", "CON", "INT", "PER", "CHR", "AC", "ATTACK", "SPEED"];
+// A creature has no light of its own, so VISION and SNEAK_VISION (v3.2.0) are players only.
+export const MONSTER_MODIFIABLE_STATS = ["STR", "DEX", "CON", "INT", "PER", "CHR", "AC", "ATTACK", "SPEED"];
+export const MODIFIABLE_STATS = [...MONSTER_MODIFIABLE_STATS, "VISION", "SNEAK_VISION"];
 
 export const DAMAGE_TYPES = ["sword", "mace", "axe", "polearm", "ranged", "magic", "unarmed"];
 
@@ -349,13 +351,13 @@ export const SAM_FUNCTIONS = [
   { name: "sam_add_stat_modifier", category: "Rules", mp: "host", hostOnly: true,
     params: [{ name: "player", type: "int" }, { name: "stat", type: "string", values: MODIFIABLE_STATS }, { name: "id", type: "string" }, { name: "add", type: "number", optional: true }, { name: "multiply", type: "number", optional: true }],
     returns: "true if it took (boolean)",
-    desc: "Contribute to one of a player's computed stats. Adds are summed and multipliers multiplied ACROSS EVERY MOD, then applied as (base + adds) * multipliers — so two mods each giving +2 STR give +4, and two each halving give a quarter. Neither mod has to know the other exists. SPEED takes a multiplier only (add must be 0): a player's speed and a monster's are scaled from different bases, so an add would mean different things on each. Add is limited to +-10000 and multiply to 100.",
+    desc: "Contribute to one of a player's computed stats. Adds are summed and multipliers multiplied ACROSS EVERY MOD, then applied as (base + adds) * multipliers — so two mods each giving +2 STR give +4, and two each halving give a quarter. Neither mod has to know the other exists. SPEED takes a multiplier only (add must be 0): a player's speed and a monster's are scaled from different bases, so an add would mean different things on each. VISION and SNEAK_VISION are EXTRA tiles on the radius of the player's own light, for seeing in the dark: VISION wherever Perception's light bonus goes (every light they carry, sneaking or not), SNEAK_VISION only while sneaking without a light source, which is the Gremlin's Improved Sneak Vision (+2 in the engine). For these two the formula runs over S.A.M's part only: (the custom race's vision / sneak_vision + adds) * multipliers, capped at -4..6 and -6..6, then the engine's own bonus (Perception, an eyepatch, the Gremlin's +2) is added untouched. So grant sight with add; a multiplier scales only what the race and other mods gave, and x0 cancels that without blinding anyone. Add is limited to +-10000 and multiply to 100.",
     gotcha: "The id is yours, and scoped to your mod: another mod using the same word gets an entry of its own, and cannot replace or remove yours. Adding again with the same id REPLACES that contribution, which makes a per-tick \"recalculate my buff\" loop safe, and sam_remove_stat_modifier takes back everything under it and touches nothing else. Survives floors (these are keyed by player slot, because a player's entity is rebuilt on the stairs and its uid changes) but not a new run: a new character, or a loaded save, starts with none, so re-apply anything permanent in game.on_game_start. The totals reach every S.A.M player's machine in order, since a player's own character sheet and walking speed are computed there." },
   { name: "sam_add_monster_stat_modifier", category: "Rules", mp: "host", hostOnly: true,
-    params: [{ name: "uid", type: "uid" }, { name: "stat", type: "string", values: MODIFIABLE_STATS }, { name: "id", type: "string" }, { name: "add", type: "number", optional: true }, { name: "multiply", type: "number", optional: true }],
+    params: [{ name: "uid", type: "uid" }, { name: "stat", type: "string", values: MONSTER_MODIFIABLE_STATS }, { name: "id", type: "string" }, { name: "add", type: "number", optional: true }, { name: "multiply", type: "number", optional: true }],
     returns: "true if it took (boolean)",
     desc: "The same for one creature.",
-    gotcha: "DIES WITH THE FLOOR. Monster tables are dropped on every level change, because the engine reuses entity uids and a remembered one can come to name something else. All nine stats work on a creature; SPEED scales how fast it walks, chases and flees. Refused for a uid that is not a living monster, a player's included: players have sam_add_stat_modifier." },
+    gotcha: "DIES WITH THE FLOOR. Monster tables are dropped on every level change, because the engine reuses entity uids and a remembered one can come to name something else. All the stats except VISION and SNEAK_VISION work on a creature (a creature has no light of its own, so those two are refused); SPEED scales how fast it walks, chases and flees. Refused for a uid that is not a living monster, a player's included: players have sam_add_stat_modifier." },
   { name: "sam_remove_stat_modifier", category: "Rules", mp: "host", hostOnly: true,
     params: [{ name: "player", type: "int" }, { name: "id", type: "string" }],
     returns: "how many stats carried that id (int)",

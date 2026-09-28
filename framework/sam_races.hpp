@@ -56,6 +56,15 @@ struct SAMRaceDef
 	// Optional "blood_diet": true — this race sustains on blood, not food.
 	bool bloodDiet = false;
 
+	// (v3.2.0) Optional "vision" / "sneak_vision": how much further this race sees in the dark,
+	// in tiles of the player's own light radius. "vision" is added wherever Perception's light
+	// bonus is (every light the player carries, sneaking or not); "sneak_vision" only while
+	// sneaking without a light source, which is exactly the Gremlin's "Improved Sneak Vision"
+	// (the engine gives a Gremlin +2 there, a gremlin-bodied race included, and this adds to it).
+	// Clamped at load to -4..6 and -6..6.
+	int vision = 0;
+	int sneakVision = 0;
+
 	// Optional "starting_spells": innate spells this race knows from creation (vanilla
 	// "SPELL_X" names or custom "namespace:spell"). Granted by SAMRaces::applySpells.
 	std::vector<std::string> startingSpells;
@@ -145,6 +154,12 @@ public:
 
 	// Look up a registered race by its runtime id (>= 200). null if none.
 	static const SAMRaceDef* get(int raceId);
+
+	// (v3.2.0) A race's "vision" and "sneak_vision", or 0 for a vanilla race, an unregistered id,
+	// and a player who turned the race's abilities off at character creation (stat_appearance != 0,
+	// the same switch that withholds its starting spells).
+	static int visionBonus(int raceId, int statAppearance);
+	static int sneakVisionBonus(int raceId, int statAppearance);
 
 	// True iff this (custom) race opted into a blood diet. False for a vanilla race, an
 	// unregistered id, or a race without the flag. Read by playerRequiresBloodToSustain.

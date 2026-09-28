@@ -87,6 +87,20 @@
       "default": false,
       "description": "If true, this race sustains on blood instead of food (like a vampire)."
     },
+    "vision": {
+      "type": "integer",
+      "minimum": -4,
+      "maximum": 6,
+      "default": 0,
+      "description": "How much further this race sees in the dark, in tiles of the player's own light radius, wherever Perception's light bonus goes (every light the player carries, sneaking or not). Added in full on top of Perception's own bonus; with VISION stat modifiers, S.A.M's whole part is capped at -4..6. Ignored when the player turns race abilities off at character creation."
+    },
+    "sneak_vision": {
+      "type": "integer",
+      "minimum": -6,
+      "maximum": 6,
+      "default": 0,
+      "description": "Extra light radius, in tiles, while sneaking without a light source: the Gremlin's Improved Sneak Vision is 2. A race on the gremlin body already gets that +2 from the engine, and this is added to it. With SNEAK_VISION stat modifiers, S.A.M's whole part is capped at -6..6. Ignored when the player turns race abilities off at character creation."
+    },
     "starting_spells": {
       "type": "array",
       "items": {
