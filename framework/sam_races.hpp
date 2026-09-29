@@ -79,6 +79,19 @@ struct SAMRaceDef
 	// -- the host body's own relations stand untouched.
 	std::vector<int> allies;
 	std::vector<int> enemies;
+	// (v3.3.0) "neutral": neither. It will not attack you on sight and you will not attack it,
+	// but it is not your ally either: the relation a Gremlin has with Goblins in vanilla. It is
+	// the only way to take a type OUT of the host body's allies without making it hostile, e.g. a
+	// human-bodied race that humans leave alone and cannot recruit (below Legendary Leadership,
+	// whose capstone recruits by body type and ignores allegiance, as vanilla's does). A shopkeeper
+	// listed here will trade, since neutral is the absence of hostility, but only in the race's own
+	// body: shapeshifted, vanilla's refusal stands.
+	std::vector<int> neutral;
+
+	// (v3.3.0) Optional "can_open_tins": eat a tin without a tin opener, as a Goatman or an
+	// Automaton does (the engine checks those two bodies, so a race on either already can). Like
+	// theirs, it covers eating; the alchemy table still wants an opener.
+	bool canOpenTins = false;
 
 	// Optional "limb_models": this race's OWN body, one model per limb, instead of the
 	// host body's. host_body still decides the skeleton -- the limb offsets, the
@@ -217,16 +230,24 @@ public:
 	// race id or an unregistered id.
 	static void applyStats(int raceId, Stat* myStats);
 
-	// What this race has DECLARED about a monster type, as a tri-state:
+	// What this race has DECLARED about a monster type:
 	//
 	//    1  ally     -- will not attack it, and it will not attack back
 	//    0  enemy    -- hostile on sight, whatever the host body thinks
+	//    2  neutral  -- (v3.3.0) neither: not hostile, and not an ally
 	//   -1  silent   -- no declaration; the host body's own relations stand
 	//
 	// -1 is the answer for every vanilla race, every unregistered id, and every race
 	// that declared nothing, which is what keeps the engine sites a true no-op. Callers
-	// must treat -1 as "leave the verdict alone", never as a boolean.
+	// must treat -1 as "leave the verdict alone", never as a boolean, and must not read the
+	// answer as "== 1 means friendly, anything else hostile": 2 is neither. checkEnemy asks
+	// "== 0", checkFriend asks "== 1", and both are false for 2, which is exactly neutral.
+	// A type in more than one list gets the least friendly: enemies, then neutral, then allies.
 	static int declaredAllegiance(int raceId, int monsterType);
+
+	// (v3.3.0) "can_open_tins", or false for a vanilla race, an unregistered id, and a player who
+	// turned the race's abilities off (stat_appearance != 0).
+	static bool canOpenTins(int raceId, int statAppearance);
 
 	// --- custom limb models ---------------------------------------------------------
 	// Turn every declared limb_models reference into an engine model index. Must run

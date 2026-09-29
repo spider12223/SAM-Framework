@@ -515,6 +515,8 @@ function raceSub(def, scripts) {
   if (def.starting_spells?.length) bits.push(`${def.starting_spells.length} innate spell${def.starting_spells.length === 1 ? '' : 's'}`);
   if (def.allies?.length) bits.push(`allied: ${def.allies.join('/')}`);
   if (def.enemies?.length) bits.push(`hostile: ${def.enemies.join('/')}`);
+  if (def.neutral?.length) bits.push(`neutral: ${def.neutral.join('/')}`);
+  if (def.can_open_tins) bits.push('opens tins');
   if (scripts && scripts[def.id]) bits.push(`${scripts[def.id].lang} script`);
   return `${def.id} · ${bits.join(', ')}`;
 }

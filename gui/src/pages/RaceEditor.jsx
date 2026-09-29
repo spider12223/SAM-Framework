@@ -100,6 +100,10 @@ export default function RaceEditor() {
   const [limbBent, setLimbBent] = useState(() =>
     Object.fromEntries(ARM_SLOTS.map((k) => [k, (typeof limbRaw(k) === 'object' && limbRaw(k)?.bent) || ''])));
   const [enemies, setEnemies] = useState(editDef?.enemies ?? []);
+  // Neither: not hostile, not an ally (the Gremlin and the Goblins). The only way to take a type
+  // out of the host body's allies without making it an enemy.
+  const [neutral, setNeutral] = useState(editDef?.neutral ?? []);
+  const [canOpenTins, setCanOpenTins] = useState(editDef?.can_open_tins ?? false);
   const [spellError, setSpellError] = useState('');
   const [scriptLang, setScriptLang] = useState(existingScript?.lang ?? 'lua');
   const [scriptCode, setScriptCode] = useState(existingScript?.code ?? '');
@@ -124,6 +128,7 @@ export default function RaceEditor() {
     for (const a of [...ATTRS, 'HP', 'MP']) { const v = num(mods[a]); if (v != null && v !== 0) sm[a] = v; }
     if (Object.keys(sm).length) def.stat_modifiers = sm;
     if (bloodDiet) def.blood_diet = true;
+    if (canOpenTins) def.can_open_tins = true;
     const vis = num(vision), sneakVis = num(sneakVision);
     if (vis) def.vision = vis;
     if (sneakVis) def.sneak_vision = sneakVis;
@@ -141,6 +146,7 @@ export default function RaceEditor() {
     if (Object.keys(lm).length) def.limb_models = lm;
     if (allies.length) def.allies = allies;
     if (enemies.length) def.enemies = enemies;
+    if (neutral.length) def.neutral = neutral;
     // Carry anything this editor has no control for straight through -- a field the
     // author hand-wrote, or one a later schema adds, must survive a save here.
     return carryUnknown(openedDef, def, 'race');
@@ -148,7 +154,8 @@ export default function RaceEditor() {
 
   // A type in both lists is an enemy in game (the engine says so in the log). Say it here
   // instead, while it is still one click to fix.
-  const conflicts = allies.filter((m) => enemies.includes(m));
+  const conflicts = [...new Set([...allies, ...enemies, ...neutral])]
+    .filter((m) => [allies, enemies, neutral].filter((l) => l.includes(m)).length > 1);
 
   const addSpell = (raw) => {
     const input = String(raw ?? '').trim();
@@ -175,7 +182,7 @@ export default function RaceEditor() {
 
   const def = useMemo(buildDef,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [name, description, hostBody, mods, bloodDiet, vision, sneakVision, startingSpells, allies, enemies, limbModels, limbBent, namespace]);
+    [name, description, hostBody, mods, bloodDiet, canOpenTins, vision, sneakVision, startingSpells, allies, enemies, neutral, limbModels, limbBent, namespace]);
   const preview = useMemo(() => JSON.stringify(def, null, 2), [def]);
   const setMod = (a, v) => setMods((prev) => ({ ...prev, [a]: v }));
 
@@ -202,6 +209,10 @@ export default function RaceEditor() {
           <label className="flex items-center gap-2 mt-3 cursor-pointer text-sm" style={{ color: 'var(--color-parchment)' }}>
             <input type="checkbox" className="sam-check" checked={bloodDiet} onChange={(e) => setBloodDiet(e.target.checked)} />
             Blood diet (sustains on blood instead of food, like a vampire)
+          </label>
+          <label className="flex items-center gap-2 mt-2 cursor-pointer text-sm" style={{ color: 'var(--color-parchment)' }}>
+            <input type="checkbox" className="sam-check" checked={canOpenTins} onChange={(e) => setCanOpenTins(e.target.checked)} />
+            Opens tins without a tin opener (like a goatman or automaton)
           </label>
           <div className="grid grid-cols-2 gap-3 mt-3">
             <Field label="Vision" hint="Extra tiles of sight in the dark, always, added on top of Perception's own light bonus. -4 to 6; 0 = normal.">
@@ -282,7 +293,7 @@ export default function RaceEditor() {
           <div className="text-xs mb-3" style={{ color: '#8a7749' }}>
             Your race already inherits its host body's relations: a Goatman-bodied race is
             left alone by goatmen without doing anything here, and hated by humans and
-            shopkeepers for the same reason. These two lists are for relations the host body
+            shopkeepers for the same reason. These lists are for relations the host body
             does <b>not</b> have. Leave them empty to inherit its relations unchanged.
           </div>
 
@@ -304,10 +315,26 @@ export default function RaceEditor() {
             onPick={(m) => setEnemies((p) => (p.includes(m) ? p : [...p, m]))}
             placeholder="Search creatures… e.g. shopkeeper" />
 
+          <div className="sam-label mb-1 mt-4" style={{ color: '#8a6d2e' }}>Neutral: leaves you alone, not your ally</div>
+          <Chips items={neutral} icon="🤚" label={prettyMonster}
+            onRemove={(m) => setNeutral((p) => p.filter((x) => x !== m))}
+            empty="Nothing added — the host body decides." />
+          <SearchSelect
+            options={MONSTERS.filter((m) => !neutral.includes(m))}
+            onPick={(m) => setNeutral((p) => (p.includes(m) ? p : [...p, m]))}
+            placeholder="Search creatures… e.g. human" />
+          <div className="text-xs mt-1" style={{ color: '#8a7749' }}>
+            Like a Gremlin and the Goblins: no attack on sight, but they won't join you either
+            (until Legendary Leadership, which recruits by body type), and one you hit fights back.
+            The way to make a human-bodied race that humans leave alone without being its allies.
+            A shopkeeper here will trade, except while you are shapeshifted.
+          </div>
+
           {conflicts.length > 0 && (
             <div className="sam-error text-sm mt-3">
               {conflicts.map(prettyMonster).join(', ')} {conflicts.length === 1 ? 'is' : 'are'} in
-              both lists. In game that means hostile — remove it from one side to be sure.
+              more than one list. In game the least friendly wins (hostile, then neutral, then
+              ally) — remove it from the others to be sure.
             </div>
           )}
         </Panel>

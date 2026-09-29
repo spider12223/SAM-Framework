@@ -8,15 +8,15 @@ Barony was never built to be modded. S.A.M is the layer that makes it modded any
 
 [hr][/hr]
 
-[h1]NEW: RACES THAT SEE IN THE DARK[/h1]
+[h1]NEW FOR CUSTOM RACES[/h1]
 
-A custom race can now have the Gremlin's Improved Sneak Vision: [b]"sneak_vision": 2[/b] in its JSON. Or [b]"vision"[/b] for sight in the dark at all times. Scripts can grant either.
+[b]"neutral"[/b]: creatures that leave your race alone but are not its allies. [b]"can_open_tins"[/b]: eat tins with no opener. [b]"sneak_vision"[/b] and [b]"vision"[/b]: see in the dark.
 
 [h1]GAME SPEED, MOD SETTINGS, THE LOOT POOL[/h1]
 
 Game Speed Control and Item Randomizer, rebuilt as tools any S.A.M mod can use. Unlike the originals, they replace no game file, so they clash with no other mod.
 
-[b]Game speed.[/b] Run the world from 0.1x to 8x in singleplayer, or bullet time on a kill.
+[b]Game speed.[/b] 0.1x to 8x in singleplayer, or bullet time on a kill.
 
 [b]Your mod in the game's own Settings.[/b] Rebindable keys, and sliders, toggles and dropdowns under General. Saved, with Restore Defaults, and no UI code.
 

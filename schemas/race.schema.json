@@ -101,6 +101,11 @@
       "default": 0,
       "description": "Extra light radius, in tiles, while sneaking without a light source: the Gremlin's Improved Sneak Vision is 2. A race on the gremlin body already gets that +2 from the engine, and this is added to it. With SNEAK_VISION stat modifiers, S.A.M's whole part is capped at -6..6. Ignored when the player turns race abilities off at character creation."
     },
+    "can_open_tins": {
+      "type": "boolean",
+      "default": false,
+      "description": "If true, this race eats a tin without a tin opener, as a Goatman or an Automaton does (a race on either of those bodies already can). Like theirs, it covers eating; the alchemy table still wants an opener. Ignored when the player turns race abilities off at character creation."
+    },
     "starting_spells": {
       "type": "array",
       "items": {
@@ -225,6 +230,65 @@
       },
       "uniqueItems": true,
       "description": "Monster types that are always hostile to this race, even ones the host body gets along with. Listing a type in both allies and enemies makes it an enemy, and the game log says so."
+    },
+    "neutral": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "human",
+          "rat",
+          "goblin",
+          "slime",
+          "troll",
+          "bat",
+          "spider",
+          "ghoul",
+          "skeleton",
+          "scorpion",
+          "imp",
+          "crab",
+          "gnome",
+          "demon",
+          "succubus",
+          "mimic",
+          "lich",
+          "minotaur",
+          "devil",
+          "shopkeeper",
+          "kobold",
+          "scarab",
+          "crystalgolem",
+          "incubus",
+          "vampire",
+          "shadow",
+          "cockatrice",
+          "insectoid",
+          "goatman",
+          "automaton",
+          "lichice",
+          "lichfire",
+          "sentrybot",
+          "spellbot",
+          "gyrobot",
+          "dummybot",
+          "bugbear",
+          "dryad",
+          "myconid",
+          "salamander",
+          "gremlin",
+          "revenant_skull",
+          "minimimic",
+          "monster_adorcised_weapon",
+          "flame_elemental",
+          "hologram",
+          "moth",
+          "earth_elemental",
+          "duck_small"
+        ]
+      },
+      "uniqueItems": true,
+      "description": "Monster types that are NEUTRAL to this race: they will not attack it on sight and it is not their ally, the relation a Gremlin has with Goblins. Use it to take a type out of the host body's allies without making it hostile, for example a human-bodied race that humans leave alone and cannot recruit. A neutral creature that is attacked still fights back. At Legendary Leadership (100) the game recruits by body type and ignores every allegiance list, so from then on a neutral type can be recruited, as a Gremlin can recruit Goblins. A shopkeeper listed here will trade, except while you are shapeshifted (as in vanilla). A type in more than one list gets the least friendly: enemies, then neutral, then allies."
     },
     "limb_models": {
       "type": "object",

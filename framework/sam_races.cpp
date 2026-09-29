@@ -475,18 +475,30 @@ void SAMRaces::loadFromManifest(const SAMModManifest& manifest)
 
 	readMonsterList("allies", def.allies);
 		readMonsterList("enemies", def.enemies);
+		readMonsterList("neutral", def.neutral);
 
-		// Declaring both is a contradiction the author needs to resolve, not something to
-		// resolve silently. enemies wins (hostility is the more consequential reading of
-		// an ambiguous file), and we say so.
+		// Declaring a type in two lists is a contradiction the author needs to resolve, not
+		// something to resolve silently. The least friendly wins (enemies, then neutral, then
+		// allies: hostility is the more consequential reading of an ambiguous file), and we say so.
+		auto listed = [](const std::vector<int>& v, int m) { return std::find(v.begin(), v.end(), m) != v.end(); };
 		for ( int m : def.enemies )
 		{
-			if ( std::find(def.allies.begin(), def.allies.end(), m) != def.allies.end() )
+			if ( listed(def.allies, m) || listed(def.neutral, m) )
 			{
 				SAM_WARN(MOD, "Race '" + def.id + "' lists '" + std::string(monstertypename[m])
-					+ "' as BOTH an ally and an enemy — treating it as an enemy.");
+					+ "' as an enemy AND as " + (listed(def.allies, m) ? "an ally" : "neutral")
+					+ " -- treating it as an enemy.");
 			}
 		}
+		for ( int m : def.neutral )
+		{
+			if ( listed(def.allies, m) && !listed(def.enemies, m) )
+			{
+				SAM_WARN(MOD, "Race '" + def.id + "' lists '" + std::string(monstertypename[m])
+					+ "' as BOTH an ally and neutral -- treating it as neutral.");
+			}
+		}
+		def.canOpenTins = getBool("can_open_tins", false);
 		if ( j.contains("starting_spells") && j["starting_spells"].is_array() )
 		{
 			for ( const json& e : j["starting_spells"] )
@@ -524,7 +536,7 @@ void SAMRaces::loadFromManifest(const SAMModManifest& manifest)
 			+ " CON " + std::to_string(def.con) + " INT " + std::to_string(def.intel)
 			+ " PER " + std::to_string(def.per) + " CHR " + std::to_string(def.chr)
 			+ " HP " + std::to_string(def.hp) + " MP " + std::to_string(def.mp) + ")");
-		if ( !def.allies.empty() || !def.enemies.empty() )
+		if ( !def.allies.empty() || !def.enemies.empty() || !def.neutral.empty() )
 		{
 			std::string line = "  " + def.name + " allegiance:";
 			if ( !def.allies.empty() )
@@ -537,8 +549,14 @@ void SAMRaces::loadFromManifest(const SAMModManifest& manifest)
 				line += " hostile to";
 				for ( int m : def.enemies ) { line += " " + std::string(monstertypename[m]); }
 			}
+			if ( !def.neutral.empty() )
+			{
+				line += " neutral to";
+				for ( int m : def.neutral ) { line += " " + std::string(monstertypename[m]); }
+			}
 			SAM_INFO(MOD, line);
 		}
+		if ( def.canOpenTins ) { SAM_INFO(MOD, "  " + def.name + " opens tins without a tin opener."); }
 	}
 }
 
@@ -868,10 +886,18 @@ int SAMRaces::declaredAllegiance(int raceId, int monsterType)
 	if ( it == s_byId.end() ) { return -1; }
 	const SAMRaceDef& def = it->second;
 
-	// enemies first: a type in both lists is hostile, matching the load-time warning.
+	// The least friendly list first, matching the load-time warnings: enemies, neutral, allies.
 	for ( int m : def.enemies ) { if ( m == monsterType ) { return 0; } }
+	for ( int m : def.neutral ) { if ( m == monsterType ) { return 2; } }
 	for ( int m : def.allies )  { if ( m == monsterType ) { return 1; } }
 	return -1;
+}
+
+bool SAMRaces::canOpenTins(int raceId, int statAppearance)
+{
+	if ( raceId < SAM_RACE_ID_BASE || statAppearance != 0 || s_byId.empty() ) { return false; }
+	const SAMRaceDef* def = get(raceId);
+	return def && def->canOpenTins;
 }
 
 void SAMRaces::clear()
