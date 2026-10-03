@@ -4,13 +4,13 @@ Barony was never built to be modded. S.A.M is the layer that makes it modded any
 
 [b]S.A.M is a dependency, not a playable mod.[/b] On its own it adds nothing. It is what other mods are built on. Install it once and every S.A.M mod works.
 
-[b]Subscribing here does NOT install it.[/b] S.A.M is a modified barony.exe, and Steam cannot replace a game's program file by itself. Run the installer once. It takes a minute, and the steps are below.
+[b]Subscribing here does NOT install it.[/b] S.A.M is a modified barony.exe, and Steam cannot replace a game's program file by itself. Run the installer once. The steps are below.
 
 [hr][/hr]
 
-[h1]NEW FOR CUSTOM RACES[/h1]
+[h1]NEW: HATS AND CHARGED HITS[/h1]
 
-[b]"neutral"[/b]: creatures that leave your race alone but are not its allies. [b]"can_open_tins"[/b]: eat tins with no opener. [b]"sneak_vision"[/b] and [b]"vision"[/b]: see in the dark.
+[b]"worn_like"[/b]: a mod hat or mask names the vanilla item it sits like, so a hat built on its side sits upright. Mod gloves and boots now show a vanilla pair. [b]Charged hits[/b]: hit events say how far a swing was wound up.
 
 [h1]GAME SPEED, MOD SETTINGS, THE LOOT POOL[/h1]
 
@@ -78,7 +78,7 @@ Build a class, item, monster, spell or effect with dropdowns and sliders, watch 
 
 JSON says what your content [i]is[/i]. A script says what it [i]does[/i]. Drop a .lua, .js or .ts file next to any JSON and it loads automatically. TypeScript is compiled for you.
 
-[b]87 events[/b] to react to, and now to change. [b]336 functions[/b] to act with: grant items and gold, read and set stats, apply effects, cast spells, deal or change damage, teleport, spawn monsters, run your own per frame logic, open windows, timers, saved data, screen effects, and live patching that reverts when your mod unloads.
+[b]87 events[/b] to react to, and now to change. [b]337 functions[/b] to act with: grant items and gold, read and set stats, apply effects, cast spells, deal or change damage, teleport, spawn monsters, run your own per frame logic, open windows, timers, saved data, screen effects, and live patching that reverts when your mod unloads.
 
 Only two functions ever get called: [b]on_event(event)[/b] and [b]on_tick(event)[/b].
 

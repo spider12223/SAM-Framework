@@ -49,6 +49,7 @@
 #include "stat.hpp"                  // stats[] equipment slots
 #include "interface/interface.hpp"   // GenericGUI transmuteItemTarget
 #include "mod_tools.hpp" // ItemTooltips.itemNameStringToItemID — resolves "model_from_item" names
+#include "entity.hpp"    // Entity::sprite, swapped by SAMWornAsTwin for the length of a placement
 #endif
 
 #include <fstream>
@@ -64,6 +65,13 @@ static const char* MOD = "ITEMS";
 
 static std::map<int, SAMItemDef> s_registry;
 static int s_nextItemId = SAM_ITEM_ID_BASE;
+
+// "worn_like" for hats and masks: a mod model index -> the vanilla ItemType a hat or mask with
+// that model is worn like. Only an item's OWN appended models go in (its "model" and each of its
+// model_states), never a vanilla index: a placeholder or model_from_item index is the vanilla
+// item's own, and mapping it would re-place every vanilla wearer of that item as well. Rebuilt
+// by registerModModels, the one place mod model indices are handed out; dropped by clear().
+static std::map<int, int> s_wornLikeBySprite;
 
 // Resolved kit_ui paths, cached because the crafting panel asks for every role on EVERY
 // frame: without this each open panel cost ~17 real file opens per frame per player, just
@@ -579,11 +587,13 @@ static bool registerItemAt(int id, SAMItemDef def)
 	// slot/category placeholder above, and is in turn overridden by an explicit "model"
 	// .vox (registerModModels runs later and wins). A per-item "icon" PNG (below) still
 	// overrides the 2D icon if present.
+	int samModelSrc = -1; // the vanilla item model_from_item resolved to, for worn_like below
 	if ( !def.modelFromItem.empty() )
 	{
 		const int src = vanillaItemTypeFromName(def.modelFromItem);
 		if ( src >= 0 && src < NUMITEMS )
 		{
+			samModelSrc = src;
 			slot.index      = items[src].index;
 			slot.fpindex    = items[src].fpindex;
 			slot.indexShort = items[src].indexShort;
@@ -595,6 +605,74 @@ static bool registerItemAt(int id, SAMItemDef def)
 		{
 			SAM_WARN(MOD, "Item [" + def.id + "] model_from_item '" + def.modelFromItem
 				+ "' is not a known vanilla ItemType — using the placeholder model.");
+		}
+	}
+
+	// "worn_like": which vanilla item the body wears this one like (see SAMItemDef::wornLike).
+	// A hat or mask uses it only for its OWN model; one without an own model already wears the
+	// vanilla model it borrowed and sits where that item sits. Gloves and boots always end up
+	// with a vanilla pair, because the engine picks the arm and leg models from a list of
+	// vanilla types and does nothing at all for a custom one: the arm keeps whatever model it
+	// had, and while a weapon is held its bent-arm step adds 2 to that model every tick.
+	def.wornLikeType = -1;
+	{
+		const bool samHead = ( eslot == EQUIPPABLE_IN_SLOT_HELM || eslot == EQUIPPABLE_IN_SLOT_MASK );
+		const bool samHandsFeet = ( eslot == EQUIPPABLE_IN_SLOT_GLOVES || eslot == EQUIPPABLE_IN_SLOT_BOOTS );
+		if ( !def.wornLike.empty() )
+		{
+			const int twin = vanillaItemTypeFromName(def.wornLike);
+			if ( twin < 0 || twin >= NUMITEMS )
+			{
+				SAM_WARN(MOD, "Item [" + def.id + "] worn_like '" + def.wornLike
+					+ "' is not a known vanilla ItemType (for example HAT_BOUNTYHUNTER), so it is ignored.");
+			}
+			else if ( !samHead && !samHandsFeet )
+			{
+				SAM_WARN(MOD, "Item [" + def.id + "] worn_like only works on a hat, mask, gloves or boots, and this item's slot is "
+					+ def.slot + ", so it is ignored.");
+			}
+			else if ( items[twin].item_slot != eslot )
+			{
+				SAM_WARN(MOD, "Item [" + def.id + "] worn_like '" + def.wornLike + "' is worn in a different slot from this item ("
+					+ def.slot + "). Name a vanilla item from the same slot. Ignored.");
+			}
+			else if ( samHead && def.model.empty() && def.modelStates.empty()
+				&& ( samModelSrc == TOOL_GLASSES || samModelSrc == MONOCLE ) )
+			{
+				// The one borrowed model that does NOT sit like its source: the game wears glasses
+				// and the monocle as separate worn models it picks by item TYPE, so a mask that
+				// borrows their model shows the floor model at the ordinary mask spot.
+				SAM_WARN(MOD, "Item [" + def.id + "] worn_like '" + def.wornLike + "' has no effect: this mask borrows the "
+					+ def.modelFromItem + " model, which is the one on the floor. The game wears glasses and the monocle as "
+					"separate models it picks by item type, so this mask shows the floor model at the usual mask spot. "
+					"To sit like them, give the item its own \"model\" and keep worn_like.");
+			}
+			else if ( samHead && def.model.empty() && def.modelStates.empty() )
+			{
+				SAM_WARN(MOD, "Item [" + def.id + "] worn_like '" + def.wornLike + "' has no effect: this item has no \"model\" or "
+					"\"model_states\" of its own, so it wears the model it borrows and already sits where that item sits.");
+			}
+			else
+			{
+				def.wornLikeType = twin;
+				SAM_INFO(MOD, "Item [" + def.id + "] is worn like vanilla '" + def.wornLike + "' (type " + std::to_string(twin) + ")");
+			}
+		}
+		if ( def.wornLikeType < 0 && samHandsFeet )
+		{
+			// The pair the placeholder model came from: model_from_item's item when it is the
+			// same kind of thing, otherwise the slot's template.
+			const bool fromModelSrc = ( samModelSrc >= 0 && items[samModelSrc].item_slot == eslot );
+			def.wornLikeType = fromModelSrc ? samModelSrc : (int)templateForSlot(eslot);
+			if ( !def.model.empty() )
+			{
+				const char* what = ( eslot == EQUIPPABLE_IN_SLOT_GLOVES ) ? "gloves" : "boots";
+				const char* limb = ( eslot == EQUIPPABLE_IN_SLOT_GLOVES ) ? "arm" : "leg";
+				SAM_INFO(MOD, "Item [" + def.id + "]: the game draws " + what + " by swapping in a whole " + limb
+					+ " model, so this item's own model is not shown on the body. It is worn as "
+					+ ( fromModelSrc ? def.modelFromItem : std::string(( eslot == EQUIPPABLE_IN_SLOT_GLOVES ) ? "GLOVES" : "LEATHER_BOOTS") )
+					+ "; set \"worn_like\" to pick another pair.");
+			}
 		}
 	}
 #endif
@@ -889,6 +967,7 @@ void SAMItems::loadFromManifest(const SAMModManifest& manifest)
 			}
 		}
 		def.modelFromItem = getStr("model_from_item");
+		def.wornLike = getStr("worn_like");
 		def.icon = getStr("icon");
 		def.weaponSkill = samLower(getStr("weapon_skill"));
 		{
@@ -1000,6 +1079,7 @@ void SAMItems::clear()
 {
 	s_kitUiPathCache.clear(); // resolved panel-art paths die with the registry
 	s_iconPathCache.clear();  // and the resolved icon paths
+	s_wornLikeBySprite.clear(); // the model indices it maps die with the items that own them
 	// v0.7.0 Feature 5: revert every sam_patch_item override to its captured original
 	// FIRST (restores vanilla items[] fields before any custom-slot teardown below).
 	for ( const auto& kv : s_itemPatches )
@@ -1456,6 +1536,84 @@ int SAMItems::stateModelFor(int itemType, int status, int beatitude, bool identi
 	return -1;
 }
 
+int SAMItems::wornSpriteFor(int sprite)
+{
+#ifdef EDITOR
+	return sprite;
+#else
+	if ( s_wornLikeBySprite.empty() ) { return sprite; }
+	auto it = s_wornLikeBySprite.find(sprite);
+	if ( it == s_wornLikeBySprite.end() ) { return sprite; }
+	const int twin = it->second;
+	// Glasses and the monocle are worn as dedicated models, not as their item models, and the
+	// mask code tells them apart by those numbers.
+	if ( twin == TOOL_GLASSES ) { return 165; }  // GlassesWorn.vox
+	if ( twin == MONOCLE )      { return 1196; } // MonocleWorn.vox
+	// Read live rather than stored: a data reload can move a vanilla item's index.
+	return items[twin].index;
+#endif
+}
+
+int SAMItems::wornTypeFor(int itemType)
+{
+	if ( itemType < SAM_ITEM_ID_BASE || s_registry.empty() ) { return itemType; }
+	auto it = s_registry.find(itemType);
+	if ( it == s_registry.end() || it->second.wornLikeType < 0 ) { return itemType; }
+	return it->second.wornLikeType;
+}
+
+#ifndef EDITOR
+SAMWornAsTwin::SAMWornAsTwin(Entity* limb)
+{
+	if ( !limb || s_wornLikeBySprite.empty() ) { return; }
+	const int own = limb->sprite;
+	const int twin = SAMItems::wornSpriteFor(own);
+	if ( twin == own ) { return; }
+	m_limb = limb;
+	m_own = own;
+	m_twin = twin;
+	limb->sprite = twin;
+}
+
+SAMWornAsTwin::~SAMWornAsTwin()
+{
+	// Undo only our own write. If the code in between set a model of its own, that one stays.
+	if ( m_limb && m_limb->sprite == m_twin ) { m_limb->sprite = m_own; }
+}
+
+// The begin/end pair's two open guards. Placement runs on the main thread only, and the pair
+// is never nested (each body's mask ladder is one straight run), so two slots are enough.
+static Entity* s_twinLimb[2] = { nullptr, nullptr };
+static int s_twinOwn[2] = { 0, 0 };
+static int s_twinSprite[2] = { 0, 0 };
+
+void SAMItems::wornAsTwinBegin(Entity* mask, Entity* helm)
+{
+	Entity* limbs[2] = { mask, helm };
+	for ( int i = 0; i < 2; ++i )
+	{
+		s_twinLimb[i] = nullptr;
+		if ( !limbs[i] || s_wornLikeBySprite.empty() ) { continue; }
+		const int own = limbs[i]->sprite;
+		const int twin = wornSpriteFor(own);
+		if ( twin == own ) { continue; }
+		s_twinLimb[i] = limbs[i];
+		s_twinOwn[i] = own;
+		s_twinSprite[i] = twin;
+		limbs[i]->sprite = twin;
+	}
+}
+
+void SAMItems::wornAsTwinEnd()
+{
+	for ( int i = 0; i < 2; ++i )
+	{
+		if ( s_twinLimb[i] && s_twinLimb[i]->sprite == s_twinSprite[i] ) { s_twinLimb[i]->sprite = s_twinOwn[i]; }
+		s_twinLimb[i] = nullptr;
+	}
+}
+#endif
+
 std::string SAMItems::getIconPath(int itemId)
 {
 	auto cached = s_iconPathCache.find(itemId);
@@ -1714,6 +1872,109 @@ void SAMItems::registerModModels()
 					+ "' did not resolve to a model; that state keeps the item's ordinary model.");
 			}
 		}
+	}
+
+	// "worn_like" for hats and masks: map each of the item's own models to its twin. This is the
+	// first point where those indices exist, and appendModels hands them out afresh every load,
+	// so the map is rebuilt here every time rather than kept.
+	//
+	// The map is keyed on the MODEL, and items that name the same .vox share one model index, so
+	// worn_like belongs to the file: every hat or mask drawn with it sits the same way. Hence two
+	// passes. The first maps every model an item with worn_like owns; the second finds the items
+	// WITHOUT one that share such a model, and says so, because they are placed like that twin too.
+	s_wornLikeBySprite.clear();
+	struct SamHeadItem { const SAMItemDef* def; ItemEquippableSlot slot; std::vector<int> own; };
+	std::vector<SamHeadItem> samHeads;
+	for ( const auto& kv : s_registry )
+	{
+		const int id = kv.first;
+		if ( id < 0 || id >= NUM_ITEM_SLOTS ) { continue; }
+		const ItemEquippableSlot es = items[id].item_slot;
+		if ( es != EQUIPPABLE_IN_SLOT_HELM && es != EQUIPPABLE_IN_SLOT_MASK ) { continue; }
+		SamHeadItem h{ &kv.second, es, {} };
+		if ( !kv.second.model.empty() )
+		{
+			const int idx = SAMModels::modelIndexForId(kv.second.model);
+			if ( idx >= 0 ) { h.own.push_back(idx); }
+		}
+		for ( const auto& ms : kv.second.modelStateIdx ) { h.own.push_back(ms.second); }
+		// A mod model only. modelIndexForId can also answer with a base-game file a mod named by
+		// path, and that index belongs to vanilla wearers too.
+		h.own.erase(std::remove_if(h.own.begin(), h.own.end(),
+			[](int idx) { return SAMModels::idForModelIndex(idx).empty(); }), h.own.end());
+		samHeads.push_back(std::move(h));
+	}
+	std::map<int, const SAMItemDef*> samMappedBy; // model index -> the item whose worn_like mapped it
+	for ( const SamHeadItem& h : samHeads )
+	{
+		if ( h.def->wornLikeType < 0 ) { continue; }
+		for ( const int idx : h.own )
+		{
+			auto ins = s_wornLikeBySprite.emplace(idx, h.def->wornLikeType);
+			if ( ins.second ) { samMappedBy[idx] = h.def; }
+			else if ( ins.first->second != h.def->wornLikeType )
+			{
+				SAM_WARN(MOD, "Item [" + h.def->id + "] shares its model with item [" + samMappedBy[idx]->id + "], which is worn like "
+					"a different vanilla item. A model can only sit one way, so the first one wins for both. Give each its own .vox file.");
+			}
+		}
+	}
+	for ( const SamHeadItem& h : samHeads )
+	{
+		if ( h.def->wornLikeType >= 0 || h.own.empty() ) { continue; }
+		const SAMItemDef* sharer = nullptr;
+		for ( const int idx : h.own )
+		{
+			auto m = samMappedBy.find(idx);
+			if ( m != samMappedBy.end() ) { sharer = m->second; break; }
+		}
+		if ( sharer )
+		{
+			const bool otherSlot = ( items[sharer->numericId].item_slot != h.slot );
+			SAM_WARN(MOD, "Item [" + h.def->id + "] uses the same .vox as item [" + sharer->id + "], which is worn like '"
+				+ sharer->wornLike + "', so it sits like that too" + ( otherSlot ? ", even though one is a hat and the other a mask" : "" )
+				+ ". A model can only sit one way. Give this item its own .vox file to wear it differently.");
+			continue;
+		}
+		// No twin and nothing shared. Most mod helmets are fine as they are, but a model built
+		// lying on its side the way the game's own hats are is worn sideways without one, and the
+		// modder has no way to know why. Hats are mirrored left-to-right across voxel z, with their
+		// height running along y; helmets are mirrored across y with their height along z. Say so
+		// once, when the model's own symmetry points clearly one way.
+		if ( h.slot != EQUIPPABLE_IN_SLOT_HELM ) { continue; }
+		const int idx0 = h.own[0];
+		if ( (Uint32)idx0 >= nummodels || !models[idx0] ) { continue; }
+		const voxel_t* v = models[idx0];
+		long filled = 0, mirrorY = 0, mirrorZ = 0;
+		auto at = [&](int x, int y, int z) { return v->data[z + y * v->sizez + x * v->sizey * v->sizez] != 255; };
+		for ( int x = 0; x < v->sizex; ++x )
+		{
+			for ( int y = 0; y < v->sizey; ++y )
+			{
+				for ( int z = 0; z < v->sizez; ++z )
+				{
+					if ( !at(x, y, z) ) { continue; }
+					++filled;
+					if ( at(x, v->sizey - 1 - y, z) ) { ++mirrorY; }
+					if ( at(x, y, v->sizez - 1 - z) ) { ++mirrorZ; }
+				}
+			}
+		}
+		if ( filled > 0 )
+		{
+			const double my = (double)mirrorY / filled;
+			const double mz = (double)mirrorZ / filled;
+			if ( mz >= 0.85 && mz - my >= 0.15 )
+			{
+				SAM_WARN(MOD, "Item [" + h.def->id + "] model '" + SAMModels::idForModelIndex(idx0) + "' looks like it is built lying on "
+					"its side, the way the game's own hats are, and without \"worn_like\" it is worn exactly as built, so it will sit "
+					"sideways on the head. Add \"worn_like\" with the vanilla hat it should sit like, for example \"HAT_BOUNTYHUNTER\".");
+			}
+		}
+	}
+	if ( !s_wornLikeBySprite.empty() )
+	{
+		SAM_INFO(MOD, std::to_string(s_wornLikeBySprite.size()) + " mod hat or mask model(s) are worn like a vanilla item");
 	}
 
 	// Monster body models: report what resolved and, crucially, what did NOT. A monster's

@@ -4,7 +4,7 @@
 // Drop this beside your mod's .ts files, or reference it:
 //   /// <reference path="sam.d.ts" />
 //
-// 336 functions, 87 events. Each function's "Multiplayer:" line starts with
+// 337 functions, 87 events. Each function's "Multiplayer:" line starts with
 // its kind (host, owner, screen, read, all, local, any); see docs/multiplayer.md.
 
 declare global {
@@ -602,6 +602,13 @@ declare global {
    * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nothing at all -- no value in Lua, undefined in JavaScript. The shared lightmap the monster AI reads exists only on the host, so a client's call is refused with a warning. It answers with nothing at all rather than 0, because 0 is a real light level: pitch darkness.
    */
   function sam_get_light_at(x: number, y: number, player?: number): number | undefined;
+
+  /**
+   * One body part of a player, or of a creature the game can put a helmet on (a human, goblin, skeleton, gnome, kobold and the like), as the game left it this tick: the model the game put on it (sprite, and model when that is a mod's own .vox), whether the game hid it (visible), where it is, how it is turned, the point it is drawn from (focal) and its scale. A mod can check where a worn or held item really sits, or line an effect up with a hand or the head. Read-only.
+   *
+   * Multiplayer: any. The same answer on every machine; safe to call anywhere, including a client's on_packet handler. Reads this machine's own copy of the entity, which on a client is interpolated between the host's updates and can lag it by a fraction of a second. Two machines can therefore answer slightly differently at the same moment: decide anything that depends on the exact number on the host and send the verdict with sam_send_packet, rather than working it out inside on_packet.
+   */
+  function sam_get_limb(uid: number, part: string): any;
 
   /**
    * The set of items a random roll of that category and level window would draw from: the sheet's item_level test (so a sam_patch_item level counts), mod-registered items, and the loot tables (an item weighted 0, outside its floor window, or kept out of the given context is absent). Without a context the context rule is not tested. The per-roll chance drops the engine makes on five items (tin opener, lantern, frying pan, backpack, grass sprig), the store-type exclusions and the GEM shortcut (nine gem rolls in ten return glass before the pool is read) are not in it; they happen inside the roll.

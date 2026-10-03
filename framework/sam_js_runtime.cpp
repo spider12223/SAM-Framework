@@ -7813,6 +7813,29 @@ namespace
 
 	// sam_get_camera(player) -> { x, y, height, yaw, pitch, mode } or undefined. Where the camera
 	// actually IS, which differs from what was asked for the moment the boom hits a wall.
+	// sam_get_limb(uid, part) -> the same object the Lua twin builds, or undefined.
+	JSValue js_sam_get_limb(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_get_limb") ) { return JS_UNDEFINED; }
+		std::string part;
+		if ( !samJsReqStr(ctx, argc, argv, 1, "sam_get_limb", &part) ) { return JS_UNDEFINED; }
+		SAMLua::LimbInfo li;
+		if ( !SAMLua::limbInfo((long long)uid, part, li) ) { return JS_UNDEFINED; }
+		JSValue o = JS_NewObject(ctx);
+		JS_SetPropertyStr(ctx, o, "sprite", JS_NewInt32(ctx, li.sprite));
+		JS_SetPropertyStr(ctx, o, "model", li.model.empty() ? JS_UNDEFINED : JS_NewString(ctx, li.model.c_str()));
+		JS_SetPropertyStr(ctx, o, "visible", JS_NewBool(ctx, li.visible));
+		const struct { const char* k; double v; } nums[] = {
+			{ "x", li.x }, { "y", li.y }, { "z", li.z }, { "yaw", li.yaw }, { "pitch", li.pitch },
+			{ "roll", li.roll }, { "focalx", li.focalx }, { "focaly", li.focaly }, { "focalz", li.focalz },
+			{ "scalex", li.scalex }, { "scaley", li.scaley }, { "scalez", li.scalez },
+		};
+		for ( const auto& n : nums ) { JS_SetPropertyStr(ctx, o, n.k, JS_NewFloat64(ctx, n.v)); }
+		return o;
+	}
+
 	JSValue js_sam_get_camera(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
@@ -8861,6 +8884,7 @@ namespace
 		samJsRegister(ctx, g, "sam_get_velocity", js_sam_get_velocity, 1);
 		samJsRegister(ctx, g, "sam_get_entity_size", js_sam_get_entity_size, 1);
 		samJsRegister(ctx, g, "sam_get_entity_sprite", js_sam_get_entity_sprite, 1);
+		samJsRegister(ctx, g, "sam_get_limb", js_sam_get_limb, 2);
 		samJsRegister(ctx, g, "sam_get_entity_ticks", js_sam_get_entity_ticks, 1);
 		samJsRegister(ctx, g, "sam_get_map_seed", js_sam_get_map_seed, 0);
 		samJsRegister(ctx, g, "sam_is_dark_level", js_sam_is_dark_level, 0);

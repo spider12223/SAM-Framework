@@ -59,6 +59,52 @@ files under `models/<yourmod>/` — two mods that both ship `models/sword.vox` w
 
 `model_fp` is the first-person model you see in your own hand.
 
+#### Hats, masks, gloves and boots: `worn_like`
+
+```json
+"slot": "EQUIPPABLE_IN_SLOT_HELM",
+"model": "models/mymod/plague_hat.vox",
+"worn_like": "HAT_BOUNTYHUNTER"
+```
+
+The game does not read where a hat goes from the hat. It matches the hat's model against its
+own models and looks up how that one sits: how far up, how far back, which way it is turned,
+and how it fits with a mask. That table exists for every body. A model your mod ships matches
+nothing in it, so it is worn exactly as you built it.
+
+That is fine for a model built like the game's own helmets, standing upright. The game's
+**hats** are built lying on their side and turned upright when worn, so a hat made by editing
+one of them (or made the same way) sits sideways on the head. `worn_like` names the vanilla
+item it should sit like, and it then sits there on every body, the paper doll included. Pick
+the vanilla hat closest in shape and size. Masks work the same way, by naming a vanilla mask.
+
+S.A.M looks at a mod helmet's model when it loads, and if the model is clearly built on its
+side and the item has no `worn_like`, `sam_log.txt` says so and names the item.
+
+**Gloves and boots** are different. The game draws them by swapping the whole arm or leg for
+a model of that arm wearing that pair, picked from its own list of gloves and boots. A mod's
+own model never shows on the body (it still shows on the floor). `worn_like` picks which
+vanilla pair is drawn. Without it, the item is drawn as the gloves or boots its
+`model_from_item` names, or else as plain `GLOVES` or `LEATHER_BOOTS`.
+
+`worn_like` has to name a vanilla item from the same slot. It is ignored, with a line in the
+log, anywhere else.
+
+It belongs to the model **file**, because the game knows a hat only by its model: every hat or
+mask that uses the same `.vox` sits the same way, and `sam_log.txt` names any item that shares a
+file with one that has a `worn_like`. Give each item its own file to wear them differently. The
+models in `model_states` count as the item's own too, so a hat whose only models of its own are
+its cursed or blessed looks can still use `worn_like`.
+
+A hat or mask with no model of its own does not need it: it already sits where the item its
+model came from sits. The exception is a mask that borrows the `TOOL_GLASSES` or `MONOCLE`
+model. The game wears those as separate models it picks by item type, so such a mask shows the
+floor model at the usual mask spot. To sit like glasses, give it its own model and `worn_like`.
+
+To check where a worn item really ended up, `sam_get_limb(uid, "helmet")` reads that part of
+the body: its model, its turn (`roll`), and the point it is drawn from (`focalx`, `focaly`,
+`focalz`).
+
 ### On a class, as a whole body
 
 ```json

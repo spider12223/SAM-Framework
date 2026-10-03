@@ -6,10 +6,18 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { CATEGORIES, SLOTS, ITEM_TYPES } from '@/data/schemas.js';
+import { itemsForSlot } from '@/data/equipment.js';
 
 /* Melee only. Ranged cannot be custom (firing is gated on a hardcoded list of vanilla
  * bows), and a throwable is declared with category THROWN instead, which already works. */
 const WEAPON_SKILLS = ['sword', 'axe', 'mace', 'polearm'];
+// The slots "worn_like" works in, and the paperdoll slot whose vanilla items it may name.
+const WORN_SLOTS = {
+  EQUIPPABLE_IN_SLOT_HELM: 'helmet',
+  EQUIPPABLE_IN_SLOT_MASK: 'mask',
+  EQUIPPABLE_IN_SLOT_GLOVES: 'gloves',
+  EQUIPPABLE_IN_SLOT_BOOTS: 'boots',
+};
 
 /* Engine traits an item can opt into. Barony decides what an item IS from hardcoded lists
  * of vanilla items, and a custom item is never on them -- these put it on. */
@@ -70,6 +78,7 @@ export default function ItemEditor() {
   const [model, setModel] = useState(editDef?.model ?? '');
   const [modelFp, setModelFp] = useState(editDef?.model_fp ?? '');
   const [modelFromItem, setModelFromItem] = useState(editDef?.model_from_item ?? '');
+  const [wornLike, setWornLike] = useState(editDef?.worn_like ?? '');
   const [icon, setIcon] = useState(editDef?.icon ?? '');
   const [attribs, setAttribs] = useState(() =>
     Object.entries(editDef?.attributes ?? {}).map(([key, value]) => ({ key, value }))
@@ -121,6 +130,8 @@ export default function ItemEditor() {
     if (model.trim()) def.model = model.trim();
     if (modelFp.trim()) def.model_fp = modelFp.trim();
     if (modelFromItem.trim()) def.model_from_item = modelFromItem.trim();
+    // Only a hat, mask, gloves or boots is worn by matching it against vanilla items.
+    if (WORN_SLOTS[slot] && wornLike.trim()) def.worn_like = wornLike.trim();
     if (icon.trim()) def.icon = icon.trim();
     if (attribs.length) {
       def.attributes = Object.fromEntries(attribs.map((a) => [a.key, a.value]));
@@ -151,7 +162,7 @@ export default function ItemEditor() {
   const def = useMemo(buildDef,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [nameId, nameUnid, description, category, slot, weaponSkill, traits, weight, goldValue, level, stackable,
-      magicLevel, model, modelFp, modelFromItem, icon, attribs, soundRows, namespace]);
+      magicLevel, model, modelFp, modelFromItem, wornLike, icon, attribs, soundRows, namespace]);
   const ownSoundIds = useMemo(() => sounds.filter((s) => s.id).map((s) => s.id), [sounds]);
   const preview = useMemo(() => JSON.stringify(def, null, 2), [def]);
   const hints = useMemo(() => checkBalance('item', def), [def]);
@@ -197,7 +208,16 @@ export default function ItemEditor() {
               <Select value={category} onChange={setCategory} options={CATEGORIES} />
             </Field>
             <Field label="Equip Slot" hint="NO_EQUIP for items that can't be worn or wielded.">
-              <Select value={slot} onChange={setSlot} options={SLOTS} />
+              <Select
+                value={slot}
+                onChange={(s) => {
+                  // A worn_like names an item from ONE slot; carried into another it would be
+                  // refused in game, so it does not survive a change of worn slot.
+                  if (WORN_SLOTS[s] !== WORN_SLOTS[slot]) setWornLike('');
+                  setSlot(s);
+                }}
+                options={SLOTS}
+              />
             </Field>
             <Field
               label="Engine traits"
@@ -297,7 +317,7 @@ export default function ItemEditor() {
             <div className="sam-divider" />
             <Field
               label="…or reuse a vanilla item's model"
-              hint='No custom .vox? Borrow an existing item model instead (world + first-person), e.g. SILVER_SHIELD. Leave blank to auto-pick by equip slot (a shield looks like a shield, boots like boots…). Ignored if a custom model is set above.'
+              hint='No custom .vox? Borrow an existing item model instead (world + first-person), e.g. SILVER_SHIELD. Leave blank to auto-pick by equip slot (a shield looks like a shield, boots like boots…). A custom model above replaces it, except on gloves and boots: there it still picks the pair drawn on the body unless Worn like is set.'
             >
               <SearchSelect
                 options={ITEM_TYPES}
@@ -310,6 +330,25 @@ export default function ItemEditor() {
                 <button type="button" className="mt-1 text-xs underline" style={{ color: '#a03327' }} onClick={() => setModelFromItem('')}>clear</button>
               )}
             </Field>
+            {WORN_SLOTS[slot] && (
+              <Field
+                label="Worn like (vanilla item)"
+                hint={WORN_SLOTS[slot] === 'helmet' || WORN_SLOTS[slot] === 'mask'
+                  ? `The game places a hat or mask by matching its model against its own, so your own .vox is worn exactly as built. One built lying on its side, the way the game's hats are, sits sideways on the head. Pick the vanilla item it should sit like (e.g. ${WORN_SLOTS[slot] === 'mask' ? 'MASK_BANDIT' : 'HAT_BOUNTYHUNTER'}) and it sits there on every body. Every item that uses the same .vox sits the same way. Not needed without a custom model.`
+                  : 'The game draws gloves and boots by swapping in whole arm and leg models, so your own .vox only shows on the floor. Pick which vanilla pair is drawn on the body. Blank: the pair your vanilla model above names, or plain gloves / leather boots.'}
+              >
+                <SearchSelect
+                  options={itemsForSlot(WORN_SLOTS[slot], ITEM_TYPES)}
+                  value={wornLike}
+                  onPick={setWornLike}
+                  placeholder={WORN_SLOTS[slot] === 'helmet' ? 'HAT_BOUNTYHUNTER' : (WORN_SLOTS[slot] === 'mask' ? 'MASK_BANDIT' : (WORN_SLOTS[slot] === 'gloves' ? 'GAUNTLETS' : 'IRON_BOOTS'))}
+                  allowCustom
+                />
+                {wornLike && (
+                  <button type="button" className="mt-1 text-xs underline" style={{ color: '#a03327' }} onClick={() => setWornLike('')}>clear</button>
+                )}
+              </Field>
+            )}
             <Field label="Inventory Icon (2D)" hint="Path to a PNG in your mod folder (e.g. items/shadowblade.png). Separate from the 3D model — this is the flat hotbar/inventory icon.">
               <TextInput value={icon} onChange={setIcon} placeholder="items/shadowblade.png" />
             </Field>

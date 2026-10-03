@@ -1,6 +1,6 @@
 # S.A.M function reference
 
-Every script function the framework exposes: **336 functions** and **87 events**.
+Every script function the framework exposes: **337 functions** and **87 events**.
 All of them work identically in Lua, JavaScript and TypeScript.
 
 This page is generated from the API definition, so it cannot fall behind the code. If a
@@ -21,7 +21,7 @@ the kind, so the line is always what really happens:
 | `read` (50) | Reads a player. The host can read everyone; a client can read only its own player. |
 | `all` (15) | Changes a table every machine keeps (class and item patches, species resists). A host call runs everywhere and reaches players who join later. |
 | `local` (26) | Answers for the machine running it: its clock, its files, its music. |
-| `any` (56) | The same answer on every machine. Safe anywhere. |
+| `any` (57) | The same answer on every machine. Safe anywhere. |
 
 Every event ends with a **Multiplayer:** line that says which machine it fires on and for
 whom. The whole model, with examples, and how to test co-op on one computer:
@@ -36,7 +36,7 @@ For guides and worked examples, see [scripting-reference.md](scripting-reference
 - [Context](#context) (13)
 - [Custom events](#custom-events) (2)
 - [Damage](#damage) (10)
-- [Entities](#entities) (10)
+- [Entities](#entities) (11)
 - [Game content](#game-content) (5)
 - [HUD](#hud) (3)
 - [Hooks](#hooks) (2)
@@ -852,6 +852,21 @@ Read which way a player is looking. 0 = +x (east), increasing toward +y — so t
 | `player` | int |
 
 **Returns:** the player's facing yaw in radians in [0, 2π) (number), or nil/undefined for an absent player
+
+**Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler. Reads this machine's own copy of the entity, which on a client is interpolated between the host's updates and can lag it by a fraction of a second. Two machines can therefore answer slightly differently at the same moment: decide anything that depends on the exact number on the host and send the verdict with sam_send_packet, rather than working it out inside on_packet.
+
+### `sam_get_limb(uid, part)`
+
+One body part of a player, or of a creature the game can put a helmet on (a human, goblin, skeleton, gnome, kobold and the like), as the game left it this tick: the model the game put on it (sprite, and model when that is a mod's own .vox), whether the game hid it (visible), where it is, how it is turned, the point it is drawn from (focal) and its scale. A mod can check where a worn or held item really sits, or line an effect up with a hand or the head. Read-only.
+
+nil for every other creature (a rat, a slime, a ghoul, even a bugbear with its sword and shield), for a player in rat or spider form, and for a part not built yet in its first tick. On a creature with a custom body, or a part a script gave a model with sam_set_model, what is drawn on screen is not what this reports: the custom model is drawn instead, and visible only says the game did not hide the part. Rotations are radians. pitch on a worn part follows its owner's.
+
+| argument | type |
+|---|---|
+| `uid` | int |
+| `part` | string — one of: `torso`, `right_leg`, `left_leg`, `right_arm`, `left_arm`, `weapon`, `shield`, `cloak`, `helmet`, `mask` |
+
+**Returns:** a table/object with sprite, model, visible, x, y, z, yaw, pitch, roll, focalx, focaly, focalz, scalex, scaley, scalez, or nil
 
 **Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler. Reads this machine's own copy of the entity, which on a client is interpolated between the host's updates and can lag it by a fraction of a second. Two machines can therefore answer slightly differently at the same moment: decide anything that depends on the exact number on the host and send the verdict with sam_send_packet, rather than working it out inside on_packet.
 
@@ -4945,8 +4960,11 @@ Fires a player's melee swing has connected and the damage is decided, but not ye
 | `backstab` | int |
 | `flanking` | int |
 | `weapon_type` | int |
+| `charge` | int |
+| `max_charge` | int |
+| `fully_charged` | int |
 
-The only place in the engine where the attacker, the crit state and a writable damage figure are all available at once. backstab and flanking are Barony's nearest thing to a critical hit and die as locals everywhere else, so this is the only way to see one. Rewrite with sam_modify_value or `event.damage = x`; returning false makes the blow land for nothing. Host-side, melee only -- arrows and spells do not come through here, use on_damage_multiplier for those.
+The only place in the engine where the attacker, the crit state and a writable damage figure are all available at once. backstab and flanking are Barony's nearest thing to a critical hit and die as locals everywhere else, so this is the only way to see one. charge is how far the swing was wound up, 0 to max_charge (30, or less under the Ensemble flute), and fully_charged is 1 for a swing held all the way. Such a swing does double damage in vanilla (a rapier a little more), already counted in damage. Rewrite with sam_modify_value or `event.damage = x`; returning false makes the blow land for nothing. Host-side, melee only -- arrows and spells do not come through here, use on_damage_multiplier for those.
 
 **Multiplayer:** Fires on the host, for every player.
 
@@ -5189,8 +5207,11 @@ Fires a player's melee weapon hits an entity.
 | `damage` | int |
 | `weapon_type` | int |
 | `lethal` | int |
+| `charge` | int |
+| `max_charge` | int |
+| `fully_charged` | int |
 
-melee only; lethal is 0/1
+melee only; lethal is 0/1. charge is how far the swing was wound up, 0 to max_charge (30, or less under the Ensemble flute); fully_charged is 1 for a swing held all the way. Such a swing does double damage in vanilla (a rapier a little more), already counted in damage.
 
 **Multiplayer:** Fires on the host, for every player (melee is resolved there).
 

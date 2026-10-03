@@ -4742,6 +4742,31 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		return 1;
 	}
 
+	// sam_get_limb(uid, part) -> { sprite, model, visible, x, y, z, yaw, pitch, roll, focalx,
+	// focaly, focalz, scalex, scaley, scalez } | nil. One body part of a player or a humanoid
+	// creature, read as the engine left it this tick: the model it wears, where it is drawn
+	// from (focal), how it is turned and scaled. Read-only.
+	int lua_sam_get_limb(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long uid = (long long)luaL_checkinteger(Ls, 1);
+		const std::string part = luaL_checkstring(Ls, 2);
+		SAMLua::LimbInfo li;
+		if ( !SAMLua::limbInfo(uid, part, li) ) { lua_pushnil(Ls); return 1; }
+		lua_newtable(Ls);
+		lua_pushinteger(Ls, (lua_Integer)li.sprite); lua_setfield(Ls, -2, "sprite");
+		if ( li.model.empty() ) { lua_pushnil(Ls); } else { lua_pushstring(Ls, li.model.c_str()); }
+		lua_setfield(Ls, -2, "model");
+		lua_pushboolean(Ls, li.visible ? 1 : 0); lua_setfield(Ls, -2, "visible");
+		const struct { const char* k; double v; } nums[] = {
+			{ "x", li.x }, { "y", li.y }, { "z", li.z }, { "yaw", li.yaw }, { "pitch", li.pitch },
+			{ "roll", li.roll }, { "focalx", li.focalx }, { "focaly", li.focaly }, { "focalz", li.focalz },
+			{ "scalex", li.scalex }, { "scaley", li.scaley }, { "scalez", li.scalez },
+		};
+		for ( const auto& n : nums ) { lua_pushnumber(Ls, n.v); lua_setfield(Ls, -2, n.k); }
+		return 1;
+	}
+
 	// sam_get_entity_ticks(uid) -> frames this entity has existed | nil
 	int lua_sam_get_entity_ticks(lua_State* Ls)
 	{
@@ -10875,6 +10900,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		samLuaRegister(L, "sam_get_velocity", lua_sam_get_velocity);
 		samLuaRegister(L, "sam_get_entity_size", lua_sam_get_entity_size);
 		samLuaRegister(L, "sam_get_entity_sprite", lua_sam_get_entity_sprite);
+		samLuaRegister(L, "sam_get_limb", lua_sam_get_limb);
 		samLuaRegister(L, "sam_get_entity_ticks", lua_sam_get_entity_ticks);
 		samLuaRegister(L, "sam_get_map_seed", lua_sam_get_map_seed);
 		samLuaRegister(L, "sam_is_dark_level", lua_sam_is_dark_level);
@@ -11375,6 +11401,81 @@ namespace SAMLua
 		return y;
 #else
 		(void)uid; return -1.0;
+#endif
+	}
+
+	bool limbInfo(long long ownerUid, const std::string& partIn, LimbInfo& out)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		std::string part = partIn;
+		for ( char& c : part ) { c = (char)std::tolower((unsigned char)c); }
+		static const struct { const char* name; int limb; } kParts[] = {
+			{ "torso", LIMB_HUMANOID_TORSO }, { "right_leg", LIMB_HUMANOID_RIGHTLEG },
+			{ "left_leg", LIMB_HUMANOID_LEFTLEG }, { "right_arm", LIMB_HUMANOID_RIGHTARM },
+			{ "left_arm", LIMB_HUMANOID_LEFTARM }, { "weapon", LIMB_HUMANOID_WEAPON },
+			{ "shield", LIMB_HUMANOID_SHIELD }, { "cloak", LIMB_HUMANOID_CLOAK },
+			{ "helmet", LIMB_HUMANOID_HELMET }, { "helm", LIMB_HUMANOID_HELMET },
+			{ "mask", LIMB_HUMANOID_MASK },
+		};
+		int limb = -1;
+		for ( const auto& kp : kParts ) { if ( part == kp.name ) { limb = kp.limb; break; } }
+		if ( limb < 0 )
+		{
+			static std::set<std::string> warned;
+			if ( warned.insert(part).second )
+			{
+				SAM_WARN("SAM", "sam_get_limb: unknown part '" + partIn + "'. Valid: torso, right_leg, left_leg, "
+					"right_arm, left_arm, weapon, shield, cloak, helmet, mask.");
+			}
+			return false;
+		}
+		Entity* owner = samResolveEntityQuiet(ownerUid);
+		if ( !owner ) { return false; }
+		// The same child list the engine's own limb code walks. A player's starts one earlier
+		// than a creature's: actPlayer numbers the torso 1 where the creature code numbers it
+		// LIMB_HUMANOID_TORSO (2).
+		int index = -1;
+		if ( owner->behavior == &actPlayer )
+		{
+			// A player in rat or spider form keeps the same children but reuses them for that
+			// body (the rat's whole body sits in the torso's slot), which actPlayer itself treats
+			// as not humanoid. Answer nil, as for a rat creature.
+			const Stat* st = owner->getStats();
+			if ( !st || st->type == RAT || st->type == SPIDER ) { return false; }
+			index = limb - 1;
+		}
+		else if ( owner->behavior == &actMonster )
+		{
+			switch ( owner->getMonsterTypeFromSprite() )
+			{
+				// The bodies whose limb code uses the LIMB_HUMANOID_* layout (actmonster.cpp
+				// monsterAnimate, each one's MoveBodyparts).
+				case AUTOMATON: case DRYAD: case GREMLIN: case GNOME: case GOATMAN: case GOBLIN:
+				case HUMAN: case INCUBUS: case INSECTOID: case KOBOLD: case MYCONID: case SALAMANDER:
+				case SHADOW: case SHOPKEEPER: case SKELETON: case SUCCUBUS: case VAMPIRE:
+					index = limb;
+					break;
+				default:
+					return false;
+			}
+		}
+		else
+		{
+			return false;
+		}
+		node_t* node = list_Node(&owner->children, index);
+		if ( !node || !node->element ) { return false; }
+		const Entity* e = (const Entity*)node->element;
+		out.sprite = (int)e->sprite;
+		out.model = SAMModels::idForModelIndex((int)e->sprite);
+		out.visible = !e->flags[INVISIBLE];
+		out.x = e->x; out.y = e->y; out.z = e->z;
+		out.yaw = e->yaw; out.pitch = e->pitch; out.roll = e->roll;
+		out.focalx = e->focalx; out.focaly = e->focaly; out.focalz = e->focalz;
+		out.scalex = e->scalex; out.scaley = e->scaley; out.scalez = e->scalez;
+		return true;
+#else
+		(void)ownerUid; (void)partIn; (void)out; return false;
 #endif
 	}
 

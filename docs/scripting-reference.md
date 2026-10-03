@@ -217,6 +217,21 @@ locals everywhere else, so this is the only way to see one. `e.attacker_uid` is 
 `on_before_damage` where it is always 0 — the engine's damage funnel carries no attacker, which
 is why every older damage event reports zero and still does.
 
+**Charged swings.** Holding the attack button winds a swing up. Both `player.on_before_hit` and
+`player.on_hit` say how far: `e.charge` runs from 0 to `e.max_charge`, and `e.fully_charged` is 1
+when the swing was held all the way. `max_charge` is 30 unless the Ensemble flute shortens it, so
+compare against it rather than against 30. A fully charged swing already does double damage in
+vanilla (a rapier a little more), and `e.damage` includes that.
+
+```lua
+if e.name == "player.on_before_hit" and e.fully_charged == 1 then
+  e.damage = e.damage + 5                          -- a heavier blow on top of the doubling
+end
+if e.name == "player.on_hit" then
+  local wound = e.charge / e.max_charge            -- 0.0 to 1.0
+end
+```
+
 The order for one melee swing is `on_damage_multiplier`, then `player.on_before_hit`, then
 `on_before_monster_damage`, then `player.on_hit`.
 

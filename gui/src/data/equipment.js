@@ -31,7 +31,8 @@ export const findSlot = (id) => EQUIP_SLOTS.find((s) => s.id === id);
 
 /**
  * The equipment slot a vanilla item belongs to, or null for backpack-only.
- * Order matters: more specific patterns first (a "SPIKED_GAUNTLET" is a weapon, not gloves).
+ * Order matters: more specific patterns first. Knuckles and SPIKED_GAUNTLETS are GLOVES in the
+ * engine (items.json equip_slot "gloves"; setGloveSprite draws them on the arm), not weapons.
  */
 export function equipSlotOf(type) {
   const t = String(type || '');
@@ -44,9 +45,9 @@ export function equipSlotOf(type) {
   if (/SHIELD|SCUTUM|BUCKLER/.test(t)) return 'shield';
   if (/TORCH|LANTERN|CRYSTAL_SHARD|LIGHT_SOURCE/.test(t)) return 'shield'; // offhand light
   if (/BOOTS|SHOES|LOAFERS|CLEAT|GREAVE/.test(t)) return 'boots';
-  if (/GLOVES|GAUNTLET|BRACERS/.test(t) && !/SPIKED_GAUNTLET|KNUCKLE/.test(t)) return 'gloves';
+  if (/GLOVES|GAUNTLET|BRACERS|KNUCKLE/.test(t)) return 'gloves';
   if (/CLOAK|CAPE|BACKPACK/.test(t)) return 'cloak';
-  if (/HELM|^HAT_|HOOD|COIF|CROWN|CIRCLET|LAURELS|TURBAN|HEADDRESS|MITER|PHRYGIAN/.test(t)) return 'helmet';
+  if (/HELM|^HAT_|HOOD|COIF|CROWN|CIRCLET|LAURELS|TURBAN|HEADDRESS|MITER|PHRYGIAN|_CAP$/.test(t)) return 'helmet';
   // Body armour. PAULDRONS and SHAWL are torso pieces (Barony's breastplate slot,
   // entity.cpp checkEquipType), not a cloak — a tester caught iron pauldrons landing there.
   // An APRON (MACHINIST_APRON, real equip_slot "torso") is body armour for the same reason.
@@ -54,7 +55,7 @@ export function equipSlotOf(type) {
   if (/GLASSES|MONOCLE|EYEPATCH|BLINDFOLD|^MASK|_MASK/.test(t)) return 'mask';
   if (/^AMULET_/.test(t)) return 'amulet';
   if (/^RING_/.test(t)) return 'ring';
-  if (/SWORD|DAGGER|RAPIER|CLAYMORE|ANELACE|FALSHION|FALCHION|AXE|MACE|FLAIL|SHILLELAGH|MORNINGSTAR|WARHAMMER|SPEAR|HALBERD|TRIDENT|LANCE|GLAIVE|POLEARM|PARTISAN|BOW|CROSSBOW|SLING|LONGBOW|KNUCKLE|SPIKED_GAUNTLET|WHIP|SCYTHE|QUARTERSTAFF|SICKLE|MAUL|CAT_O/.test(t)) return 'weapon';
+  if (/SWORD|DAGGER|RAPIER|CLAYMORE|ANELACE|FALSHION|FALCHION|AXE|MACE|FLAIL|SHILLELAGH|MORNINGSTAR|WARHAMMER|SPEAR|HALBERD|TRIDENT|LANCE|GLAIVE|POLEARM|PARTISAN|BOW|CROSSBOW|SLING|LONGBOW|WHIP|SCYTHE|QUARTERSTAFF|SICKLE|MAUL|CAT_O/.test(t)) return 'weapon';
   return null;
 }
 

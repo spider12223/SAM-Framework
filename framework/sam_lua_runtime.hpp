@@ -134,6 +134,19 @@ namespace SAMLua
 	bool lookAt(unsigned long long uid, unsigned long long targetUid);
 	// Read an entity's facing, or a negative number if the uid is unknown.
 	double entityFacing(unsigned long long uid);
+	// One body part of a player or a humanoid creature, as sam_get_limb reports it. Shared by both
+	// runtimes so they cannot disagree about which child entity is which part.
+	struct LimbInfo
+	{
+		int sprite = 0;
+		std::string model; // the mod model id when the part wears a mod's model, "" for a vanilla one
+		bool visible = false;
+		double x = 0, y = 0, z = 0, yaw = 0, pitch = 0, roll = 0;
+		double focalx = 0, focaly = 0, focalz = 0, scalex = 0, scaley = 0, scalez = 0;
+	};
+	// False when the owner is unknown, has no humanoid body, has not built that part yet, or the
+	// part is not one of the names sam_get_limb takes (that case logs one warning per name).
+	bool limbInfo(long long ownerUid, const std::string& part, LimbInfo& out);
 
 	// Shared by both runtimes' sam_spawn_entity. Returns the new uid, or 0.
 	unsigned long long spawnScriptedEntity(double tileX, double tileY,

@@ -31,6 +31,7 @@
 
 struct SAMModManifest;  // from sam_workshop.hpp (full type only needed in the .cpp)
 class Item;             // items.hpp (only pointers cross this header)
+class Entity;           // entity.hpp (only pointers cross this header)
 
 // Custom item ids occupy [5000, NUM_ITEM_SLOTS). Chosen well above NUMITEMS.
 static const int SAM_ITEM_ID_BASE = 5000;
@@ -72,6 +73,18 @@ struct SAMItemDef
 	std::map<std::string, int> modelFpStateIdx;
 	std::string modelFromItem;      // vanilla ItemType name (e.g. "SILVER_SHIELD") to clone the 3D model from
 	std::string icon;               // mod-relative PNG path — loaded into the inventory icon
+
+	// "worn_like": the vanilla item (ItemType NAME, e.g. "HAT_BOUNTYHUNTER") this item is worn
+	// like on the body. Barony decides where a hat or mask sits by comparing its MODEL with the
+	// vanilla models it knows (the per-body model_positions.json tables plus hardcoded HAT_*
+	// checks), and which arm or leg model to draw for gloves and boots by comparing the item
+	// TYPE with vanilla types. A mod's own .vox matches none of them, so a hat authored lying on
+	// its side the way the vanilla hats are is worn sideways, and gloves or boots draw nothing.
+	// Resolved when the item registers: wornLikeType is the vanilla type, or -1 for none.
+	// Gloves and boots always get one (see registerItemAt), because the engine has no row for
+	// a custom type there at all.
+	std::string wornLike;
+	int wornLikeType = -1;
 
 	// Which weapon skill this item trains and scales off: "sword", "axe", "mace",
 	// "polearm", "ranged", "thrown" or "unarmed". Empty = "sword" for an equippable
@@ -195,6 +208,26 @@ public:
 	// id is not a registered custom item. The engine asks this from getWeaponSkill.
 	static int weaponSkillFor(int itemId);
 
+	// "worn_like", for a hat or a mask. Given a worn limb's model index, the model the engine's
+	// placement code should compare: the vanilla twin's worn model when the index is a mod
+	// item's OWN model and the item names a twin, otherwise the index unchanged. Only a mod's
+	// own appended models are ever mapped, so a vanilla model always comes back as itself.
+	// Use it through SAMWornAsTwin below rather than directly.
+	static int wornSpriteFor(int sprite);
+
+	// "worn_like", for gloves and boots. The vanilla type the engine should pick the arm or leg
+	// model by: itemType itself for a vanilla item, otherwise what the custom item resolved at
+	// load (its worn_like, or the pair its placeholder model came from). A custom glove or boot
+	// type never comes back, because the engine has no arm or leg model for one.
+	static int wornTypeFor(int itemType);
+
+	// The mask ladder in each body's limb code: a run of statements rather than one function,
+	// so it cannot hold a SAMWornAsTwin without a new block. Begin right before it and end right
+	// after it. Not nestable, and nothing between the two may leave early. Both limbs may be
+	// null. No-op with no mod hat or mask that names a twin.
+	static void wornAsTwinBegin(Entity* mask, Entity* helm);
+	static void wornAsTwinEnd();
+
 	// Write a def at a FIXED id, outside the load-order allocator. Only the framework's
 	// own built-ins use this; a mod can never reach the reserved band.
 	static bool registerBuiltinAt(int id, SAMItemDef def);
@@ -256,4 +289,22 @@ public:
 	// pointers dropped, a worn twin's slot restored). Only for callers that are themselves at
 	// the drain's safe point, like SAMSpells::drainRemoveQueue. Refuses a worn item.
 	static void destroyNow(Item* item, int owner);
+};
+
+// For as long as it lives, a worn hat or mask limb READS as its "worn_like" twin's model, so
+// every placement rule the engine keys on the model places it like that twin: the per-body
+// model_positions.json tables, the hardcoded HAT_* and hood checks, and the helm-and-mask
+// expansion. The limb's own model is put back when it ends, before anything draws or is sent
+// to a client. Does nothing for a vanilla model, and nothing at all with no mod loaded.
+class SAMWornAsTwin
+{
+public:
+	explicit SAMWornAsTwin(Entity* limb);
+	~SAMWornAsTwin();
+	SAMWornAsTwin(const SAMWornAsTwin&) = delete;
+	SAMWornAsTwin& operator=(const SAMWornAsTwin&) = delete;
+private:
+	Entity* m_limb = nullptr; // null = nothing to undo
+	int m_own = 0;
+	int m_twin = 0;
 };
