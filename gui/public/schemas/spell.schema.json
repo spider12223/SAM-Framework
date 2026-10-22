@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://sam-framework.dev/schemas/spell.schema.json",
   "title": "S.A.M Spell",
-  "description": "Defines a custom spell. S.A.M's spell loader registers it into its runtime spell registry at a reserved id (>=2000) so it can be referenced by name ('namespace:spell'). NOTE: this version REGISTERS and validates the spell metadata and lets sam_grant_spell reference it; building the in-engine spell object and the actual CASTING behavior (projectile, damage, on-hit effects) is delivered in a later update. Every 'payload'/'projectile_type'/'damage_*'/'on_hit_*' field below is parsed and stored now but does not yet cast.",
+  "description": "Defines a custom spell. S.A.M's spell loader registers it into its runtime spell registry at a reserved id (>=2000) so it can be referenced by name ('namespace:spell'). The spell casts like the vanilla spell its 'payload' names, and shows in the spell list with its name and icon. Nothing grants it by itself: add its id to a class's or race's starting_spells, call sam_grant_spell, or give your mod a spellbook item whose spellbook_spell is this spell. Fields that are saved but not used yet: speed, and damage_min (it only decides whether the tooltip shows a damage tag; damage_max sets the damage).",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -48,7 +48,7 @@
         "none"
       ],
       "default": "missile",
-      "description": "How the spell is delivered. 'missile' = a single bolt (Barony PROPULSION_MISSILE / spell_element_missile root). 'missile_trio' = a 3-way spread (PROPULSION_MISSILE_TRIO / spell_element_trio). 'none' = a non-projectile/self spell. (Parsed now; drives casting in a later update.)"
+      "description": "How the spell is delivered. 'missile' = a single bolt (Barony PROPULSION_MISSILE / spell_element_missile root). 'missile_trio' = a 3-way spread (PROPULSION_MISSILE_TRIO / spell_element_trio). 'none' only marks the tooltip as a self spell: the spell still fires its bolt, so a spell that must not shoot needs a script on player.on_spell_cast that returns false."
     },
     "payload": {
       "enum": [
@@ -74,17 +74,17 @@
         "steal_weapon",
         "drain_soul"
       ],
-      "description": "The spell's effect payload — maps 1:1 to a real Barony spell element (e.g. 'fire' -> spell_element_fireball, 'force' -> spell_element_forcebolt, 'charm_monster' -> spell_element_charm, 'magic_missile' -> spell_element_magicmissile). Determines the bolt's on-hit behavior. (Parsed now; drives casting in a later update.)"
+      "description": "The spell's effect payload — maps 1:1 to a real Barony spell element (e.g. 'fire' -> spell_element_fireball, 'force' -> spell_element_forcebolt, 'charm_monster' -> spell_element_charm, 'magic_missile' -> spell_element_magicmissile). Determines the bolt's on-hit behavior."
     },
     "damage_min": {
       "type": "integer",
       "minimum": 0,
-      "description": "Minimum damage the spell deals. (Parsed now; applied when casting lands in a later update.)"
+      "description": "Not used by the bolt: damage_max sets the damage. Setting either number only adds a damage tag to the tooltip."
     },
     "damage_max": {
       "type": "integer",
       "minimum": 0,
-      "description": "Maximum damage the spell deals. (Parsed now; applied when casting lands in a later update.)"
+      "description": "Damage the bolt deals (the payload's damage is set to this). Leave it out to keep the payload's own damage."
     },
     "range": {
       "type": "integer",
@@ -94,26 +94,26 @@
     "speed": {
       "type": "integer",
       "minimum": 0,
-      "description": "Projectile speed. (Parsed now; applied in a later update.)"
+      "description": "Not used yet: the bolt keeps the payload's speed."
     },
     "on_hit_effect": {
       "type": "string",
-      "description": "Optional. Status effect (an EFF_ effect name from stat.hpp, e.g. 'EFF_POISONED') applied to a struck target. (Parsed now; applied in a later update.)"
+      "description": "Optional. Status effect applied to whatever the bolt hits: a built-in name such as 'EFF_POISONED', or one of your own custom effects by its exact id ('namespace:effect', lowercase, e.g. 'mymod:plague'). A name that matches nothing is ignored, with one warning line in sam_log.txt. For payloads that apply a status of their own (slow, confuse, sleep and similar) it applies only when that status lands too. It applies whenever the bolt reports a hit: never for ghost_bolt or dig, for steal_weapon only when a weapon is actually taken, and for charm_monster only when the charm or pacify lands."
     },
     "on_hit_duration": {
       "type": "integer",
       "minimum": 0,
-      "description": "Optional. Duration in game ticks (50/sec) of on_hit_effect. (Parsed now; applied in a later update.)"
+      "description": "Optional. Duration in game ticks (50/sec) of on_hit_effect. 0 or left out uses the custom effect's own duration_ticks, otherwise 250 ticks (5 seconds)."
     },
     "on_hit_chance": {
       "type": "integer",
       "minimum": 0,
       "maximum": 100,
-      "description": "Optional. Percent chance (0-100) that on_hit_effect triggers on a hit. (Parsed now; applied in a later update.)"
+      "description": "Optional. Percent chance (0-100) that on_hit_effect triggers on a hit. 0 or left out means every hit."
     },
     "icon": {
       "type": "string",
-      "description": "Optional. Path (relative to the mod folder) to a PNG spell icon, e.g. 'spells/shadow_bolt.png'. (Parsed now; drawn when the spell UI lands in a later update.)"
+      "description": "Optional. Path (relative to the mod folder) to a PNG spell icon, e.g. 'spells/shadow_bolt.png'."
     },
     "starting_spell": {
       "type": "boolean",

@@ -3654,6 +3654,21 @@ namespace
 		return JS_NewBool(ctx, SAMLua::queueRemoveEntity((unsigned int)uid, "sam_remove_entity") ? 1 : 0);
 	}
 
+	// sam_make_follower(leader, monster_uid) -> bool. Twin of the Lua binding; the decision is
+	// SAMLua::recruitFollower, shared, so the two runtimes cannot disagree about who may be recruited.
+	JSValue js_sam_make_follower(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t leader = 0, uid = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &leader, "sam_make_follower") ) { return JS_FALSE; }
+		if ( !samJsReqI32Wide(ctx, argc, argv, 1, &uid, "sam_make_follower") ) { return JS_FALSE; }
+#ifdef SAM_JS_HAVE_BARONY
+		return JS_NewBool(ctx, SAMLua::recruitFollower((long long)leader, (long long)uid, "sam_make_follower") ? 1 : 0);
+#else
+		return JS_FALSE;
+#endif
+	}
+
 	// sam_spawn_companion(player, model_id [, scale]) -> uid | undefined. Twin of the Lua binding:
 	// spawns a floating companion that renders a registered custom .vox model and trails the
 	// player, ready to thrust forward on sam_companion_punch. Remove with sam_remove_entity.
@@ -8834,6 +8849,7 @@ namespace
 		samJsRegister(ctx, g, "sam_spawn_monster", js_sam_spawn_monster, 4);
 		samJsRegister(ctx, g, "sam_spawn_portal", js_sam_spawn_portal, 2);
 		samJsRegister(ctx, g, "sam_remove_entity", js_sam_remove_entity, 1);
+		samJsRegister(ctx, g, "sam_make_follower", js_sam_make_follower, 2);
 		samJsRegister(ctx, g, "sam_set_entity_facing", js_sam_set_entity_facing, 2);
 		samJsRegister(ctx, g, "sam_look_at", js_sam_look_at, 2);
 		samJsRegister(ctx, g, "sam_get_entity_facing", js_sam_get_entity_facing, 1);

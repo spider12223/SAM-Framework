@@ -10,7 +10,7 @@
     "prebuild": "node scripts/sync-schemas.mjs",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --import ./test/alias-loader.mjs test/codegen.test.mjs"
+    "test": "node --import ./test/alias-loader.mjs test/codegen.test.mjs && node --import ./test/alias-loader.mjs test/spellEffectRef.test.mjs"
   },
   "dependencies": {
     "ajv": "^8.17.1",

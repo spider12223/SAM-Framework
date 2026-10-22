@@ -7716,6 +7716,24 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 #endif
 	}
 
+	// sam_make_follower(leader, monster_uid) -> bool. Make a monster a real follower of a player:
+	// on the player's side, off the player's target list, in the follower list and on the ally HUD.
+	// `leader` is a player index or the uid of a player's entity. false when refused: a boss, a
+	// shopkeeper, a monster that already has a leader, or a player already at the Leadership cap.
+	// The decision lives in SAMLua::recruitFollower, so the JS twin cannot drift. Host only.
+	int lua_sam_make_follower(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const long long leader = (long long)luaL_checkinteger(Ls, 1);
+		const long long uid = (long long)luaL_checkinteger(Ls, 2);
+#ifdef SAM_LUA_HAVE_BARONY
+		lua_pushboolean(Ls, SAMLua::recruitFollower(leader, uid, "sam_make_follower") ? 1 : 0);
+		return 1;
+#else
+		(void)leader; (void)uid; lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
 	// ===== v1.11.0 persistent world state ==================================================
 	//
 	// Barony throws floors away: every level is regenerated from `mapseed`, and no map
@@ -10792,6 +10810,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		samLuaRegister(L, "sam_spawn_monster", lua_sam_spawn_monster);
 		samLuaRegister(L, "sam_spawn_portal", lua_sam_spawn_portal);
 		samLuaRegister(L, "sam_remove_entity", lua_sam_remove_entity);
+		samLuaRegister(L, "sam_make_follower", lua_sam_make_follower);
 		samLuaRegister(L, "sam_set_entity_facing", lua_sam_set_entity_facing);
 		samLuaRegister(L, "sam_look_at", lua_sam_look_at);
 		samLuaRegister(L, "sam_get_entity_facing", lua_sam_get_entity_facing);
@@ -12113,6 +12132,130 @@ namespace SAMLua
 	}
 
 	bool queueRemoveEntity(unsigned int uid, const char* who) { return samQueueRemoveEntity((Uint32)uid, who); }
+
+	// sam_make_follower, both runtimes. The recipe is the vanilla Scroll of Summon's
+	// (item_usage_funcs.cpp): forceFollower, then monsterAllyIndex, the ally flag and the ally
+	// colour. forceFollower itself sends a remote leader's machine the LEAD packet and the ally
+	// HUD stats, so nothing here is new on the wire: monsterAllyIndex (skill 42) and USERFLAG2 go
+	// out through the engine's own senders, which a stock client already handles.
+	//
+	// What forceFollower does NOT do is decide who may be recruited or how many: the scroll and
+	// the Dominate spell each do that their own way, and a script has to do it somewhere. The
+	// refusals below are Dominate's "invalid creature" list (spellEffectDominate, magic.cpp) and
+	// the cap makeFollower / jewelItemRecruit apply. The scroll itself ignores the cap, so this is
+	// stricter than the scroll: a script that wants to exceed it can remove the monster it spawned.
+	bool recruitFollower(long long leaderArg, long long monsterUid, const char* who)
+	{
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( multiplayer == CLIENT ) { SAM_WARN("SAM", std::string(who) + " refused: host only."); return false; }
+
+		// The leader is a player: an index 0..MAXPLAYERS-1, or the uid of that player's entity
+		// (sam_get_player_uid gives it). A player's uid below MAXPLAYERS would read as an index, so
+		// the documentation tells scripts to pass the index for those.
+		Entity* leader = nullptr;
+		if ( leaderArg >= 0 && leaderArg < MAXPLAYERS )
+		{
+			leader = players[leaderArg] ? players[leaderArg]->entity : nullptr;
+		}
+		else
+		{
+			leader = samResolveEntityRead(leaderArg, who);
+		}
+		if ( !leader || leader->behavior != &actPlayer )
+		{
+			SAM_WARN("SAM", std::string(who) + ": the leader has to be a player who is in the game (an index 0.."
+				+ std::to_string(MAXPLAYERS - 1) + ", or the uid of a player's entity); got "
+				+ std::to_string(leaderArg) + ".");
+			return false;
+		}
+		const int p = leader->skill[2];
+		if ( p < 0 || p >= MAXPLAYERS || !stats[p] ) { return false; }
+
+		Entity* mon = samResolveWritable(monsterUid, who);
+		if ( !mon ) { return false; }
+		Stat* ms = mon->getStats();
+		if ( mon->behavior != &actMonster || !ms )
+		{
+			SAM_WARN("SAM", std::string(who) + ": uid " + std::to_string(monsterUid) + " is not a monster.");
+			return false;
+		}
+		if ( ms->HP <= 0 ) { return false; }   // already dying; the engine is about to free it
+
+		// makeFollower's own first test: a monster that already has a living leader is not
+		// recruited over its leader's head, not even by the same player.
+		if ( ms->leader_uid != 0 && uidToEntity((Sint32)ms->leader_uid) )
+		{
+			SAM_WARN("SAM", std::string(who) + ": uid " + std::to_string(monsterUid) + " already follows someone.");
+			return false;
+		}
+
+		// Dominate's list of creatures that can never be made a follower. isBossMonster already
+		// covers shopkeepers, other traders, the minotaur, shadows, liches, the devil and a mod's
+		// own monster declared a boss.
+		// The four bots are tested by Stat::type as well as by monsterIsTinkeringCreation(), which
+		// reads the entity's SPRITE: a monster spawned this very tick has not had one assigned yet
+		// (its first act does that), so the sprite test answers false for a sentrybot made a moment ago.
+		const bool bot = ( ms->type == SENTRYBOT || ms->type == GYROBOT || ms->type == SPELLBOT || ms->type == DUMMYBOT );
+		const bool innerDemon = ( ms->type == INCUBUS && !strncmp(ms->name, "inner demon", strlen("inner demon")) );
+		if ( mon->isBossMonster() || mon->isInertMimic() || innerDemon || bot
+			|| ms->type == MIMIC || ms->type == MINIMIMIC || ms->type == BAT_SMALL || ms->type == HOLOGRAM
+			|| mon->monsterIsTinkeringCreation() || mon->monsterAllySummonRank != 0 )
+		{
+			SAM_WARN("SAM", std::string(who) + ": uid " + std::to_string(monsterUid)
+				+ " cannot be made a follower (a boss, a shopkeeper or other trader, a mimic, a hologram,"
+				" a tinkering construct or a summoned ally; the Dominate spell refuses the same creatures).");
+			return false;
+		}
+
+		// The cap: the engine's own formula (makeFollower, jewelItemRecruit). It counts followers
+		// that still exist and leaves out the four tinkering bots, as the engine's own count does.
+		Stat* ls = stats[p];
+		const int allowed = std::min(8, std::max(4, 2 * (ls->getModifiedProficiency(PRO_LEADERSHIP) / 20)));
+		int have = 0;
+		for ( node_t* n = ls->FOLLOWERS.first; n != nullptr; n = n->next )
+		{
+			if ( !n->element ) { continue; }
+			Entity* f = uidToEntity((Sint32)(*((Uint32*)n->element)));
+			Stat* fs = f ? f->getStats() : nullptr;
+			if ( !fs ) { continue; }
+			if ( fs->type == SENTRYBOT || fs->type == GYROBOT || fs->type == SPELLBOT || fs->type == DUMMYBOT ) { continue; }
+			++have;
+		}
+		if ( have >= allowed )
+		{
+			SAM_INFO("SAM", std::string(who) + ": player " + std::to_string(p) + " already leads " + std::to_string(have)
+				+ " of the " + std::to_string(allowed) + " followers their Leadership allows, so uid "
+				+ std::to_string(monsterUid) + " was not recruited.");
+			return false;
+		}
+
+		if ( !forceFollower(*leader, *mon) ) { return false; }
+		mon->monsterAllyIndex = p;
+		if ( multiplayer == SERVER )
+		{
+			serverUpdateEntitySkill(mon, 42);   // monsterAllyIndex, for clients
+		}
+		mon->flags[USERFLAG2] = true;            // the ally colour
+		serverUpdateEntityFlag(mon, USERFLAG2);
+		if ( monsterChangesColorWhenAlly(ms) )
+		{
+			int bodypart = 0;
+			for ( node_t* node = mon->children.first; node != nullptr; node = node->next )
+			{
+				if ( bodypart >= LIMB_HUMANOID_TORSO )
+				{
+					if ( Entity* tmp = (Entity*)node->element ) { tmp->flags[USERFLAG2] = true; }
+				}
+				++bodypart;
+			}
+		}
+		SAM_INFO("SAM", std::string(who) + ": uid " + std::to_string(monsterUid) + " now follows player " + std::to_string(p)
+			+ " (" + std::to_string(have + 1) + " of " + std::to_string(allowed) + ").");
+		return true;
+#else
+		(void)leaderArg; (void)monsterUid; (void)who; return false;
+#endif
+	}
 
 	void drainRemoveQueue()
 	{

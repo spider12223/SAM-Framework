@@ -276,6 +276,10 @@ namespace SAMLua
 	// Ask for an entity to be removed on the next frame. Shared with the JS runtime so there is
 	// ONE queue and one drain, not two that can disagree about ordering.
 	bool queueRemoveEntity(unsigned int uid, const char* who);
+	// sam_make_follower, for both runtimes. `leader` is a player index (0..MAXPLAYERS-1) or the
+	// uid of a player's entity. Shared because "who may be recruited, and how many" is one decision:
+	// two copies would drift, and the refusals are the part a script author has to be able to trust.
+	bool recruitFollower(long long leader, long long monsterUid, const char* who);
 	Entity* resolveReadableEntity(long long uid, const char* who);
 	// ---- batch 4, combat ----------------------------------------------------------------
 	// The combat readers' resolver: an entity that HAS a Stat. Shared because "what counts as a

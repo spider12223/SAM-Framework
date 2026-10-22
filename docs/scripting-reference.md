@@ -49,7 +49,7 @@ see it and neither can silently starve the other.
 |---|---|
 | `player.on_item_use` | Don't run the item's normal use behaviour |
 | `player.on_before_item_pickup` | Refuse the pickup; the item stays on the floor |
-| `player.on_spell_cast` | Stop the cast. Fires before mana is spent, so it costs nothing |
+| `player.on_spell_cast` | Stop the cast: no bolt, no fizzle. Nothing is spent in multiplayer, but in single-player most of the mana is already gone (the casting animation spends it first) |
 | `world.on_item_deployed` | Don't build the engine's gadget; you built your own |
 
 Everything else is a notification. Returning `false` from one does nothing.
@@ -415,6 +415,50 @@ Fields vary per event; `sam_log(e.name)` inside your handler and read the log if
 `player.on_spell_cast` `player.on_spell_failed` `player.on_spell_learned`
 `player.on_effect_applied` `player.on_effect_removed` `player.on_effect_expired`
 `player.on_status_effect_tick` `player.on_poison_tick` `player.on_bleed_tick`
+
+#### A custom spell that does something new
+
+A spell's JSON picks one of the 21 built-in payloads, so a bolt, a spread or a status is as far as
+JSON goes. For anything else (summoning, a teleport, a heal), give the spell any payload and let a
+script do the work from `player.on_spell_cast`, then cancel the bolt:
+
+```lua
+local SPELL = "mymod:summon_rats"        -- the id in the spell's JSON
+
+function on_event(e)
+  if e.name == "player.on_spell_cast" and e.spell_name == SPELL then
+    local x, y = sam_get_position(sam_get_player_uid(e.player))
+    for i = 1, 2 do
+      local rat = sam_spawn_monster(x, y, "rat")      -- returns the uid; a wild rat for now
+      if rat and not sam_make_follower(e.player, rat) then
+        sam_remove_entity(rat)            -- refused (over the follower cap): do not leave a wild rat behind
+      end
+    end
+    return false                          -- no bolt
+  end
+end
+```
+
+* `e.spell_name` is the id the spell's JSON declared, `"mymod:summon_rats"` (before 3.5.0 it was
+  an internal name like `spell_sam_mymod_summon_rats`). A vanilla spell answers with the
+  engine's name, such as `"spell_forcebolt"`.
+* The player has to know the spell: put its id in a class's or race's `starting_spells`, or call
+  `sam_grant_spell`. Otherwise the event never fires.
+* `return false` stops the bolt. It does not give the mana back in single-player, where the casting
+  animation has already spent most of it.
+* **Spawned monsters are wild until you recruit them.** `sam_spawn_monster` and `sam_spawn_monsters`
+  make ordinary monsters that hunt the player. `sam_make_follower(player, uid)` turns one into a
+  real follower, the way the Scroll of Summon does: on the player's side, in the follower list, on
+  the ally panel. Spawn with `sam_spawn_monster`, which returns the uid (`sam_spawn_monsters` returns
+  only a count). It returns `false` for a boss, a shopkeeper, a monster that already has a leader,
+  and when the player already leads as many followers as their Leadership allows (4 below
+  Leadership 60, 6 from 60, 8 from 80). The Scroll of Summon ignores that cap and this does not, so
+  the recipe above removes a rat that was refused. A monster variant with
+  `"force_player_recruitable": true` is the other route: it does not attack, and the player
+  recruits it by pressing Use. (`sam_make_follower` is new in 3.5.0.)
+* A custom spell can apply a status of your own: put the effect's exact id (for example
+  `"mymod:plague"`, lowercase, with the namespace) in the spell's `on_hit_effect`. A misspelled id
+  applies nothing and leaves one warning line in `sam_log.txt`.
 
 ### Monsters
 

@@ -47,7 +47,7 @@ barony.exe -samtest=HelloTest -windowed -size=640x480
 | flag | |
 |---|---|
 | `-samtest=<mod>[,<mod>...]` | mod FOLDER names under `mods/`, in load order. This flag alone is enough. |
-| `-samtestclass=<class>` | the class to start as. Default `barbarian`. |
+| `-samtestclass=<class>` | the class to start as. Default `barbarian`. Only these thirteen are matched: barbarian, warrior, healer, rogue, wanderer, cleric, merchant, wizard, arcanist, joker, sexton, ninja, monk. Any other name (a later vanilla class such as mesmer, a custom class, a typo) is ignored without a message and the run starts as a Barbarian. |
 | `-samtestrace=<ns:race>` | a custom race to play as, by the `id` in its JSON. The race's stat changes and innate spells are applied as they would be for a character made in the menu. A race no loaded mod registers is exit code 3. |
 | `-samtestseed=<n>` | the dungeon seed. Fixed by default, so the same command twice walks the same dungeon and a failure can be looked at again. |
 | `-samtestfloor=<n>` | take the stairs down to floor `n` before leaving the mod to it. |

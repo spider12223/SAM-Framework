@@ -13,6 +13,7 @@
 #include "sam_lua_runtime.hpp"   // actionNameForIndex, dispatchAction, isKeyHeld
 #include "sam_mp_inventory.hpp"  // listFor: the host's mirror of a remote player's backpack
 #include "sam_settings.hpp"      // the actions mods registered (sam_register_action), polled by name
+#include "sam_spells.hpp"        // scriptName: a custom spell reports its declared "ns:spell" id
 
 #include <cstdint>
 #include <cstdlib>
@@ -1041,7 +1042,8 @@ void reportSpellLearned(int player, int spellId, const char* spellName)
 {
 	if ( player < 0 || player >= MAXPLAYERS || !players[player] ) { return; }
 	if ( !SamEvent::anyScripts() ) { return; }
-	const std::string name = spellName ? spellName : "";
+	std::string name = spellName ? spellName : "";
+	{ const std::string declared = SAMSpells::scriptName(spellId); if ( !declared.empty() ) { name = declared; } }
 	if ( multiplayer != CLIENT )
 	{
 		SamEvent ev("player.on_spell_learned");
@@ -1060,7 +1062,8 @@ void reportSpellFailed(int player, int spellId, const char* spellName, const cha
 {
 	if ( player < 0 || player >= MAXPLAYERS || !players[player] ) { return; }
 	if ( !SamEvent::anyScripts() ) { return; }
-	const std::string name = spellName ? spellName : "";
+	std::string name = spellName ? spellName : "";
+	{ const std::string declared = SAMSpells::scriptName(spellId); if ( !declared.empty() ) { name = declared; } }
 	const std::string why = reason ? reason : "";
 	if ( multiplayer != CLIENT )
 	{

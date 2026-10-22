@@ -380,7 +380,10 @@ npm run dev      # http://localhost:5173
 npm run build    # static site in dist/
 ```
 
-**The framework** (`framework/*.cpp`) is compiled into Barony's build. In short: clone [Barony's source](https://github.com/TurningWheel/Barony), add the S.A.M `framework/` files to the game target, and apply the small set of interception hooks (loader, class/item registration, character-select carousel, multiplayer sync). The framework code is deliberately decoupled — the logger, workshop scanner, loader, and the parsing halves of the class/item registries include zero Barony headers. See [`framework/`](framework/) and the header comments for the hook points.
+**The framework** (`framework/*.cpp`) is compiled into a patched Barony. The patched source is the separate public repository [Barony-SAM](https://github.com/spider12223/Barony-SAM): Barony's own source with S.A.M's engine hooks added, still under Barony's BSD 2-Clause licence. Put it next to this repository (this folder must be named `SAM-Framework`) and build it from there. Barony's source is not included in this repository, and you still need your own copy of Barony to play.
+
+To work on S.A.M itself (the module map, how to add a function, an event or a field, and the checks a
+change has to pass), read **[CONTRIBUTING.md](CONTRIBUTING.md)**.
 
 > Barony's own source is **not** included in this repository and is not ours to redistribute — it belongs to [Turning Wheel LLC](https://github.com/TurningWheel/Barony). S.A.M only ships its own framework code, schemas, GUI, and docs.
 

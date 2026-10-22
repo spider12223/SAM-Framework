@@ -1,6 +1,6 @@
 # S.A.M function reference
 
-Every script function the framework exposes: **337 functions** and **87 events**.
+Every script function the framework exposes: **338 functions** and **87 events**.
 All of them work identically in Lua, JavaScript and TypeScript.
 
 This page is generated from the API definition, so it cannot fall behind the code. If a
@@ -15,7 +15,7 @@ the kind, so the line is always what really happens:
 
 | kind | what it means for your script |
 |---|---|
-| `host` (150) | Runs on the host, where your events and timers already run. A client's call is refused with a one-time warning. The result reaches every player. |
+| `host` (151) | Runs on the host, where your events and timers already run. A client's call is refused with a one-time warning. The result reaches every player. |
 | `owner` (10) | Changes something that lives on the player's own machine (their backpack, their spells). Call it on the host; S.A.M carries it to that player's machine. |
 | `screen` (29) | Shows something on one player's screen. Name the player, or leave it out inside an event about a player; -1 means every player. S.A.M carries it to their machine. |
 | `read` (50) | Reads a player. The host can read everyone; a client can read only its own player. |
@@ -46,7 +46,7 @@ For guides and worked examples, see [scripting-reference.md](scripting-reference
 - [Logging](#logging) (3)
 - [Loot](#loot) (12)
 - [Mechanisms](#mechanisms) (4)
-- [Monsters](#monsters) (26)
+- [Monsters](#monsters) (27)
 - [Multiplayer](#multiplayer) (3)
 - [Networking](#networking) (1)
 - [Panels](#panels) (16)
@@ -2004,6 +2004,21 @@ Kill a monster by UID (runs its normal death + drops; fires on_monster_died).
 
 **Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
 
+### `sam_make_follower(leader, uid)`
+
+Make a monster a real follower of a player, the way the Scroll of Summon does: it fights on the player's side, stops hunting them, shows on the ally panel and follows their orders. leader is a player index (0 to 3), or the uid of a player's entity. Refused (false, with a line in sam_log.txt) when the monster is a boss (a mod monster flagged as a boss counts), a shopkeeper or other trader, a mimic, a hologram, a bat, a tinkering construct (a mod monster flagged as one counts), an Inner Demon or a summoned ally (the same creatures the Dominate spell refuses); when it already has a living leader (it is never taken from one, not even from the same player); or when the player already leads as many followers as their Leadership allows: 4 below Leadership 60, 6 from 60, 8 from 80, the same cap as recruiting by hand (tinkering bots do not count). A monster that is dying, or a uid that names no entity, is refused without a log line. The Scroll of Summon ignores that cap, this does not, so a spell that summons several should check the result and call sam_remove_entity on any monster that was refused, which is otherwise still a wild one. The call itself gives no Leadership experience and records no recruit in the Compendium (the Scroll of Summon does); after that it is an ordinary follower, so when it kills something its leader earns Leadership experience and the Compendium kill credit.
+
+Spawn the monster with sam_spawn_monster, which returns its uid; sam_spawn_monsters returns only a count. A player index is 0 to 3, so a player's own uid below 4 cannot be told from one: pass the index.
+
+| argument | type |
+|---|---|
+| `leader` | int |
+| `uid` | uid |
+
+**Returns:** true if the monster is now the player's follower (boolean); false if it was refused
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. Host only. For a player on another machine the engine sends that machine its own recruit packet (the one the Scroll of Summon uses) and the follower's ally-panel stats; nothing new goes to a stock client.
+
 ### `sam_monster_attack(uid)`
 
 Make a monster swing immediately, using whatever attack pose its current weapon calls for.
@@ -2202,7 +2217,7 @@ sam_set_monster_target takes a player INDEX and can only ever aim at a player, s
 
 ### `sam_spawn_monsters(near_uid, monster_type, count)`
 
-Spawn `count` (1-8) monsters of a type near an anchor entity's UID.
+Spawn `count` (1-8) monsters of a type near an anchor entity's UID. They are ordinary wild monsters, hostile to the players, and you get a count back, not their uids. For allies, spawn each with sam_spawn_monster and hand it to sam_make_follower.
 
 | argument | type |
 |---|---|
@@ -5452,7 +5467,9 @@ Fires a player casts a spell.
 | `spell_name` | string |
 | `target_uid` | uid |
 
-**Multiplayer:** Fires on the host, for every player (a joiner's cast arrives before mana is spent).
+For a spell that came from a mod, spell_name is the id its JSON declared (for example "mymod:summon_rats"), the same form sam_get_spells reports (before 3.5.0 it was an internal name like spell_sam_mymod_summon_rats). A vanilla spell answers with the engine's name, such as "spell_forcebolt". Returning false cancels the cast: no bolt, no fizzle message, and no Sorcery skill-up. In multiplayer nothing has been spent yet. In single-player most of the mana is already gone, because the casting animation spends it before this event, so a cancelled cast is not free there. A spell with projectile_type none still builds its bolt, so a spell that must not shoot has to cancel it here.
+
+**Multiplayer:** Fires on the host, for every player (a joiner's cast arrives before mana is spent; in single-player the casting animation has already spent most of it).
 
 ### `player.on_spell_failed`
 
@@ -5465,6 +5482,8 @@ Fires a cast fizzles or is blocked.
 | `spell_name` | string |
 | `reason` | string |
 
+For a spell that came from a mod, spell_name is the id its JSON declared (for example "mymod:summon_rats"), the same form sam_get_spells reports (before 3.5.0 it was an internal name like spell_sam_mymod_summon_rats). A vanilla spell answers with the engine's name, such as "spell_forcebolt". 
+
 **Multiplayer:** Fires on the host, for every player: a fizzle from the host's own cast, and not_enough_mana as reported by the caster's own game. A joiner whose game does not run S.A.M reports no mana failures.
 
 ### `player.on_spell_learned`
@@ -5476,6 +5495,8 @@ Fires a player learns a spell.
 | `player` | int |
 | `spell_id` | int |
 | `spell_name` | string |
+
+For a spell that came from a mod, spell_name is the id its JSON declared (for example "mymod:summon_rats"), the same form sam_get_spells reports (before 3.5.0 it was an internal name like spell_sam_mymod_summon_rats). A vanilla spell answers with the engine's name, such as "spell_forcebolt". 
 
 **Multiplayer:** Fires on the host, for every player, once, when the spell is actually learned: a joiner's own game reports it (including a carried sam_grant_spell). A joiner whose game does not run S.A.M reports nothing.
 
@@ -5840,7 +5861,7 @@ Fires a creature's species init has finished making its starting gear (worn slot
 
 This is the one place to reach the ~700 hardcoded species gear tables without an engine edit per species: read with sam_get_container_items, rewrite pockets with sam_add_item_to_container / sam_remove_item_from_container and worn slots with sam_monster_equip. Pockets are what the creature drops on death.
 
-A shopkeeper's store has already been stocked by now (world.on_before_shop_stock and world.on_shop_stocked fired inside its init). Player allies summoned by a script get it too.
+A shopkeeper's store has already been stocked by now (world.on_before_shop_stock and world.on_shop_stocked fired inside its init).
 
 **Multiplayer:** Fires on the host, for every creature on its first tick.
 

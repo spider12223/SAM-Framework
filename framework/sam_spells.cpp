@@ -334,7 +334,15 @@ void SAMSpells::buildEngineSpell(const SAMSpellDef& def)
 		if ( slot < 0 ) { slot = SAMLua::effectIdFromName(def.onHitEffect.c_str()); }
 		if ( slot < 0 && def.onHitEffect.rfind("EFF_", 0) == 0 ) { slot = SAMLua::effectIdFromName(def.onHitEffect.c_str() + 4); }
 		def.onHitEffectSlot = slot;
-		if ( slot < 0 ) { SAM_WARN(MOD, "spell '" + def.id + "' on_hit_effect '" + def.onHitEffect + "' is unknown — ignored."); }
+		if ( slot < 0 )
+		{
+			SAM_WARN(MOD, "spell '" + def.id + "' on_hit_effect '" + def.onHitEffect + "' is unknown — ignored. "
+				"Use the effect's exact id (lowercase, with its namespace, e.g. \"mymod:plague\") or a vanilla name like EFF_POISONED.");
+		}
+		else
+		{
+			SAM_INFO(MOD, "spell '" + def.id + "' on_hit_effect '" + def.onHitEffect + "' -> effect slot " + std::to_string(slot));
+		}
 	}
 
 	// 2) Tooltip/UI metadata so the spell lists with its name + a sane tooltip. spellItem_t
@@ -352,7 +360,7 @@ void SAMSpells::buildEngineSpell(const SAMSpellDef& def)
 	                    : (selfCast ? ItemTooltips_t::SPELL_TYPE_SELF : ItemTooltips_t::SPELL_TYPE_PROJECTILE);
 	si.spellTags.clear();
 	if ( def.damageMax > 0 || def.damageMin > 0 ) { si.spellTags.insert(ItemTooltips_t::SPELL_TAG_DAMAGE); }
-	if ( !def.onHitEffect.empty() ) { si.spellTags.insert(ItemTooltips_t::SPELL_TAG_STATUS_EFFECT); }
+	if ( def.onHitEffectSlot >= 0 ) { si.spellTags.insert(ItemTooltips_t::SPELL_TAG_STATUS_EFFECT); }
 	ItemTooltips.spellNameStringToSpellID[internalName] = id;
 
 	// 3) Hover description. ItemTooltips_t::getSpellDescriptionText (mod_tools.cpp:2459)

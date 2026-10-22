@@ -4,7 +4,7 @@
 // Drop this beside your mod's .ts files, or reference it:
 //   /// <reference path="sam.d.ts" />
 //
-// 337 functions, 87 events. Each function's "Multiplayer:" line starts with
+// 338 functions, 87 events. Each function's "Multiplayer:" line starts with
 // its kind (host, owner, screen, read, all, local, any); see docs/multiplayer.md.
 
 declare global {
@@ -1346,6 +1346,13 @@ declare global {
   function sam_look_at(uid: number, target_uid: number): boolean;
 
   /**
+   * Make a monster a real follower of a player, the way the Scroll of Summon does: it fights on the player's side, stops hunting them, shows on the ally panel and follows their orders. leader is a player index (0 to 3), or the uid of a player's entity. Refused (false, with a line in sam_log.txt) when the monster is a boss (a mod monster flagged as a boss counts), a shopkeeper or other trader, a mimic, a hologram, a bat, a tinkering construct (a mod monster flagged as one counts), an Inner Demon or a summoned ally (the same creatures the Dominate spell refuses); when it already has a living leader (it is never taken from one, not even from the same player); or when the player already leads as many followers as their Leadership allows: 4 below Leadership 60, 6 from 60, 8 from 80, the same cap as recruiting by hand (tinkering bots do not count). A monster that is dying, or a uid that names no entity, is refused without a log line. The Scroll of Summon ignores that cap, this does not, so a spell that summons several should check the result and call sam_remove_entity on any monster that was refused, which is otherwise still a wild one. The call itself gives no Leadership experience and records no recruit in the Compendium (the Scroll of Summon does); after that it is an ordinary follower, so when it kills something its leader earns Leadership experience and the Compendium kill credit.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. Host only. For a player on another machine the engine sends that machine its own recruit packet (the one the Scroll of Summon uses) and the follower's ally-panel stats; nothing new goes to a stock client.
+   */
+  function sam_make_follower(leader: number, uid: number): boolean;
+
+  /**
    * Show a line in a player's in-game message log.
    *
    * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. A line sent to a player on another machine is shown with one leading space, so that player's game can never mistake it for one of Barony's own messages that it acts on.
@@ -2137,7 +2144,7 @@ declare global {
   function sam_spawn_monster(tile_x: number, tile_y: number, monster_name: string, shop_type?: number): number | undefined;
 
   /**
-   * Spawn count (1-8) monsters of a type near an anchor entity's UID.
+   * Spawn count (1-8) monsters of a type near an anchor entity's UID. They are ordinary wild monsters, hostile to the players, and you get a count back, not their uids. For allies, spawn each with sam_spawn_monster and hand it to sam_make_follower.
    *
    * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns 0.
    */
@@ -2481,7 +2488,7 @@ declare global {
     | "player.on_proficiency_increased"
     /** Fires a player opens trade with a shopkeeper. Multiplayer: Fires on the host, for every player. */
     | "player.on_shop_entered"
-    /** Fires a player casts a spell. Multiplayer: Fires on the host, for every player (a joiner's cast arrives before mana is spent). */
+    /** Fires a player casts a spell. Multiplayer: Fires on the host, for every player (a joiner's cast arrives before mana is spent; in single-player the casting animation has already spent most of it). */
     | "player.on_spell_cast"
     /** Fires a cast fizzles or is blocked. Multiplayer: Fires on the host, for every player: a fizzle from the host's own cast, and not_enough_mana as reported by the caster's own game. A joiner whose game does not run S.A.M reports no mana failures. */
     | "player.on_spell_failed"

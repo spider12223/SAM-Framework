@@ -8,9 +8,9 @@ Barony was never built to be modded. S.A.M is the layer that makes it modded any
 
 [hr][/hr]
 
-[h1]NEW: HATS AND CHARGED HITS[/h1]
+[h1]NEW: SUMMONS THAT FIGHT FOR YOU[/h1]
 
-[b]"worn_like"[/b]: a mod hat or mask names the vanilla item it sits like, so a hat built on its side sits upright. Mod gloves and boots now show a vanilla pair. [b]Charged hits[/b]: hit events say how far a swing was wound up.
+[b]sam_make_follower[/b]: a script can turn a spawned monster into a real ally, like a Scroll of Summon but stricter. A custom spell's effect now lands on more bolts, and scripts see a mod spell by its own id.
 
 [h1]GAME SPEED, MOD SETTINGS, THE LOOT POOL[/h1]
 
@@ -70,7 +70,7 @@ A mod here is not a guest that can only react. It can be told a player was hit a
 
 Nothing to download: [b][url=https://spider12223.github.io/SAM-Framework/]S.A.M Mod Builder[/url][/b]
 
-Build a class, item, monster, spell or effect with dropdowns and sliders, watch the JSON update live, then export a ready to use .zip. It checks your work against the same rules the game uses, so if it exports, it loads.
+Build a class, item, monster, spell or effect with dropdowns and sliders, watch the JSON update live, then export a ready to use .zip. It checks every JSON file against the S.A.M schemas, so typos and bad values are caught before you play.
 
 [hr][/hr]
 
@@ -78,11 +78,11 @@ Build a class, item, monster, spell or effect with dropdowns and sliders, watch 
 
 JSON says what your content [i]is[/i]. A script says what it [i]does[/i]. Drop a .lua, .js or .ts file next to any JSON and it loads automatically. TypeScript is compiled for you.
 
-[b]87 events[/b] to react to, and now to change. [b]337 functions[/b] to act with: grant items and gold, read and set stats, apply effects, cast spells, deal or change damage, teleport, spawn monsters, run your own per frame logic, open windows, timers, saved data, screen effects, and live patching that reverts when your mod unloads.
+[b]87 events[/b] to react to, and now to change. [b]338 functions[/b] to act with: grant items and gold, read and set stats, apply effects, cast spells, deal or change damage, teleport, spawn monsters, run your own per frame logic, open windows, timers, saved data, screen effects, and live patching that reverts when your mod unloads.
 
-Only two functions ever get called: [b]on_event(event)[/b] and [b]on_tick(event)[/b].
+S.A.M looks for just two function names in your script: [b]on_event(event)[/b] and [b]on_tick(event)[/b].
 
-[b]Safe by design.[/b] Scripts run sandboxed with a memory cap and an instruction limit. A broken script switches itself off and writes why to the log. It cannot crash your game.
+[b]Safe by design.[/b] Scripts run sandboxed with a memory cap and a time limit. If a handler fails, that script stops getting events and logs why.
 
 [hr][/hr]
 

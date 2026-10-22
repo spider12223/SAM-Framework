@@ -1,13 +1,15 @@
 /*
  * Spell Editor — build a custom spell (spell.schema.json). S.A.M registers it at
  * a reserved runtime id (>=2000) so a class's starting_spells (or sam_grant_spell)
- * can reference it by "namespace:spell". NOTE: casting behavior lands in a later
- * engine update; metadata is parsed + stored now.
+ * can reference it by "namespace:spell". It casts like the vanilla spell its payload names,
+ * and its on-hit effect can be a built-in status or one of this mod's own custom effects.
  */
 import { useEffect, useMemo, useState } from 'react';
 import { SPELL_PAYLOADS, SPELL_PROJECTILE_TYPES } from '@/data/schemas.js';
+import { EFFECTS } from '@/data/samApi.js';
 import { validate } from '@/lib/validate.js';
 import { carryUnknown } from '@/lib/editorKeys.js';
+import { checkOnHitEffect, describeOnHitEffect } from '@/lib/spellEffectRef.js';
 import { useMod } from '@/state/ModContext.jsx';
 import { Panel, Field, TextInput, NumberInput, GoldButton, ErrorList, SavedNote } from '@/components/ui.jsx';
 
@@ -16,7 +18,7 @@ function slugify(name) {
 }
 
 export default function SpellEditor() {
-  const { meta, spells, editing, dispatch } = useMod();
+  const { meta, spells, effects, editing, dispatch } = useMod();
   const editDef = editing?.kind === 'spell' ? spells.find((s) => s.id === editing.id) : null;
 
   // The def as it was when this page opened. `editDef` is derived from `editing`, and the
@@ -87,6 +89,11 @@ export default function SpellEditor() {
     [name, description, manaCost, projectile, payload, damageMin, damageMax, range, speed, onHitEffect, onHitDuration, onHitChance, icon, startingSpell, namespace]);
   const preview = useMemo(() => JSON.stringify(def, null, 2), [def]);
 
+  // The mod's own effects, by the exact id the game looks up. The text box accepts anything, so
+  // say plainly when what was typed will not find an effect (the game ignores it, silently).
+  const customEffectIds = useMemo(() => (effects ?? []).map((e) => e.id), [effects]);
+  const onHitNote = describeOnHitEffect(checkOnHitEffect(onHitEffect, customEffectIds));
+
   return (
     <div className="space-y-4 max-w-5xl mx-auto">
       <div>
@@ -121,15 +128,34 @@ export default function SpellEditor() {
         </Panel>
 
         <Panel title="On-Hit & Presentation">
-          <Field label="On-hit effect" hint="An EFF_ status name applied to a struck target (e.g. EFF_POISONED).">
-            <TextInput value={onHitEffect} onChange={setOnHitEffect} placeholder="EFF_SLOW" />
+          <Field
+            label="On-hit effect"
+            hint={(
+              <>
+                A status applied to whatever the spell hits: pick one of your own effects from the
+                list (they look like <span className="sam-mono">{namespace}:plague</span>) or a built-in one
+                like <span className="sam-mono">EFF_POISONED</span>.
+                {onHitNote && (
+                  <span className={onHitNote.tone === 'warn' ? 'sam-error block mt-1' : 'block mt-1'}
+                    style={onHitNote.tone === 'ok' ? { color: '#9dc76a' } : undefined}>
+                    {onHitNote.tone === 'ok' ? '✓ ' : '⚠ '}{onHitNote.text}
+                  </span>
+                )}
+              </>
+            )}
+          >
+            <TextInput value={onHitEffect} onChange={setOnHitEffect} placeholder="EFF_SLOW" list="sam-onhit-effects" />
+            <datalist id="sam-onhit-effects">
+              {customEffectIds.map((id) => <option key={id} value={id} />)}
+              {EFFECTS.map((n) => <option key={n} value={`EFF_${n}`} />)}
+            </datalist>
           </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Effect duration (ticks)" hint="50 ticks = 1 second."><NumberInput value={onHitDuration} min={0} onChange={setOnHitDuration} /></Field>
             <Field label="Effect chance (%)"><NumberInput value={onHitChance} min={0} onChange={setOnHitChance} /></Field>
           </div>
           <div className="sam-divider" />
-          <Field label="Icon path (mod-relative)" hint="PNG shown for the spell (when the spell UI lands).">
+          <Field label="Icon path (mod-relative)" hint="PNG shown for the spell in the spell list.">
             <TextInput value={icon} onChange={setIcon} placeholder="spells/shadow_bolt.png" />
           </Field>
           <label className="flex items-center gap-2 mt-3 cursor-pointer text-sm" style={{ color: 'var(--color-parchment)' }}>

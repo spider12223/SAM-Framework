@@ -2,8 +2,8 @@
  * Effect Editor — build a custom status effect (effect.schema.json). S.A.M registers it
  * into a reserved effect slot (135-159) so it applies REAL mechanics: flat attribute
  * modifiers, a move-speed multiplier and per-second HP/MP deltas while active, plus a HUD
- * icon. Apply it in-game with sam_apply_effect(player, "namespace:effect", ticks), from a
- * script or the visual block builder's "apply a status effect" block.
+ * icon. Apply it in-game with sam_apply_effect(player, "namespace:effect", ticks) from a script,
+ * or from a custom spell: type the effect's id into the spell's On-hit effect box.
  */
 import { useEffect, useMemo, useState } from 'react';
 import { validate } from '@/lib/validate.js';
@@ -120,11 +120,11 @@ export default function EffectEditor() {
         </Panel>
 
         <Panel title="While active — over time & movement">
-          <Field label="Move speed multiplier" hint="1.0 = normal, 0.8 = 20% slower, 1.5 = 50% faster. The engine clamps the top end.">
+          <Field label="Move speed multiplier" hint="1.0 = normal, 0.8 = 20% slower, 1.5 = 50% faster. The engine clamps the top end. Only players are slowed or sped up; this does nothing to a monster.">
             <NumberInput value={speedMult} min={0.1} max={3} step={0.1} onChange={setSpeedMult} />
           </Field>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="HP / second" hint="Negative drains (can kill), positive heals.">
+            <Field label="HP / second" hint="Negative drains (can kill), positive heals. On a monster the drain is silent: no damage numbers, and the health bar only updates when something else hits it.">
               <NumberInput value={hpSec} onChange={setHpSec} />
             </Field>
             <Field label="MP / second" hint="Negative drains, positive restores.">
@@ -140,7 +140,7 @@ export default function EffectEditor() {
             </Field>
           </div>
           <div className="sam-divider" />
-          <Field label="Default duration (ticks)" hint="50 ticks = 1 second. The ticks passed to sam_apply_effect override this.">
+          <Field label="Default duration (ticks)" hint="50 ticks = 1 second. The ticks passed to sam_apply_effect, or a spell's Effect duration, override this.">
             <NumberInput value={duration} min={0} onChange={setDuration} />
           </Field>
           <div className="sam-divider" />
@@ -164,7 +164,7 @@ export default function EffectEditor() {
             <textarea className="sam-input" rows={2} value={tooltip} onChange={(e) => setTooltip(e.target.value)} placeholder="Chilled to the bone…" />
           </Field>
           <div>
-            <Field label="Icon path (mod-relative)" hint="Optional PNG for the HUD icon. A generic icon is used if left blank.">
+            <Field label="Icon path (mod-relative)" hint="Optional PNG for the HUD icon, inside your mod folder. A generic icon is used if left blank or if the file is not found (sam_log.txt says so).">
               <TextInput value={icon} onChange={setIcon} placeholder="effects/frostbite.png" />
             </Field>
             <label className="flex items-center gap-2 mt-3 cursor-pointer text-sm" style={{ color: 'var(--color-parchment)' }}>

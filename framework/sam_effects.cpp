@@ -169,7 +169,17 @@ void SAMEffects::loadFromManifest(const SAMModManifest& manifest)
 			}
 			else
 			{
-				def.icon = joinPath(manifest.modPath, iconRel);
+				const std::string iconPath = joinPath(manifest.modPath, iconRel);
+				if ( std::ifstream(iconPath.c_str(), std::ios::binary).good() )
+				{
+					def.icon = iconPath;
+				}
+				else
+				{
+					// A path that is not there used to leave the effect with NO icon at all.
+					SAM_WARN(MOD, "Effect [" + def.id + "] icon file '" + iconRel
+						+ "' was not found in the mod folder -- using the default icon. Leave \"icon\" blank to use it on purpose.");
+				}
 			}
 		}
 

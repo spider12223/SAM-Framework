@@ -217,8 +217,9 @@ export default function StartHere() {
               That is the most common reason a custom spell seems to do nothing.
             </p>
             <p style={{ color: '#8a7038' }}>
-              Not wired up yet: the on-hit effect, range, and speed fields are saved but not used. You
-              get the element's built-in behavior plus your damage number.
+              The on-hit effect and range work: pick the effect from the list (your own effects show
+              up there) and the spell applies it to whatever it hits. Speed and Damage min are saved but
+              not used yet. You get the element's built-in behavior plus your Damage max.
             </p>
           </div>
         </div>
@@ -228,7 +229,7 @@ export default function StartHere() {
           <div className="space-y-2 text-sm leading-relaxed" style={{ color: 'var(--color-parchment)' }}>
             <p>
               A custom status effect fully works once it is on someone. It counts down on its own,
-              changes their stats, HP, MP, or move speed the way you set it, and shows on the HUD.
+              changes their stats, HP, MP, or move speed the way you set it (move speed only changes a player, not a monster), and shows on the HUD.
             </p>
             <p>
               To put the effect on a player or a monster, you apply it. Right now the way to do that is

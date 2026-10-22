@@ -307,11 +307,11 @@
         },
         "force_player_recruitable": {
           "type": "boolean",
-          "description": "If true, players can always recruit this monster (bypasses the normal recruit check)."
+          "description": "If true, players can always recruit this monster by pressing Use on it (bypasses the normal recruit check). It does not follow anyone until it is recruited."
         },
         "force_player_friendly": {
           "type": "boolean",
-          "description": "If true, spawns allied to the players."
+          "description": "If true, spawns friendly to the players: it does not attack them. It is not a follower, so it does not follow them (use force_player_recruitable if players should be able to recruit it)."
         },
         "force_player_enemy": {
           "type": "boolean",
