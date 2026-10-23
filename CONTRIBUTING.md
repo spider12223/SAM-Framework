@@ -6,7 +6,7 @@ not need any of this: start with [docs/getting-started.md](docs/getting-started.
 folder from [examples/](examples/).
 
 S.A.M was created by **spider12223 (SAMBOSA)**. This page is built on one written by
-**rumpleivskin (Kyle)**, whose text it keeps in large part.
+**rumpleivskin**, whose text it keeps in large part.
 
 ---
 

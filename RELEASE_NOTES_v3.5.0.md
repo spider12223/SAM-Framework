@@ -106,9 +106,9 @@ online only.
 
 - [CONTRIBUTING.md](CONTRIBUTING.md), a map of the project for anyone who wants to help: where
   things live, how to add a function, an event or a field, and the checks to run before a pull
-  request. It is built on one written by rumpleivskin (Kyle), whose text it keeps in large part,
+  request. It is built on one written by rumpleivskin, whose text it keeps in large part,
   corrected for how S.A.M is really released.
-- A fix from Kyle in the engine source: the `/sam_alchemy` console command declared a function
+- A fix from rumpleivskin in the engine source: the `/sam_alchemy` console command declared a function
   inside a namespace, where GCC and Clang read it as a different function from the one the game
   defines, so the link fails (Visual Studio links it). It is now declared at file scope, so it
   names the game's own function. That should link on GCC and Clang, but we did not build with
