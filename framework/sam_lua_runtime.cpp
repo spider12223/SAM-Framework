@@ -5691,7 +5691,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		for ( const char* c = traitC; c && *c; ++c ) { u += (char)toupper((unsigned char)*c); }
 		if ( t < 0 || t >= NUM_ITEM_SLOTS ) { lua_pushboolean(Ls, 0); return 1; }
 		const ItemType ty = (ItemType)t;
-		// All ELEVEN traits a mod may declare, not the four this used to know. Two sources, asked
+		// All TWELVE traits a mod may declare, not the four this used to know. Two sources, asked
 		// in this order: the bit a custom item declared (ItemGeneric::samTraits, set from
 		// kTraitNames in sam_items.cpp), then the engine's own predicate for a vanilla item.
 		// Four of these -- automaton_food, tinker_throwable, usable, beatitude_ac -- had no
@@ -5710,12 +5710,13 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		else if ( u == "TINKER_THROWABLE" ) { v = ( declared & SAMItemTrait::TINKER_THROWABLE ) != 0; }
 		else if ( u == "USABLE" )           { v = ( declared & SAMItemTrait::USABLE ) != 0; }
 		else if ( u == "BEATITUDE_AC" )     { v = ( declared & SAMItemTrait::BEATITUDE_AC ) != 0; }
+		else if ( u == "UNBREAKABLE" )      { v = ( declared & SAMItemTrait::UNBREAKABLE ) != 0; }
 		else                                { known = false; }
 		if ( !known )
 		{
 			SAM_ERROR("LUA", "sam_item_has_trait: unknown trait '" + u + "'. Valid: RANGED, QUIVER,"
 				" FOCI, INSTRUMENT, THROWN_BALL, SHIELD_SLOT, POTION_BAD, AUTOMATON_FOOD,"
-				" TINKER_THROWABLE, USABLE, BEATITUDE_AC.");
+				" TINKER_THROWABLE, USABLE, BEATITUDE_AC, UNBREAKABLE.");
 			lua_pushboolean(Ls, 0); return 1;
 		}
 		lua_pushboolean(Ls, v ? 1 : 0);
@@ -8601,6 +8602,36 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 #endif
 	}
 
+	// sam_get_hotbar(player) -> array of { slot, kind, name, type, uid }, one per occupied hotbar slot
+	// (slot 0 to 9). nil when this machine cannot see that player's bar: it belongs to the machine the
+	// player plays on. Read only.
+	int lua_sam_get_hotbar(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		std::vector<SAMSpells::HotbarEntry> bar;
+		if ( !SAMSpells::hotbarOf(player, &bar) ) { lua_pushnil(Ls); return 1; }
+		lua_newtable(Ls);
+		int n = 0;
+		for ( const SAMSpells::HotbarEntry& e : bar )
+		{
+			lua_newtable(Ls);
+			lua_pushinteger(Ls, e.slot);                        lua_setfield(Ls, -2, "slot");
+			lua_pushstring(Ls, e.isSpell ? "spell" : "item");   lua_setfield(Ls, -2, "kind");
+			lua_pushstring(Ls, e.name.c_str());                 lua_setfield(Ls, -2, "name");
+			lua_pushinteger(Ls, e.type);                        lua_setfield(Ls, -2, "type");
+			lua_pushinteger(Ls, (lua_Integer)e.uid);            lua_setfield(Ls, -2, "uid");
+			lua_rawseti(Ls, -2, ++n);
+		}
+		return 1;
+#else
+		(void)player;
+		lua_newtable(Ls);
+		return 1;
+#endif
+	}
+
 	// sam_player_knows_spell(player, spell) -> bool. Vanilla SPELL_ name or custom "ns:spell".
 	int lua_sam_player_knows_spell(lua_State* Ls)
 	{
@@ -10684,6 +10715,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		samLuaRegister(L, "sam_cast_spell_pos", lua_sam_cast_spell_pos);
 		samLuaRegister(L, "sam_monster_cast_spell", lua_sam_monster_cast_spell);
 		samLuaRegister(L, "sam_get_spells", lua_sam_get_spells);
+		samLuaRegister(L, "sam_get_hotbar", lua_sam_get_hotbar);
 		samLuaRegister(L, "sam_player_knows_spell", lua_sam_player_knows_spell);
 		samLuaRegister(L, "sam_remove_spell", lua_sam_remove_spell);
 

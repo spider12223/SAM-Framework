@@ -257,6 +257,8 @@ public:
 	// Re-apply the class's hotbar pins after Barony's assignHotbarSlots() wipes the bar.
 	// Must be called at the END of ClassHotbarConfig_t::assignHotbarSlots.
 	static void reapplyHotbarPins(int player);
+	// The class item pins half of reapplyHotbarPins (the innate spells are placed after it).
+	static void reapplyClassItemPins(int player);
 	// Grant starting spells (called from initClass spells chain).
 	static void applySpells(int player);
 };

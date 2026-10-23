@@ -459,6 +459,16 @@ end
 * A custom spell can apply a status of your own: put the effect's exact id (for example
   `"mymod:plague"`, lowercase, with the namespace) in the spell's `on_hit_effect`. A misspelled id
   applies nothing and leaves one warning line in `sam_log.txt`.
+* **Innate spells on the hotbar (new in 3.6.0).** A race or class lists spells in `starting_spells`; when
+  a character is created they are also put on the first free hotbar slots, after the class's own
+  layout (which the game builds from a file that can name only vanilla classes and spells, so
+  before this a custom race's spells were in the spell list and never on the bar). Read the bar with
+  `sam_get_hotbar(player)`: an array of `{ slot, kind, name, type, uid }`, slots 0 to 9, for a player
+  who plays on this machine. Only a new game gets the placement: a loaded saved game keeps the bar it was
+  saved with. It happens even if the player has turned off the Add Items to Hotbar setting. The call is
+  read only: no script call sets a hotbar slot, though a spell or item a script grants can land on a free
+  slot through the game's own add-to-hotbar option. The player can still move or clear anything on the
+  bar. While a character is shapeshifted the game swaps the form's own bar in, and the call returns that.
 
 ### Monsters
 
@@ -550,10 +560,38 @@ you configure it. Traits put it on the list.
 | `automaton_food` | Edible by an automaton |
 | `tinker_throwable` | Throwable/deployable, like a bomb or trap |
 | `usable` | Offer a **Use** option in the inventory |
+| `unbreakable` (new in 3.6.0) | Is not worn down by use, hits, blocks or burning, and is safe from a cursed Scroll of Repair, a cursed Scroll of Charging and a Scroll of Destroy Armor that is not cursed. Weapons, armour, shields, cloaks and spellbooks all count; a magic staff with it never runs out of charges. It only stops FUTURE wear, so an item that is already broken stays broken. A script can still set its condition with `sam_set_item_status`, and an Automaton monster that recycles items from its pack can still wear it down. A player running an older S.A.M ignores the trait |
 | `beatitude_ac` | Blessing or cursing it raises or lowers its AC. This is what a custom **mask** needs to gain armour from being blessed, and it also makes the mask breakable like a real one |
 
-Traits make an item *recognised*. What it then does is up to your script — pair
+A trait puts the item on one of the game's lists, and the game then treats it the way it treats the vanilla items on that list: a `ranged` item fires like a bow, a `quiver` holds ammo, an `unbreakable` item is not worn down, and none of that needs a script. Some traits only open the door and leave the work to your script — pair
 `tinker_throwable` with `world.on_item_deployed` to build a real trap.
+
+### A weapon that puts an effect on what it hits (new in 3.6.0)
+
+```json
+"category": "WEAPON",
+"slot": "EQUIPPABLE_IN_SLOT_WEAPON",
+"on_hit_effect": "mymod:plague",
+"on_hit_chance": 0.25,
+"on_hit_duration": 250
+```
+
+* `on_hit_effect` is one of your own effects by its exact id (lowercase, with the namespace) or a
+  vanilla name such as `EFF_SLOW`. A name that matches nothing is ignored and `sam_log.txt` says so.
+* `on_hit_chance` is a fraction, 0.0 to 1.0. Leave it out for every hit; an explicit 0 means never.
+  A spell's `on_hit_chance` is a whole percent, 0 to 100, and 0 means every hit there, so do not copy the
+  number from one to the other. A chance that is negative or not a number is read as left out, with no warning.
+* `on_hit_duration` is in ticks, 50 to a second. Leave it out for the effect's own `duration_ticks`,
+  otherwise 250 (5 seconds).
+* It works for melee hits by a player or by a monster wielding the weapon, as long as the hit does damage
+  (a blow that is fully blocked or absorbed down to 0 applies nothing) and the target survives it. It does
+  not work yet for thrown weapons or arrows. It does not apply to a monster's natural attacks (a bite, a
+  claw), to a bugbear's shield bash, or while the wielder is a shapeshifted player.
+* The usual effect rules apply: species immunities and the `on_before_effect_applied` event. It
+  never shortens an effect the target already has, and leaves a permanent one alone.
+* A player who lands a fully charged, damaging swing at skill 100 with a weapon whose `weapon_skill` is
+  sword, axe, mace or polearm can also trigger the game's own proc for that skill, on top of this. A
+  monster wielding the weapon never does.
 
 ---
 

@@ -37,6 +37,7 @@ export const EDITOR_KEYS = {
     'id', 'name_identified', 'name_unidentified', 'description', 'category', 'slot',
     'weapon_skill', 'traits', 'weight', 'gold_value', 'level', 'model', 'model_fp',
     'model_from_item', 'worn_like', 'icon', 'attributes', 'stackable', 'magic_level', 'sounds',
+    'on_hit_effect', 'on_hit_chance', 'on_hit_duration',
   ],
   // MonsterEditor.jsx buildDef() -- complete against monster.schema.json today.
   monster: [

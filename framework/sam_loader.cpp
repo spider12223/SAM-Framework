@@ -301,6 +301,8 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 	// a numeric id. Must run here, after the loop: custom spells load per-mod inside it, so
 	// this is the first point at which a cross-mod "ns:spell" reference is guaranteed present.
 	SAMItems::resolveSpellAttributes();
+	// Same moment, same reason: an item's on_hit_effect may name an effect a later mod declares.
+	SAMItems::resolveOnHitEffects();
 
 	// All scripts loaded — free the ~9MB TypeScript compiler + its runtime so it
 	// is not resident during gameplay (lazily recreated if a later load needs it).

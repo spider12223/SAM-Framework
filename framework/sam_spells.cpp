@@ -483,6 +483,47 @@ int SAMSpells::resolveSpellRef(const std::string& spell)
 	return -1;
 }
 
+bool SAMSpells::hotbarOf(int player, std::vector<HotbarEntry>* out)
+{
+	if ( !out ) { return false; }
+	out->clear();
+	if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->isLocalPlayer() ) { return false; }
+	auto& bar = players[player]->hotbar.slots();
+	for ( int i = 0; i < static_cast<int>(NUM_HOTBAR_SLOTS); ++i )
+	{
+		const Uint32 uid = bar[i].item;
+		if ( uid == 0 ) { continue; }
+		const Item* it = uidToItem(uid);
+		if ( !it ) { continue; }
+		HotbarEntry e;
+		e.slot = i;
+		e.uid = static_cast<long long>(uid);
+		if ( it->type == SPELL_ITEM )
+		{
+			int id = static_cast<int>(it->appearance);
+			// the shapeshift twin of a vanilla spell carries 1000 + its id
+			if ( id >= 1000 && id < 1000 + NUM_SPELLS ) { id -= 1000; }
+			e.isSpell = true;
+			e.type = id;
+			e.name = scriptName(id);
+		}
+		else
+		{
+			const int type = static_cast<int>(it->type);
+			e.isSpell = false;
+			e.type = type;
+			if ( type >= SAM_ITEM_ID_BASE )
+			{
+				const SAMItemDef* d = SAMItems::getItem(type);
+				e.name = d ? d->id : std::string();
+			}
+			else if ( type >= 0 && type < NUMITEMS ) { e.name = itemNameStrings[type + 2]; }
+		}
+		out->push_back(e);
+	}
+	return true;
+}
+
 std::string SAMSpells::scriptName(int spellId)
 {
 	// A mod's spell answers with the id its JSON declared, so a script can compare it with its

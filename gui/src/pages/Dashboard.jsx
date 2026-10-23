@@ -10,7 +10,7 @@ import { useMod } from '@/state/ModContext.jsx';
 import { Panel, GoldButton } from '@/components/ui.jsx';
 
 /** The framework's own version (mods declare their own framework_min_version). */
-const SAM_FRAMEWORK_VERSION = '3.5.0';
+const SAM_FRAMEWORK_VERSION = '3.6.0';
 
 /** Where players get S.A.M itself (the framework is a dependency, not a mod). */
 const WORKSHOP_URL = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472';
@@ -28,12 +28,12 @@ const TRAVELS = [
  * thing a returning modder sees, and the point is 'here is what you can do now that you
  * could not before', not a changelog. */
 const WHATS_NEW = [
-  ["Your mod works for everyone in the game",
-   "A mod used to work properly only for the host: its windows drew on the host's screen, it read the host's backpack when you asked about a joiner's, and it never heard a joiner press a key. Now every one of the 316 functions has a co-op behaviour the game enforces. You still write one script and name players by number, and the framework carries each call to the machine that has to run it."],
-  ["Sounds and music with no JSON at all",
-   "Drop a file in your mod's sounds/ folder and it is ready to play. Name one after a Barony sound in sounds/replace/ and it takes over for everyone who has your mod, while everyone else hears the original. Music works the same way, per floor, per map or per boss, and there is a Music editor here for the rest."],
-  ["Rules that stack, and a camera",
-   "Stat bonuses now add and multiply across every mod instead of overwriting each other, so two mods that both touch strength both count. Immunities by player, creature or species. An experience curve, which Barony does not have. And a camera you can put behind the player, out in the world, or on a target."],
+  ["Items that never wear out",
+   "Give an item the unbreakable trait and the game stops wearing it down: swings, hits, blocks, burning and the repair and destroy-armor scrolls all leave it alone. It works on weapons, armour, shields, cloaks and spellbooks, and it is a checkbox in the Item Editor."],
+  ["Weapons that put an effect on what they hit",
+   "A weapon can now name a status effect, one of your own or a built-in one, with a chance and a duration. A melee hit with it puts the effect on the creature it hits. The Item Editor has the controls and warns when the effect id will not match."],
+  ["Innate spells on the hotbar",
+   "The spells a custom race or class starts with are now on the hotbar of a new character, not only in the spell list. A new function, sam_get_hotbar, reads what is on a player's bar."],
 ];
 
 /** sam-well stat box: big gold number over a small-caps label. */
@@ -83,12 +83,11 @@ export default function Dashboard() {
       {/* --------------------------------------------------- what is new */}
       <Panel title={`New in ${SAM_FRAMEWORK_VERSION}`}>
         <p className="m-0" style={{ color: 'var(--color-parchment)' }}>
-          This one is about trust.{' '}
+          This one is about what an item can do on its own.{' '}
           <strong style={{ color: 'var(--color-gold)' }}>
-            The whole framework was read, doubted, and fixed.
+            Items that never wear out, weapons that put an effect on what they hit, and innate spells on the hotbar.
           </strong>{' '}
-          Models are named by file instead of by number, and a long list of things that
-          used to fail quietly now say what went wrong.
+          Nothing here needs a script.
         </p>
         <ul className="mt-3 mb-0 space-y-2" style={{ listStyle: 'none', padding: 0 }}>
           {WHATS_NEW.map(([title, blurb]) => (
@@ -113,7 +112,7 @@ export default function Dashboard() {
              target="_blank" rel="noreferrer" style={{ color: 'var(--color-gold)' }}>
             complete function reference
           </a>{' '}
-          lists all 184 functions and 72 events with their arguments and return values. Writing
+          lists every function and event with their arguments and return values. Writing
           your mod in TypeScript?{' '}
           <a href="https://github.com/spider12223/SAM-Framework/releases/latest/download/sam.d.ts"
              target="_blank" rel="noreferrer" style={{ color: 'var(--color-gold)' }}>sam.d.ts</a>{' '}

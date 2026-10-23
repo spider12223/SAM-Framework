@@ -4,7 +4,7 @@
 // Drop this beside your mod's .ts files, or reference it:
 //   /// <reference path="sam.d.ts" />
 //
-// 338 functions, 87 events. Each function's "Multiplayer:" line starts with
+// 339 functions, 87 events. Each function's "Multiplayer:" line starts with
 // its kind (host, owner, screen, read, all, local, any); see docs/multiplayer.md.
 
 declare global {
@@ -483,6 +483,13 @@ declare global {
    * Multiplayer: read. The host can read every creature; a client can read only its own player's uid (entity_uid), and anything else is refused with a one-time warning and returns nil (undefined in JavaScript).
    */
   function sam_get_healring(entity_uid: number): number | undefined;
+
+  /**
+   * Read what is on a player's hotbar right now. slot is 0 to 9, the numbering a class's starting_items hotbar_slot uses. kind is "spell" or "item". For a spell, name is a mod spell's "namespace:spell" or a vanilla spell's internal name and type is the spell's id; for an item, name is the item's internal name (a mod item's "namespace:item") and type is its item type number. uid is the item's uid. Empty slots are left out. Read only: no script call sets a hotbar slot (the game's own auto-add can still place an item or spell that a script grants, when the player has that option on and a slot is free).
+   *
+   * Multiplayer: local. Answers for the machine running the script. Given a player on another machine (player), it is refused with a one-time warning and returns nil (undefined in JavaScript). Returns nil for a player on another machine, and logs it once for each such player. A seat nobody plays on also returns nil, with nothing logged.
+   */
+  function sam_get_hotbar(player: number): any;
 
   /**
    * Read any creature's health by UID.
@@ -1234,7 +1241,7 @@ declare global {
   function sam_is_visible(uid: number): boolean | undefined;
 
   /**
-   * The item counterpart of sam_monster_has_trait. Takes a TYPE. Answers for all eleven traits a mod can declare, checking what the item declared and then the game's own rule for a vanilla one. An unknown trait name is refused with the valid list logged rather than silently returning false.
+   * The item counterpart of sam_monster_has_trait. Takes a TYPE. Answers for the twelve traits a mod can declare. RANGED, QUIVER, FOCI, INSTRUMENT and THROWN_BALL are also true for the vanilla items the game already puts on those lists. The other seven, UNBREAKABLE included, report only what a mod declared, so every vanilla item answers false for them, a vanilla artifact too. An unknown trait name is refused with the valid list logged rather than silently returning false.
    *
    * Multiplayer: any. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
    */

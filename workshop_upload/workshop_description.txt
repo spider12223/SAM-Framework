@@ -8,9 +8,9 @@ Barony was never built to be modded. S.A.M is the layer that makes it modded any
 
 [hr][/hr]
 
-[h1]NEW: SUMMONS THAT FIGHT FOR YOU[/h1]
+[h1]NEW: SUMMONS, UNBREAKABLE ITEMS, HOTBAR SPELLS[/h1]
 
-[b]sam_make_follower[/b]: a script can turn a spawned monster into a real ally, like a Scroll of Summon but stricter. A custom spell's effect now lands on more bolts, and scripts see a mod spell by its own id.
+[b]sam_make_follower[/b] makes a spawned monster an ally. Mod items can be [b]unbreakable[/b], melee weapons can add your own effect to a hit, and a mod race's innate spells sit on a new character's hotbar.
 
 [h1]GAME SPEED, MOD SETTINGS, THE LOOT POOL[/h1]
 
@@ -78,7 +78,7 @@ Build a class, item, monster, spell or effect with dropdowns and sliders, watch 
 
 JSON says what your content [i]is[/i]. A script says what it [i]does[/i]. Drop a .lua, .js or .ts file next to any JSON and it loads automatically. TypeScript is compiled for you.
 
-[b]87 events[/b] to react to, and now to change. [b]338 functions[/b] to act with: grant items and gold, read and set stats, apply effects, cast spells, deal or change damage, teleport, spawn monsters, run your own per frame logic, open windows, timers, saved data, screen effects, and live patching that reverts when your mod unloads.
+[b]87 events[/b] to react to, and now to change. [b]339 functions[/b] to act with: grant items and gold, read and set stats, apply effects, cast spells, deal or change damage, teleport, spawn monsters, run your own per frame logic, open windows, timers, saved data, screen effects, and live patching that reverts when your mod unloads.
 
 S.A.M looks for just two function names in your script: [b]on_event(event)[/b] and [b]on_tick(event)[/b].
 

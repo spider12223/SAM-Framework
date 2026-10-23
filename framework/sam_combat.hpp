@@ -42,8 +42,21 @@
 
 #pragma once
 
+class Entity;
+class Stat;
+
 namespace SAMCombat
 {
+	// ---- a weapon's own on-hit effect ------------------------------------------------------
+	//
+	// Called by the engine right after a melee hit by a MOD weapon has landed. Applies the
+	// weapon's on_hit_effect (item JSON; see SAMItemDef) to the victim: the chance roll, the duration
+	// (on_hit_duration, else the effect's own, else 250 ticks) and the effect's usual rules (species
+	// immunity, the on_before_effect_applied gate, the client sync) all come from Entity::setEffect.
+	// Never shortens an effect the victim already has. Does nothing for a vanilla weapon, a weapon with
+	// no on_hit_effect, a victim with no stats or no health left.
+	void applyItemOnHit(int itemType, Entity* attacker, Entity* victim, Stat* victimStats);
+
 	// ---- species damage resistance ------------------------------------------------------
 	//
 	// multiplier is the same scale as damagetables: 1.0 = normal, 0.5 = half damage taken,

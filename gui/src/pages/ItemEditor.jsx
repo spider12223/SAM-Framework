@@ -33,10 +33,13 @@ const ITEM_TRAITS = [
   ['potion_bad',       'Recognised as a harmful potion'],
   ['automaton_food',   'An automaton can eat it'],
   ['beatitude_ac',     'Blessing or cursing it changes its AC (needed for custom masks)'],
+  ['unbreakable',      'Never loses condition from use, hits, blocks or burning'],
 ];
 import { validate } from '@/lib/validate.js';
 import { carryUnknown } from '@/lib/editorKeys.js';
 import { checkBalance } from '@/lib/balance.js';
+import { EFFECTS } from '@/data/samApi.js';
+import { checkOnHitEffect, describeOnHitEffect } from '@/lib/spellEffectRef.js';
 import { useMod } from '@/state/ModContext.jsx';
 import {
   Panel, Field, TextInput, NumberInput, Select, SearchSelect, GoldButton,
@@ -52,7 +55,7 @@ function slugify(name) {
 const numOr = (v, d) => (v === '' || v === null || v === undefined ? d : v);
 
 export default function ItemEditor() {
-  const { meta, items, sounds = [], editing, dispatch } = useMod();
+  const { meta, items, effects = [], sounds = [], editing, dispatch } = useMod();
 
   // "Edit" handoff from the Mod Builder: seed the form from a saved item.
   const editDef = editing?.kind === 'item' ? items.find((it) => it.id === editing.id) : null;
@@ -79,6 +82,12 @@ export default function ItemEditor() {
   const [modelFp, setModelFp] = useState(editDef?.model_fp ?? '');
   const [modelFromItem, setModelFromItem] = useState(editDef?.model_from_item ?? '');
   const [wornLike, setWornLike] = useState(editDef?.worn_like ?? '');
+  // A weapon's own on-hit effect. The chance is kept as a percent in the form and written as the
+  // 0.0 to 1.0 fraction the JSON takes; blank means every hit.
+  const [onHitEffect, setOnHitEffect] = useState(editDef?.on_hit_effect ?? '');
+  const [onHitChance, setOnHitChance] = useState(
+    editDef?.on_hit_chance != null ? Math.round(editDef.on_hit_chance * 10000) / 100 : '');
+  const [onHitDuration, setOnHitDuration] = useState(editDef?.on_hit_duration ?? '');
   const [icon, setIcon] = useState(editDef?.icon ?? '');
   const [attribs, setAttribs] = useState(() =>
     Object.entries(editDef?.attributes ?? {}).map(([key, value]) => ({ key, value }))
@@ -124,6 +133,11 @@ export default function ItemEditor() {
     // Only meaningful for a wielded weapon. Without it the engine gives a custom weapon no
     // skill at all: no skill increase from use, no damage variance, no durability scaling.
     if (slot === 'EQUIPPABLE_IN_SLOT_WEAPON') def.weapon_skill = weaponSkill;
+    if (slot === 'EQUIPPABLE_IN_SLOT_WEAPON' && onHitEffect.trim()) {
+      def.on_hit_effect = onHitEffect.trim();
+      if (onHitChance !== '' && onHitChance != null) def.on_hit_chance = Math.min(100, Math.max(0, Number(onHitChance))) / 100;
+      if (onHitDuration !== '' && onHitDuration != null && Number(onHitDuration) > 0) def.on_hit_duration = Number(onHitDuration);
+    }
     if (traits.length) def.traits = traits;
     if (nameUnid.trim()) def.name_unidentified = nameUnid.trim();
     if (description.trim()) def.description = description.trim();
@@ -162,7 +176,9 @@ export default function ItemEditor() {
   const def = useMemo(buildDef,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [nameId, nameUnid, description, category, slot, weaponSkill, traits, weight, goldValue, level, stackable,
-      magicLevel, model, modelFp, modelFromItem, wornLike, icon, attribs, soundRows, namespace]);
+      magicLevel, model, modelFp, modelFromItem, wornLike, onHitEffect, onHitChance, onHitDuration, icon, attribs, soundRows, namespace]);
+  const customEffectIds = useMemo(() => effects.map((e) => e.id), [effects]);
+  const onHitNote = describeOnHitEffect(checkOnHitEffect(onHitEffect, customEffectIds));
   const ownSoundIds = useMemo(() => sounds.filter((s) => s.id).map((s) => s.id), [sounds]);
   const preview = useMemo(() => JSON.stringify(def, null, 2), [def]);
   const hints = useMemo(() => checkBalance('item', def), [def]);
@@ -253,6 +269,42 @@ export default function ItemEditor() {
                   options={WEAPON_SKILLS.map((k) => ({ value: k, label: k[0].toUpperCase() + k.slice(1) }))}
                 />
               </Field>
+            )}
+            {slot === 'EQUIPPABLE_IN_SLOT_WEAPON' && (
+              <div className="col-span-2 space-y-3">
+                <Field
+                  label="On-hit effect"
+                  hint={(
+                    <>
+                      A status this weapon puts on whatever it hits in melee: pick one of your own effects (they look like{' '}
+                      <span className="sam-mono">{namespace}:plague</span>) or a built-in one like{' '}
+                      <span className="sam-mono">EFF_POISONED</span>.
+                      {onHitNote && (
+                        <span className={onHitNote.tone === 'warn' ? 'sam-error block mt-1' : 'block mt-1'}
+                          style={onHitNote.tone === 'ok' ? { color: '#9dc76a' } : undefined}>
+                          {onHitNote.tone === 'ok' ? '\u2713 ' : '\u26a0 '}{onHitNote.text}
+                        </span>
+                      )}
+                    </>
+                  )}
+                >
+                  <TextInput value={onHitEffect} onChange={setOnHitEffect} placeholder="EFF_SLOW" list="sam-item-onhit-effects" />
+                  <datalist id="sam-item-onhit-effects">
+                    {customEffectIds.map((id) => <option key={id} value={id} />)}
+                    {EFFECTS.map((n) => <option key={n} value={`EFF_${n}`} />)}
+                  </datalist>
+                </Field>
+                {onHitEffect.trim() && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="Effect chance (%)" hint="Blank means every hit.">
+                      <NumberInput value={onHitChance} min={0} max={100} onChange={setOnHitChance} />
+                    </Field>
+                    <Field label="Effect duration (ticks)" hint="50 ticks = 1 second. Blank (or 0) uses a custom effect's own duration, or 5 seconds for a built-in one.">
+                      <NumberInput value={onHitDuration} min={0} onChange={setOnHitDuration} />
+                    </Field>
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </Panel>

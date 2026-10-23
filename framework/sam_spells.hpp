@@ -21,6 +21,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 #include <map>
 
 struct SAMModManifest;  // from sam_workshop.hpp (full type only needed in the .cpp)
@@ -113,6 +114,15 @@ public:
 	// The name scripts see for a spell id: the "namespace:spell" a mod declared, else the
 	// engine's internal name, else "" for an id nothing defines.
 	static std::string scriptName(int spellId);
+
+	// One occupied hotbar slot, for sam_get_hotbar. slot is 0 to 9. For a spell, `type` is the spell's
+	// id and `name` its scriptName; for an item, `type` is the item type and `name` its internal name
+	// (a mod item's "namespace:item").
+	struct HotbarEntry { int slot; bool isSpell; std::string name; int type; long long uid; };
+
+	// What is on the hotbar of a player who plays on THIS machine, every occupied slot in slot order.
+	// False (and `out` empty) for a player this machine cannot see: the bar is that machine's own.
+	static bool hotbarOf(int player, std::vector<HotbarEntry>* out);
 
 	// Teach spell `spellId` to `player` on THIS machine, through the engine's own addSpell (the
 	// spell list plus its spell item). The player must play here; in multiplayer the

@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://sam-framework.dev/schemas/item.schema.json",
   "title": "S.A.M Item / Weapon",
-  "description": "Defines a custom item or weapon. S.A.M registers it into the items[] table at a reserved runtime slot (>=5000) and wires up its names, category, slot, weight, value, level, attributes and 2D inventory icon. Custom 3D models and on-hit effects are PLANNED and not yet loaded \u2014 see each field's note.",
+  "description": "Defines a custom item or weapon. S.A.M registers it into the items[] table at a reserved runtime slot (>=5000) and wires up its names, category, slot, weight, value, level, attributes and 2D inventory icon. Your own 3D models load from the model fields, and a weapon can put a status effect on a creature it hits in melee with on_hit_effect. Fields that are parsed but not applied yet are marked PLANNED in their own note.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -90,7 +90,7 @@
     },
     "traits": {
       "type": "array",
-      "description": "Engine behaviours this item opts into. Barony answers questions like 'is this a bow?' or 'can this hold arrows?' from hardcoded lists of vanilla item types, and a custom item can never be on those lists. Naming a trait here puts it on. A trait makes the item RECOGNISED; what it then does is up to your script.",
+      "description": "Engine behaviours this item opts into. Barony answers questions like 'is this a bow?' or 'can this hold arrows?' from hardcoded lists of vanilla item types, and a custom item can never be on those lists. Naming a trait here puts it on. A trait puts the item on one of the game's lists, and the game then treats it as it treats the vanilla items on that list: a ranged item fires like a bow, a quiver holds ammo, an unbreakable item is not worn down by use, hits, blocks or burning and is safe from the Repair and Destroy Armor scrolls, and none of that needs a script. Some traits only open the door and leave the work to your script (usable, tinker_throwable).",
       "items": {
         "type": "string",
         "enum": [
@@ -104,7 +104,8 @@
           "automaton_food",
           "tinker_throwable",
           "usable",
-          "beatitude_ac"
+          "beatitude_ac",
+          "unbreakable"
         ]
       },
       "uniqueItems": true
@@ -153,7 +154,7 @@
     },
     "attributes": {
       "type": "object",
-      "description": "Numeric values the engine reads off this item. Recognised keys: ATK (added by attackGetAttack for weapons), AC (added by armorGetAC for armor and shields), TINKER_SALVAGE_METAL and TINKER_SALVAGE_MAGIC (what this yields when salvaged), spellbook_spell (the spell this SPELLBOOK teaches or casts, as a spell id), and foci_spell (the spell a shield-slot focus channels, as a spell id). Any other key is kept on the item and never looked at: there is no script call that reads a custom attribute back, so an invented key like EFF_UNBREAKABLE does nothing. A custom key has to be a whole number; anything else is dropped when the mod loads.",
+      "description": "Numeric values the engine reads off this item. Recognised keys: ATK (added by attackGetAttack for weapons), AC (added by armorGetAC for armor and shields), TINKER_SALVAGE_METAL and TINKER_SALVAGE_MAGIC (what this yields when salvaged), spellbook_spell (the spell this SPELLBOOK teaches or casts, as a spell id), and foci_spell (the spell a shield-slot focus channels, as a spell id). Any other key is kept on the item and never looked at: there is no script call that reads a custom attribute back, so an invented key like EFF_UNBREAKABLE does nothing (for an item that never wears out, use the \"unbreakable\" trait). A custom key has to be a whole number; anything else is dropped when the mod loads.",
       "additionalProperties": {
         "type": "integer"
       },
@@ -208,13 +209,18 @@
     },
     "on_hit_effect": {
       "type": "string",
-      "description": "PLANNED \u2014 requires the S.A.M effect/plugin system, which is not yet implemented. Parsed but has no runtime effect. Status effect to apply on a successful hit (e.g. an EFF_ effect name from stat.hpp)."
+      "description": "A status effect this weapon puts on whatever it hits in melee (not yet when it is thrown, and not with arrows). One of your own effects by its exact id ('namespace:effect', lowercase, e.g. 'mymod:plague'), or a vanilla name such as 'EFF_SLOW'. A name that matches nothing is ignored, with one warning line in sam_log.txt. It applies only when the hit does damage and leaves the target alive. The usual effect rules apply (species immunities, the on_before_effect_applied event), and it never shortens an effect the target already has."
     },
     "on_hit_chance": {
       "type": "number",
       "minimum": 0,
       "maximum": 1,
-      "description": "PLANNED \u2014 no runtime effect yet (see 'on_hit_effect'). Probability (0.0-1.0) that on_hit_effect triggers on a hit."
+      "description": "Probability, 0.0 to 1.0, that on_hit_effect lands on a hit. Left out means every hit; an explicit 0 means never. A value above 1 is read as 1, with a warning. On a spell the same field is a whole percent, 0 to 100, and 0 means every hit, so do not copy a number between the two."
+    },
+    "on_hit_duration": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "How long on_hit_effect lasts, in ticks (50 to a second). 0 or left out uses the effect's own duration_ticks, otherwise 250 (5 seconds)."
     },
     "stackable": {
       "type": "boolean",

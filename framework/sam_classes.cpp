@@ -1438,10 +1438,65 @@ void SAMClasses::applyLoadout(int player)
 	SAM_INFO(MOD, "Applied loadout for [" + def->id + "]: " + std::to_string(given) + " item stack(s).");
 }
 
+// Innate spells on the hotbar. initClass puts every spell a character starts with on the first free
+// slot, and then assignHotbarSlots zeroes the bar and refills it from data/class_hotbars.json, which
+// can name only vanilla classes and vanilla spells. So the spells a custom race or class lists in
+// starting_spells (and a vanilla spell a custom class lists) were in the spell list and never on the
+// bar. Each one goes back on the first free slot, vanilla's own rule, after the layout and the class
+// item pins, so it never takes a slot anything else holds. A spell the layout already placed stays.
+// The bar is this machine's own, so only a player who plays here is touched. With nothing declared
+// this returns at once.
+static void samPlaceInnateSpells(int player)
+{
+	if ( player < 0 || player >= MAXPLAYERS || !players[player] || !stats[player] ) { return; }
+	if ( !players[player]->isLocalPlayer() ) { return; }
+	std::vector<std::string> declared;   // the race's first, then the class's: initClass's own order
+	if ( const SAMRaceDef* r = SAMRaces::get(stats[player]->playerRace) )
+	{
+		if ( stats[player]->stat_appearance == 0 ) { declared.insert(declared.end(), r->startingSpells.begin(), r->startingSpells.end()); }
+	}
+	if ( const SAMClassDef* c = SAMClasses::getClass(client_classes[player]) )
+	{
+		declared.insert(declared.end(), c->startingSpells.begin(), c->startingSpells.end());
+	}
+	if ( declared.empty() ) { return; }
+	auto& bar = players[player]->hotbar.slots();
+	int placed = 0;
+	for ( const std::string& name : declared )
+	{
+		const int id = SAMSpells::resolveSpellRef(name);
+		if ( id < 0 ) { continue; }
+		Item* spellItem = nullptr;
+		for ( node_t* n = stats[player]->inventory.first; n; n = n->next )
+		{
+			Item* it = (Item*)n->element;
+			if ( it && it->type == SPELL_ITEM && it->appearance == static_cast<Uint32>(id) ) { spellItem = it; break; }
+		}
+		if ( !spellItem ) { continue; }   // this character does not know it
+		bool already = false;
+		for ( int i = 0; i < static_cast<int>(NUM_HOTBAR_SLOTS); ++i ) { if ( bar[i].item == spellItem->uid ) { already = true; break; } }
+		if ( already ) { continue; }
+		for ( int i = 0; i < static_cast<int>(NUM_HOTBAR_SLOTS); ++i )
+		{
+			if ( bar[i].item == 0 || !uidToItem(bar[i].item) ) { bar[i].item = spellItem->uid; ++placed; break; }
+		}
+	}
+	if ( placed > 0 )
+	{
+		SAM_DEBUG(MOD, "Put " + std::to_string(placed) + " innate spell(s) on the hotbar for player " + std::to_string(player) + ".");
+	}
+}
+
 // Re-pin the class's hotbar items after Barony's ClassHotbarConfig_t::assignHotbarSlots()
 // has zeroed and rebuilt the bar (it runs a few frames after applyLoadout and would
 // otherwise erase every custom pin). Called at the end of assignHotbarSlots.
 void SAMClasses::reapplyHotbarPins(int player)
+{
+	reapplyClassItemPins(player);
+	samPlaceInnateSpells(player);
+}
+
+void SAMClasses::reapplyClassItemPins(int player)
 {
 	if ( player < 0 || player >= MAXPLAYERS || !players[player] ) { return; }
 	// Only a currently-custom class has fresh pins. applyLoadout isn't called for a vanilla

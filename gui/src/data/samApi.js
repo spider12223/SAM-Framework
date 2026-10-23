@@ -82,7 +82,7 @@ export const DAMAGE_TYPES = ["sword", "mace", "axe", "polearm", "ranged", "magic
 // S.A.M call's output into another has to work.
 export const ARMOR_SLOTS = ["helmet", "breastplate", "armor", "gloves", "boots", "shoes", "shield", "cloak", "mask"];
 
-export const ITEM_TRAITS = ["RANGED", "QUIVER", "FOCI", "INSTRUMENT", "THROWN_BALL", "SHIELD_SLOT", "POTION_BAD", "AUTOMATON_FOOD", "TINKER_THROWABLE", "USABLE", "BEATITUDE_AC"];
+export const ITEM_TRAITS = ["RANGED", "QUIVER", "FOCI", "INSTRUMENT", "THROWN_BALL", "SHIELD_SLOT", "POTION_BAD", "AUTOMATON_FOOD", "TINKER_THROWABLE", "USABLE", "BEATITUDE_AC", "UNBREAKABLE"];
 
 // Every creature the engine knows, by the exact name the framework accepts (monstertypename[]
 // in monster.hpp). The NOTHING sentinel and the reserved padding slots are left out — they are
@@ -638,7 +638,7 @@ export const SAM_FUNCTIONS = [
     params: [{ name: "entity_uid", type: "uid" }, { name: "slot", type: "string", optional: true, values: ARMOR_SLOTS }],
     returns: "true if the piece degraded (boolean)",
     desc: "Degrade a worn piece of armour, possibly breaking it. With no slot named, the engine's own picker chooses, so the odds and the exclusions match a real hit. player.on_item_broken has existed as an event with no verb able to cause it.",
-    gotcha: "False is a real answer as well as a failure: the engine refuses shadows and liches outright, and refuses artifacts, quivers and anything preserved." },
+    gotcha: "False is a real answer as well as a failure: the engine refuses shadows and liches outright, and refuses artifacts, quivers, anything preserved and any item whose mod gave it the unbreakable trait. With no slot named the engine picks a worn piece at random first, so it can land on an unbreakable piece and return false: name the slot to be sure." },
   { name: "sam_gib", category: "Presentation", mp: "host", hostOnly: true,
     params: [{ name: "entity_uid", type: "uid" }, { name: "sprite", type: "int", optional: true }],
     returns: "true if a chunk was thrown (boolean)",
@@ -816,6 +816,13 @@ export const SAM_FUNCTIONS = [
   { name: "sam_monster_cast_spell", category: "Spells", mp: "host", hostOnly: true,
     params: [{ name: "uid", type: "uid" }, { name: "spell", type: "string", values: ["vanilla SPELL_ name", "\"namespace:spell\" (custom)"] }],
     returns: "the missile's uid (int), or nil/undefined", desc: "Make a monster (or a companion) cast a spell along its own facing. Free cast, host-only." },
+  { name: "sam_get_hotbar", category: "Spells", mp: "local", hostOnly: false, ts: "any",
+    params: [{ name: "player", type: "int" }],
+    returns: "an array of { slot, kind, name, type, uid }, one per occupied hotbar slot, or nil/undefined when this machine cannot see that player's bar",
+    desc: "Read what is on a player's hotbar right now. slot is 0 to 9, the numbering a class's starting_items hotbar_slot uses. kind is \"spell\" or \"item\". For a spell, name is a mod spell's \"namespace:spell\" or a vanilla spell's internal name and type is the spell's id; for an item, name is the item's internal name (a mod item's \"namespace:item\") and type is its item type number. uid is the item's uid. Empty slots are left out. Read only: no script call sets a hotbar slot (the game's own auto-add can still place an item or spell that a script grants, when the player has that option on and a slot is free).",
+    gotcha: "The hotbar is part of the screen of the machine its player plays on, so only a player who plays on this machine can be read: the host gets nil for a remote player, and a joiner gets nil for everyone but themselves. A custom race or class's starting_spells are put on the first free slots when a character is created, after the class layout is applied, The bar is built before game.on_game_start fires on the host and in singleplayer, so it can be read in that event or later. While a character is shapeshifted the game swaps the form's own bar into the slots, so the call returns the form's bar. Only a new game gets the placement: a loaded saved game keeps the bar it was saved with.",
+    mpNote: "Returns nil for a player on another machine, and logs it once for each such player. A seat nobody plays on also returns nil, with nothing logged." },
+
   { name: "sam_get_spells", category: "Spells", mp: "read", hostOnly: false,
     params: [{ name: "player", type: "int" }],
     returns: "array/table of the spells the player knows (a mod's spell as its \"namespace:spell\", a vanilla one as its internal name), or nil if this machine cannot see that player's spells", desc: "List the spells a player currently knows.",
@@ -1679,7 +1686,7 @@ export const SAM_FUNCTIONS = [
   { name: "sam_item_has_trait", category: "Inventory", mp: "any", hostOnly: false,
     params: [{ name: "item_type", type: "int" }, { name: "trait", type: "string", values: ITEM_TRAITS }],
     returns: "true if the type has that trait (boolean)",
-    desc: "The item counterpart of sam_monster_has_trait. Takes a TYPE. Answers for all eleven traits a mod can declare, checking what the item declared and then the game's own rule for a vanilla one. An unknown trait name is refused with the valid list logged rather than silently returning false." },
+    desc: "The item counterpart of sam_monster_has_trait. Takes a TYPE. Answers for the twelve traits a mod can declare. RANGED, QUIVER, FOCI, INSTRUMENT and THROWN_BALL are also true for the vanilla items the game already puts on those lists. The other seven, UNBREAKABLE included, report only what a mod declared, so every vanilla item answers false for them, a vanilla artifact too. An unknown trait name is refused with the valid list logged rather than silently returning false." },
   { name: "sam_get_item_slot", category: "Inventory", mp: "any", hostOnly: false,
     params: [{ name: "item_type", type: "int" }],
     returns: "one of WEAPON, SHIELD, MASK, HELM, GLOVES, BOOTS, BREASTPLATE, CLOAK, AMULET, RING, or NONE for something that cannot be worn",

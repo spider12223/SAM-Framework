@@ -111,7 +111,7 @@
       "items": {
         "type": "string"
       },
-      "description": "Innate spells this race knows from creation. Vanilla \"SPELL_X\" names or your own \"namespace:spell\"."
+      "description": "Innate spells this race knows from creation. Vanilla \"SPELL_X\" names or your own \"namespace:spell\". They are also put on the first free hotbar slots when the character is created."
     },
     "allies": {
       "type": "array",

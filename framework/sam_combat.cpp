@@ -30,6 +30,9 @@
 #include "stat.hpp"     // Stat, the ten equipment slots
 #include "entity.hpp"   // Entity, actPlayer
 #include "monster.hpp"  // NUMMONSTERS, NOTHING, DamageTableType, limbs
+#include "prng.hpp"     // local_rng: the on_hit_chance roll
+#include "sam_items.hpp"    // the item's declared on_hit_effect
+#include "sam_effects.hpp"  // an effect's own default duration
 
 namespace SAMCombat
 {
@@ -557,6 +560,31 @@ namespace SAMCombat
 		}
 	};
 	static SamCombatNet s_combatNet;
+
+	// ---- a weapon's own on-hit effect ------------------------------------------------------
+
+	void applyItemOnHit(int itemType, Entity* attacker, Entity* victim, Stat* victimStats)
+	{
+		(void)attacker;
+		const SAMItemDef* d = SAMItems::getItem(itemType);
+		if ( !d || d->onHitEffectSlot < 0 || !victim || !victimStats || victimStats->HP <= 0 ) { return; }
+		const int slot = d->onHitEffectSlot;
+		if ( slot >= NUMEFFECTS ) { return; }
+		if ( d->onHitChance >= 0.0 && d->onHitChance < 1.0 )
+		{
+			if ( d->onHitChance <= 0.0 ) { return; }
+			if ( (int)(local_rng.rand() % 10000) >= (int)(d->onHitChance * 10000.0) ) { return; }
+		}
+		// A permanent effect (-1) is left alone: refreshing it with a number would end it.
+		if ( victimStats->EFFECTS_TIMERS[slot] == -1 && victimStats->getEffectActive(slot) ) { return; }
+		int dur = d->onHitDuration;
+		if ( dur <= 0 ) { dur = SAMEffects::defaultDurationForSlot(slot); }
+		if ( dur <= 0 ) { dur = TICKS_PER_SECOND * 5; }
+		// overrideDuration = false: the longer of the old and new timer, so a short blade never cuts
+		// short a longer effect the target already has. setEffect applies the immunity rules, the
+		// on_before_effect_applied gate and the client sync.
+		victim->setEffect(slot, true, dur, true, true, false, false);
+	}
 
 	void clear()
 	{

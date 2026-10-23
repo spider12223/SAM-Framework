@@ -1,6 +1,6 @@
 # S.A.M function reference
 
-Every script function the framework exposes: **338 functions** and **87 events**.
+Every script function the framework exposes: **339 functions** and **87 events**.
 All of them work identically in Lua, JavaScript and TypeScript.
 
 This page is generated from the API definition, so it cannot fall behind the code. If a
@@ -20,7 +20,7 @@ the kind, so the line is always what really happens:
 | `screen` (29) | Shows something on one player's screen. Name the player, or leave it out inside an event about a player; -1 means every player. S.A.M carries it to their machine. |
 | `read` (50) | Reads a player. The host can read everyone; a client can read only its own player. |
 | `all` (15) | Changes a table every machine keeps (class and item patches, species resists). A host call runs everywhere and reaches players who join later. |
-| `local` (26) | Answers for the machine running it: its clock, its files, its music. |
+| `local` (27) | Answers for the machine running it: its clock, its files, its music. |
 | `any` (57) | The same answer on every machine. Safe anywhere. |
 
 Every event ends with a **Multiplayer:** line that says which machine it fires on and for
@@ -58,7 +58,7 @@ For guides and worked examples, see [scripting-reference.md](scripting-reference
 - [Rules](#rules) (15)
 - [Settings](#settings) (4)
 - [Sound & music](#sound-music) (6)
-- [Spells](#spells) (9)
+- [Spells](#spells) (10)
 - [Status effects](#status-effects) (9)
 - [Terrain](#terrain) (9)
 - [Timers](#timers) (3)
@@ -198,7 +198,7 @@ This is the engine's own switch, the one /thirdperson flips, so it costs nothing
 
 Degrade a worn piece of armour, possibly breaking it. With no slot named, the engine's own picker chooses, so the odds and the exclusions match a real hit. player.on_item_broken has existed as an event with no verb able to cause it.
 
-False is a real answer as well as a failure: the engine refuses shadows and liches outright, and refuses artifacts, quivers and anything preserved.
+False is a real answer as well as a failure: the engine refuses shadows and liches outright, and refuses artifacts, quivers, anything preserved and any item whose mod gave it the unbreakable trait. With no slot named the engine picks a worn piece at random first, so it can land on an unbreakable piece and return false: name the slot to be sure.
 
 | argument | type |
 |---|---|
@@ -1394,12 +1394,12 @@ Covers everything worn in the shield hand, not only shields: lanterns, torches, 
 
 ### `sam_item_has_trait(item_type, trait)`
 
-The item counterpart of sam_monster_has_trait. Takes a TYPE. Answers for all eleven traits a mod can declare, checking what the item declared and then the game's own rule for a vanilla one. An unknown trait name is refused with the valid list logged rather than silently returning false.
+The item counterpart of sam_monster_has_trait. Takes a TYPE. Answers for the twelve traits a mod can declare. RANGED, QUIVER, FOCI, INSTRUMENT and THROWN_BALL are also true for the vanilla items the game already puts on those lists. The other seven, UNBREAKABLE included, report only what a mod declared, so every vanilla item answers false for them, a vanilla artifact too. An unknown trait name is refused with the valid list logged rather than silently returning false.
 
 | argument | type |
 |---|---|
 | `item_type` | int |
-| `trait` | string — one of: `RANGED`, `QUIVER`, `FOCI`, `INSTRUMENT`, `THROWN_BALL`, `SHIELD_SLOT`, `POTION_BAD`, `AUTOMATON_FOOD`, `TINKER_THROWABLE`, `USABLE`, `BEATITUDE_AC` |
+| `trait` | string — one of: `RANGED`, `QUIVER`, `FOCI`, `INSTRUMENT`, `THROWN_BALL`, `SHIELD_SLOT`, `POTION_BAD`, `AUTOMATON_FOOD`, `TINKER_THROWABLE`, `USABLE`, `BEATITUDE_AC`, `UNBREAKABLE` |
 
 **Returns:** true if the type has that trait (boolean)
 
@@ -3658,6 +3658,20 @@ Fire a spell aimed at a map tile. Free cast, host-only.
 **Returns:** the missile's uid (int), or nil/undefined
 
 **Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript).
+
+### `sam_get_hotbar(player)`
+
+Read what is on a player's hotbar right now. slot is 0 to 9, the numbering a class's starting_items hotbar_slot uses. kind is "spell" or "item". For a spell, name is a mod spell's "namespace:spell" or a vanilla spell's internal name and type is the spell's id; for an item, name is the item's internal name (a mod item's "namespace:item") and type is its item type number. uid is the item's uid. Empty slots are left out. Read only: no script call sets a hotbar slot (the game's own auto-add can still place an item or spell that a script grants, when the player has that option on and a slot is free).
+
+The hotbar is part of the screen of the machine its player plays on, so only a player who plays on this machine can be read: the host gets nil for a remote player, and a joiner gets nil for everyone but themselves. A custom race or class's starting_spells are put on the first free slots when a character is created, after the class layout is applied, The bar is built before game.on_game_start fires on the host and in singleplayer, so it can be read in that event or later. While a character is shapeshifted the game swaps the form's own bar into the slots, so the call returns the form's bar. Only a new game gets the placement: a loaded saved game keeps the bar it was saved with.
+
+| argument | type |
+|---|---|
+| `player` | int |
+
+**Returns:** an array of { slot, kind, name, type, uid }, one per occupied hotbar slot, or nil/undefined when this machine cannot see that player's bar
+
+**Multiplayer:** `local`. Answers for the machine running the script. Given a player on another machine (`player`), it is refused with a one-time warning and returns nil (undefined in JavaScript). Returns nil for a player on another machine, and logs it once for each such player. A seat nobody plays on also returns nil, with nothing logged.
 
 ### `sam_get_spells(player)`
 

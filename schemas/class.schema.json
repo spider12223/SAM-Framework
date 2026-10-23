@@ -783,7 +783,7 @@
     },
     "starting_spells": {
       "type": "array",
-      "description": "Spells the class knows from the start. Each entry is EITHER a Barony spell constant name in SPELL_X form (e.g. 'SPELL_FORCEBOLT', from magic.hpp) OR a custom S.A.M spell id in 'namespace:spell' form (e.g. 'darkmage:shadow_bolt') declared by a mod's spells[] and registered by the spell loader.",
+      "description": "Spells the class knows from the start. Each entry is EITHER a Barony spell constant name in SPELL_X form (e.g. 'SPELL_FORCEBOLT', from magic.hpp) OR a custom S.A.M spell id in 'namespace:spell' form (e.g. 'darkmage:shadow_bolt') declared by a mod's spells[] and registered by the spell loader. When a character is created these spells are also put on the first free hotbar slots, after the class's own hotbar layout is applied.",
       "items": {
         "type": "string",
         "pattern": "^(SPELL_[A-Z0-9_]+|[a-z][a-z0-9_]*:[a-z][a-z0-9_]*)$",

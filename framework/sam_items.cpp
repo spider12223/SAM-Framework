@@ -50,6 +50,8 @@
 #include "interface/interface.hpp"   // GenericGUI transmuteItemTarget
 #include "mod_tools.hpp" // ItemTooltips.itemNameStringToItemID — resolves "model_from_item" names
 #include "entity.hpp"    // Entity::sprite, swapped by SAMWornAsTwin for the length of a placement
+#include "sam_effects.hpp"      // an item's on_hit_effect: a custom effect id -> its slot
+#include "sam_lua_runtime.hpp"  // SAMLua::effectIdFromName: the vanilla effect names
 #endif
 
 #include <fstream>
@@ -771,6 +773,7 @@ static bool registerItemAt(int id, SAMItemDef def)
 			{ "tinker_throwable", SAMItemTrait::TINKER_THROWABLE },
 			{ "usable",           SAMItemTrait::USABLE },
 			{ "beatitude_ac",     SAMItemTrait::BEATITUDE_AC },
+			{ "unbreakable",      SAMItemTrait::UNBREAKABLE },
 		};
 		slot.samTraits = 0;
 		for ( const std::string& t : def.traits )
@@ -1025,7 +1028,15 @@ void SAMItems::loadFromManifest(const SAMModManifest& manifest)
 			}
 		}
 		def.onHitEffect = getStr("on_hit_effect");
-		def.onHitChance = getNum("on_hit_chance", 0.0);
+		def.onHitChance = getNum("on_hit_chance", -1.0);   // -1: left out = every hit
+		if ( def.onHitChance > 1.0 )
+		{
+			SAM_WARN(MOD, "Item [" + def.id + "] on_hit_chance " + std::to_string(def.onHitChance)
+				+ " is above 1.0 -- it is a fraction (0.25 is 25%), so 1.0 is used.");
+			def.onHitChance = 1.0;
+		}
+		else if ( def.onHitChance < 0.0 ) { def.onHitChance = -1.0; }
+		def.onHitDuration = getInt("on_hit_duration", 0);
 		def.stackable = getBool("stackable", false);
 		def.magicLevel = getInt("magic_level", 0);
 
@@ -1167,6 +1178,31 @@ void SAMItems::reapplyAfterDataReload()
 	{
 		SAM_INFO(MOD, "Re-applied " + std::to_string(s_itemPatchedNow.size())
 			+ " item patch(es) after a vanilla data reload.");
+	}
+#endif
+}
+
+void SAMItems::resolveOnHitEffects()
+{
+#ifndef EDITOR
+	for ( auto& kv : s_registry )
+	{
+		SAMItemDef& def = kv.second;
+		def.onHitEffectSlot = -1;
+		if ( def.onHitEffect.empty() ) { continue; }
+		int slot = SAMEffects::idForName(def.onHitEffect);
+		if ( slot < 0 ) { slot = SAMLua::effectIdFromName(def.onHitEffect.c_str()); }
+		if ( slot < 0 && def.onHitEffect.rfind("EFF_", 0) == 0 ) { slot = SAMLua::effectIdFromName(def.onHitEffect.c_str() + 4); }
+		def.onHitEffectSlot = slot;
+		if ( slot < 0 )
+		{
+			SAM_WARN(MOD, "Item '" + def.id + "' on_hit_effect '" + def.onHitEffect + "' is unknown -- ignored. "
+				"Use the effect's exact id (lowercase, with its namespace, e.g. \"mymod:plague\") or a vanilla name like EFF_POISONED.");
+		}
+		else
+		{
+			SAM_INFO(MOD, "Item '" + def.id + "' on_hit_effect '" + def.onHitEffect + "' -> effect slot " + std::to_string(slot));
+		}
 	}
 #endif
 }

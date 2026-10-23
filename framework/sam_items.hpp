@@ -96,7 +96,8 @@ struct SAMItemDef
 	std::string weaponSkill;
 
 	// Engine traits this item opts into: "ranged", "quiver", "foci", "instrument",
-	// "thrown_ball", "shield_slot", "potion_bad", "automaton_food", "tinker_throwable".
+	// "thrown_ball", "shield_slot", "potion_bad", "automaton_food", "tinker_throwable",
+	// "usable", "beatitude_ac" and "unbreakable" (never loses condition).
 	// Barony decides each of those by checking the item against a hardcoded list of vanilla
 	// types, which a custom item can never be on. Naming one here puts the item on the list.
 	std::vector<std::string> traits;
@@ -114,8 +115,15 @@ struct SAMItemDef
 	// AFTER items, so they are stashed here and turned into numeric ids by
 	// SAMItems::resolveSpellAttributes() once every spell is registered.
 	std::map<std::string, std::string> spellAttrPending;
+	// A weapon's own on-hit status, for melee hits. onHitEffect is the exact id of a custom
+	// effect ("ns:effect") or a vanilla name ("EFF_SLOW", "poisoned"); it is turned into an effect slot
+	// once every mod has loaded (SAMItems::resolveOnHitEffects). onHitChance is a fraction, 0.0 to 1.0:
+	// -1 (left out) means every hit, an explicit 0 means never. onHitDuration is ticks, 50 to a second:
+	// 0 means the effect's own duration, else 250.
 	std::string onHitEffect;
-	double onHitChance = 0.0;
+	double onHitChance = -1.0;
+	int onHitDuration = 0;
+	mutable int onHitEffectSlot = -1;   // resolved engine slot, -1 = none or unknown
 	bool stackable = false;
 	int magicLevel = 0;
 };
@@ -252,6 +260,11 @@ public:
 	// the live items[] slot, so it survives a later data reload. Call from the loader after
 	// SAMSpells::loadFromManifest has run for every mod. No-op when nothing is pending.
 	static void resolveSpellAttributes();
+
+	// Turn every item's on_hit_effect into an engine effect slot (custom "ns:effect" or a vanilla
+	// name). Call after every mod has loaded: an effect may come from a mod that loads later. Warns
+	// once per item whose effect names nothing.
+	static void resolveOnHitEffects();
 
 	// Name of a Category enum value ("WEAPON", "ARMOR", "GEM", ...), or "" if unknown.
 	// Reverse of the internal categoryFromName; lets scripts read an item's category.

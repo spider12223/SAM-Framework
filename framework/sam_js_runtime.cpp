@@ -3292,7 +3292,7 @@ namespace
 		if ( c ) { JS_FreeCString(ctx, c); }
 		if ( t < 0 || t >= NUM_ITEM_SLOTS ) { return JS_FALSE; }
 		const ItemType ty = (ItemType)t;
-		// All ELEVEN traits a mod may declare. See the Lua twin: the bit a custom item declared
+		// All TWELVE traits a mod may declare. See the Lua twin: the bit a custom item declared
 		// (ItemGeneric::samTraits) OR the engine's predicate for a vanilla one. Four of these had
 		// no reader anywhere before.
 		const Uint64 declared = ::items[t].samTraits;
@@ -3307,9 +3307,10 @@ namespace
 		if ( u == "TINKER_THROWABLE" ) { return JS_NewBool(ctx, ( declared & SAMItemTrait::TINKER_THROWABLE ) ? 1 : 0); }
 		if ( u == "USABLE" )           { return JS_NewBool(ctx, ( declared & SAMItemTrait::USABLE ) ? 1 : 0); }
 		if ( u == "BEATITUDE_AC" )     { return JS_NewBool(ctx, ( declared & SAMItemTrait::BEATITUDE_AC ) ? 1 : 0); }
+		if ( u == "UNBREAKABLE" )      { return JS_NewBool(ctx, ( declared & SAMItemTrait::UNBREAKABLE ) ? 1 : 0); }
 		SAM_ERROR("JS", "sam_item_has_trait: unknown trait '" + u + "'. Valid: RANGED, QUIVER, FOCI,"
 			" INSTRUMENT, THROWN_BALL, SHIELD_SLOT, POTION_BAD, AUTOMATON_FOOD, TINKER_THROWABLE,"
-			" USABLE, BEATITUDE_AC.");
+			" USABLE, BEATITUDE_AC, UNBREAKABLE.");
 		return JS_FALSE;
 	}
 
@@ -6970,6 +6971,34 @@ namespace
 #endif
 	}
 
+	// sam_get_hotbar(player). See the Lua twin.
+	JSValue js_sam_get_hotbar(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1;
+		if ( !samJsReqI32(ctx, argc, argv, 0, &player, "sam_get_hotbar") ) { return JS_NewArray(ctx); }
+#ifdef SAM_JS_HAVE_BARONY
+		std::vector<SAMSpells::HotbarEntry> bar;
+		if ( !SAMSpells::hotbarOf((int)player, &bar) ) { return JS_UNDEFINED; }
+		JSValue arr = JS_NewArray(ctx);
+		uint32_t n = 0;
+		for ( const SAMSpells::HotbarEntry& e : bar )
+		{
+			JSValue o = JS_NewObject(ctx);
+			JS_SetPropertyStr(ctx, o, "slot", JS_NewInt32(ctx, e.slot));
+			JS_SetPropertyStr(ctx, o, "kind", JS_NewString(ctx, e.isSpell ? "spell" : "item"));
+			JS_SetPropertyStr(ctx, o, "name", JS_NewString(ctx, e.name.c_str()));
+			JS_SetPropertyStr(ctx, o, "type", JS_NewInt32(ctx, e.type));
+			JS_SetPropertyStr(ctx, o, "uid", JS_NewInt64(ctx, (int64_t)e.uid));
+			JS_SetPropertyUint32(ctx, arr, n++, o);
+		}
+		return arr;
+#else
+		(void)player;
+		return JS_NewArray(ctx);
+#endif
+	}
+
 	JSValue js_sam_player_knows_spell(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
@@ -8792,6 +8821,7 @@ namespace
 		samJsRegister(ctx, g, "sam_cast_spell_pos", js_sam_cast_spell_pos, 4);
 		samJsRegister(ctx, g, "sam_monster_cast_spell", js_sam_monster_cast_spell, 2);
 		samJsRegister(ctx, g, "sam_get_spells", js_sam_get_spells, 1);
+		samJsRegister(ctx, g, "sam_get_hotbar", js_sam_get_hotbar, 1);
 		samJsRegister(ctx, g, "sam_player_knows_spell", js_sam_player_knows_spell, 2);
 		samJsRegister(ctx, g, "sam_remove_spell", js_sam_remove_spell, 2);
 #ifdef SAM_JS_HAVE_BARONY
