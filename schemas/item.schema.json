@@ -72,7 +72,7 @@
     },
     "weapon_skill": {
       "type": "string",
-      "description": "Which weapon skill this trains and scales off. Barony works a weapon's skill out from a hardcoded list of vanilla item types, so a custom weapon matches none of them and gets no skill at all: no skill increase from using it, no damage variance, no durability scaling, and the tooltip claims Sword. Set this and it behaves as the weapon it is. Melee only: a ranged weapon cannot be custom (firing is gated on a hardcoded list of vanilla bows), and for a throwable set category THROWN instead, which trains Ranged and already works. Only meaningful on an equippable weapon; defaults to sword.",
+      "description": "Which weapon skill this trains and scales off. Barony works a weapon's skill out from a hardcoded list of vanilla item types, so a custom weapon matches none of them and gets no skill at all: no skill increase from using it, no damage variance, no durability scaling, and the tooltip claims Sword. Set this and it behaves as the weapon it is. Melee only: for a bow-like weapon use the \"ranged\" trait instead (it fires like a crossbow and trains Ranged, going by the code), and for a throwable set category THROWN, which trains Ranged and already works. Only meaningful on an equippable weapon; defaults to sword.",
       "enum": [
         "sword",
         "axe",
@@ -154,7 +154,7 @@
     },
     "attributes": {
       "type": "object",
-      "description": "Numeric values the engine reads off this item. Recognised keys: ATK (added by attackGetAttack for weapons), AC (added by armorGetAC for armor and shields), TINKER_SALVAGE_METAL and TINKER_SALVAGE_MAGIC (what this yields when salvaged), spellbook_spell (the spell this SPELLBOOK teaches or casts, as a spell id), and foci_spell (the spell a shield-slot focus channels, as a spell id). Any other key is kept on the item and never looked at: there is no script call that reads a custom attribute back, so an invented key like EFF_UNBREAKABLE does nothing (for an item that never wears out, use the \"unbreakable\" trait). A custom key has to be a whole number; anything else is dropped when the mod loads.",
+      "description": "Numeric values the engine reads off this item. The keys S.A.M documents: ATK (added to a weapon's attack), AC (added to armor and shields), TINKER_SALVAGE_METAL and TINKER_SALVAGE_MAGIC (what it yields when salvaged), and spellbook_spell, foci_spell, tome_spell and magicstaff_spell (the spell a book teaches, a focus channels, a tome casts or a staff casts, as a spell id or a \"namespace:spell\" name). Every key is copied onto the item, and the game reads a few more on its own items (for example UNSELLABLE, UNVOIDABLE, UNVANDALISABLE, UNBURNABLE and no_stack), which S.A.M has not tested on a mod item. A key the game never reads does nothing, and no script can read it back. Careful: on armor, rings and similar items the stat keys STR, DEX, CON, INT, PER and CHR, and the EFF_ names the game's own tooltips have a line for, are printed in the item's tooltip as stat lines but give no bonus. To make an item give a stat, use a script (sam_add_stat_modifier). For an item that never wears out, use the \"unbreakable\" trait. A custom key has to be a whole number; anything else is dropped when the mod loads.",
       "additionalProperties": {
         "type": "integer"
       },
@@ -209,7 +209,7 @@
     },
     "on_hit_effect": {
       "type": "string",
-      "description": "A status effect this weapon puts on whatever it hits in melee (not yet when it is thrown, and not with arrows). One of your own effects by its exact id ('namespace:effect', lowercase, e.g. 'mymod:plague'), or a vanilla name such as 'EFF_SLOW'. A name that matches nothing is ignored, with one warning line in sam_log.txt. It applies only when the hit does damage and leaves the target alive. The usual effect rules apply (species immunities, the on_before_effect_applied event), and it never shortens an effect the target already has."
+      "description": "A status effect this weapon puts on whatever it hits in melee (not yet when it is thrown, and not with arrows). One of your own effects by its exact id ('namespace:effect', lowercase, e.g. 'mymod:plague'), or a vanilla name such as 'EFF_SLOW'. A name that matches nothing is ignored, with one warning line in sam_log.txt. It applies only when the hit does damage and leaves the target alive. The usual effect rules apply (species immunities, the on_before_effect_applied event), and it never shortens an effect the target already has. The item's tooltip lists it by itself once the item is identified (for example \"25% chance on hit: [Slowed] for 5s\"), so you do not need to write it into the description."
     },
     "on_hit_chance": {
       "type": "number",

@@ -202,6 +202,19 @@ public:
 	// own icon directly, independent of the vanilla images[]/appearance indexing.
 	static std::string getIconPath(int itemId);
 
+	// How long a weapon's on_hit_effect lasts, in ticks: its own on_hit_duration, else the effect's
+	// declared duration, else 5 seconds. One answer for the combat code and the tooltip line, so
+	// what the tooltip says is what a hit does.
+	static int onHitDurationTicks(const SAMItemDef& def);
+
+	// The shared "mod-relative image path -> a path the image loader can open" resolver. Item
+	// icons use it, and so do spell icons. Returns "" when nothing was found, after logging one
+	// warning that names the file it looked for. module / example / fallback only change the
+	// wording of that warning ("SPELLS", "spells/shadow_bolt.png", "the generic spell icon").
+	static std::string resolveModImage(const std::string& modPath, const std::string& rel,
+		const char* field, const std::string& ownerId, const char* module = "ITEMS",
+		const char* example = "items/images/foo.png", const char* fallback = "the default icon");
+
 	// The model a custom item should draw given its state, or -1 to use its ordinary one.
 	// Called from itemModel / itemModelFirstperson, which both hold the Item, so this needs
 	// no new plumbing and nothing new on the wire: status, beatitude and identified are all

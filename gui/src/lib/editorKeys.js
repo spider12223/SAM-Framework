@@ -45,11 +45,11 @@ export const EDITOR_KEYS = {
     'properties', 'traits', 'body', 'equipped_items', 'inventory_items', 'followers',
     'shopkeeper_properties', 'spawn', 'sounds', 'music',
   ],
-  // SpellEditor.jsx buildDef(). `difficulty` has no control.
+  // SpellEditor.jsx buildDef() -- complete against spell.schema.json today.
   spell: [
     'id', 'name', 'payload', 'description', 'mana_cost', 'projectile_type', 'damage_min',
     'damage_max', 'range', 'speed', 'on_hit_effect', 'on_hit_duration', 'on_hit_chance',
-    'icon', 'starting_spell',
+    'icon', 'starting_spell', 'school', 'difficulty', 'learn_requirements',
   ],
   // EffectEditor.jsx buildDef() -- complete against effect.schema.json today.
   effect: [
@@ -59,7 +59,7 @@ export const EDITOR_KEYS = {
   // RaceEditor.jsx buildDef(). `first_person` and `extra_limbs` have no control.
   race: [
     'id', 'name', 'host_body', 'description', 'stat_modifiers', 'blood_diet', 'vision', 'sneak_vision',
-    'can_open_tins', 'starting_spells', 'limb_models', 'allies', 'enemies', 'neutral',
+    'can_open_tins', 'starting_spells', 'limb_models', 'allies', 'enemies', 'neutral', 'recruits',
   ],
   // RecipeEditor.jsx buildDef() -- complete against recipe.schema.json today.
   recipe: ['id', 'item', 'kit', 'skill_level', 'materials', 'metal_cost', 'magic_cost', 'status'],

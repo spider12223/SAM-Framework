@@ -592,6 +592,78 @@ A trait puts the item on one of the game's lists, and the game then treats it th
 * A player who lands a fully charged, damaging swing at skill 100 with a weapon whose `weapon_skill` is
   sword, axe, mace or polearm can also trigger the game's own proc for that skill, on top of this. A
   monster wielding the weapon never does.
+* (new in 3.7.0) The weapon's tooltip lists the effect by itself, once the item is identified, under the
+  stock effect line on a sword, axe, mace or polearm style tooltip (after the attributes heading, or last, on
+  others): `25% chance on hit: [Slowed] for 5s`, or `On hit: [Chill] for 3.5s` when it lands
+  every time. A weapon whose `on_hit_chance` is 0 gets no line. The line states what the item declares, so
+  it does not know about a target's immunities or a longer timer the target already has, and only a melee hit
+  applies the effect, so on a bow or a thrown weapon the line names an effect that never lands. Do not also
+  write the effect into `description` or it shows twice. `sam_log.txt` prints the line built for each item
+  whose effect is known.
+* Careful with item `attributes`: the keys S.A.M documents are `ATK`, `AC`, the two `TINKER_SALVAGE_` keys and
+  the four spell keys. The game reads a few more on its own items (for example `UNSELLABLE`, `UNVOIDABLE`,
+  `UNVANDALISABLE`, `UNBURNABLE`, `no_stack`), which S.A.M has not tested on a mod item, and a key the game
+  never reads does nothing. A stat key such as `"CHR": 2` on armor or a ring is printed in the tooltip as a
+  stat line but gives no bonus. To make an item give a stat, use a script with `sam_add_stat_modifier`.
+
+---
+
+### Spells: school, level, requirements, icon and spellbook (new in 3.7.0)
+
+```json
+{
+  "id": "mymod:summon_rat",
+  "name": "Summon Rat",
+  "payload": "force",
+  "school": "mysticism",
+  "difficulty": 40,
+  "learn_requirements": { "stats": { "CHR": 10 }, "skills": { "PRO_LEADERSHIP": 20 } },
+  "icon": "spells/summon_rat.png"
+}
+```
+
+* `school` is `sorcery` (the default, and what every custom spell was before this field), `mysticism` or
+  `thaumaturgy`. It decides which skill a learner needs and which skill a cast trains, which stats add to
+  the spell's power (Sorcery INT, Mysticism INT and CHR, Thaumaturgy INT and CON), which robes help it and
+  the school icon in the tooltip. A spell with `difficulty` 0 checks no skill when learned. An unknown word is
+  reported and the spell stays Sorcery.
+* `difficulty` is what your skill in the spell's school plus your INT must reach to learn it from a book.
+  It also sets the spell's level, shown as tier I to VI: difficulty divided by 20 (0 to 19 is I, 20 to 39
+  is II, up to 100 and more for VI). 0 means anyone can learn it. At skill 100 the game counts your skill
+  plus INT as exactly 100, so keep `difficulty` at 100 or below.
+* `learn_requirements` asks for more: the least `STR`, `DEX`, `CON`, `INT`, `PER` or `CHR` (gear and effects
+  count) and the least level in a skill by its `PRO_` name. A character who lacks one is told the first thing
+  they lack, and the book is not read. It is only checked when a spellbook or tome of the spell is read: a spell a class,
+  a race or `sam_grant_spell` hands over is always learned. A stat or skill name the game does not know is
+  reported and ignored.
+* A **spellbook** of the spell is an item with `"category": "SPELLBOOK"`, `"model_from_item"` set to a
+  vanilla spellbook for its look, `"attributes": { "spellbook_spell": "mymod:summon_rat" }`, and a
+  `level` of 0 or more so it can turn up in chests, in the general store and in the packs of monsters whose
+  map slot is a random spellbook, once the floor is deep enough for that level (the bookstore does not stock
+  it; leave `level` at -1 to keep it out of the dungeon). The Spell Editor has an "Also make a spellbook" tick box that writes this item.
+* `icon` is a PNG path written from the folder that holds `mod.json`, for example `spells/summon_rat.png`
+  (no leading slash, no `..`, and no `mods/yourfolder/` in front; that prefix is found only for a mod
+  installed by hand, with a warning, and not on a Steam Workshop install). It is drawn on the hotbar, in the
+  spell list, in the tooltip and in the new-spell popup. A path the game cannot find, or one that climbs out of
+  the mod folder, shows the generic spell orb and `sam_log.txt` names the path it looked for. The game reads
+  the picture when it starts, so restart it after changing the file.
+
+### Races: recruiting (new in 3.7.0)
+
+A race's `recruits` list names monster types the player can recruit as followers by pressing Use on them:
+
+```json
+{ "id": "mymod:ratkin", "name": "Ratkin", "host_body": "human", "recruits": ["rat", "spider"] }
+```
+
+The game normally decides who a player may recruit from the player's body (a spider body recruits spiders,
+scarabs and scorpions, and so on). `recruits` adds types on top of that for any body, and it keeps working
+at Legendary Leadership, where the body table alone decides. A listed type is also the race's ally, so it
+does not attack the player (the game counts it as a friend, and effects such as confusion can still override
+that); a type that is also under `enemies` or `neutral` is dropped from `recruits` with a warning. Bosses,
+shopkeepers, mimics, bats, the tinkering bots and holograms are types that can never be made followers and
+are dropped with a warning. The player's Leadership still caps how many followers they can have. For
+any other recruiting rule, handle `player.on_callout` or an action press yourself and call `sam_make_follower`.
 
 ---
 
@@ -774,8 +846,11 @@ skill, gets no damage variance, and its tooltip claims Sword. Set `"weapon_skill
 **Spellbooks and foci teach by attribute:**
 
 ```json
-"attributes": { "spellbook_spell": 1 }
+"attributes": { "spellbook_spell": "mymod:summon_rat" }
 ```
+
+The value is your own `"namespace:spell"`, a vanilla name such as `SPELL_FIREBALL`, or a numeric spell id.
+`foci_spell`, `tome_spell` and `magicstaff_spell` work the same way.
 
 ---
 

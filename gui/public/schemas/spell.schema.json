@@ -39,7 +39,147 @@
       "type": "integer",
       "default": 0,
       "minimum": 0,
-      "description": "Magic skill (Spellcasting proficiency + INT) needed to LEARN this from a book. 0 (default) means any character can learn it, even a low-INT melee class. Raise it to gate the spell behind magic skill like a vanilla spellbook."
+      "description": "Needed to LEARN this spell from a book or tome: your skill in the spell's school (see school) plus your INT must reach this number. It also sets the spell's level, difficulty divided by 20, shown as tier I to VI (0 to 19 is I, 20 to 39 is II, and so on up to 100 or more for VI). 0 (default) means any character can learn it, even a low-INT melee class. Raise it to gate the spell behind magic skill like a vanilla spellbook."
+    },
+    "school": {
+      "enum": [
+        "sorcery",
+        "mysticism",
+        "thaumaturgy"
+      ],
+      "default": "sorcery",
+      "description": "(new in 3.7.0) Which school of magic the spell belongs to: sorcery (the default, and what every custom spell was before this field existed), mysticism or thaumaturgy. It decides which skill the learn difficulty is checked against (a spell with difficulty 0 checks none) and which skill casting the spell trains, which stats add to its power (Sorcery: INT, Mysticism: INT and CHR, Thaumaturgy: INT and CON), which robes help it, and the school icon in its tooltip."
+    },
+    "learn_requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "(new in 3.7.0) Extra things a character needs to LEARN this spell from a book or tome, on top of difficulty. Each must be met or the book is not read and the player is told the first thing they lack. stats: the least STR, DEX, CON, INT, PER or CHR needed (gear and effects count). skills: the least level in a skill, by its PRO_ name, for example PRO_LEADERSHIP: 20. Only checked when a book or tome is read: a spell a class, a race or sam_grant_spell hands over is always learned.",
+      "properties": {
+        "stats": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "STR": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "DEX": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "CON": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "INT": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "PER": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "CHR": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          "description": "Least attribute values, e.g. { \"CHR\": 10, \"INT\": 12 }."
+        },
+        "skills": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "PRO_LOCKPICKING": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "PRO_STEALTH": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "PRO_TRADING": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "PRO_APPRAISAL": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "PRO_THAUMATURGY": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "PRO_LEADERSHIP": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "PRO_MYSTICISM": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "PRO_SORCERY": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "PRO_RANGED": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "PRO_SWORD": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "PRO_MACE": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "PRO_AXE": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "PRO_POLEARM": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "PRO_SHIELD": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "PRO_UNARMED": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "PRO_ALCHEMY": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          "description": "Least skill levels, e.g. { \"PRO_LEADERSHIP\": 20 }."
+        }
+      }
     },
     "projectile_type": {
       "enum": [
@@ -113,7 +253,7 @@
     },
     "icon": {
       "type": "string",
-      "description": "Optional. Path (relative to the mod folder) to a PNG spell icon, e.g. 'spells/shadow_bolt.png'."
+      "description": "Optional. Path to a PNG spell icon, written from the folder that holds mod.json (not from the spells folder): e.g. 'spells/shadow_bolt.png', with no leading slash, no '..' and no 'mods/<folder>/' in front. It is drawn on the hotbar, in the spell list, in the tooltip and in the new-spell popup. If the file is not found, or the path is wrong, the generic spell orb is used and sam_log.txt names the path it looked for. Restart the game after changing the file."
     },
     "starting_spell": {
       "type": "boolean",

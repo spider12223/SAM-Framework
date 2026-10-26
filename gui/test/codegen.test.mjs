@@ -902,8 +902,14 @@ check('the stub reads the old argument order as sound #0 (so the tests above cat
   assert('model_states survives an item save', item.model_states?.[1] === 'a:m');
   const cls = carryUnknown({ id: 'a:b', name: 'B', blood_diet: true }, { id: 'a:b', name: 'B' }, 'class');
   assert('blood_diet survives a class save', cls.blood_diet === true);
-  const spell = carryUnknown({ id: 'a:b', name: 'B', difficulty: 40 }, { id: 'a:b', name: 'B' }, 'spell');
-  assert('difficulty survives a spell save', spell.difficulty === 40);
+  // The Spell Editor owns difficulty, school and learn_requirements now, so clearing one clears it...
+  const spellCleared = carryUnknown({ id: 'a:b', name: 'B', difficulty: 40, school: 'mysticism', learn_requirements: { stats: { CHR: 10 } } },
+    { id: 'a:b', name: 'B' }, 'spell');
+  assert('clearing difficulty in the spell editor clears it',
+    !('difficulty' in spellCleared) && !('school' in spellCleared) && !('learn_requirements' in spellCleared));
+  // ...while a key no editor knows about (a later schema's) still rides through a spell save.
+  const spell = carryUnknown({ id: 'a:b', name: 'B', some_future_key: 40 }, { id: 'a:b', name: 'B' }, 'spell');
+  assert('a key the spell editor does not own survives a spell save', spell.some_future_key === 40);
   // kit_ui is read by the engine (sam_items.cpp) and is not in item.schema.json yet, so it is
   // the live example of a key no editor can know about.
   const kit = carryUnknown({ id: 'a:b', name_identified: 'B', kit_ui: { frame: 'images/x.png' } },
@@ -1197,6 +1203,32 @@ if (LUA) {
     { encoding: 'utf8' }).trim();
   assert(`a refused custom condition and action still parse${perr ? ` -- ${perr}` : ''}`, perr === '');
   assert('a refused custom condition reads as false, not as a truthy table', bothBlank.includes('if false '));
+}
+
+// ---------------------------------------------------------------------------------
+// Spell school / learn requirements, a race's recruits list, and a loadout entry that is both worn and
+// pinned: the schema is what the editors' output is checked against, so each new field has to be accepted
+// when right and refused when wrong (a field the schema did not know would make every save fail).
+{
+  const { validate } = await import('@/lib/validate.js');
+  const spell = (extra) => ({ id: 'a:b', name: 'B', payload: 'force', ...extra });
+  assert('a spell with school, difficulty and learn_requirements validates',
+    validate('spell', spell({ school: 'mysticism', difficulty: 45,
+      learn_requirements: { stats: { CHR: 10 }, skills: { PRO_LEADERSHIP: 20 } } })).valid);
+  assert('an unknown school is refused', !validate('spell', spell({ school: 'sorcerer' })).valid);
+  assert('an unknown stat in learn_requirements is refused',
+    !validate('spell', spell({ learn_requirements: { stats: { CHA: 5 } } })).valid);
+  assert('an unknown skill in learn_requirements is refused',
+    !validate('spell', spell({ learn_requirements: { skills: { PRO_LEADERSHP: 5 } } })).valid);
+  const race = (extra) => ({ id: 'a:b', name: 'B', host_body: 'human', ...extra });
+  assert('a race with a recruits list validates', validate('race', race({ recruits: ['rat', 'spider'] })).valid);
+  assert('a creature that can never be a follower is refused in recruits',
+    !validate('race', race({ recruits: ['shopkeeper'] })).valid && !validate('race', race({ recruits: ['minotaur'] })).valid);
+  const cls = (items) => ({ id: 'a:b', name: 'B', stats: {}, starting_items: items });
+  assert('a starting item that is equipped AND on the hotbar validates',
+    validate('class', cls([{ type: 'QUARTERSTAFF', equip: true, hotbar_slot: 0 }])).valid);
+  const book = { id: 'a:book', name_identified: 'Book', category: 'SPELLBOOK', attributes: { spellbook_spell: 'a:b' } };
+  assert('a spellbook that names a custom spell by id validates', validate('item', book).valid);
 }
 
 // ---------------------------------------------------------------------------------

@@ -152,6 +152,10 @@ struct SAMClassStatPatch
 class SAMClasses
 {
 public:
+	// "PRO_LEADERSHIP" -> the proficiency index (stat.hpp), or -1 for a name that is not one of the
+	// sixteen skills. A spell's learn_requirements use the same names a class's "skills" does.
+	static int skillIdFromName(const std::string& name);
+
 	// Read + register every class JSON declared in a mod manifest. Additive
 	// across manifests within one load cycle; call clear() first each cycle.
 	static void loadFromManifest(const SAMModManifest& manifest);

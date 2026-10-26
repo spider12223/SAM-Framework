@@ -23,7 +23,7 @@ import {
   ItemIcon, ErrorList, SavedNote, BalanceHints, SearchSelect,
 } from '@/components/ui.jsx';
 import LoadoutBoard from '@/components/LoadoutBoard.jsx';
-import { entryFromJson, entryToJson, newEntry } from '@/data/equipment.js';
+import { entryFromJson, entryToJson, newEntry, equipSlotOf } from '@/data/equipment.js';
 
 const MAX_PORTRAIT_BYTES = 256 * 1024; // portraits are 54x54 — anything big is a mistake
 
@@ -198,7 +198,14 @@ export default function ClassEditor() {
     draft?.skills ?? Object.fromEntries(SKILLS.map((s) => [s, editDef?.skills?.[s] ?? 0]))
   );
   const [items, setItems] = useState(() =>
-    draft?.items ?? (editDef?.starting_items ?? []).map(entryFromJson)
+    draft?.items ?? (editDef?.starting_items ?? []).map((si) => {
+      const e = entryFromJson(si);
+      // The paperdoll cell of a vanilla item comes from its type; a custom item's comes from the
+      // slot its own JSON declares. entryFromJson cannot know that, so without this a custom
+      // weapon reopened from a saved class lands in the "slot already taken" rescue tray.
+      const cell = e.equip ? CUSTOM_SLOT_TO_PAPERDOLL[customItemMap[e.type]?.slot] : undefined;
+      return cell ? { ...e, _slot: cell } : e;
+    })
   );
   const [spells, setSpells] = useState(draft?.spells ?? editDef?.starting_spells ?? []);
   const [spellError, setSpellError] = useState('');
@@ -327,7 +334,19 @@ export default function ClassEditor() {
   // the backpack. Either way it also shows up in the slot pickers on the board above.
   const addCustomItem = (it) => {
     const slotId = CUSTOM_SLOT_TO_PAPERDOLL[it.slot];
-    setItems((prev) => [...prev, newEntry(it.id, !!slotId, slotId)]);
+    setItems((prev) => {
+      if (!slotId) return [...prev, newEntry(it.id, false)];
+      // The same rule as choosing for that slot on the board: whatever is wielded there drops to the
+      // backpack (never lost), and its hotbar key goes to the newcomer. Without this a second
+      // "equipped" weapon landed in the red "slot already taken" tray.
+      const holds = (x) => x.equip && (equipSlotOf(x.type) || x._slot) === slotId;
+      const pinned = (x) => Number(x.hotbar_slot) >= 0;
+      const pin = (prev.find((x) => holds(x) && pinned(x)) || {}).hotbar_slot;
+      const demoted = prev.map((x) => (holds(x)
+        ? { ...x, equip: false, _slot: undefined, hotbar_slot: pinned(x) ? -1 : x.hotbar_slot }
+        : x));
+      return [...demoted, { ...newEntry(it.id, true, slotId), ...(pin != null && Number(pin) >= 0 ? { hotbar_slot: Number(pin) } : {}) }];
+    });
   };
 
   // Set one attribute's growth weight (blank → 2 neutral; clamp 0..99).

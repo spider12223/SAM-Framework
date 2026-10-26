@@ -9,8 +9,10 @@
  * this redesign is that a modder sets a "+2 blessed" or "cursed" starting item right here,
  * in the game's own language, instead of hand-typing a beatitude integer into JSON.
  *
- * State is ONE flat array of entries that maps 1:1 to starting_items. The two regions are
- * derived: equipped = entry.equip (placed in its slot), backpack = everything else. `_key`
+ * State is ONE flat array of entries that maps 1:1 to starting_items. The regions are
+ * derived: equipped = entry.equip (placed in its slot), hotbar = entry.hotbar_slot >= 0,
+ * backpack = everything that is neither. An item can be equipped AND pinned to a hotbar key
+ * (the Wizard's staff starts in hand and on key 1); the engine does both for one entry. `_key`
  * and `_slot` are UI-only and stripped on save (see ClassEditor buildDef).
  */
 import { useState } from 'react';
@@ -26,7 +28,7 @@ import { BOOKS, bookTitle } from '@/data/books.js';
 const slotOfEntry = (it) => equipSlotOf(it.type) || it._slot || null;
 
 /** One 64px cell: filled item (icon + blessing/count/condition badges + remove) or empty. */
-function Cell({ entry, ghostIcon, label, selected, onClick, onRemove }) {
+function Cell({ entry, ghostIcon, label, selected, onClick, onRemove, removeTitle = 'Remove', handBadge = false }) {
   if (!entry) {
     return (
       <button type="button" className="sam-slot sam-slot-empty" title={label ? `Add ${label}` : 'Add an item'} onClick={onClick}>
@@ -46,8 +48,9 @@ function Cell({ entry, ghostIcon, label, selected, onClick, onRemove }) {
       <span className={`sam-slot-ico ${entry.identified ? '' : 'sam-slot-unid'}`} aria-hidden>{ghostIcon}</span>
       {b !== 0 && <span className={`sam-slot-bless ${b > 0 ? 'bless-pos' : 'bless-neg'}`}>{b > 0 ? `+${b}` : b}</span>}
       {entry.count > 1 && <span className="sam-slot-count">×{entry.count}</span>}
+      {handBadge && entry.count <= 1 && <span className="sam-slot-count" title="Also starts in hand (equipped)">✋</span>}
       {!entry.identified && <span className="sam-slot-pip" title="unidentified">?</span>}
-      <span className="sam-slot-x" title="Remove" onClick={(e) => { e.stopPropagation(); onRemove(); }}>✕</span>
+      <span className="sam-slot-x" title={removeTitle} onClick={(e) => { e.stopPropagation(); onRemove(); }}>✕</span>
     </div>
   );
 }
@@ -149,13 +152,12 @@ function DetailStrip({ entry, patch, onHotbar, iconFor, onRemove, category }) {
           <input type="checkbox" className="sam-check" checked={!!entry.identified} onChange={(e) => patch({ identified: e.target.checked })} />
           <span className="sam-label" style={{ fontSize: '0.72rem' }}>Identified</span>
         </label>
-        {!equipped && (
-          <div>
-            <div className="sam-label mb-1" style={{ fontSize: '0.72rem' }}>Hotbar</div>
-            <Select value={String(entry.hotbar_slot)} onChange={(v) => onHotbar(Number(v))}
-              options={[{ value: '-1', label: 'in pack' }, ...Array.from({ length: 10 }, (_, i) => ({ value: String(i), label: `slot ${i === 9 ? 0 : i + 1}` }))]} />
-          </div>
-        )}
+        <div>
+          <div className="sam-label mb-1" style={{ fontSize: '0.72rem' }}
+            title={equipped ? 'An equipped item can also sit on a hotbar key: it starts in hand and on that key.' : undefined}>Hotbar</div>
+          <Select value={String(entry.hotbar_slot)} onChange={(v) => onHotbar(Number(v))}
+            options={[{ value: '-1', label: equipped ? 'not on the hotbar' : 'in pack' }, ...Array.from({ length: 10 }, (_, i) => ({ value: String(i), label: `slot ${i === 9 ? 0 : i + 1}` }))]} />
+        </div>
         {isBook && (
           <div style={{ gridColumn: '1 / -1' }}>
             <div className="sam-label mb-1" style={{ fontSize: '0.72rem' }} title="Which readable book this is — the engine picks it by the item's appearance index.">Book / Contents</div>
@@ -173,7 +175,7 @@ export default function LoadoutBoard({ items, onChange, allTypes, iconFor, categ
   const [picker, setPicker] = useState(null); // { slot } for equip, { backpack:true } for pack
   const [selectedKey, setSelectedKey] = useState(null);
 
-  const isPinned = (it) => !it.equip && Number(it.hotbar_slot) >= 0;
+  const isPinned = (it) => Number(it.hotbar_slot) >= 0;           // equipped or not
   const backpack = items.filter((it) => !it.equip && !isPinned(it)); // loose (unpinned) items
   const hotbarItem = (n) => items.find((it) => isPinned(it) && Number(it.hotbar_slot) === n);
   const selected = items.find((it) => it._key === selectedKey);
@@ -181,10 +183,11 @@ export default function LoadoutBoard({ items, onChange, allTypes, iconFor, categ
   const patch = (key, fields) => onChange(items.map((it) => (it._key === key ? { ...it, ...fields } : it)));
   const remove = (key) => { onChange(items.filter((it) => it._key !== key)); if (key === selectedKey) setSelectedKey(null); };
 
-  /** Pin an item to a hotbar slot (or -1 to send it back to the loose backpack), demoting
-   *  whatever held that slot so two starting items never fight over one hotbar key. */
+  /** Pin an item to a hotbar slot (or -1 to unpin it), demoting whatever held that slot so two
+   *  starting items never fight over one hotbar key. An equipped item keeps its equip and its
+   *  paperdoll cell: it starts in hand and on that key. */
   const setHotbar = (key, n) => onChange(items.map((it) => {
-    if (it._key === key) return { ...it, equip: false, hotbar_slot: n, _slot: undefined };
+    if (it._key === key) return { ...it, hotbar_slot: n };
     if (n >= 0 && isPinned(it) && Number(it.hotbar_slot) === n) return { ...it, hotbar_slot: -1 };
     return it;
   }));
@@ -204,9 +207,14 @@ export default function LoadoutBoard({ items, onChange, allTypes, iconFor, categ
     } else {
       const slot = picker.slot;
       // Replace-and-demote: an item already in this slot drops to the backpack, never lost.
+      // If it was also pinned to a hotbar key, the key moves to the newcomer (replacing the
+      // Wizard's staff with a sword should leave the sword on key 1, not strand the staff there).
+      const pin = (items.find((it) => it.equip && slotOfEntry(it) === slot.id && isPinned(it)) || {}).hotbar_slot;
       const demoted = items.map((it) =>
-        it.equip && slotOfEntry(it) === slot.id ? { ...it, equip: false, _slot: undefined } : it);
-      const e = newEntry(type, true, slot.id);
+        it.equip && slotOfEntry(it) === slot.id
+          ? { ...it, equip: false, _slot: undefined, hotbar_slot: isPinned(it) ? -1 : it.hotbar_slot }
+          : it);
+      const e = { ...newEntry(type, true, slot.id), ...(pin != null && Number(pin) >= 0 ? { hotbar_slot: Number(pin) } : {}) };
       onChange([...demoted, e]);
       setSelectedKey(e._key);
     }
@@ -294,13 +302,15 @@ export default function LoadoutBoard({ items, onChange, allTypes, iconFor, categ
                       ghostIcon={it ? iconFor(it.type) : ''}
                       selected={it && it._key === selectedKey}
                       onClick={() => (it ? setSelectedKey(it._key) : setPicker({ hotbar: n }))}
-                      onRemove={() => it && remove(it._key)}
+                      handBadge={!!(it && it.equip)}
+                      removeTitle={it && it.equip ? 'Take off the hotbar (it stays equipped)' : 'Remove'}
+                      onRemove={() => it && (it.equip ? patch(it._key, { hotbar_slot: -1 }) : remove(it._key))}
                     />
                   </div>
                 );
               })}
             </div>
-            <div className="text-xs mt-2" style={{ color: '#6b5a35' }}>Numbered quick-use slots. Click one to pin a starting item, or set an item's Hotbar in its details. A pinned item still counts as in the pack.</div>
+            <div className="text-xs mt-2" style={{ color: '#6b5a35' }}>Numbered quick-use slots. Click one to pin a starting item, or set an item's Hotbar in its details. A pinned item that is not worn still counts as in the pack; a worn one (marked ✋) starts in hand and on that key, like the Wizard's staff.</div>
           </div>
         </div>
       </div>

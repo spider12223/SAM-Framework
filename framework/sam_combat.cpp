@@ -577,9 +577,7 @@ namespace SAMCombat
 		}
 		// A permanent effect (-1) is left alone: refreshing it with a number would end it.
 		if ( victimStats->EFFECTS_TIMERS[slot] == -1 && victimStats->getEffectActive(slot) ) { return; }
-		int dur = d->onHitDuration;
-		if ( dur <= 0 ) { dur = SAMEffects::defaultDurationForSlot(slot); }
-		if ( dur <= 0 ) { dur = TICKS_PER_SECOND * 5; }
+		const int dur = SAMItems::onHitDurationTicks(*d); // the same number the tooltip line states
 		// overrideDuration = false: the longer of the old and new timer, so a short blade never cuts
 		// short a longer effect the target already has. setEffect applies the immunity rules, the
 		// on_before_effect_applied gate and the client sync.

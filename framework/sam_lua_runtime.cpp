@@ -12221,17 +12221,9 @@ namespace SAMLua
 			return false;
 		}
 
-		// Dominate's list of creatures that can never be made a follower. isBossMonster already
-		// covers shopkeepers, other traders, the minotaur, shadows, liches, the devil and a mod's
-		// own monster declared a boss.
-		// The four bots are tested by Stat::type as well as by monsterIsTinkeringCreation(), which
-		// reads the entity's SPRITE: a monster spawned this very tick has not had one assigned yet
-		// (its first act does that), so the sprite test answers false for a sentrybot made a moment ago.
-		const bool bot = ( ms->type == SENTRYBOT || ms->type == GYROBOT || ms->type == SPELLBOT || ms->type == DUMMYBOT );
-		const bool innerDemon = ( ms->type == INCUBUS && !strncmp(ms->name, "inner demon", strlen("inner demon")) );
-		if ( mon->isBossMonster() || mon->isInertMimic() || innerDemon || bot
-			|| ms->type == MIMIC || ms->type == MINIMIMIC || ms->type == BAT_SMALL || ms->type == HOLOGRAM
-			|| mon->monsterIsTinkeringCreation() || mon->monsterAllySummonRank != 0 )
+		// Dominate's list of creatures that can never be made a follower. The race "recruits" list
+		// asks the same question, so it lives in one place (SAMRaces::neverAFollower).
+		if ( SAMRaces::neverAFollower(mon, ms) )
 		{
 			SAM_WARN("SAM", std::string(who) + ": uid " + std::to_string(monsterUid)
 				+ " cannot be made a follower (a boss, a shopkeeper or other trader, a mimic, a hologram,"

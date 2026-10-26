@@ -788,6 +788,8 @@ static int proIdFromName(const std::string& n)
 	return (it != m.end()) ? it->second : -1;
 }
 
+int SAMClasses::skillIdFromName(const std::string& name) { return proIdFromName(name); }
+
 static Status statusFromName(const std::string& n)
 {
 	if ( n == "BROKEN" ) { return BROKEN; }

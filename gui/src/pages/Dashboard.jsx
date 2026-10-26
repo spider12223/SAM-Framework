@@ -10,7 +10,7 @@ import { useMod } from '@/state/ModContext.jsx';
 import { Panel, GoldButton } from '@/components/ui.jsx';
 
 /** The framework's own version (mods declare their own framework_min_version). */
-const SAM_FRAMEWORK_VERSION = '3.6.0';
+const SAM_FRAMEWORK_VERSION = '3.7.0';
 
 /** Where players get S.A.M itself (the framework is a dependency, not a mod). */
 const WORKSHOP_URL = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472';
@@ -28,12 +28,12 @@ const TRAVELS = [
  * thing a returning modder sees, and the point is 'here is what you can do now that you
  * could not before', not a changelog. */
 const WHATS_NEW = [
-  ["Items that never wear out",
-   "Give an item the unbreakable trait and the game stops wearing it down: swings, hits, blocks, burning and the repair and destroy-armor scrolls all leave it alone. It works on weapons, armour, shields, cloaks and spellbooks, and it is a checkbox in the Item Editor."],
-  ["Weapons that put an effect on what they hit",
-   "A weapon can now name a status effect, one of your own or a built-in one, with a chance and a duration. A melee hit with it puts the effect on the creature it hits. The Item Editor has the controls and warns when the effect id will not match."],
-  ["Innate spells on the hotbar",
-   "The spells a custom race or class starts with are now on the hotbar of a new character, not only in the spell list. A new function, sam_get_hotbar, reads what is on a player's bar."],
+  ["Spells with a school and requirements",
+   "A custom spell can now be Sorcery, Mysticism or Thaumaturgy, and can ask for a minimum Charisma, Intelligence or any other stat, or a skill level, before a spellbook of it can be read. The Spell Editor has boxes for the school and for how hard the spell is to learn, can make the spellbook for you, and takes a PNG for the spell's icon."],
+  ["Recruit what you choose",
+   "A race can list monsters it recruits by pressing Use on them, such as rats and spiders, whatever body the race has. They count as your allies, and your Leadership still caps how many you can lead."],
+  ["Clearer weapons and spell pictures",
+   "A mod weapon's on-hit effect now appears in its tooltip. A spell icon path that cannot be found is reported in the log instead of silently falling back to the generic orb, and the picture now shows in the new-spell popup too. In the Class Editor an item can be in the hand and on a hotbar key at once."],
 ];
 
 /** sam-well stat box: big gold number over a small-caps label. */
@@ -83,9 +83,9 @@ export default function Dashboard() {
       {/* --------------------------------------------------- what is new */}
       <Panel title={`New in ${SAM_FRAMEWORK_VERSION}`}>
         <p className="m-0" style={{ color: 'var(--color-parchment)' }}>
-          This one is about what an item can do on its own.{' '}
+          This one is about spells, recruiting and a few fixes.{' '}
           <strong style={{ color: 'var(--color-gold)' }}>
-            Items that never wear out, weapons that put an effect on what they hit, and innate spells on the hotbar.
+            A race that recruits what you choose, spells with a school and real requirements, and clearer weapons and spell pictures.
           </strong>{' '}
           Nothing here needs a script.
         </p>

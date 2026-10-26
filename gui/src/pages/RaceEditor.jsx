@@ -39,6 +39,11 @@ const LIMB_SLOTS = [
 // a shield. Everything else is drawn the same whatever the player is carrying.
 const ARM_SLOTS = ['arm_right', 'arm_left'];
 const prettyMonster = (m) => m.split('_').map(cap).join(' ');
+// Creatures no follower can be made of (a boss, a trader, a mimic, a hologram, a bat, a tinkering
+// bot). The game drops them from a "recruits" list, so the editor does not offer them.
+const NEVER_RECRUITS = ['shopkeeper', 'minotaur', 'lich', 'lichice', 'lichfire', 'devil', 'shadow', 'mimic',
+  'minimimic', 'sentrybot', 'spellbot', 'gyrobot', 'dummybot', 'hologram', 'bat'];
+const RECRUITABLE = MONSTERS.filter((m) => !NEVER_RECRUITS.includes(m));
 
 // A removable chip list. Same shape the class editor uses for starting spells, so the two
 // editors read the same way.
@@ -103,6 +108,9 @@ export default function RaceEditor() {
   // Neither: not hostile, not an ally (the Gremlin and the Goblins). The only way to take a type
   // out of the host body's allies without making it an enemy.
   const [neutral, setNeutral] = useState(editDef?.neutral ?? []);
+  // Types this race recruits by pressing Use. Implies an ally; the game takes a type that is also
+  // an enemy or neutral off this list.
+  const [recruits, setRecruits] = useState(editDef?.recruits ?? []);
   const [canOpenTins, setCanOpenTins] = useState(editDef?.can_open_tins ?? false);
   const [spellError, setSpellError] = useState('');
   const [scriptLang, setScriptLang] = useState(existingScript?.lang ?? 'lua');
@@ -147,6 +155,7 @@ export default function RaceEditor() {
     if (allies.length) def.allies = allies;
     if (enemies.length) def.enemies = enemies;
     if (neutral.length) def.neutral = neutral;
+    if (recruits.length) def.recruits = recruits;
     // Carry anything this editor has no control for straight through -- a field the
     // author hand-wrote, or one a later schema adds, must survive a save here.
     return carryUnknown(openedDef, def, 'race');
@@ -156,6 +165,8 @@ export default function RaceEditor() {
   // instead, while it is still one click to fix.
   const conflicts = [...new Set([...allies, ...enemies, ...neutral])]
     .filter((m) => [allies, enemies, neutral].filter((l) => l.includes(m)).length > 1);
+  // A recruitable type is an ally already, so being under enemies or neutral too contradicts it.
+  const recruitConflicts = recruits.filter((m) => enemies.includes(m) || neutral.includes(m));
 
   const addSpell = (raw) => {
     const input = String(raw ?? '').trim();
@@ -182,7 +193,7 @@ export default function RaceEditor() {
 
   const def = useMemo(buildDef,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [name, description, hostBody, mods, bloodDiet, canOpenTins, vision, sneakVision, startingSpells, allies, enemies, neutral, limbModels, limbBent, namespace]);
+    [name, description, hostBody, mods, bloodDiet, canOpenTins, vision, sneakVision, startingSpells, allies, enemies, neutral, recruits, limbModels, limbBent, namespace]);
   const preview = useMemo(() => JSON.stringify(def, null, 2), [def]);
   const setMod = (a, v) => setMods((prev) => ({ ...prev, [a]: v }));
 
@@ -329,6 +340,29 @@ export default function RaceEditor() {
             The way to make a human-bodied race that humans leave alone without being its allies.
             A shopkeeper here will trade, except while you are shapeshifted.
           </div>
+
+          <div className="sam-label mb-1 mt-4" style={{ color: '#8a6d2e' }}>Can recruit: press Use to make a follower</div>
+          <Chips items={recruits} icon="🐀" label={prettyMonster}
+            onRemove={(m) => setRecruits((p) => p.filter((x) => x !== m))}
+            empty="Nothing added — your body's own recruiting rules apply." />
+          <SearchSelect
+            options={RECRUITABLE.filter((m) => !recruits.includes(m))}
+            onPick={(m) => setRecruits((p) => (p.includes(m) ? p : [...p, m]))}
+            placeholder="Search creatures… e.g. rat" />
+          <div className="text-xs mt-1" style={{ color: '#8a7749' }}>
+            The game decides who you may recruit from your body (a spider body recruits spiders, scarabs
+            and scorpions). This adds creatures for any body, and keeps working at Legendary Leadership.
+            A creature here also counts as your ally. Your Leadership still caps how many
+            followers you can have. Bosses, shopkeepers, mimics, bats, the tinkering bots and holograms can
+            never be followers, so they are not offered.
+          </div>
+          {recruitConflicts.length > 0 && (
+            <div className="sam-error text-sm mt-3">
+              {recruitConflicts.map(prettyMonster).join(', ')} {recruitConflicts.length === 1 ? 'is' : 'are'} also
+              hostile or neutral. In game that wins and the creature is dropped from this list — remove it from
+              the other list to recruit it.
+            </div>
+          )}
 
           {conflicts.length > 0 && (
             <div className="sam-error text-sm mt-3">

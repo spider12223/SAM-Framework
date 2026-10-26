@@ -48,6 +48,15 @@ struct SAMSpellDef
 	// ignoreSkill for a difficulty-0 custom spell, matching "learnable by any caster").
 	// Set it above 0 to gate the spell behind magic skill like a vanilla spellbook.
 	int difficulty = 0;
+	// (3.7.0) "school": "sorcery" (the default, and what every custom spell was before this
+	// field), "mysticism" or "thaumaturgy". It picks the skill a learner needs and a cast trains, the
+	// stat that adds to the spell's power, the robes that help it and the school icon in its tooltip.
+	std::string school = "sorcery";
+	// (3.7.0) "learn_requirements": more than difficulty asks for, checked when a book or tome
+	// of this spell is read. Stat name ("STR".."CHR") -> least value, and skill name ("PRO_LEADERSHIP")
+	// -> least level. Empty = nothing extra.
+	std::map<std::string, int> requireStats;
+	std::map<std::string, int> requireSkills;
 	std::string projectileType = "missile"; // "missile" | "missile_trio" | "none"
 	std::string payload;            // e.g. "force", "fire", "drain_soul" (schema enum)
 
@@ -62,6 +71,7 @@ struct SAMSpellDef
 	mutable int onHitEffectSlot = -1; // v1.5.0: resolved engine effect slot for onHitEffect (-1 = none/unknown)
 
 	std::string icon;               // mod-relative PNG path
+	std::string iconResolved;       // absolute path of that PNG, found once at load ("" = none: the generic orb)
 	bool startingSpell = false;
 };
 
@@ -143,6 +153,11 @@ public:
 	static bool queueRemoveSpell(int player, int spellId);
 	static void drainRemoveQueue();
 	static void clearRemoveQueue();
+
+	// (3.7.0) What a player still lacks to learn this spell from a book or tome, in words
+	// ("You need 10 Charisma to learn Summon Rat (you have 7)."), or "" when they meet its
+	// learn_requirements or it declares none. Local players only; "" for anyone else.
+	static std::string unmetLearnRequirement(int spellId, int player);
 
 	// Absolute, Image::get-ready path to a custom spell's icon PNG (from the mod folder),
 	// or "" if the runtime id isn't a registered custom spell / has no icon / the file is

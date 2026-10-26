@@ -33,6 +33,16 @@
 #include <cctype>
 
 using nlohmann::json;
+
+// Monster TYPES a "recruits" list can never usefully name: bosses, traders, mimics, the tinkering
+// bots, holograms and bats. neverAFollower() refuses these by looking at the entity; this is the
+// same list by type, so a race file that names one is told at load instead of failing quietly.
+static bool samTypeNeverFollows(int m)
+{
+	return m == SHOPKEEPER || m == MINOTAUR || m == LICH || m == LICH_ICE || m == LICH_FIRE
+		|| m == DEVIL || m == SHADOW || m == MIMIC || m == MINIMIMIC || m == SENTRYBOT
+		|| m == SPELLBOT || m == GYROBOT || m == DUMMYBOT || m == HOLOGRAM || m == BAT_SMALL;
+}
 static const char* MOD = "RACES";
 
 namespace
@@ -476,6 +486,7 @@ void SAMRaces::loadFromManifest(const SAMModManifest& manifest)
 	readMonsterList("allies", def.allies);
 		readMonsterList("enemies", def.enemies);
 		readMonsterList("neutral", def.neutral);
+		readMonsterList("recruits", def.recruits);
 
 		// Declaring a type in two lists is a contradiction the author needs to resolve, not
 		// something to resolve silently. The least friendly wins (enemies, then neutral, then
@@ -497,6 +508,25 @@ void SAMRaces::loadFromManifest(const SAMModManifest& manifest)
 				SAM_WARN(MOD, "Race '" + def.id + "' lists '" + std::string(monstertypename[m])
 					+ "' as BOTH an ally and neutral -- treating it as neutral.");
 			}
+		}
+
+		// "recruits" implies an ally, so a type that is also an enemy or neutral contradicts it,
+		// and one no follower can be made of would promise something the game refuses. Say so, and
+		// drop it: the race still loads, and the rest of the list stands.
+		for ( auto it = def.recruits.begin(); it != def.recruits.end(); )
+		{
+			const int m = *it;
+			const char* why = nullptr;
+			if ( samTypeNeverFollows(m) )              { why = "can never be made a follower (a boss, a trader, a mimic, a hologram, a bat or a tinkering bot)"; }
+			else if ( listed(def.enemies, m) )         { why = "is also listed under enemies"; }
+			else if ( listed(def.neutral, m) )         { why = "is also listed under neutral"; }
+			if ( why )
+			{
+				SAM_WARN(MOD, "Race '" + def.id + "' lists '" + std::string(monstertypename[m])
+					+ "' under recruits, but it " + why + " -- removed from recruits.");
+				it = def.recruits.erase(it);
+			}
+			else { ++it; }
 		}
 		def.canOpenTins = getBool("can_open_tins", false);
 		if ( j.contains("starting_spells") && j["starting_spells"].is_array() )
@@ -536,7 +566,7 @@ void SAMRaces::loadFromManifest(const SAMModManifest& manifest)
 			+ " CON " + std::to_string(def.con) + " INT " + std::to_string(def.intel)
 			+ " PER " + std::to_string(def.per) + " CHR " + std::to_string(def.chr)
 			+ " HP " + std::to_string(def.hp) + " MP " + std::to_string(def.mp) + ")");
-		if ( !def.allies.empty() || !def.enemies.empty() || !def.neutral.empty() )
+		if ( !def.allies.empty() || !def.enemies.empty() || !def.neutral.empty() || !def.recruits.empty() )
 		{
 			std::string line = "  " + def.name + " allegiance:";
 			if ( !def.allies.empty() )
@@ -553,6 +583,11 @@ void SAMRaces::loadFromManifest(const SAMModManifest& manifest)
 			{
 				line += " neutral to";
 				for ( int m : def.neutral ) { line += " " + std::string(monstertypename[m]); }
+			}
+			if ( !def.recruits.empty() )
+			{
+				line += " can recruit";
+				for ( int m : def.recruits ) { line += " " + std::string(monstertypename[m]); }
 			}
 			SAM_INFO(MOD, line);
 		}
@@ -890,7 +925,43 @@ int SAMRaces::declaredAllegiance(int raceId, int monsterType)
 	for ( int m : def.enemies ) { if ( m == monsterType ) { return 0; } }
 	for ( int m : def.neutral ) { if ( m == monsterType ) { return 2; } }
 	for ( int m : def.allies )  { if ( m == monsterType ) { return 1; } }
+	// A recruitable type is an ally: pressing Use on a creature that is trying to kill you would
+	// only start a fight. The load-time check already took a type that is also an enemy or neutral
+	// off this list, so these two never contradict the lines above.
+	for ( int m : def.recruits ) { if ( m == monsterType ) { return 1; } }
 	return -1;
+}
+
+bool SAMRaces::neverAFollower(Entity* monster, Stat* monsterStats)
+{
+	if ( !monster || !monsterStats ) { return true; }
+	// The four bots are tested by Stat::type as well as by monsterIsTinkeringCreation(), which
+	// reads the entity's SPRITE: a monster spawned this very tick has not had one assigned yet
+	// (its first act does that), so the sprite test answers false for a sentrybot made a moment ago.
+	const bool bot = ( monsterStats->type == SENTRYBOT || monsterStats->type == GYROBOT
+		|| monsterStats->type == SPELLBOT || monsterStats->type == DUMMYBOT );
+	const bool innerDemon = ( monsterStats->type == INCUBUS
+		&& !strncmp(monsterStats->name, "inner demon", strlen("inner demon")) );
+	// isBossMonster already covers shopkeepers, other traders, the minotaur, shadows, liches, the
+	// devil and a mod's own monster declared a boss.
+	return monster->isBossMonster() || monster->isInertMimic() || innerDemon || bot
+		|| monsterStats->type == MIMIC || monsterStats->type == MINIMIMIC
+		|| monsterStats->type == BAT_SMALL || monsterStats->type == HOLOGRAM
+		|| monster->monsterIsTinkeringCreation() || monster->monsterAllySummonRank != 0;
+}
+
+bool SAMRaces::recruitsByUse(const Stat* playerStats, Entity* monster, Stat* monsterStats)
+{
+	// Cheapest first: playerRace is 0 for every vanilla race, so a game with no race mod returns on
+	// the first comparison, every time makeFollower is asked.
+	if ( !playerStats || playerStats->playerRace < SAM_RACE_ID_BASE || playerStats->stat_appearance != 0
+		|| s_byId.empty() ) { return false; }
+	if ( !monster || !monsterStats ) { return false; }
+	const SAMRaceDef* def = get(playerStats->playerRace);
+	if ( !def || def->recruits.empty() ) { return false; }
+	const int type = (int)monster->getRace();
+	if ( std::find(def->recruits.begin(), def->recruits.end(), type) == def->recruits.end() ) { return false; }
+	return !neverAFollower(monster, monsterStats);
 }
 
 bool SAMRaces::canOpenTins(int raceId, int statAppearance)

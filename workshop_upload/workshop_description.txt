@@ -8,9 +8,9 @@ Barony was never built to be modded. S.A.M is the layer that makes it modded any
 
 [hr][/hr]
 
-[h1]NEW: SUMMONS, UNBREAKABLE ITEMS, HOTBAR SPELLS[/h1]
+[h1]NEW: RECRUITS, SPELL SCHOOLS[/h1]
 
-[b]sam_make_follower[/b] makes a spawned monster an ally. Mod items can be [b]unbreakable[/b], melee weapons can add your own effect to a hit, and a mod race's innate spells sit on a new character's hotbar.
+A race can [b]recruit[/b] creatures you name, like rats and spiders. Spells get a [b]school[/b] and stat or skill needs, and the Spell Editor makes the spellbook. Icon paths are checked, and mod weapons list on-hit effects.
 
 [h1]GAME SPEED, MOD SETTINGS, THE LOOT POOL[/h1]
 

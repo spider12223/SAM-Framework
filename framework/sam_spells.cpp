@@ -31,6 +31,7 @@
 #include "mod_tools.hpp"     // ItemTooltips.spellItems / spellNameStringToSpellID
 #include "items.hpp"         // items[], NUM_ITEM_SLOTS, SPELLBOOK, WOODEN_SHIELD (reverse map)
 #include "sam_items.hpp"     // SAM_ITEM_ID_BASE
+#include "sam_classes.hpp"       // SAMClasses::skillIdFromName: a spell's learn_requirements skills
 #include "sam_effects.hpp"       // v1.5.0: resolve on_hit_effect custom "ns:effect" -> slot
 #include "sam_lua_runtime.hpp"   // v1.5.0: SAMLua::effectIdFromName (vanilla EFF_ names)
 #include "sam_mp_inventory.hpp"  // noteOwnerRefusal: a carried grant/removal that failed here
@@ -224,6 +225,75 @@ void SAMSpells::loadFromManifest(const SAMModManifest& manifest)
 		def.icon          = getStr("icon");
 		def.startingSpell = getBool("starting_spell", false);
 
+		// school: which of the three schools of magic. An unknown word is reported and the spell stays
+		// Sorcery, as it was before the field existed.
+		def.school = getStr("school");
+		if ( def.school.empty() ) { def.school = "sorcery"; }
+		{
+			static const std::vector<std::string> kSchools = { "sorcery", "mysticism", "thaumaturgy" };
+			if ( !listHas(kSchools, def.school) )
+			{
+				const std::string sug = SAMErrors::suggest(def.school, kSchools);
+				SAMErrors::reportSemantic(MOD, fileLabel, "/school", def.school, "not a school of magic",
+					"\"sorcery\", \"mysticism\" or \"thaumaturgy\"",
+					sug.empty() ? "" : ("did you mean \"" + sug + "\"?"),
+					"treated as sorcery; the rest of the spell loaded.", /*warn=*/true);
+				def.school = "sorcery";
+			}
+		}
+
+		// learn_requirements: { "stats": { "CHR": 10 }, "skills": { "PRO_LEADERSHIP": 20 } }. A name the
+		// game does not know is reported and dropped, so a typo cannot quietly turn into "no requirement".
+		{
+			auto lr = j.find("learn_requirements");
+			if ( lr != j.end() && lr->is_object() )
+			{
+				static const std::vector<std::string> kStatNames = { "STR", "DEX", "CON", "INT", "PER", "CHR" };
+				auto readMap = [&](const char* group, std::map<std::string, int>& out, bool isSkill) {
+					auto g = lr->find(group);
+					if ( g == lr->end() || !g->is_object() ) { return; }
+					for ( auto it = g->begin(); it != g->end(); ++it )
+					{
+						const std::string key = it.key();
+						const bool known = isSkill ? (SAMClasses::skillIdFromName(key) >= 0) : listHas(kStatNames, key);
+						if ( !known || !it.value().is_number() )
+						{
+							SAMErrors::reportSemantic(MOD, fileLabel, std::string("/learn_requirements/") + group + "/" + key,
+								it.value().dump(), known ? "not a number" : (isSkill ? "not a skill" : "not a stat"),
+								isSkill ? "a skill name such as \"PRO_LEADERSHIP\"" : "STR, DEX, CON, INT, PER or CHR",
+								"", "that requirement ignored; the rest of the spell loaded.", /*warn=*/true);
+							continue;
+						}
+						const int need = it.value().get<int>();
+						if ( need > 0 ) { out[key] = need; }
+					}
+				};
+				readMap("stats", def.requireStats, false);
+				readMap("skills", def.requireSkills, true);
+			}
+		}
+
+		// Find the icon file once, here, where a mistake can be reported. A wrong path used to fall
+		// back to the generic orb with nothing in the log, and the file was opened again on every
+		// draw of every hotbar slot.
+		if ( !def.icon.empty() )
+		{
+			if ( SAMErrors::relPathEscapes(def.icon) )
+			{
+				SAM_WARN(MOD, "Spell [" + def.id + "] icon path '" + def.icon + "' escapes the mod folder; "
+					"ignoring it. The generic spell icon is used.");
+			}
+			else
+			{
+				def.iconResolved = SAMItems::resolveModImage(def.modPath, def.icon, "icon", def.id,
+					"SPELLS", "spells/shadow_bolt.png", "the generic spell icon");
+				if ( !def.iconResolved.empty() )
+				{
+					SAM_INFO(MOD, "Spell [" + def.id + "] custom icon -> " + def.iconResolved);
+				}
+			}
+		}
+
 		if ( def.payload.empty() )
 		{
 			SAMErrors::reportSemantic(MOD, fileLabel, "/payload", "", "missing (required)",
@@ -279,7 +349,8 @@ void SAMSpells::buildEngineSpell(const SAMSpellDef& def)
 	spell->spell_internal_name[sizeof(spell->spell_internal_name) - 1] = '\0';
 	spell->difficulty = (def.difficulty < 0 ? 0 : def.difficulty); // 0 = learnable by anyone (see below)
 	spell->mana = (def.manaCost < 0 ? 0 : def.manaCost);
-	spell->skillID = PRO_SORCERY;
+	spell->skillID = ( def.school == "mysticism" ) ? PRO_MYSTICISM
+		: ( def.school == "thaumaturgy" ) ? PRO_THAUMATURGY : PRO_SORCERY;
 
 	const bool trio = (def.projectileType == "missile_trio");
 	const bool selfCast = (def.projectileType == "none");
@@ -353,7 +424,7 @@ void SAMSpells::buildEngineSpell(const SAMSpellDef& def)
 	si.name = def.name;
 	si.name_lowercase = toLowerStr(def.name);
 	si.mana = spell->mana;
-	si.skillID = PRO_SORCERY;
+	si.skillID = spell->skillID; // the school the tooltip shows
 	si.difficulty = 0;
 	si.damage = def.damageMax;
 	si.spellType = trio ? ItemTooltips_t::SPELL_TYPE_PROJECTILE_SHORT_X3
@@ -390,7 +461,14 @@ void SAMSpells::buildEngineSpell(const SAMSpellDef& def)
 		}
 	}
 
-	SAM_INFO(MOD, "Built spell_t for " + def.name + " -> allGameSpells[" + std::to_string(id) + "]");
+	// School and learn requirements are in the line so a modder (and the test) can read what the game
+	// took from the file; there is no other place either is shown outside a tooltip.
+	std::string learnNote;
+	for ( const auto& r : def.requireStats )  { learnNote += (learnNote.empty() ? "" : ", ") + r.first + " " + std::to_string(r.second); }
+	for ( const auto& r : def.requireSkills ) { learnNote += (learnNote.empty() ? "" : ", ") + r.first + " " + std::to_string(r.second); }
+	SAM_INFO(MOD, "Built spell_t for " + def.name + " -> allGameSpells[" + std::to_string(id) + "] (school " + def.school
+		+ ", skill " + std::to_string(spell->skillID) + ", difficulty " + std::to_string(spell->difficulty)
+		+ (learnNote.empty() ? std::string() : (", learn needs " + learnNote)) + ")");
 }
 
 void SAMSpells::buildAllEngineSpells()
@@ -777,15 +855,59 @@ const SAMSpellDef* SAMSpells::getSpellByName(const std::string& namespacedId)
 	return nullptr;
 }
 
-std::string SAMSpells::getIconPath(int spellId)
+std::string SAMSpells::unmetLearnRequirement(int spellId, int player)
 {
 	const SAMSpellDef* def = getSpell(spellId);
-	if ( !def || def->icon.empty() ) { return std::string(); }
-	// Path-traversal guard: def->icon is untrusted mod JSON; refuse to resolve a
-	// path that escapes the mod folder (fall back to no custom icon).
-	if ( SAMErrors::relPathEscapes(def->icon) ) { return std::string(); }
-	const std::string abs = joinPath(def->modPath, def->icon);
-	std::ifstream f(abs.c_str(), std::ios::binary);
-	if ( !f.good() ) { return std::string(); }
-	return abs;
+	if ( !def || (def->requireStats.empty() && def->requireSkills.empty()) ) { return std::string(); }
+	if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->entity || !stats[player] )
+	{
+		return std::string();
+	}
+	Entity* me = players[player]->entity;
+	Stat* st = stats[player];
+
+	// Gear and effects count, as they do for the vanilla learn check (it reads the player's INT).
+	for ( const auto& need : def->requireStats )
+	{
+		int have = 0;
+		const char* word = "";
+		if ( need.first == "STR" )      { have = me->getSTR(); word = "Strength"; }
+		else if ( need.first == "DEX" ) { have = me->getDEX(); word = "Dexterity"; }
+		else if ( need.first == "CON" ) { have = me->getCON(); word = "Constitution"; }
+		else if ( need.first == "INT" ) { have = me->getINT(); word = "Intelligence"; }
+		else if ( need.first == "PER" ) { have = me->getPER(); word = "Perception"; }
+		else if ( need.first == "CHR" ) { have = me->getCHR(); word = "Charisma"; }
+		else { continue; }
+		if ( have < need.second )
+		{
+			return "You need " + std::to_string(need.second) + " " + word + " to learn " + def->name
+				+ " (you have " + std::to_string(have) + ").";
+		}
+	}
+	for ( const auto& need : def->requireSkills )
+	{
+		const int pro = SAMClasses::skillIdFromName(need.first);
+		if ( pro < 0 ) { continue; }
+		const int have = st->getModifiedProficiency(pro);
+		if ( have < need.second )
+		{
+			// "PRO_LEADERSHIP" -> "Leadership"
+			std::string word = need.first.rfind("PRO_", 0) == 0 ? need.first.substr(4) : need.first;
+			for ( size_t i = 0; i < word.size(); ++i )
+			{
+				word[i] = (i == 0) ? (char)std::toupper((unsigned char)word[i]) : (char)std::tolower((unsigned char)word[i]);
+			}
+			return "You need " + word + " " + std::to_string(need.second) + " to learn " + def->name
+				+ " (you have " + std::to_string(have) + ").";
+		}
+	}
+	return std::string();
+}
+
+std::string SAMSpells::getIconPath(int spellId)
+{
+	// Resolved (and any problem reported) once when the spell loaded, so this is a plain read:
+	// it runs for every spell slot on the hotbar every frame.
+	const SAMSpellDef* def = getSpell(spellId);
+	return def ? def->iconResolved : std::string();
 }

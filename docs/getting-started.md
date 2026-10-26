@@ -61,6 +61,11 @@ S.A.M publishes JSON Schemas so your editor validates and autocompletes as you t
 }
 ```
 
+An item can be both worn and on the hotbar: `"equip": true` puts it in the character's hand (or on their
+body), and `"hotbar_slot": 0` also puts it on hotbar key 1, the way the Wizard starts with the quarterstaff.
+This works for your own custom items too (the Class Editor's loadout board does it with the Hotbar box on an
+equipped item).
+
 ## 5. items/oakstaff.json
 
 ```json

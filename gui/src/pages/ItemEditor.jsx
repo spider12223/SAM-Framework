@@ -8,8 +8,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { CATEGORIES, SLOTS, ITEM_TYPES } from '@/data/schemas.js';
 import { itemsForSlot } from '@/data/equipment.js';
 
-/* Melee only. Ranged cannot be custom (firing is gated on a hardcoded list of vanilla
- * bows), and a throwable is declared with category THROWN instead, which already works. */
+/* Melee only. A bow-like weapon is declared with the "ranged" trait instead, and a throwable
+ * with category THROWN, which already works. */
 const WEAPON_SKILLS = ['sword', 'axe', 'mace', 'polearm'];
 // The slots "worn_like" works in, and the paperdoll slot whose vanilla items it may name.
 const WORN_SLOTS = {
@@ -53,9 +53,11 @@ function slugify(name) {
 
 /** Coerce a NumberInput value ('' when cleared) to a fallback number. */
 const numOr = (v, d) => (v === '' || v === null || v === undefined ? d : v);
+// These four attributes name a SPELL (a "namespace:spell" or SPELL_X), not a number.
+const SPELL_ATTR_KEYS = ['spellbook_spell', 'foci_spell', 'tome_spell', 'magicstaff_spell'];
 
 export default function ItemEditor() {
-  const { meta, items, effects = [], sounds = [], editing, dispatch } = useMod();
+  const { meta, items, effects = [], sounds = [], spells = [], editing, dispatch } = useMod();
 
   // "Edit" handoff from the Mod Builder: seed the form from a saved item.
   const editDef = editing?.kind === 'item' ? items.find((it) => it.id === editing.id) : null;
@@ -94,6 +96,7 @@ export default function ItemEditor() {
   );
   const [attrKey, setAttrKey] = useState('');
   const [attrVal, setAttrVal] = useState(0);
+  const [attrText, setAttrText] = useState('');
   // "sounds": { vanilla name/group -> sound id }, played for whoever holds or wears the item.
   const [soundRows, setSoundRows] = useState(() => soundMapToRows(editDef?.sounds));
   const [errors, setErrors] = useState([]);
@@ -110,7 +113,9 @@ export default function ItemEditor() {
   const addAttr = () => {
     const k = attrKey.trim();
     if (!k) return;
-    const v = Math.trunc(numOr(attrVal, 0));
+    const isSpellKey = SPELL_ATTR_KEYS.includes(k);
+    const v = isSpellKey ? attrText.trim() : Math.trunc(numOr(attrVal, 0));
+    if (isSpellKey && !v) return;
     setAttribs((prev) => {
       const i = prev.findIndex((a) => a.key === k);
       if (i >= 0) return prev.map((a, j) => (j === i ? { key: k, value: v } : a));
@@ -118,6 +123,7 @@ export default function ItemEditor() {
     });
     setAttrKey('');
     setAttrVal(0);
+    setAttrText('');
   };
 
   const buildDef = () => {
@@ -409,8 +415,14 @@ export default function ItemEditor() {
 
         <Panel title="Attributes">
           <div className="text-xs mb-2" style={{ color: '#6b5a35' }}>
-            Named integer effects (e.g. <span className="sam-mono">ATK</span>,{' '}
-            <span className="sam-mono">shadow_damage</span>).
+            Whole numbers the game reads: <span className="sam-mono">ATK</span> and <span className="sam-mono">AC</span>,
+            the two <span className="sam-mono">TINKER_SALVAGE_</span> keys, and the spell keys{' '}
+            (<span className="sam-mono">spellbook_spell</span>, <span className="sam-mono">tome_spell</span>,{' '}
+            <span className="sam-mono">foci_spell</span>, <span className="sam-mono">magicstaff_spell</span>), which take a spell
+            such as <span className="sam-mono">{namespace}:frostbolt</span>. The game reads a few other keys on its own items
+            (for example <span className="sam-mono">UNSELLABLE</span>), which S.A.M has not tested on a mod item; a key the game
+            never reads does nothing. Careful: a stat key like <span className="sam-mono">CHR</span> on armor or a ring is
+            printed in the tooltip as a stat line but gives no bonus; use a script for that.
           </div>
           <div className="flex flex-wrap gap-2 mb-3 min-h-8">
             {attribs.length === 0 && (
@@ -442,13 +454,28 @@ export default function ItemEditor() {
                 onKeyDown={(e) => e.key === 'Enter' && addAttr()}
               />
             </Field>
-            <Field label="Value" className="w-24">
-              <NumberInput
-                value={attrVal}
-                onChange={setAttrVal}
-                onKeyDown={(e) => e.key === 'Enter' && addAttr()}
-              />
-            </Field>
+            {SPELL_ATTR_KEYS.includes(attrKey.trim()) ? (
+              <Field label="Spell" className="w-56">
+                <TextInput
+                  value={attrText}
+                  onChange={setAttrText}
+                  placeholder={`${namespace}:frostbolt`}
+                  list="sam-attr-spells"
+                  onKeyDown={(e) => e.key === 'Enter' && addAttr()}
+                />
+                <datalist id="sam-attr-spells">
+                  {spells.map((sp) => <option key={sp.id} value={sp.id} />)}
+                </datalist>
+              </Field>
+            ) : (
+              <Field label="Value" className="w-24">
+                <NumberInput
+                  value={attrVal}
+                  onChange={setAttrVal}
+                  onKeyDown={(e) => e.key === 'Enter' && addAttr()}
+                />
+              </Field>
+            )}
             <GoldButton onClick={addAttr}>Add</GoldButton>
           </div>
         </Panel>

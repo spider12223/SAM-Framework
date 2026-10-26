@@ -88,6 +88,17 @@ struct SAMRaceDef
 	// body: shapeshifted, vanilla's refusal stands.
 	std::vector<int> neutral;
 
+	// (3.7.0) Optional "recruits": monster types this race can recruit by pressing Use on them,
+	// as a rat-bodied race recruits rats. Vanilla decides who a player may recruit from the player's
+	// BODY (a human body recruits whatever is friendly, a spider body recruits spiders, scarabs and
+	// scorpions, ...), so a race on another body could recruit nothing its body's row does not name,
+	// and a human-bodied race lost its "allies" recruits at Legendary Leadership, where the body table
+	// alone decides. A listed type is also this race's ally (it will not attack you, you will not
+	// attack it) unless the same type is under enemies or neutral: those win, and the type is taken
+	// off this list with a warning. Creatures that can never be a follower (bosses, shopkeepers, mimics,
+	// the tinkering bots, holograms, bats) are dropped at load too.
+	std::vector<int> recruits;
+
 	// (v3.3.0) Optional "can_open_tins": eat a tin without a tin opener, as a Goatman or an
 	// Automaton does (the engine checks those two bodies, so a race on either already can). Like
 	// theirs, it covers eating; the alchemy table still wants an opener.
@@ -248,6 +259,17 @@ public:
 	// (v3.3.0) "can_open_tins", or false for a vanilla race, an unregistered id, and a player who
 	// turned the race's abilities off (stat_appearance != 0).
 	static bool canOpenTins(int raceId, int statAppearance);
+
+	// (3.7.0) Does the player with these stats recruit this monster by pressing Use because their
+	// custom race lists it under "recruits"? False for a vanilla race, an unregistered id, a player
+	// who turned the race's abilities off (stat_appearance != 0), and a creature no follower can be
+	// made of. makeFollower asks it; the engine's own body table is untouched.
+	static bool recruitsByUse(const Stat* playerStats, Entity* monster, Stat* monsterStats);
+
+	// The creatures no follower can be made of: a boss, a shopkeeper or other trader, a mimic, a
+	// hologram, a tinkering construct, a summoned ally, an inner demon (the list Dominate refuses).
+	// One answer for the "recruits" list and for sam_make_follower, so they cannot disagree.
+	static bool neverAFollower(Entity* monster, Stat* monsterStats);
 
 	// --- custom limb models ---------------------------------------------------------
 	// Turn every declared limb_models reference into an engine model index. Must run

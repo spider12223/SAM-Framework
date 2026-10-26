@@ -51,6 +51,9 @@
 #include "mod_tools.hpp" // ItemTooltips.itemNameStringToItemID — resolves "model_from_item" names
 #include "entity.hpp"    // Entity::sprite, swapped by SAMWornAsTwin for the length of a placement
 #include "sam_effects.hpp"      // an item's on_hit_effect: a custom effect id -> its slot
+#ifndef EDITOR
+#include "ui/GameUI.hpp"        // StatusEffectQueue_t: the display name of a vanilla effect, for the tooltip line
+#endif
 #include "sam_lua_runtime.hpp"  // SAMLua::effectIdFromName: the vanilla effect names
 #endif
 
@@ -183,7 +186,8 @@ static bool fileExists(const std::string& p)
 // worked -- because that spelling also breaks the MODELS on a Workshop install, where the
 // content directory is not <Barony>/mods/<folder>.
 static std::string samResolveModImage(const std::string& modPath, const std::string& rel,
-	const char* field, const std::string& ownerId)
+	const char* field, const std::string& ownerId, const char* module = "ITEMS",
+	const char* example = "items/images/foo.png", const char* fallback = "the default icon")
 {
 	if ( rel.empty() ) { return std::string(); }
 	auto collapse = [](const std::string& in) {
@@ -206,7 +210,7 @@ static std::string samResolveModImage(const std::string& modPath, const std::str
 		const std::string alt = collapse(toForwardSlashes(joinPath(realDir, logical)));
 		if ( fileExists(alt) )
 		{
-			SAM_WARN("ITEMS", "[" + ownerId + "] " + field + " '" + rel + "' was found from the "
+			SAM_WARN(module, "[" + ownerId + "] " + field + " '" + rel + "' was found from the "
 				"game folder, not your mod folder. These paths are relative to your mod, so drop "
 				"the leading \"mods/<your folder>/\". It works today only because you installed "
 				"the mod by hand -- on a Steam Workshop install this path will not exist.");
@@ -214,9 +218,9 @@ static std::string samResolveModImage(const std::string& modPath, const std::str
 		}
 	}
 #endif
-	SAM_WARN("ITEMS", "[" + ownerId + "] " + field + " '" + rel + "' was not found (looked for '"
+	SAM_WARN(module, "[" + ownerId + "] " + field + " '" + rel + "' was not found (looked for '"
 		+ want + "'). The path is relative to your mod folder: for a file at "
-		"<your mod>/items/images/foo.png write \"items/images/foo.png\". Using the default icon.");
+		"<your mod>/" + example + " write \"" + example + "\". Using " + fallback + ".");
 	return std::string();
 }
 
@@ -491,6 +495,53 @@ static std::string samTooltipKeyFor(const std::string& srcKey, const std::string
 }
 
 #ifndef EDITOR
+// The tooltip line for a weapon's on_hit_effect: "25% chance on hit: [Slowed] for 5s", or
+// "On hit: [Slowed] for 5s" when it lands every time. Static like vanilla's "+10% [Bleed] chance
+// on hit": it states what the item declares, not what a target's immunities will allow. The
+// [brackets] are the tooltip's own highlight for a status name. Empty when there is nothing to say.
+static std::string samOnHitTooltipLine(const SAMItemDef& def)
+{
+	if ( def.onHitEffectSlot < 0 || def.onHitChance == 0.0 ) { return std::string(); }
+
+	std::string name;
+	if ( const SAMEffectDef* custom = SAMEffects::get(def.onHitEffectSlot) ) { name = custom->name; }
+	if ( name.empty() )
+	{
+		auto& all = StatusEffectQueue_t::StatusEffectDefinitions_t::allEffects;
+		auto vanilla = all.find(def.onHitEffectSlot);
+		if ( vanilla != all.end() ) { name = vanilla->second.name; }
+	}
+	if ( name.empty() )
+	{
+		// No display name known: show what the modder wrote, tidied ("EFF_SLOW" -> "slow").
+		name = def.onHitEffect;
+		if ( name.rfind("EFF_", 0) == 0 ) { name.erase(0, 4); }
+		for ( char& c : name ) { c = (c == '_') ? ' ' : (char)std::tolower((unsigned char)c); }
+	}
+
+	std::string line;
+	if ( def.onHitChance > 0.0 && def.onHitChance < 1.0 )
+	{
+		const int pct = std::max(1, (int)(def.onHitChance * 100.0 + 0.5));
+		line = std::to_string(pct) + "% chance on hit: ";
+	}
+	else
+	{
+		line = "On hit: ";
+	}
+	line += "[" + name + "]";
+
+	const int ticks = SAMItems::onHitDurationTicks(def);
+	if ( ticks > 0 )
+	{
+		const int tenths = (ticks * 10 + TICKS_PER_SECOND / 2) / TICKS_PER_SECOND; // rounded to 0.1 s
+		line += " for " + std::to_string(tenths / 10);
+		if ( tenths % 10 != 0 ) { line += "." + std::to_string(tenths % 10); }
+		line += "s";
+	}
+	return line;
+}
+
 // Give a custom item a REAL hover tooltip. The key: clone the vanilla CATEGORY template
 // (tooltip_sword, tooltip_armor_breastpiece, tooltip_potion_water, ...) — NOT the bare
 // "tooltip_default". Only the category template carries the ATK / stat-bonus / durability
@@ -545,6 +596,23 @@ static void injectCustomTooltip(int id, const SAMItemDef& def)
 		std::string bl;
 		while ( std::getline(bs, bl) ) { ttCopy.descriptionText.push_back(bl); }
 		if ( ttCopy.descriptionText.empty() ) { ttCopy.descriptionText.push_back(def.description); }
+	}
+	// A weapon that puts an effect on its target says so, right under the stock "+10% [Bleed]"
+	// style effect lines (or after the attributes text, or last, on a template without them). The
+	// tag is our own: the renderer passes a tag it has no rule for through unchanged.
+	{
+		const std::string onHitLine = samOnHitTooltipLine(def);
+		if ( !onHitLine.empty() )
+		{
+			const std::string tag = "sam_on_hit";
+			ttCopy.detailsText[tag] = std::vector<std::string>{ onHitLine };
+			auto& order = ttCopy.detailsTextInsertOrder;
+			order.erase(std::remove(order.begin(), order.end(), tag), order.end());
+			auto at = std::find(order.begin(), order.end(), std::string("weapon_base_effects"));
+			if ( at == order.end() ) { at = std::find(order.begin(), order.end(), std::string("attributes_text")); }
+			if ( at != order.end() ) { ++at; }
+			order.insert(at, tag);
+		}
 	}
 	const std::string ttKey = samTooltipKeyFor(srcKey, def.id);
 	ItemTooltips.tooltips[ttKey] = std::move(ttCopy);
@@ -1006,7 +1074,7 @@ void SAMItems::loadFromManifest(const SAMModManifest& manifest)
 		{
 			SAM_WARN(MOD, "Item [" + def.id + "] weapon_skill '" + def.weaponSkill
 				+ "' is not one of sword/axe/mace/polearm — falling back to sword. (For a throwable, "
-				"set \"category\": \"THROWN\" instead; ranged weapons cannot be custom.)");
+				"set \"category\": \"THROWN\" instead; for a bow-like weapon use the \"ranged\" trait.)");
 			def.weaponSkill.clear();
 		}
 		{
@@ -1073,10 +1141,12 @@ void SAMItems::loadFromManifest(const SAMModManifest& manifest)
 						&& it.key() != "spellbook_spell" && it.key() != "foci_spell"
 						&& it.key() != "tome_spell" && it.key() != "magicstaff_spell" )
 					{
-						SAM_WARN(MOD, "Item '" + def.id + "': attribute '" + it.key() + "' is not read by the engine "
-							"and will have no effect. Recognised keys: ATK, AC, TINKER_SALVAGE_METAL, "
-							"TINKER_SALVAGE_MAGIC, spellbook_spell, foci_spell, tome_spell, magicstaff_spell. (Item behaviour otherwise comes "
-							"from a script, not from an attribute key.)");
+						SAM_WARN(MOD, "Item '" + def.id + "': attribute '" + it.key() + "' is not one of the keys S.A.M documents. "
+							"Documented keys: ATK, AC, TINKER_SALVAGE_METAL, TINKER_SALVAGE_MAGIC, spellbook_spell, foci_spell, "
+							"tome_spell, magicstaff_spell. The game reads a few other keys on its own items (for example UNSELLABLE, "
+							"UNVOIDABLE, UNVANDALISABLE, UNBURNABLE, no_stack); S.A.M has not tested those on a mod item. A key the "
+							"game never reads does nothing. Careful: on armor and rings the stat keys STR to CHR are printed in the "
+							"tooltip but give no bonus (use a script for that).");
 					}
 				}
 			}
@@ -1202,6 +1272,12 @@ void SAMItems::resolveOnHitEffects()
 		else
 		{
 			SAM_INFO(MOD, "Item '" + def.id + "' on_hit_effect '" + def.onHitEffect + "' -> effect slot " + std::to_string(slot));
+			// The tooltip was built at registration, before this slot was known: build it again
+			// so the on-hit line is on it. Idempotent (it rebuilds from the stock template).
+			injectCustomTooltip(kv.first, def);
+			const std::string tipLine = samOnHitTooltipLine(def);
+			SAM_INFO(MOD, "Item '" + def.id + "' tooltip on-hit line: "
+				+ (tipLine.empty() ? std::string("(none: it never lands)") : tipLine));
 		}
 	}
 #endif
@@ -1649,6 +1725,23 @@ void SAMItems::wornAsTwinEnd()
 	}
 }
 #endif
+
+int SAMItems::onHitDurationTicks(const SAMItemDef& def)
+{
+	int dur = def.onHitDuration;
+#ifndef EDITOR
+	if ( dur <= 0 ) { dur = SAMEffects::defaultDurationForSlot(def.onHitEffectSlot); }
+#endif
+	if ( dur <= 0 ) { dur = 5 * 50; } // five seconds at 50 ticks a second (TICKS_PER_SECOND is not visible in the editor build)
+	return dur;
+}
+
+std::string SAMItems::resolveModImage(const std::string& modPath, const std::string& rel,
+	const char* field, const std::string& ownerId, const char* module, const char* example,
+	const char* fallback)
+{
+	return samResolveModImage(modPath, rel, field, ownerId, module, example, fallback);
+}
 
 std::string SAMItems::getIconPath(int itemId)
 {

@@ -776,7 +776,7 @@
             "minimum": -1,
             "maximum": 9,
             "default": -1,
-            "description": "Hotbar slot (0-9) to bind this item to, or -1 for none."
+            "description": "Hotbar slot (0-9) to bind this item to, or -1 for none. Works together with equip: true: an equipped item with a hotbar_slot starts in the hand (or on the body) and on that hotbar key, the way the Wizard starts with the quarterstaff. Slot 0 is hotbar key 1."
           }
         }
       }
