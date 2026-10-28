@@ -1341,7 +1341,7 @@ declare global {
   /**
    * Put a link on every empty player slot of the host's lobby, like "+ Add Companion". Pressing it fires lobby.on_slot_action with your namespace as mod, this id as action and the slot. Call it at top level, beside sam_register_action. Registering the same id again changes its label.
    *
-   * Multiplayer: local. Answers for the machine running the script. Every machine registers it as the mod loads; only the host draws the links, because only the host can claim a slot.
+   * Multiplayer: all. Changes a table every machine keeps its own copy of: a host call runs on the host and on every S.A.M client, and is replayed to a client that joins later. A client's call is refused with a one-time warning and returns false. Every machine registers it as the mod loads; only the host draws the links, because only the host can claim a slot.
    */
   function sam_lobby_add_slot_action(id: string, label: string): boolean;
 
@@ -1570,14 +1570,14 @@ declare global {
   function sam_party_set_difficulty_count(count: number): boolean;
 
   /**
-   * Change a party member's options after it exists. Only the keys you give change. Turning respawn off makes its next death final; turning wait_at_exit off lets the party leave without it.
+   * Change a party member's options after it exists. Only the keys you give change. Turning respawn off makes its next death final; turning wait_at_exit off lets the party leave without it; turning carry_on on or off changes whether the run can go on while it stands.
    *
    * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
    */
   function sam_party_set_options(uid: number, options: any): boolean;
 
   /**
-   * Make a party member beside a player. It starts from the same baseline stats a player does and takes its class's stats (a S.A.M custom class's through the same hook a player's go through) and its class's starting kit, equipped where a player would wear it. It levels up through the class's growth rather than a monster's roll, does not count against its leader's follower limit, stays on the players' side when its leader dies, and crosses floors as a follower does. With wait_at_exit, every exit waits for it (party.on_waiting_at_exit); with respawn, it comes back beside its leader on the next floor after it dies (party.on_member_died). party.on_member_spawned fires once it exists.
+   * Make a party member beside a player. It starts from the same baseline stats a player does and takes its class's stats (a S.A.M custom class's through the same hook a player's go through) and its class's starting kit, equipped where a player would wear it. It levels up through the class's growth rather than a monster's roll, does not count against its leader's follower limit, stays on the players' side when its leader dies, and crosses floors as a follower does. With wait_at_exit, every exit waits for it (party.on_waiting_at_exit); with respawn, it comes back beside its leader on the next floor after it dies (party.on_member_died). party.on_member_spawned fires once it exists. With carry_on (off unless you ask), the run does not end when every player is down while this member stands: the fallen wait as ghosts, the member takes the party to the next exit, and the run ends when no carry_on member is left standing.
    *
    * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Party members are monsters, so every machine sees them the way it sees any ally the host spawned.
    */
@@ -2593,7 +2593,7 @@ declare global {
     | "player.on_equip"
     /** Fires the party takes a ladder to a new floor. Multiplayer: Fires on the host, once for every connected player when the party takes a ladder; initiator is the player who climbed. */
     | "player.on_floor_change"
-    /** Fires a player's game-over window opens on their own machine. Multiplayer: Fires on the dying player's own machine (a client's own game for a client) when that player's game-over window opens. In co-op that can be a death while others still live (survived tells you), not only the end of the run. The host never sees a remote player's. */
+    /** Fires a player's game-over window opens on their own machine. Multiplayer: Fires on the dying player's own machine (a client's own game for a client) when that player's game-over window opens. In co-op that can be a death while others still live (survived tells you), not only the end of the run. While a party member with carry_on carries the run on after every player is down, the Dismiss window does not fire it; the final window, when the party is wiped, does. The host never sees a remote player's. */
     | "player.on_game_over"
     /** Fires a player picks up gold. Multiplayer: Fires on the host, for every player. */
     | "player.on_gold_collected"

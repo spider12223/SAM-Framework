@@ -19,7 +19,6 @@
 #include "sam_races.hpp"
 #include "sam_catalog.hpp"
 #include "sam_net.hpp"
-#include "sam_rules.hpp"     // NetOp::PartyCarryOn
 
 #include "main.hpp"
 #include "game.hpp"
@@ -38,7 +37,7 @@
 #include "ui/GameUI.hpp"     // gameUIFrame
 #include "ui/Frame.hpp"
 
-void samOnAllPlayersDead();   // actplayer.cpp: the one-time "everyone is dead" bookkeeping (scores)
+void samPartyWiped();   // actplayer.cpp: the party that carried the run on is gone: the save, the music, the scores
 
 #include <algorithm>
 #include <cctype>
@@ -393,11 +392,14 @@ namespace
 		return false;
 	}
 
+	// A member that can take the party on: standing, and its mod turned carry_on on for it.
 	bool memberStanding(Entity* e)
 	{
 		if ( !e || e->behavior != &actMonster ) { return false; }
 		Stat* s = e->getStats();
-		return s && s->HP > 0 && (s->MISC_FLAGS[SAMParty::SAM_STAT_FLAG_PARTY] >> 24) == (Sint32)SAMParty::MARKER;
+		if ( !s || s->HP <= 0 ) { return false; }
+		const Sint32 m = s->MISC_FLAGS[SAMParty::SAM_STAT_FLAG_PARTY];
+		return (m >> 24) == (Sint32)SAMParty::MARKER && (m & SAMParty::FLAG_CARRY_ON) != 0;
 	}
 
 	int membersStanding(Entity* except)
@@ -427,14 +429,20 @@ namespace
 	std::uint8_t g_netCarry = CARRY_NONE;    // client: the host's last word
 	std::uint8_t g_sentCarry = CARRY_NONE;   // host: what the clients were last told
 	bool g_wiped = false;                    // host: the last member fell after the players
+	bool g_carried = false;                  // host: every player was down while a carry_on member stood
+	Uint32 g_goneTicks = 0;                  // host: how long that has been over with nobody declared it
 	std::map<std::uint32_t, std::uint32_t> g_heading;   // host: member uid -> the exit it is walking to
 	std::map<Uint32, Uint32> g_carryWait;   // host: exit uid -> tick a carrying member first waited there
 	constexpr Uint32 CARRY_WAIT_TICKS = TICKS_PER_SECOND * 20;   // then it goes without the stragglers
 	std::vector<std::uint32_t> g_netMembers;   // client: the party members on this floor, by uid (sorted)
 	std::vector<std::uint32_t> g_sentMembers;  // host: what the clients were last told
 
-	std::uint8_t carryOp() { return (std::uint8_t)(SAMNet::Op::RulesFirst + SAMRules::NetOp::PartyCarryOn); }
-	std::uint8_t membersOp() { return (std::uint8_t)(SAMNet::Op::RulesFirst + SAMRules::NetOp::PartyMembers); }
+	// Our ops, as offsets in SAMNet::Op::PartyFirst's block (host -> client; nothing goes the other way).
+	// Once shipped, a number never changes and is never reused.
+	constexpr int OP_CARRY = 0;     // every player down: the party carries on / was wiped
+	constexpr int OP_MEMBERS = 1;   // the party members on this floor, by uid
+	std::uint8_t carryOp() { return (std::uint8_t)(SAMNet::Op::PartyFirst + OP_CARRY); }
+	std::uint8_t membersOp() { return (std::uint8_t)(SAMNet::Op::PartyFirst + OP_MEMBERS); }
 
 	// Every party member on this floor, dead or alive, by uid, sorted (host).
 	std::vector<std::uint32_t> memberUids()
@@ -490,17 +498,23 @@ namespace
 	void endRunIfWiped(Entity* dying)
 	{
 		if ( g_wiped || anyPlayerStanding() || membersStanding(dying) > 0 ) { return; }
+		// Only a run a carry_on member was carrying ends here; without one, the last player's own
+		// death has already done what a vanilla game over does.
+		if ( !g_carried && !(dying && (SAMParty::flags(dying->getStats()) & SAMParty::FLAG_CARRY_ON)) ) { return; }
 		g_wiped = true;
-		samOnAllPlayersDead();
+		g_carried = false;
+		samPartyWiped();
 		for ( int p = 0; p < MAXPLAYERS; ++p )
 		{
 			if ( !client_disconnected[p] ) { showFinalGameover(p); }
 		}
 	}
 
+	// CARRY_ON means a carry_on member stands. A client carries on only while none of its players
+	// stands either (it sees their health), so it does not lag its own player's fall by a message.
 	std::uint8_t hostCarryState()
 	{
-		if ( anyPlayerStanding() ) { g_wiped = false; return CARRY_NONE; }   // a floor later, or a restart
+		if ( anyPlayerStanding() ) { g_wiped = false; return membersStanding(nullptr) > 0 ? CARRY_ON : CARRY_NONE; }   // a floor later, or a restart
 		if ( g_wiped ) { return CARRY_WIPED; }
 		return membersStanding(nullptr) > 0 ? CARRY_ON : CARRY_NONE;
 	}
@@ -542,6 +556,8 @@ namespace
 		g_netCarry = CARRY_NONE;
 		g_sentCarry = CARRY_NONE;
 		g_wiped = false;
+		g_carried = false;
+		g_goneTicks = 0;
 		g_carryWait.clear();
 		g_netMembers.clear();
 		g_sentMembers.clear();
@@ -556,7 +572,7 @@ namespace
 		g_netCarry = state;
 		if ( state == CARRY_WIPED && was != CARRY_WIPED )
 		{
-			samOnAllPlayersDead();
+			samPartyWiped();
 			for ( int p = 0; p < MAXPLAYERS; ++p ) { showFinalGameover(p); }
 		}
 	}
@@ -613,6 +629,7 @@ namespace
 		v.set("wait_at_exit", SamValue::boolean((f & SAMParty::FLAG_WAIT_AT_EXIT) != 0));
 		v.set("respawn", SamValue::boolean((f & SAMParty::FLAG_RESPAWN) != 0));
 		v.set("grow_like_class", SamValue::boolean((f & SAMParty::FLAG_GROW_LIKE_CLASS) != 0));
+		v.set("carry_on", SamValue::boolean((f & SAMParty::FLAG_CARRY_ON) != 0));
 		return v;
 	}
 
@@ -714,7 +731,8 @@ namespace SAMParty
 		std::uint32_t f = FLAG_MEMBER | FLAG_WAIT_AT_EXIT | FLAG_RESPAWN | FLAG_GROW_LIKE_CLASS;
 		if ( !readFlagOption(spec, "wait_at_exit", FLAG_WAIT_AT_EXIT, f, why)
 			|| !readFlagOption(spec, "respawn", FLAG_RESPAWN, f, why)
-			|| !readFlagOption(spec, "grow_like_class", FLAG_GROW_LIKE_CLASS, f, why) )
+			|| !readFlagOption(spec, "grow_like_class", FLAG_GROW_LIKE_CLASS, f, why)
+			|| !readFlagOption(spec, "carry_on", FLAG_CARRY_ON, f, why) )
 		{
 			return 0;
 		}
@@ -800,15 +818,21 @@ namespace SAMParty
 		if ( multiplayer == CLIENT ) { say(why, "party members are the host's"); return false; }
 		Entity* e = memberEntity(uid);
 		if ( !e ) { say(why, "uid " + std::to_string(uid) + " is not a party member on this floor"); return false; }
-		if ( !options.isMap() ) { say(why, "the second argument must be a table { wait_at_exit, respawn, grow_like_class, tag }"); return false; }
+		if ( !options.isMap() ) { say(why, "the second argument must be a table { wait_at_exit, respawn, grow_like_class, carry_on, tag }"); return false; }
 		Stat* s = e->getStats();
 		std::uint32_t f = flags(s);
 		std::string tag = attr(s, ATTR_TAG);
 		if ( !readFlagOption(options, "wait_at_exit", FLAG_WAIT_AT_EXIT, f, why)
 			|| !readFlagOption(options, "respawn", FLAG_RESPAWN, f, why)
 			|| !readFlagOption(options, "grow_like_class", FLAG_GROW_LIKE_CLASS, f, why)
+			|| !readFlagOption(options, "carry_on", FLAG_CARRY_ON, f, why)
 			|| !readTag(options, tag, why) )
 		{
+			return false;
+		}
+		if ( (f & FLAG_CARRY_ON) && !(flags(s) & FLAG_CARRY_ON) && !anyPlayerStanding() )
+		{
+			say(why, "carry_on cannot be turned on once every player is down: that run has ended");
 			return false;
 		}
 		setFlags(s, f | FLAG_MEMBER);
@@ -1106,9 +1130,22 @@ namespace SAMParty
 		return false;
 	}
 
+	void tick()
+	{
+		if ( multiplayer == CLIENT ) { return; }
+		if ( anyPlayerStanding() ) { g_carried = false; g_wiped = false; g_goneTicks = 0; return; }   // a floor later, or a restart
+		if ( g_wiped ) { return; }
+		if ( membersStanding(nullptr) > 0 ) { g_carried = true; g_goneTicks = 0; return; }
+		if ( !g_carried ) { return; }
+		// The members that carried the run are gone and none of them died on the way (a mod
+		// removed them, or they were swept off the floor). Wait a moment in case a floor change is
+		// still placing them, then end the run rather than leave the players watching as ghosts.
+		if ( ++g_goneTicks >= TICKS_PER_SECOND * 2 ) { endRunIfWiped(nullptr); }
+	}
+
 	bool partyCarriesOn()
 	{
-		if ( multiplayer == CLIENT ) { return g_netCarry == CARRY_ON; }   // the host's word
+		if ( multiplayer == CLIENT ) { return g_netCarry == CARRY_ON && !anyPlayerStanding(); }   // the host's word, and no player of ours up
 		if ( anyPlayerStanding() || g_wiped ) { return false; }
 		return membersStanding(nullptr) > 0;
 	}

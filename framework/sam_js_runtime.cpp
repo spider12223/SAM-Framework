@@ -6763,7 +6763,7 @@ namespace
 #endif
 	}
 
-	// sam_party_set_options(uid, { wait_at_exit, respawn, grow_like_class, tag }) -> bool.
+	// sam_party_set_options(uid, { wait_at_exit, respawn, grow_like_class, carry_on, tag }) -> bool.
 	JSValue js_sam_party_set_options(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();

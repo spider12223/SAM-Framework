@@ -2638,7 +2638,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 #endif
 
 	// sam_party_spawn(leader, spec) -> uid | nil. spec: { name, race, class, sex, appearance,
-	// tag, wait_at_exit, respawn, grow_like_class, pickup }.
+	// tag, wait_at_exit, respawn, grow_like_class, carry_on, pickup }.
 	int lua_sam_party_spawn(lua_State* Ls)
 	{
 		SAMLogger::noteApiCall();
@@ -2686,7 +2686,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 #endif
 	}
 
-	// sam_party_set_options(uid, { wait_at_exit, respawn, grow_like_class, tag }) -> bool.
+	// sam_party_set_options(uid, { wait_at_exit, respawn, grow_like_class, carry_on, tag }) -> bool.
 	int lua_sam_party_set_options(lua_State* Ls)
 	{
 		SAMLogger::noteApiCall();

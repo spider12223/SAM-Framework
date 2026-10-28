@@ -19,8 +19,8 @@ the kind, so the line is always what really happens:
 | `owner` (14) | Changes something that lives on the player's own machine (their backpack, their spells). Call it on the host; S.A.M carries it to that player's machine. |
 | `screen` (29) | Shows something on one player's screen. Name the player, or leave it out inside an event about a player; -1 means every player. S.A.M carries it to their machine. |
 | `read` (50) | Reads a player. The host can read everyone; a client can read only its own player. |
-| `all` (15) | Changes a table every machine keeps (class and item patches, species resists). A host call runs everywhere and reaches players who join later. |
-| `local` (32) | Answers for the machine running it: its clock, its files, its music. |
+| `all` (16) | Changes a table every machine keeps (class and item patches, species resists). A host call runs everywhere and reaches players who join later. |
+| `local` (31) | Answers for the machine running it: its clock, its files, its music. |
 | `any` (57) | The same answer on every machine. Safe anywhere. |
 
 Every event ends with a **Multiplayer:** line that says which machine it fires on and for
@@ -1637,7 +1637,7 @@ An empty slot shows the first two actions registered across all loaded mods. Lin
 
 **Returns:** true when the action exists (boolean); false for a bad id or label, or when four actions are already registered
 
-**Multiplayer:** `local`. Answers for the machine running the script. Every machine registers it as the mod loads; only the host draws the links, because only the host can claim a slot.
+**Multiplayer:** `all`. Changes a table every machine keeps its own copy of: a host call runs on the host and on every S.A.M client, and is replayed to a client that joins later. A client's call is refused with a one-time warning and returns false. Every machine registers it as the mod loads; only the host draws the links, because only the host can claim a slot.
 
 ### `sam_lobby_clear_card(slot)`
 
@@ -2694,7 +2694,7 @@ Everything about one party member: class and race as the ids sam_party_spawn tak
 |---|---|
 | `uid` | uid |
 
-**Returns:** a table { uid, name, class, class_id, race, race_id, sex, appearance, leader, tag, mod, level, hp, max_hp, wait_at_exit, respawn, grow_like_class }, or nil/undefined for a creature that is not a party member
+**Returns:** a table { uid, name, class, class_id, race, race_id, sex, appearance, leader, tag, mod, level, hp, max_hp, wait_at_exit, respawn, grow_like_class, carry_on }, or nil/undefined for a creature that is not a party member
 
 **Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript).
 
@@ -2746,12 +2746,12 @@ Every machine builds each floor itself, so a count only one machine knows would 
 
 ### `sam_party_set_options(uid, options)`
 
-Change a party member's options after it exists. Only the keys you give change. Turning respawn off makes its next death final; turning wait_at_exit off lets the party leave without it.
+Change a party member's options after it exists. Only the keys you give change. Turning respawn off makes its next death final; turning wait_at_exit off lets the party leave without it; turning carry_on on or off changes whether the run can go on while it stands.
 
 | argument | type |
 |---|---|
 | `uid` | uid |
-| `options` | table — one of: `wait_at_exit: boolean`, `respawn: boolean`, `grow_like_class: boolean`, `tag: string (up to 31 characters)` |
+| `options` | table — one of: `wait_at_exit: boolean`, `respawn: boolean`, `grow_like_class: boolean`, `carry_on: boolean`, `tag: string (up to 31 characters)` |
 
 **Returns:** true when the options are set (boolean); false for a creature that is not a party member or a value of the wrong kind
 
@@ -2759,14 +2759,14 @@ Change a party member's options after it exists. Only the keys you give change. 
 
 ### `sam_party_spawn(leader, spec)`
 
-Make a party member beside a player. It starts from the same baseline stats a player does and takes its class's stats (a S.A.M custom class's through the same hook a player's go through) and its class's starting kit, equipped where a player would wear it. It levels up through the class's growth rather than a monster's roll, does not count against its leader's follower limit, stays on the players' side when its leader dies, and crosses floors as a follower does. With wait_at_exit, every exit waits for it (party.on_waiting_at_exit); with respawn, it comes back beside its leader on the next floor after it dies (party.on_member_died). party.on_member_spawned fires once it exists.
+Make a party member beside a player. It starts from the same baseline stats a player does and takes its class's stats (a S.A.M custom class's through the same hook a player's go through) and its class's starting kit, equipped where a player would wear it. It levels up through the class's growth rather than a monster's roll, does not count against its leader's follower limit, stays on the players' side when its leader dies, and crosses floors as a follower does. With wait_at_exit, every exit waits for it (party.on_waiting_at_exit); with respawn, it comes back beside its leader on the next floor after it dies (party.on_member_died). party.on_member_spawned fires once it exists. With carry_on (off unless you ask), the run does not end when every player is down while this member stands: the fallen wait as ghosts, the member takes the party to the next exit, and the run ends when no carry_on member is left standing.
 
 Spawn from game.on_game_start or later (a timer of a tick is safest): before the leader's body exists there is nobody to stand beside and the call is refused. A class's starting spells are not learned (a monster casts from what it carries), and race-specific items in a vanilla kit are skipped. sam_spawn_companion is a different thing: a scripted model that walks beside a player, not a creature with stats.
 
 | argument | type |
 |---|---|
 | `leader` | int (the player it follows, 0-3) |
-| `spec` | table — one of: `name: string (up to 31 characters; a random player name when left out)`, `race: string | int (an id from sam_party_choices, e.g. "human", "goblin", "mymod:lizardfolk"; default "human")`, `class: string | int (an id from sam_party_choices, e.g. "warrior", "mymod:knight"; default "warrior")`, `sex: "male" | "female" (random when left out)`, `appearance: int (0-17, humans only; default 0)`, `tag: string (up to 31 characters; yours to read back, e.g. "fellowship:2"; default your namespace)`, `wait_at_exit: boolean (default true)`, `respawn: boolean (default true)`, `grow_like_class: boolean (default true)`, `pickup: "unowned" | "all" | "none" (what it picks up off the floor; default "unowned")` |
+| `spec` | table — one of: `name: string (up to 31 characters; a random player name when left out)`, `race: string | int (an id from sam_party_choices, e.g. "human", "goblin", "mymod:lizardfolk"; default "human")`, `class: string | int (an id from sam_party_choices, e.g. "warrior", "mymod:knight"; default "warrior")`, `sex: "male" | "female" (random when left out)`, `appearance: int (0-17, humans only; default 0)`, `tag: string (up to 31 characters; yours to read back, e.g. "fellowship:2"; default your namespace)`, `wait_at_exit: boolean (default true)`, `respawn: boolean (default true)`, `grow_like_class: boolean (default true)`, `carry_on: boolean (default false: when every player is down and a member with this on still stands, the run goes on instead of ending)`, `pickup: "unowned" | "all" | "none" (what it picks up off the floor; default "unowned")` |
 
 **Returns:** the new party member's uid (int), or nil/undefined when refused (the reason is in the log)
 
@@ -5554,7 +5554,7 @@ Fires a player's game-over window opens on their own machine.
 
 Your last chance to write per-run state with sam_save_data (a file on that machine) before the run is gone. Not cancellable.
 
-**Multiplayer:** Fires on the dying player's own machine (a client's own game for a client) when that player's game-over window opens. In co-op that can be a death while others still live (survived tells you), not only the end of the run. The host never sees a remote player's.
+**Multiplayer:** Fires on the dying player's own machine (a client's own game for a client) when that player's game-over window opens. In co-op that can be a death while others still live (survived tells you), not only the end of the run. While a party member with carry_on carries the run on after every player is down, the Dismiss window does not fire it; the final window, when the party is wiped, does. The host never sees a remote player's.
 
 ### `player.on_gold_collected`
 

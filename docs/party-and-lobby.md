@@ -51,6 +51,7 @@ the world for her to stand beside.
 | `wait_at_exit` | true | every exit waits until it is within 4 tiles |
 | `respawn` | true | after it dies, it comes back beside its leader on the next floor |
 | `grow_like_class` | true | level-ups raise stats the way its class does for a player |
+| `carry_on` | false | when every player is down and it still stands, the run goes on (see below) |
 | `pickup` | `"unowned"` | what it picks up off the floor: `"unowned"`, `"all"` or `"none"` |
 
 A custom class works the way it does for a player: its stats, passives and overrides come
@@ -63,7 +64,7 @@ and take the race-specific extras some vanilla kits add for one race.
 ```lua
 local info = sam_party_get_info(uid)
 -- { uid, name, class, class_id, race, race_id, sex, appearance, leader, tag, mod,
---   level, hp, max_hp, wait_at_exit, respawn, grow_like_class }
+--   level, hp, max_hp, wait_at_exit, respawn, grow_like_class, carry_on }
 
 sam_party_set_options(uid, { respawn = false })   -- its next death is final
 sam_party_list()                                  -- every living member on this floor
@@ -124,7 +125,7 @@ attack, items) whatever its leader's Leadership skill: it is a companion, not a 
 online play the host tells each S.A.M client which creatures are party members, so the same
 holds for a friend's own companion.
 
-**When every player is down (unreleased).** While a party member still stands, the run is not over:
+**When every player is down (unreleased).** This is off unless a mod turns it on: give a member `carry_on = true` (in `sam_party_spawn`, or later with `sam_party_set_options`). A game with no such member ends when the last player falls, as vanilla does. While a `carry_on` member still stands, the run is not over:
 
 - The fallen get the "your party carries on" game-over window. Dismiss makes them a ghost (in
   solo too, as in co-op); the host tells every S.A.M client, so a friend's window says the same.
@@ -136,10 +137,16 @@ holds for a friend's own companion.
   `party.on_waiting_at_exit` meanwhile (nobody clicked).
 - On the next floor the fallen stand up at half health, with co-op's rule for their gear (Keep
   Inventory), and the members are placed beside them as usual.
-- If the last standing member falls too, the run ends: every fallen player gets the final
-  game-over window and the run's scores are posted, as when the last player dies.
+- Until then nothing of the end happens: the save is kept, the game-over music and `player.on_game_over`
+  wait, and a solo player's gear follows Keep Inventory as in co-op instead of dropping.
+- If the last standing `carry_on` member falls, or goes without dying (a mod removed it) and stays gone
+  for two seconds, the run ends: every fallen player gets the final game-over window, the save is
+  deleted, the music plays and the run's scores are posted, as when the last player dies.
+  `player.on_game_over` fires for a player whose window was the final one; one who fell earlier
+  while another player still stood has already had it fire for that death, and gets it again here.
+- `sam_party_set_options` refuses to turn `carry_on` on once no player is standing: that run has ended.
 
-There is nothing to call: any mod with party members gets this. A floor whose every exit is out
+Turning `carry_on` off on the last member that carries ends the run after the same two seconds. A floor whose every exit is out
 of reach (locked, or past a boss) leaves the members waiting; the pause menu can still end the run.
 
 ---

@@ -82,6 +82,7 @@ namespace SAMParty
 	constexpr std::uint32_t FLAG_WAIT_AT_EXIT = 1u << 1;
 	constexpr std::uint32_t FLAG_RESPAWN = 1u << 2;
 	constexpr std::uint32_t FLAG_GROW_LIKE_CLASS = 1u << 3;
+	constexpr std::uint32_t FLAG_CARRY_ON = 1u << 4;   // off unless the mod asks: this member can take the party on after the players fall
 
 	constexpr int MAX_NAME = 31;     // Stat::name is 32 bytes with its terminator
 	constexpr int MAX_TAG = 31;      // a follower save keeps 31 characters of an attribute
@@ -91,15 +92,15 @@ namespace SAMParty
 	// ---- the script side (host; each refusal returns 0 / false with the reason in *why)
 
 	// spec: { name, race, class, sex, appearance, tag, wait_at_exit, respawn, grow_like_class,
-	//         pickup }. race and class are an id string ("human", "warrior", "mymod:knight")
+	//         carry_on, pickup }. race and class are an id string ("human", "warrior", "mymod:knight")
 	// or a number. Returns the new member's uid, or 0.
 	std::uint32_t spawn(int leader, const SamValue& spec, std::string* why, const std::string& ns = std::string());
 
 	bool isMemberUid(std::uint32_t uid);
 	// { uid, name, class, class_id, race, race_id, sex, appearance, leader, tag, mod, level,
-	//   hp, max_hp, wait_at_exit, respawn, grow_like_class }, or nil for a non-member.
+	//   hp, max_hp, wait_at_exit, respawn, grow_like_class, carry_on }, or nil for a non-member.
 	SamValue info(std::uint32_t uid);
-	// options: any of { wait_at_exit, respawn, grow_like_class, tag }.
+	// options: any of { wait_at_exit, respawn, grow_like_class, carry_on, tag }.
 	bool setOptions(std::uint32_t uid, const SamValue& options, std::string* why);
 	SamValue list();      // info() for every living member on this floor
 	SamValue fallen();    // { name, class, race, tag, mod, leader } for each waiting to come back
@@ -136,10 +137,14 @@ namespace SAMParty
 	void respawnFallen();
 	// Each exit, after vanilla's "assemble your party" check passes. False: not yet.
 	bool exitsMayClose(Entity* exitEntity, int player);
-	// Every player is down but a party member still stands (host or solo; false on a client).
+	// Every player is down but a party member with carry_on still stands (on a client, what the host
+	// last said). A mod that never sets carry_on never sees this: the game is vanilla's.
 	// The game-over window then offers Dismiss, the fallen wait as ghosts, and the members make
 	// for the exit: the run goes on, and the fallen stand up on the next floor as in co-op.
 	bool partyCarriesOn();
+	// game.cpp, every tick of a game in progress (host or solo): ends the run when the members that
+	// carried it on are gone without a death to say so.
+	void tick();
 	// actLadder / actPortal / actMidGamePortal / actCustomPortal: the player to act for when
 	// partyCarriesOn() and a living member is at this exit, else -1.
 	int exitUser(Entity* exitEntity);
@@ -147,7 +152,7 @@ namespace SAMParty
 	// partyCarriesOn(); when the last one falls with every player down, the run ends.
 	void think(Entity* monster, Stat* myStats);
 	// The follower menu: true for a party member (no leadership gate on its orders). Works on
-	// a client too: the host sends the floor's party-member uids (NetOp::PartyMembers).
+	// a client too: the host sends the floor's party-member uids (SAMNet::Op::PartyFirst + 1).
 	bool takesOrdersFreely(Entity* follower);
 	// handleEffects' monster level-up branch. True when it raised the stats like a player.
 	bool levelUpLikePlayer(Entity* monster, Stat* myStats, int increasestat[3]);
