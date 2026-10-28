@@ -1,6 +1,6 @@
 # S.A.M function reference
 
-Every script function the framework exposes: **357 functions** and **93 events**.
+Every script function the framework exposes: **358 functions** and **93 events**.
 All of them work identically in Lua, JavaScript and TypeScript.
 
 This page is generated from the API definition, so it cannot fall behind the code. If a
@@ -15,7 +15,7 @@ the kind, so the line is always what really happens:
 
 | kind | what it means for your script |
 |---|---|
-| `host` (160) | Runs on the host, where your events and timers already run. A client's call is refused with a one-time warning. The result reaches every player. |
+| `host` (161) | Runs on the host, where your events and timers already run. A client's call is refused with a one-time warning. The result reaches every player. |
 | `owner` (14) | Changes something that lives on the player's own machine (their backpack, their spells). Call it on the host; S.A.M carries it to that player's machine. |
 | `screen` (29) | Shows something on one player's screen. Name the player, or leave it out inside an event about a player; -1 means every player. S.A.M carries it to their machine. |
 | `read` (50) | Reads a player. The host can read everyone; a client can read only its own player. |
@@ -51,7 +51,7 @@ For guides and worked examples, see [scripting-reference.md](scripting-reference
 - [Multiplayer](#multiplayer) (3)
 - [Networking](#networking) (1)
 - [Panels](#panels) (16)
-- [Party](#party) (10)
+- [Party](#party) (11)
 - [Persistence](#persistence) (13)
 - [Pictures](#pictures) (16)
 - [Player state](#player-state) (13)
@@ -2654,6 +2654,18 @@ Measure a string before you place it. This is how you lay a panel out properly i
 
 
 ## Party
+
+### `sam_get_follower_leader(uid)`
+
+Whose follower a creature is. Works for any ally the player's side owns, not only party members: a recruited monster, a party member, a summon that follows. A wild monster, a player and a uid that is nothing all answer nil/undefined.
+
+| argument | type |
+|---|---|
+| `uid` | uid |
+
+**Returns:** the player index (0-3) the creature follows (number), or nil/undefined for a creature that follows nobody
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript. Host only, like the monsters themselves.
 
 ### `sam_party_choice_allowed(race, class)`
 

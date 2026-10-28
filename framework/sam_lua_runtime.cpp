@@ -101,6 +101,7 @@ extern "C" {
 #	include "sam_net.hpp"     // multiplayer contracts + the channel that carries a call to its player
 #	include "sam_value.hpp"   // P_PARTY: a table argument read once, in C++, for both runtimes
 #	include "sam_party.hpp"   // party members: sam_party_*
+#	include "sam_ally_items.hpp"   // gear on allies: sam_monster_*, sam_give_item_to_ally
 #	include "sam_lobby.hpp"   // lobby cards: sam_lobby_*
 #	include "sam_mp_inventory.hpp" // remote players' backpacks and spells, as the host mirrors them
 #	include "sam_mp_entities.hpp" // multiplayer: script-made entities, pinned props, terrain, gibs
@@ -2670,6 +2671,22 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		lua_pushboolean(Ls, 0);
 #endif
 		return 1;
+	}
+
+	// sam_get_follower_leader(uid) -> player index (0..3) | nil.
+	int lua_sam_get_follower_leader(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const lua_Integer uid = luaL_checkinteger(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		const int leader = (uid > 0 && uid <= 0xFFFFFFFFLL) ? SAMAllyItems::leaderOf((std::uint32_t)uid) : -1;
+		if ( leader < 0 ) { lua_pushnil(Ls); return 1; }
+		lua_pushinteger(Ls, leader);
+		return 1;
+#else
+		(void)uid;
+		lua_pushnil(Ls); return 1;
+#endif
 	}
 
 	// sam_party_get_info(uid) -> table | nil.
@@ -11146,6 +11163,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		// P_PARTY: party members and lobby cards (sam_party.cpp, sam_lobby.cpp).
 		samLuaRegister(L, "sam_party_spawn", lua_sam_party_spawn);
 		samLuaRegister(L, "sam_party_is_member", lua_sam_party_is_member);
+		samLuaRegister(L, "sam_get_follower_leader", lua_sam_get_follower_leader);
 		samLuaRegister(L, "sam_party_get_info", lua_sam_party_get_info);
 		samLuaRegister(L, "sam_party_set_options", lua_sam_party_set_options);
 		samLuaRegister(L, "sam_party_list", lua_sam_party_list);

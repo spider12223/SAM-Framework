@@ -96,6 +96,7 @@ extern "C" {
 #	include "sam_net.hpp"     // multiplayer contracts + the channel that carries a call to its player
 #	include "sam_value.hpp"   // P_PARTY: a table argument read once, in C++, for both runtimes
 #	include "sam_party.hpp"   // party members: sam_party_*
+#	include "sam_ally_items.hpp"   // gear on allies: sam_monster_*, sam_give_item_to_ally
 #	include "sam_lobby.hpp"   // lobby cards: sam_lobby_*
 #	include "sam_mp_inventory.hpp" // remote players' backpacks and spells, as the host mirrors them
 #	include "sam_mp_entities.hpp" // multiplayer: script-made entities, pinned props, terrain, gibs
@@ -6749,6 +6750,21 @@ namespace
 #endif
 	}
 
+	// sam_get_follower_leader(uid) -> number | undefined.
+	JSValue js_sam_get_follower_leader(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_get_follower_leader") ) { return JS_UNDEFINED; }
+#ifdef SAM_JS_HAVE_BARONY
+		const int leader = (uid > 0 && uid <= 0xFFFFFFFFLL) ? SAMAllyItems::leaderOf((std::uint32_t)uid) : -1;
+		if ( leader < 0 ) { return JS_UNDEFINED; }
+		return JS_NewInt32(ctx, leader);
+#else
+		return JS_UNDEFINED;
+#endif
+	}
+
 	// sam_party_get_info(uid) -> object | undefined.
 	JSValue js_sam_party_get_info(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
@@ -9228,6 +9244,7 @@ namespace
 		// P_PARTY: party members and lobby cards (sam_party.cpp, sam_lobby.cpp).
 		samJsRegister(ctx, g, "sam_party_spawn", js_sam_party_spawn, 2);
 		samJsRegister(ctx, g, "sam_party_is_member", js_sam_party_is_member, 1);
+		samJsRegister(ctx, g, "sam_get_follower_leader", js_sam_get_follower_leader, 1);
 		samJsRegister(ctx, g, "sam_party_get_info", js_sam_party_get_info, 1);
 		samJsRegister(ctx, g, "sam_party_set_options", js_sam_party_set_options, 2);
 		samJsRegister(ctx, g, "sam_party_list", js_sam_party_list, 0);

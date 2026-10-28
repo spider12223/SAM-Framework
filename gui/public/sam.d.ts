@@ -4,7 +4,7 @@
 // Drop this beside your mod's .ts files, or reference it:
 //   /// <reference path="sam.d.ts" />
 //
-// 357 functions, 93 events. Each function's "Multiplayer:" line starts with
+// 358 functions, 93 events. Each function's "Multiplayer:" line starts with
 // its kind (host, owner, screen, read, all, local, any); see docs/multiplayer.md.
 
 declare global {
@@ -455,6 +455,13 @@ declare global {
    * Multiplayer: any. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
    */
   function sam_get_floor(): number;
+
+  /**
+   * Whose follower a creature is. Works for any ally the player's side owns, not only party members: a recruited monster, a party member, a summon that follows. A wild monster, a player and a uid that is nothing all answer nil/undefined.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nothing at all -- no value in Lua, undefined in JavaScript. Host only, like the monsters themselves.
+   */
+  function sam_get_follower_leader(uid: number): number | undefined;
 
   /**
    * How filling a food is. Takes an item TYPE rather than a uid, so you can price food your mod has not spawned yet. Vanilla foods only: the engine's table has no entry for custom items, so your own food answers 0.

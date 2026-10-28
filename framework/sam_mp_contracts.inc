@@ -258,6 +258,10 @@ SAM_MP(sam_party_get_info,                Host,   None,      0, Nil)
 SAM_MP(sam_party_is_member,               Host,   None,      0, None)
 SAM_MP(sam_party_list,                    Host,   None,      0, Empty)
 SAM_MP(sam_party_random_name,             Local,  None,      0, Nil)
+
+// ---- Ally items (unreleased)
+// Monsters and their pockets are the host's, so every call here is the host's.
+SAM_MP(sam_get_follower_leader,           Host,   None,      0, None)
 SAM_MP(sam_party_set_difficulty_count,    Host,   None,      0, False)
 SAM_MP(sam_party_set_options,             Host,   None,      0, False)
 SAM_MP(sam_party_spawn,                   Host,   None,      0, Nil)

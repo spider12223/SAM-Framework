@@ -802,6 +802,13 @@ namespace SAMParty
 		return monster->getUID();
 	}
 
+	int followerLeader(Entity* monster)
+	{
+		if ( !monster || monster->behavior != &actMonster ) { return -1; }
+		Stat* s = monster->getStats();
+		return s ? leaderOf(monster, s) : -1;
+	}
+
 	bool isMemberUid(std::uint32_t uid)
 	{
 		return memberEntity(uid) != nullptr;

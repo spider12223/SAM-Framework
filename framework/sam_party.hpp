@@ -97,6 +97,9 @@ namespace SAMParty
 	std::uint32_t spawn(int leader, const SamValue& spec, std::string* why, const std::string& ns = std::string());
 
 	bool isMemberUid(std::uint32_t uid);
+	// The player (0..3) a monster follows: a party member's leader, or a vanilla follower's. -1 for a
+	// creature that follows nobody, a player, or null.
+	int followerLeader(Entity* monster);
 	// { uid, name, class, class_id, race, race_id, sex, appearance, leader, tag, mod, level,
 	//   hp, max_hp, wait_at_exit, respawn, grow_like_class, carry_on }, or nil for a non-member.
 	SamValue info(std::uint32_t uid);
