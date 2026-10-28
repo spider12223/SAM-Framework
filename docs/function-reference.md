@@ -1,6 +1,6 @@
 # S.A.M function reference
 
-Every script function the framework exposes: **343 functions** and **87 events**.
+Every script function the framework exposes: **357 functions** and **93 events**.
 All of them work identically in Lua, JavaScript and TypeScript.
 
 This page is generated from the API definition, so it cannot fall behind the code. If a
@@ -15,12 +15,12 @@ the kind, so the line is always what really happens:
 
 | kind | what it means for your script |
 |---|---|
-| `host` (151) | Runs on the host, where your events and timers already run. A client's call is refused with a one-time warning. The result reaches every player. |
+| `host` (160) | Runs on the host, where your events and timers already run. A client's call is refused with a one-time warning. The result reaches every player. |
 | `owner` (14) | Changes something that lives on the player's own machine (their backpack, their spells). Call it on the host; S.A.M carries it to that player's machine. |
 | `screen` (29) | Shows something on one player's screen. Name the player, or leave it out inside an event about a player; -1 means every player. S.A.M carries it to their machine. |
 | `read` (50) | Reads a player. The host can read everyone; a client can read only its own player. |
 | `all` (15) | Changes a table every machine keeps (class and item patches, species resists). A host call runs everywhere and reaches players who join later. |
-| `local` (27) | Answers for the machine running it: its clock, its files, its music. |
+| `local` (32) | Answers for the machine running it: its clock, its files, its music. |
 | `any` (57) | The same answer on every machine. Safe anywhere. |
 
 Every event ends with a **Multiplayer:** line that says which machine it fires on and for
@@ -43,6 +43,7 @@ For guides and worked examples, see [scripting-reference.md](scripting-reference
 - [Input](#input) (8)
 - [Inventory](#inventory) (30)
 - [Live patching](#live-patching) (6)
+- [Lobby](#lobby) (4)
 - [Logging](#logging) (3)
 - [Loot](#loot) (12)
 - [Mechanisms](#mechanisms) (4)
@@ -50,6 +51,7 @@ For guides and worked examples, see [scripting-reference.md](scripting-reference
 - [Multiplayer](#multiplayer) (3)
 - [Networking](#networking) (1)
 - [Panels](#panels) (16)
+- [Party](#party) (10)
 - [Persistence](#persistence) (13)
 - [Pictures](#pictures) (16)
 - [Player state](#player-state) (13)
@@ -65,7 +67,7 @@ For guides and worked examples, see [scripting-reference.md](scripting-reference
 - [Truth](#truth) (17)
 - [World](#world) (23)
 - [Your own logic](#your-own-logic) (7)
-- [Events](#events) (87)
+- [Events](#events) (93)
 
 
 ## Camera
@@ -1620,6 +1622,63 @@ Revert a class stat/skill patch.
 **Multiplayer:** `all`. Changes a table every machine keeps its own copy of: a host call runs on the host and on every S.A.M client, and is replayed to a client that joins later. A client's call is refused with a one-time warning and returns false. Call it on the host or when your mod loads. A host call applies on every S.A.M player's machine, and a player who joins later gets the host's whole table.
 
 
+## Lobby
+
+### `sam_lobby_add_slot_action(id, label)`
+
+Put a link on every empty player slot of the host's lobby, like "+ Add Companion". Pressing it fires lobby.on_slot_action with your namespace as mod, this id as action and the slot. Call it at top level, beside sam_register_action. Registering the same id again changes its label.
+
+An empty slot shows the first two actions registered across all loaded mods. Links are not drawn in a lobby for a saved game or in the tutorial, and only the host sees them.
+
+| argument | type |
+|---|---|
+| `id` | string (letters, digits, _ . -; up to 32) |
+| `label` | string (up to 40 characters) |
+
+**Returns:** true when the action exists (boolean); false for a bad id or label, or when four actions are already registered
+
+**Multiplayer:** `local`. Answers for the machine running the script. Every machine registers it as the mod loads; only the host draws the links, because only the host can claim a slot.
+
+### `sam_lobby_clear_card(slot)`
+
+Give a slot back: your card goes, the slot unlocks, and it shows what an empty slot shows again, links included.
+
+| argument | type |
+|---|---|
+| `slot` | int (1-3) |
+
+**Returns:** true when the slot was yours and is free again (boolean)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
+
+### `sam_lobby_get_slot(slot)`
+
+What a lobby slot holds right now: a player (with the name shown for them), a mod's card, nothing (open: a mod may claim it), or nothing that can be used (closed by the player-count setting, or a saved game's lobby). Use it to offer "follows: <player>" choices on a card.
+
+| argument | type |
+|---|---|
+| `slot` | int (0-3) |
+
+**Returns:** a table { slot, state = "player", name } | { slot, state = "card", mod, title } | { slot, state = "open" } | { slot, state = "closed" }, or nil/undefined for a slot that does not exist
+
+**Multiplayer:** `local`. Answers for the machine running the script. Per machine: a client knows the cards the host sent it.
+
+### `sam_lobby_set_card(slot, card)`
+
+Claim an empty player slot and show your own card in it, or redraw a card you already show there. The slot is locked while you hold it, so nobody can join into it. The host's card has its controls: a cycle row draws < and > (input "prev" / "next"), a buttons row draws its buttons (input "click"), and every press fires lobby.on_card_input with the control's id. Redraw by calling this again with the new card; nothing about the card is kept but what you send.
+
+Only while a lobby is open: from lobby.on_lobby_opened, lobby.on_slot_action, lobby.on_card_input or a setting change. A lobby for a saved game takes no cards. The cards are forgotten when the run starts, so keep what the player chose in your own script and use it from game.on_game_start.
+
+| argument | type |
+|---|---|
+| `slot` | int (1-3) |
+| `card` | table — one of: `title: string (up to 31 characters)`, `edit_title: boolean (the host can type over the title; sent as control "title", input "text")`, `rows: array of up to 5 rows, each one of { text = "..." } | { cycle = "control", text = "..." } | { buttons = { "control", ... }, labels = { "...", ... } } (1 to 3 buttons; text and labels up to 40 characters; a control id is letters, digits, _ . -, up to 32)` |
+
+**Returns:** true when the card is shown (boolean); false, with the reason in the log, for a slot with a player in it, a slot the lobby has closed, a slot another mod holds, or a card that breaks a limit
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. A S.A.M player in the lobby sees the card read-only and follows every change; a player on a stock game sees a locked slot.
+
+
 ## Logging
 
 ### `sam_log(msg)`
@@ -2592,6 +2651,126 @@ Measure a string before you place it. This is how you lay a panel out properly i
 **Returns:** width, height in pixels (two ints), or nil/undefined if the font could not be loaded
 
 **Multiplayer:** `any`. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
+
+
+## Party
+
+### `sam_party_choice_allowed(race, class)`
+
+The character screen's own rule for this machine: DLC ownership, and the race unlocks that gate some classes. A S.A.M custom race or class carries no gate of its own, so it is always allowed.
+
+| argument | type |
+|---|---|
+| `race` | string |
+| `class` | string |
+
+**Returns:** true when the character screen would allow this race with this class here (boolean); false when it would not, or for a race or class this game does not have
+
+**Multiplayer:** `local`. Answers for the machine running the script. Per machine, like the character screen: ownership is the host's when the host asks.
+
+### `sam_party_choices()`
+
+The classes and races this game can give a party member, vanilla first and then every S.A.M custom class and race that is loaded, with the id sam_party_spawn takes, the name to show, and the engine's number. Fetch it once (a lobby is a good time) rather than every frame.
+
+**Returns:** a table { classes = { { id, name, number }, ... }, races = { { id, name, number }, ... }, appearances = 18 }
+
+**Multiplayer:** `local`. Answers for the machine running the script. Per machine: a class from a DLC this machine does not own is still listed; ask sam_party_choice_allowed.
+
+### `sam_party_fallen()`
+
+The party members who died with respawn on and will rejoin beside their leaders when the party reaches the next floor. One that has nowhere to stand there waits another floor.
+
+Not kept in a save: a member who died and has not come back yet when the game is saved is gone after a reload. Living members are saved as followers, as usual.
+
+**Returns:** array of { name, class, race, tag, mod, leader } tables, one per party member waiting to come back on the next floor (array)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns an empty table (an empty array in JavaScript).
+
+### `sam_party_get_info(uid)`
+
+Everything about one party member: class and race as the ids sam_party_spawn takes (and their numbers), the player it follows (still that player while they are down; -1 only for a member that has lost its leader entirely), the tag you gave it, the mod that made it, and its options.
+
+| argument | type |
+|---|---|
+| `uid` | uid |
+
+**Returns:** a table { uid, name, class, class_id, race, race_id, sex, appearance, leader, tag, mod, level, hp, max_hp, wait_at_exit, respawn, grow_like_class }, or nil/undefined for a creature that is not a party member
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript).
+
+### `sam_party_is_member(uid)`
+
+Whether a creature is a party member. Cheap: one integer test on its stats.
+
+| argument | type |
+|---|---|
+| `uid` | uid |
+
+**Returns:** true for a living party member on this floor, false otherwise (boolean)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript.
+
+### `sam_party_list()`
+
+Every living party member on the current floor, whichever mod made it. Filter on mod or tag for your own.
+
+**Returns:** array of sam_party_get_info tables, one per living party member on this floor (array)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns an empty table (an empty array in JavaScript).
+
+### `sam_party_random_name([sex])`
+
+A name from the game's own player-name lists, the ones the character screen's random button draws from.
+
+| argument | type |
+|---|---|
+| `sex` *(optional)* | string (optional: "male" or "female"; either when left out) |
+
+**Returns:** a random player name (string)
+
+**Multiplayer:** `local`. Answers for the machine running the script.
+
+### `sam_party_set_difficulty_count(count)`
+
+How many party members the next run counts as players when it builds floors: monster numbers, the hunger rate and the Devil's shadows follow it, exactly as they follow connected players. Set it in the lobby (the host reads it when the run starts, and again for a restart in place); it goes back to 0 every time a lobby opens. The connected players plus the count are capped at 4.
+
+Every machine builds each floor itself, so a count only one machine knows would put players in different dungeons. The host therefore uses it only when every connected player's game says hello to S.A.M's lobby; with a player on a stock game the run is balanced for the connected players alone, and the host's log says so.
+
+| argument | type |
+|---|---|
+| `count` | int (0-3) |
+
+**Returns:** true when the count is set (boolean); false outside 0 to 3
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. The host decides at the start of the run and the number travels with the game's own start packet, so every S.A.M machine builds the same floors.
+
+### `sam_party_set_options(uid, options)`
+
+Change a party member's options after it exists. Only the keys you give change. Turning respawn off makes its next death final; turning wait_at_exit off lets the party leave without it.
+
+| argument | type |
+|---|---|
+| `uid` | uid |
+| `options` | table — one of: `wait_at_exit: boolean`, `respawn: boolean`, `grow_like_class: boolean`, `tag: string (up to 31 characters)` |
+
+**Returns:** true when the options are set (boolean); false for a creature that is not a party member or a value of the wrong kind
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
+
+### `sam_party_spawn(leader, spec)`
+
+Make a party member beside a player. It starts from the same baseline stats a player does and takes its class's stats (a S.A.M custom class's through the same hook a player's go through) and its class's starting kit, equipped where a player would wear it. It levels up through the class's growth rather than a monster's roll, does not count against its leader's follower limit, stays on the players' side when its leader dies, and crosses floors as a follower does. With wait_at_exit, every exit waits for it (party.on_waiting_at_exit); with respawn, it comes back beside its leader on the next floor after it dies (party.on_member_died). party.on_member_spawned fires once it exists.
+
+Spawn from game.on_game_start or later (a timer of a tick is safest): before the leader's body exists there is nobody to stand beside and the call is refused. A class's starting spells are not learned (a monster casts from what it carries), and race-specific items in a vanilla kit are skipped. sam_spawn_companion is a different thing: a scripted model that walks beside a player, not a creature with stats.
+
+| argument | type |
+|---|---|
+| `leader` | int (the player it follows, 0-3) |
+| `spec` | table — one of: `name: string (up to 31 characters; a random player name when left out)`, `race: string | int (an id from sam_party_choices, e.g. "human", "goblin", "mymod:lizardfolk"; default "human")`, `class: string | int (an id from sam_party_choices, e.g. "warrior", "mymod:knight"; default "warrior")`, `sex: "male" | "female" (random when left out)`, `appearance: int (0-17, humans only; default 0)`, `tag: string (up to 31 characters; yours to read back, e.g. "fellowship:2"; default your namespace)`, `wait_at_exit: boolean (default true)`, `respawn: boolean (default true)`, `grow_like_class: boolean (default true)`, `pickup: "unowned" | "all" | "none" (what it picks up off the floor; default "unowned")` |
+
+**Returns:** the new party member's uid (int), or nil/undefined when refused (the reason is in the log)
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Party members are monsters, so every machine sees them the way it sees any ally the host spawned.
 
 
 ## Persistence
@@ -4766,6 +4945,51 @@ Percent, because event fields are whole numbers: 100 is 1x, 250 is 2.5x. tempora
 
 **Multiplayer:** Fires on the host, in singleplayer.
 
+### `lobby.on_card_input`
+
+Fires the host pressed a control on a card a mod shows in a lobby slot.
+
+| field | type |
+|---|---|
+| `mod` | string (the namespace that owns the card) |
+| `slot` | int |
+| `control` | string (the control id from the card; "title" for the title box) |
+| `input` | string ("prev", "next", "click" or "text") |
+| `text` | string (the typed title, for input "text") |
+
+Change your own state and redraw with sam_lobby_set_card; the card shows only what you send. Every mod receives it: check e.mod first.
+
+The title box sends what was typed, untrimmed and possibly empty: trim it and keep the old title when nothing is left.
+
+**Multiplayer:** Fires on the host.
+
+### `lobby.on_lobby_opened`
+
+Fires the lobby screen has been built, before anyone presses anything.
+
+| field | type |
+|---|---|
+| `loading_save` | int (1 for a lobby that continues a saved game) |
+| `online` | int (1 when hosting online; 0 for a local lobby) |
+
+Forget the last lobby's choices here: the cards of an earlier lobby are gone, and so is a difficulty count. A lobby for a saved game takes no cards.
+
+**Multiplayer:** Fires on the host, and in a local lobby. A client's lobby fires nothing: it asks the host for the cards instead.
+
+### `lobby.on_slot_action`
+
+Fires the host pressed one of a mod's links on an empty player slot.
+
+| field | type |
+|---|---|
+| `mod` | string (the namespace that registered it) |
+| `action` | string (the id given to sam_lobby_add_slot_action) |
+| `slot` | int |
+
+Usually answered with sam_lobby_set_card(e.slot, ...). Every mod receives it: check e.mod against your own namespace first.
+
+**Multiplayer:** Fires on the host.
+
 ### `mod.on_setting_changed`
 
 Fires the value one of a mod's settings holds really changes: the player pressed Confirm in Settings (source "ui"), pressed Restore Defaults and then Confirm ("reset"), or a script called sam_set_setting ("script").
@@ -4988,6 +5212,70 @@ Fires every game tick (50/sec), for every script that defines on_tick(event).
 no player. prefix; delivered to the separate on_tick(event) handler, not on_event; host-only and silent
 
 **Multiplayer:** Fires on the host only (and in singleplayer). A client gets no tick: update HUD and panels when something changes and pass the player, because every call for a remote player is a network message.
+
+### `party.on_member_died`
+
+> Cancellable: return `false` to stop it.
+
+Fires a party member has died, before its gear drops.
+
+| field | type |
+|---|---|
+| `uid` | uid |
+| `leader` | int (the player it follows, even while they are down) |
+| `tag` | string |
+| `mod` | string |
+| `member_name` | string |
+| `will_respawn` | int (1 when its respawn option is on) |
+| `message` | string |
+
+Return false and it does not come back (a permadeath mode); it changes nothing for a member whose respawn is off. message is what every player is told ("Brienne will rejoin the party on the next floor."): set it to translate it, or to "" for silence.
+
+Gear follows a player's rule: with Keep Inventory on, the member keeps everything and its body drops nothing; without it, the body drops everything as usual and it comes back with nothing.
+
+**Multiplayer:** Fires on the host, for every party member, whichever mod made it: check e.mod or e.tag.
+
+### `party.on_member_spawned`
+
+Fires a party member has been made by sam_party_spawn, or a fallen one has come back beside its leader on a new floor.
+
+| field | type |
+|---|---|
+| `uid` | uid |
+| `leader` | int |
+| `tag` | string |
+| `mod` | string (the namespace that spawned it) |
+| `member_name` | string |
+| `class` | string |
+| `race` | string |
+| `respawned` | int (1 when it came back from the dead) |
+| `message` | string |
+
+message is what the leader is told when it comes back ("Brienne rejoins the party."); set e.message to translate it, or to "" to say nothing. It is empty for a fresh spawn.
+
+**Multiplayer:** Fires on the host, once per member it makes or brings back.
+
+### `party.on_waiting_at_exit`
+
+> Cancellable: return `false` to stop it.
+
+Fires a player tried an exit that is waiting for a party member: one set to wait_at_exit is alive on this floor and more than 4 tiles from it.
+
+| field | type |
+|---|---|
+| `player` | int (who tried the exit) |
+| `exit_uid` | uid |
+| `waiting` | int (how many are missing) |
+| `first_uid` | uid |
+| `first_name` | string |
+| `attempt` | int (1 the first time this exit is tried with someone missing, counting up) |
+| `message` | string |
+
+Return false to let the party go now (a party member is a follower, so Barony still brings it to the next floor beside its leader, as it does every follower). Otherwise the missing members are sent to the exit and the player is told message ("Waiting for Brienne to reach the exit..."). attempt lets a mod give up after a few tries, so a member stuck behind a wall cannot hold the party up. Check sam_party_get_info(e.first_uid).mod before giving up, so you only decide for your own members.
+
+Vanilla's own "assemble your party" check for the players runs first; this fires only once the players are together. While every player is down and the members are taking the party to an exit themselves, it does not fire at all (nobody clicked): that exit waits up to 20 seconds for the rest on its own.
+
+**Multiplayer:** Fires on the host, for the player who tried the exit, on every kind of exit (ladders and every portal).
 
 ### `player.on_attack_start`
 

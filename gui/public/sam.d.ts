@@ -4,7 +4,7 @@
 // Drop this beside your mod's .ts files, or reference it:
 //   /// <reference path="sam.d.ts" />
 //
-// 343 functions, 87 events. Each function's "Multiplayer:" line starts with
+// 357 functions, 93 events. Each function's "Multiplayer:" line starts with
 // its kind (host, owner, screen, read, all, local, any); see docs/multiplayer.md.
 
 declare global {
@@ -1339,6 +1339,34 @@ declare global {
   function sam_load_data(key: string): any;
 
   /**
+   * Put a link on every empty player slot of the host's lobby, like "+ Add Companion". Pressing it fires lobby.on_slot_action with your namespace as mod, this id as action and the slot. Call it at top level, beside sam_register_action. Registering the same id again changes its label.
+   *
+   * Multiplayer: local. Answers for the machine running the script. Every machine registers it as the mod loads; only the host draws the links, because only the host can claim a slot.
+   */
+  function sam_lobby_add_slot_action(id: string, label: string): boolean;
+
+  /**
+   * Give a slot back: your card goes, the slot unlocks, and it shows what an empty slot shows again, links included.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
+   */
+  function sam_lobby_clear_card(slot: number): boolean;
+
+  /**
+   * What a lobby slot holds right now: a player (with the name shown for them), a mod's card, nothing (open: a mod may claim it), or nothing that can be used (closed by the player-count setting, or a saved game's lobby). Use it to offer "follows: <player>" choices on a card.
+   *
+   * Multiplayer: local. Answers for the machine running the script. Per machine: a client knows the cards the host sent it.
+   */
+  function sam_lobby_get_slot(slot: number): any;
+
+  /**
+   * Claim an empty player slot and show your own card in it, or redraw a card you already show there. The slot is locked while you hold it, so nobody can join into it. The host's card has its controls: a cycle row draws < and > (input "prev" / "next"), a buttons row draws its buttons (input "click"), and every press fires lobby.on_card_input with the control's id. Redraw by calling this again with the new card; nothing about the card is kept but what you send.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. A S.A.M player in the lobby sees the card read-only and follows every change; a player on a stock game sees a locked slot.
+   */
+  function sam_lobby_set_card(slot: number, card: any): boolean;
+
+  /**
    * The player index THIS machine controls.
    *
    * Multiplayer: local. Answers for the machine running the script.
@@ -1484,6 +1512,76 @@ declare global {
    * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
    */
   function sam_obituary(killer_uid: number, victim_uid: number, from_spell?: boolean): boolean;
+
+  /**
+   * The character screen's own rule for this machine: DLC ownership, and the race unlocks that gate some classes. A S.A.M custom race or class carries no gate of its own, so it is always allowed.
+   *
+   * Multiplayer: local. Answers for the machine running the script. Per machine, like the character screen: ownership is the host's when the host asks.
+   */
+  function sam_party_choice_allowed(race: string, class_: string): boolean | undefined;
+
+  /**
+   * The classes and races this game can give a party member, vanilla first and then every S.A.M custom class and race that is loaded, with the id sam_party_spawn takes, the name to show, and the engine's number. Fetch it once (a lobby is a good time) rather than every frame.
+   *
+   * Multiplayer: local. Answers for the machine running the script. Per machine: a class from a DLC this machine does not own is still listed; ask sam_party_choice_allowed.
+   */
+  function sam_party_choices(): any;
+
+  /**
+   * The party members who died with respawn on and will rejoin beside their leaders when the party reaches the next floor. One that has nowhere to stand there waits another floor.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns an empty table (an empty array in JavaScript).
+   */
+  function sam_party_fallen(): any;
+
+  /**
+   * Everything about one party member: class and race as the ids sam_party_spawn takes (and their numbers), the player it follows (still that player while they are down; -1 only for a member that has lost its leader entirely), the tag you gave it, the mod that made it, and its options.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript).
+   */
+  function sam_party_get_info(uid: number): any;
+
+  /**
+   * Whether a creature is a party member. Cheap: one integer test on its stats.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nothing at all -- no value in Lua, undefined in JavaScript.
+   */
+  function sam_party_is_member(uid: number): boolean | undefined;
+
+  /**
+   * Every living party member on the current floor, whichever mod made it. Filter on mod or tag for your own.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns an empty table (an empty array in JavaScript).
+   */
+  function sam_party_list(): any;
+
+  /**
+   * A name from the game's own player-name lists, the ones the character screen's random button draws from.
+   *
+   * Multiplayer: local. Answers for the machine running the script.
+   */
+  function sam_party_random_name(sex?: string): string;
+
+  /**
+   * How many party members the next run counts as players when it builds floors: monster numbers, the hunger rate and the Devil's shadows follow it, exactly as they follow connected players. Set it in the lobby (the host reads it when the run starts, and again for a restart in place); it goes back to 0 every time a lobby opens. The connected players plus the count are capped at 4.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. The host decides at the start of the run and the number travels with the game's own start packet, so every S.A.M machine builds the same floors.
+   */
+  function sam_party_set_difficulty_count(count: number): boolean;
+
+  /**
+   * Change a party member's options after it exists. Only the keys you give change. Turning respawn off makes its next death final; turning wait_at_exit off lets the party leave without it.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
+   */
+  function sam_party_set_options(uid: number, options: any): boolean;
+
+  /**
+   * Make a party member beside a player. It starts from the same baseline stats a player does and takes its class's stats (a S.A.M custom class's through the same hook a player's go through) and its class's starting kit, equipped where a player would wear it. It levels up through the class's growth rather than a monster's roll, does not count against its leader's follower limit, stays on the players' side when its leader dies, and crosses floors as a follower does. With wait_at_exit, every exit waits for it (party.on_waiting_at_exit); with respawn, it comes back beside its leader on the next floor after it dies (party.on_member_died). party.on_member_spawned fires once it exists.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Party members are monsters, so every machine sees them the way it sees any ally the host spawned.
+   */
+  function sam_party_spawn(leader: number, spec: any): number | undefined;
 
   /**
    * Override a class's STARTING stats/skills (patch = { STR, DEX, ..., MAXHP, skills = {...} }). Reverts on unload. Tables are read the same way in Lua and JavaScript: keys are case-insensitive, number fields take only numbers and text fields only strings.
@@ -2421,6 +2519,12 @@ declare global {
     | "game.on_level_entered"
     /** Fires the simulation speed really changes: a sam_set_game_speed or /sam_gamespeed that set a different value, a temporary window ending, and the reset to 1x when a run ends or a new one starts. Multiplayer: Fires on the host, in singleplayer. */
     | "game.on_speed_changed"
+    /** Fires the host pressed a control on a card a mod shows in a lobby slot. Multiplayer: Fires on the host. */
+    | "lobby.on_card_input"
+    /** Fires the lobby screen has been built, before anyone presses anything. Multiplayer: Fires on the host, and in a local lobby. A client's lobby fires nothing: it asks the host for the cards instead. */
+    | "lobby.on_lobby_opened"
+    /** Fires the host pressed one of a mod's links on an empty player slot. Multiplayer: Fires on the host. */
+    | "lobby.on_slot_action"
     /** Fires the value one of a mod's settings holds really changes: the player pressed Confirm in Settings (source "ui"), pressed Restore Defaults and then Confirm ("reset"), or a script called sam_set_setting ("script"). Multiplayer: Fires on the machine whose setting changed. */
     | "mod.on_setting_changed"
     /** Fires a BOUND action goes down — e.g. the player presses whatever they have "Use" mapped to. Multiplayer: Fires on the host (and in singleplayer), for every player: each local seat, and each joiner's buttons as their game reports them. A joiner whose game does not run S.A.M produces none. */
@@ -2449,6 +2553,12 @@ declare global {
     | "on_projectile_hit"
     /** Fires every game tick (50/sec), for every script that defines on_tick(event). Multiplayer: Fires on the host only (and in singleplayer). A client gets no tick: update HUD and panels when something changes and pass the player, because every call for a remote player is a network message. */
     | "on_tick"
+    /** Fires a party member has died, before its gear drops. Multiplayer: Fires on the host, for every party member, whichever mod made it: check e.mod or e.tag. */
+    | "party.on_member_died"
+    /** Fires a party member has been made by sam_party_spawn, or a fallen one has come back beside its leader on a new floor. Multiplayer: Fires on the host, once per member it makes or brings back. */
+    | "party.on_member_spawned"
+    /** Fires a player tried an exit that is waiting for a party member: one set to wait_at_exit is alive on this floor and more than 4 tiles from it. Multiplayer: Fires on the host, for the player who tried the exit, on every kind of exit (ladders and every portal). */
+    | "party.on_waiting_at_exit"
     /** Fires a player starts an attack swing (any weapon). Multiplayer: Fires on the host, for every player. */
     | "player.on_attack_start"
     /** Fires a dead player becomes a ghost. Multiplayer: Fires on the host, for every player. */
