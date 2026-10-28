@@ -1,6 +1,6 @@
 # S.A.M function reference
 
-Every script function the framework exposes: **360 functions** and **94 events**.
+Every script function the framework exposes: **362 functions** and **94 events**.
 All of them work identically in Lua, JavaScript and TypeScript.
 
 This page is generated from the API definition, so it cannot fall behind the code. If a
@@ -15,7 +15,7 @@ the kind, so the line is always what really happens:
 
 | kind | what it means for your script |
 |---|---|
-| `host` (163) | Runs on the host, where your events and timers already run. A client's call is refused with a one-time warning. The result reaches every player. |
+| `host` (165) | Runs on the host, where your events and timers already run. A client's call is refused with a one-time warning. The result reaches every player. |
 | `owner` (14) | Changes something that lives on the player's own machine (their backpack, their spells). Call it on the host; S.A.M carries it to that player's machine. |
 | `screen` (29) | Shows something on one player's screen. Name the player, or leave it out inside an event about a player; -1 means every player. S.A.M carries it to their machine. |
 | `read` (50) | Reads a player. The host can read everyone; a client can read only its own player. |
@@ -51,7 +51,7 @@ For guides and worked examples, see [scripting-reference.md](scripting-reference
 - [Multiplayer](#multiplayer) (3)
 - [Networking](#networking) (1)
 - [Panels](#panels) (16)
-- [Party](#party) (13)
+- [Party](#party) (15)
 - [Persistence](#persistence) (13)
 - [Pictures](#pictures) (16)
 - [Player state](#player-state) (13)
@@ -2683,6 +2683,20 @@ Barony ships no class rules for allies. A mod that wants one (only warriors wear
 
 **Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Host only, like the monsters themselves.
 
+### `sam_monster_equip_item(uid, slot, item_uid)`
+
+Puts an item from an ally's pockets on it. It runs the checks sam_monster_can_equip runs, then moves the SAME item (its uid stays) into the slot; what was worn there goes back to the pockets, never to the floor. Nothing is lost on a refusal.
+
+| argument | type |
+|---|---|
+| `uid` | uid |
+| `slot` | string — one of: `helmet`, `breastplate`, `gloves`, `shoes`, `shield`, `weapon`, `cloak`, `amulet`, `ring`, `mask` |
+| `item_uid` | uid (an item in the ally's pockets) |
+
+**Returns:** a table { ok, reason, text }: ok is true when the item is now worn; otherwise reason is one of no_monster, no_ally, bad_slot, not_in_pockets, wrong_slot, race, cursed_in_slot, mod_veto, and text is a sentence you can show a player.
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Host only, like the monsters themselves.
+
 ### `sam_monster_get_inventory(uid)`
 
 What a monster carries in its pockets and what it wears, with the uid of each item. An item a slot points to is listed under worn only, and its equipped is true. Unlike sam_get_container_items it tells worn gear from pocket gear, and the uids work with the other ally item functions.
@@ -2692,6 +2706,21 @@ What a monster carries in its pockets and what it wears, with the uid of each it
 | `uid` | uid |
 
 **Returns:** a table { pockets, worn }, or nil/undefined for a creature that is not a monster. pockets is an array of items; worn is a table keyed by slot (helmet, breastplate, gloves, shoes, shield, weapon, cloak, amulet, ring, mask) holding only the slots that are filled. An item is { uid, type, name, count, beatitude, status, identified, equipped, appearance }: the same fields sam_get_inventory gives, plus appearance.
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Host only, like the monsters themselves.
+
+### `sam_monster_unequip_to_inventory(uid, slot)`
+
+Takes what an ally wears in a slot back into its pockets (the same item, the same uid). A cursed item will not come off, and a full set of pockets keeps it on. Barony counts an ally's pockets as full at 9 items (5 for an automaton), the numbers its own pick-up code uses, and refuses one more once the list holds one beyond that.
+
+item.on_before_monster_equip does not fire here: taking something off is not wearing it.
+
+| argument | type |
+|---|---|
+| `uid` | uid |
+| `slot` | string — one of: `helmet`, `breastplate`, `gloves`, `shoes`, `shield`, `weapon`, `cloak`, `amulet`, `ring`, `mask` |
+
+**Returns:** a table { ok, reason, text }: ok is true when the item is now in the pockets; otherwise reason is one of no_monster, no_ally, bad_slot, empty_slot, cursed, pockets_full.
 
 **Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Host only, like the monsters themselves.
 

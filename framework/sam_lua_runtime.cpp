@@ -2731,6 +2731,38 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 #endif
 	}
 
+	// sam_monster_equip_item(uid, slot, item_uid) -> { ok, reason, text }.
+	int lua_sam_monster_equip_item(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const lua_Integer uid = luaL_checkinteger(Ls, 1);
+		const char* slot = luaL_checkstring(Ls, 2);
+		const lua_Integer itemUid = luaL_checkinteger(Ls, 3);
+#ifdef SAM_LUA_HAVE_BARONY
+		const std::uint32_t id = (uid > 0 && uid <= 0xFFFFFFFFLL) ? (std::uint32_t)uid : 0;
+		const std::uint32_t item = (itemUid > 0 && itemUid <= 0xFFFFFFFFLL) ? (std::uint32_t)itemUid : 0;
+		return samLuaPushValue(Ls, SAMAllyItems::toValue(SAMAllyItems::equipItem(id, slot, item)));
+#else
+		(void)uid; (void)slot; (void)itemUid;
+		lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_monster_unequip_to_inventory(uid, slot) -> { ok, reason, text }.
+	int lua_sam_monster_unequip_to_inventory(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const lua_Integer uid = luaL_checkinteger(Ls, 1);
+		const char* slot = luaL_checkstring(Ls, 2);
+#ifdef SAM_LUA_HAVE_BARONY
+		const std::uint32_t id = (uid > 0 && uid <= 0xFFFFFFFFLL) ? (std::uint32_t)uid : 0;
+		return samLuaPushValue(Ls, SAMAllyItems::toValue(SAMAllyItems::unequipToInventory(id, slot)));
+#else
+		(void)uid; (void)slot;
+		lua_pushnil(Ls); return 1;
+#endif
+	}
+
 	// sam_party_get_info(uid) -> table | nil.
 	int lua_sam_party_get_info(lua_State* Ls)
 	{
@@ -11208,6 +11240,8 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		samLuaRegister(L, "sam_get_follower_leader", lua_sam_get_follower_leader);
 		samLuaRegister(L, "sam_monster_get_inventory", lua_sam_monster_get_inventory);
 		samLuaRegister(L, "sam_monster_can_equip", lua_sam_monster_can_equip);
+		samLuaRegister(L, "sam_monster_equip_item", lua_sam_monster_equip_item);
+		samLuaRegister(L, "sam_monster_unequip_to_inventory", lua_sam_monster_unequip_to_inventory);
 		samLuaRegister(L, "sam_party_get_info", lua_sam_party_get_info);
 		samLuaRegister(L, "sam_party_set_options", lua_sam_party_set_options);
 		samLuaRegister(L, "sam_party_list", lua_sam_party_list);

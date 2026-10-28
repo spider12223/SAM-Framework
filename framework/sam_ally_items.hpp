@@ -62,6 +62,15 @@ namespace SAMAllyItems
 	// race, cursed_in_slot, then item.on_before_monster_equip (mod_veto). Moves nothing.
 	Result canEquip(std::uint32_t uid, const SamValue& item, const std::string& slot);
 
+	// Puts an item from the ally's pockets on, in `slot`. The same checks as canEquip, with
+	// not_in_pockets for an item that is not there. The SAME Item is relinked (the uid stays), and
+	// what was worn comes back to the pockets; nothing is dropped.
+	Result equipItem(std::uint32_t uid, const std::string& slot, std::uint32_t itemUid);
+
+	// Takes what is worn in `slot` back to the pockets (same Item, same uid). Refused: empty_slot,
+	// cursed (the engine's rule), pockets_full.
+	Result unequipToInventory(std::uint32_t uid, const std::string& slot);
+
 	// Item::canUnequip's decision without its side effect (it identifies the item): false for a
 	// cursed item its wielder cannot take off. The same rule as the runtimes' samItemCanUnequipQuiet
 	// (which are file-local, one per runtime); the ally calls need it in C++.

@@ -4,7 +4,7 @@
 // Drop this beside your mod's .ts files, or reference it:
 //   /// <reference path="sam.d.ts" />
 //
-// 360 functions, 94 events. Each function's "Multiplayer:" line starts with
+// 362 functions, 94 events. Each function's "Multiplayer:" line starts with
 // its kind (host, owner, screen, read, all, local, any); see docs/multiplayer.md.
 
 declare global {
@@ -1479,6 +1479,13 @@ declare global {
   function sam_monster_equip(uid: number, slot: string, item: string, beatitude?: number, status?: number, count?: number): boolean;
 
   /**
+   * Puts an item from an ally's pockets on it. It runs the checks sam_monster_can_equip runs, then moves the SAME item (its uid stays) into the slot; what was worn there goes back to the pockets, never to the floor. Nothing is lost on a refusal.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Host only, like the monsters themselves.
+   */
+  function sam_monster_equip_item(uid: number, slot: string, item_uid: number): any;
+
+  /**
    * Turn a monster to look at a tile. Aims at the tile centre. Pair it with sam_monster_charge to aim a charge.
    *
    * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
@@ -1519,6 +1526,13 @@ declare global {
    * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
    */
   function sam_monster_unequip(uid: number, slot: string): boolean;
+
+  /**
+   * Takes what an ally wears in a slot back into its pockets (the same item, the same uid). A cursed item will not come off, and a full set of pockets keeps it on. Barony counts an ally's pockets as full at 9 items (5 for an automaton), the numbers its own pick-up code uses, and refuses one more once the list holds one beyond that.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Host only, like the monsters themselves.
+   */
+  function sam_monster_unequip_to_inventory(uid: number, slot: string): any;
 
   /**
    * Nudge an entity by a relative distance, sliding along whatever it runs into rather than stopping dead or passing through. The answer is the distance it MANAGED, so 0 means something is right there and 0.3 out of a requested 2 means it hit a corner: a plain true or false would have hidden the difference. Distances are in tiles, like every other spatial call here, and a long move is walked in short steps so it cannot skip over a wall: the engine's collision test only looks at where you land, not at the path, so a single two-tile step used to step clean over a one-tile wall and report the whole distance as clear. A ground item or gold bag is woken, so it settles exactly like a dropped item (drops to the floor, falls into a pit, floats on water), in singleplayer too. Use sam_set_position to teleport, or sam_apply_force to shove.

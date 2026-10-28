@@ -191,6 +191,48 @@ namespace
 		return false;
 	}
 
+	int pocketCapacity(const Stat* s)
+	{
+		return s->type == AUTOMATON ? 5 : 9;   // Barony's own numbers for what an ally will pick up (entity.cpp, monsterAddNearbyItemToInventory)
+	}
+
+	// Barony's test (entity.cpp:25545): no more room once the list holds capacity + 1.
+	bool pocketsFull(Stat* s)
+	{
+		return list_Size(&s->inventory) >= pocketCapacity(s) + 1;
+	}
+
+	// An item in the monster's pocket list (worn or not), or nullptr.
+	Item* findInPockets(Stat* s, std::uint32_t uid)
+	{
+		for ( node_t* node = s->inventory.first; node; node = node->next )
+		{
+			Item* it = (Item*)node->element;
+			if ( it && it->uid == uid ) { return it; }
+		}
+		return nullptr;
+	}
+
+	// The item leaves the list but is not freed: the node goes, the item stays and owns itself,
+	// which is how Barony keeps what a monster wears.
+	void removeFromPockets(Item* item)
+	{
+		node_t* node = item->node;
+		if ( !node ) { return; }
+		node->element = nullptr;
+		list_RemoveNode(node);
+		item->node = nullptr;
+	}
+
+	void addToPockets(Stat* s, Item* item)
+	{
+		node_t* node = list_AddNodeLast(&s->inventory);
+		node->element = item;
+		node->deconstructor = &defaultDeconstructor;
+		node->size = sizeof(Item);
+		item->node = node;
+	}
+
 	SAMAllyItems::Result refuse(const char* reason, const char* text)
 	{
 		SAMAllyItems::Result r;
@@ -202,67 +244,6 @@ namespace
 
 namespace SAMAllyItems
 {
-	bool canUnequipQuiet(const Item* it, const Stat* wielder)
-	{
-		if ( !it ) { return true; }
-		// NOTE: the engine has a "spellbooks always unequippable" branch at items.cpp:6259,
-		// and it is INSIDE a /* */ block: "Spellbooks are no longer equipable." It never
-		// runs, and its literals are stale anyway (100-103 are rings, not books). It was
-		// copied here by mistake and is deliberately absent now.
-		if ( it->type == TOOL_DUCK ) { return true; }
-		if ( wielder )
-		{
-			// An automaton is never stuck with anything (items.cpp:6279).
-			if ( wielder->type == AUTOMATON ) { return true; }
-			// Succubus and friends: a BLESSING is what sticks, not a curse.
-			if ( shouldInvertEquipmentBeatitude(wielder) ) { return it->beatitude <= 0; }
-		}
-		return it->beatitude >= 0;
-	}
-
-	Result canEquip(std::uint32_t uid, const SamValue& item, const std::string& slot)
-	{
-		Stat* s = nullptr;
-		if ( !monsterOf(uid, &s) ) { return refuse("no_monster", "That is not a monster."); }
-		const int leader = leaderOf(uid);
-		if ( leader < 0 ) { return refuse("no_ally", "That monster is not following anyone."); }
-		Item** slotPtr = slotPointer(s, slot);
-		if ( !slotPtr ) { return refuse("bad_slot", "There is no such slot."); }
-		Named named;
-		if ( !resolveNamed(s, item, named) ) { return refuse("unknown_item", "There is no such item."); }
-		if ( slot != wornSlotOf(named.type) ) { return refuse("wrong_slot", "That does not go in that slot."); }
-
-		// The body gate needs an Item to look at; a type alone gets a throwaway one (never listed).
-		Item* temp = nullptr;
-		const Item* subject = named.item;
-		if ( !subject )
-		{
-			temp = static_cast<Item*>(calloc(1, sizeof(Item)));
-			temp->type = (ItemType)named.type;
-			subject = temp;
-		}
-		const bool bodyOk = bodyAllows(s, *subject);
-		free(temp);
-		if ( !bodyOk ) { return refuse("race", "It cannot wear that."); }
-
-		if ( *slotPtr && *slotPtr != named.item && !canUnequipQuiet(*slotPtr, s) )
-		{
-			return refuse("cursed_in_slot", "What it wears there is cursed and will not come off.");
-		}
-
-		SamEvent e("item.on_before_monster_equip");
-		e.i("uid", (long long)uid).i("leader", leader).s("slot", slot)
-			.i("item_uid", named.item ? (long long)named.item->uid : 0LL).i("item_type", named.type)
-			.s("item_name", SAMMpInventory::inventoryName(named.type)).s("message", "");
-		if ( !e.fire() )
-		{
-			const std::string said = e.getStr("message", "");
-			return refuse("mod_veto", said.empty() ? "A mod does not allow that." : said.c_str());
-		}
-		Result ok;
-		ok.ok = true;
-		return ok;
-	}
 	SamValue toValue(const Result& r)
 	{
 		SamValue v = SamValue::object();
@@ -300,5 +281,124 @@ namespace SAMAllyItems
 		out.set("pockets", pockets);
 		out.set("worn", worn);
 		return out;
+	}
+
+	bool canUnequipQuiet(const Item* it, const Stat* wielder)
+	{
+		if ( !it ) { return true; }
+		// NOTE: the engine has a "spellbooks always unequippable" branch at items.cpp:6259,
+		// and it is INSIDE a /* */ block: "Spellbooks are no longer equipable." It never
+		// runs, and its literals are stale anyway (100-103 are rings, not books). It was
+		// copied here by mistake and is deliberately absent now.
+		if ( it->type == TOOL_DUCK ) { return true; }
+		if ( wielder )
+		{
+			// An automaton is never stuck with anything (items.cpp:6279).
+			if ( wielder->type == AUTOMATON ) { return true; }
+			// Succubus and friends: a BLESSING is what sticks, not a curse.
+			if ( shouldInvertEquipmentBeatitude(wielder) ) { return it->beatitude <= 0; }
+		}
+		return it->beatitude >= 0;
+	}
+
+	// The checks every equip goes through, after the monster, its leader, the slot and the item
+	// have been found: the slot fits, the body allows it, what is worn there can come off, and
+	// last the mods. Moves nothing. The item may go (a handler can use it up): look again after.
+	static Result evaluate(std::uint32_t uid, Stat* s, int leader, const std::string& slot, Item** slotPtr, const Named& named)
+	{
+		if ( slot != wornSlotOf(named.type) ) { return refuse("wrong_slot", "That does not go in that slot."); }
+
+		// The body gate needs an Item to look at; a type alone gets a throwaway one (never listed).
+		Item* temp = nullptr;
+		const Item* subject = named.item;
+		if ( !subject )
+		{
+			temp = static_cast<Item*>(calloc(1, sizeof(Item)));
+			temp->type = (ItemType)named.type;
+			subject = temp;
+		}
+		const bool bodyOk = bodyAllows(s, *subject);
+		free(temp);
+		if ( !bodyOk ) { return refuse("race", "It cannot wear that."); }
+
+		if ( *slotPtr && *slotPtr != named.item && !canUnequipQuiet(*slotPtr, s) )
+		{
+			return refuse("cursed_in_slot", "What it wears there is cursed and will not come off.");
+		}
+
+		SamEvent e("item.on_before_monster_equip");
+		e.i("uid", (long long)uid).i("leader", leader).s("slot", slot)
+			.i("item_uid", named.item ? (long long)named.item->uid : 0LL).i("item_type", named.type)
+			.s("item_name", SAMMpInventory::inventoryName(named.type)).s("message", "");
+		if ( !e.fire() )
+		{
+			const std::string said = e.getStr("message", "");
+			return refuse("mod_veto", said.empty() ? "A mod does not allow that." : said.c_str());
+		}
+		Result ok;
+		ok.ok = true;
+		return ok;
+	}
+
+	Result canEquip(std::uint32_t uid, const SamValue& item, const std::string& slot)
+	{
+		Stat* s = nullptr;
+		if ( !monsterOf(uid, &s) ) { return refuse("no_monster", "That is not a monster."); }
+		const int leader = leaderOf(uid);
+		if ( leader < 0 ) { return refuse("no_ally", "That monster is not following anyone."); }
+		Item** slotPtr = slotPointer(s, slot);
+		if ( !slotPtr ) { return refuse("bad_slot", "There is no such slot."); }
+		Named named;
+		if ( !resolveNamed(s, item, named) ) { return refuse("unknown_item", "There is no such item."); }
+		return evaluate(uid, s, leader, slot, slotPtr, named);
+	}
+
+	Result equipItem(std::uint32_t uid, const std::string& slot, std::uint32_t itemUid)
+	{
+		Stat* s = nullptr;
+		if ( !monsterOf(uid, &s) ) { return refuse("no_monster", "That is not a monster."); }
+		const int leader = leaderOf(uid);
+		if ( leader < 0 ) { return refuse("no_ally", "That monster is not following anyone."); }
+		Item** slotPtr = slotPointer(s, slot);
+		if ( !slotPtr ) { return refuse("bad_slot", "There is no such slot."); }
+		Item* item = findInPockets(s, itemUid);
+		if ( !item ) { return refuse("not_in_pockets", "That item is not in its pockets."); }
+		Named named;
+		named.item = item;
+		named.type = (int)item->type;
+		Result r = evaluate(uid, s, leader, slot, slotPtr, named);
+		if ( !r.ok ) { return r; }
+		// A handler could have used the item up or changed what is worn: look again.
+		if ( findInPockets(s, itemUid) != item || isWorn(s, item) ) { return refuse("not_in_pockets", "That item is not in its pockets."); }
+		if ( *slotPtr && *slotPtr != item && !canUnequipQuiet(*slotPtr, s) )
+		{
+			return refuse("cursed_in_slot", "What it wears there is cursed and will not come off.");
+		}
+
+		// Relink, never copy: the item leaves the list (its node goes, the item stays) and becomes
+		// what the slot points to; what was worn comes back to the list.
+		Item* occupant = *slotPtr;
+		removeFromPockets(item);
+		*slotPtr = item;
+		if ( occupant && occupant != item ) { addToPockets(s, occupant); }
+		return r;
+	}
+
+	Result unequipToInventory(std::uint32_t uid, const std::string& slot)
+	{
+		Stat* s = nullptr;
+		if ( !monsterOf(uid, &s) ) { return refuse("no_monster", "That is not a monster."); }
+		if ( leaderOf(uid) < 0 ) { return refuse("no_ally", "That monster is not following anyone."); }
+		Item** slotPtr = slotPointer(s, slot);
+		if ( !slotPtr ) { return refuse("bad_slot", "There is no such slot."); }
+		Item* item = *slotPtr;
+		if ( !item ) { return refuse("empty_slot", "Nothing is worn there."); }
+		if ( !canUnequipQuiet(item, s) ) { return refuse("cursed", "It is cursed and will not come off."); }
+		if ( !item->node && pocketsFull(s) ) { return refuse("pockets_full", "Its pockets are full."); }
+		*slotPtr = nullptr;
+		if ( !item->node ) { addToPockets(s, item); }
+		Result ok;
+		ok.ok = true;
+		return ok;
 	}
 }

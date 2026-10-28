@@ -6820,6 +6820,40 @@ namespace
 #endif
 	}
 
+	// sam_monster_equip_item(uid, slot, item_uid) -> { ok, reason, text } | undefined.
+	JSValue js_sam_monster_equip_item(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0, itemUid = 0;
+		std::string slot;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_monster_equip_item") ) { return JS_UNDEFINED; }
+		if ( !samJsReqStr(ctx, argc, argv, 1, "sam_monster_equip_item", &slot) ) { return JS_UNDEFINED; }
+		if ( !samJsReqI32Wide(ctx, argc, argv, 2, &itemUid, "sam_monster_equip_item") ) { return JS_UNDEFINED; }
+#ifdef SAM_JS_HAVE_BARONY
+		const std::uint32_t id = (uid > 0 && uid <= 0xFFFFFFFFLL) ? (std::uint32_t)uid : 0;
+		const std::uint32_t item = (itemUid > 0 && itemUid <= 0xFFFFFFFFLL) ? (std::uint32_t)itemUid : 0;
+		return samJsFromValue(ctx, SAMAllyItems::toValue(SAMAllyItems::equipItem(id, slot, item)));
+#else
+		return JS_UNDEFINED;
+#endif
+	}
+
+	// sam_monster_unequip_to_inventory(uid, slot) -> { ok, reason, text } | undefined.
+	JSValue js_sam_monster_unequip_to_inventory(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0;
+		std::string slot;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_monster_unequip_to_inventory") ) { return JS_UNDEFINED; }
+		if ( !samJsReqStr(ctx, argc, argv, 1, "sam_monster_unequip_to_inventory", &slot) ) { return JS_UNDEFINED; }
+#ifdef SAM_JS_HAVE_BARONY
+		const std::uint32_t id = (uid > 0 && uid <= 0xFFFFFFFFLL) ? (std::uint32_t)uid : 0;
+		return samJsFromValue(ctx, SAMAllyItems::toValue(SAMAllyItems::unequipToInventory(id, slot)));
+#else
+		return JS_UNDEFINED;
+#endif
+	}
+
 	// sam_party_get_info(uid) -> object | undefined.
 	JSValue js_sam_party_get_info(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
@@ -9302,6 +9336,8 @@ namespace
 		samJsRegister(ctx, g, "sam_get_follower_leader", js_sam_get_follower_leader, 1);
 		samJsRegister(ctx, g, "sam_monster_get_inventory", js_sam_monster_get_inventory, 1);
 		samJsRegister(ctx, g, "sam_monster_can_equip", js_sam_monster_can_equip, 3);
+		samJsRegister(ctx, g, "sam_monster_equip_item", js_sam_monster_equip_item, 3);
+		samJsRegister(ctx, g, "sam_monster_unequip_to_inventory", js_sam_monster_unequip_to_inventory, 2);
 		samJsRegister(ctx, g, "sam_party_get_info", js_sam_party_get_info, 1);
 		samJsRegister(ctx, g, "sam_party_set_options", js_sam_party_set_options, 2);
 		samJsRegister(ctx, g, "sam_party_list", js_sam_party_list, 0);
