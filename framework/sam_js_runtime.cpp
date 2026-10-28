@@ -6854,6 +6854,58 @@ namespace
 #endif
 	}
 
+	// sam_give_item_to_ally(player, uid, item_uid, [count]) -> { ok, reason, text, ticket } | undefined.
+	JSValue js_sam_give_item_to_ally(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t player = 0, uid = 0, itemUid = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &player, "sam_give_item_to_ally") ) { return JS_UNDEFINED; }
+		if ( !samJsReqI32Wide(ctx, argc, argv, 1, &uid, "sam_give_item_to_ally") ) { return JS_UNDEFINED; }
+		if ( !samJsReqI32Wide(ctx, argc, argv, 2, &itemUid, "sam_give_item_to_ally") ) { return JS_UNDEFINED; }
+#ifdef SAM_JS_HAVE_BARONY
+		// undefined and null mean "the whole stack", like a missing count in Lua. A count that is
+		// there but is not a number is refused rather than read as the whole stack.
+		int64_t count = 0;
+		if ( samHasArg(argc, argv, 3) )
+		{
+			double d = 0.0;
+			if ( !samJsNum(ctx, argv[3], &d) ) { return samJsFromValue(ctx, SAMAllyItems::toValue(SAMAllyItems::Result{false, "bad_count", "That is not a number.", 0})); }
+			count = (int64_t)d;
+		}
+		const std::uint32_t id = (uid > 0 && uid <= 0xFFFFFFFFLL) ? (std::uint32_t)uid : 0;
+		const std::uint32_t item = (itemUid > 0 && itemUid <= 0xFFFFFFFFLL) ? (std::uint32_t)itemUid : 0;
+		return samJsFromValue(ctx, SAMAllyItems::toValue(SAMAllyItems::giveItem((int)player, id, item, (count < -1 || count > 0x7FFF) ? -1 : (int)count)));
+#else
+		return JS_UNDEFINED;
+#endif
+	}
+
+	// sam_take_item_from_ally(player, uid, item_uid, [count]) -> { ok, reason, text, ticket } | undefined.
+	JSValue js_sam_take_item_from_ally(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t player = 0, uid = 0, itemUid = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &player, "sam_take_item_from_ally") ) { return JS_UNDEFINED; }
+		if ( !samJsReqI32Wide(ctx, argc, argv, 1, &uid, "sam_take_item_from_ally") ) { return JS_UNDEFINED; }
+		if ( !samJsReqI32Wide(ctx, argc, argv, 2, &itemUid, "sam_take_item_from_ally") ) { return JS_UNDEFINED; }
+#ifdef SAM_JS_HAVE_BARONY
+		// undefined and null mean "the whole stack", like a missing count in Lua. A count that is
+		// there but is not a number is refused rather than read as the whole stack.
+		int64_t count = 0;
+		if ( samHasArg(argc, argv, 3) )
+		{
+			double d = 0.0;
+			if ( !samJsNum(ctx, argv[3], &d) ) { return samJsFromValue(ctx, SAMAllyItems::toValue(SAMAllyItems::Result{false, "bad_count", "That is not a number.", 0})); }
+			count = (int64_t)d;
+		}
+		const std::uint32_t id = (uid > 0 && uid <= 0xFFFFFFFFLL) ? (std::uint32_t)uid : 0;
+		const std::uint32_t item = (itemUid > 0 && itemUid <= 0xFFFFFFFFLL) ? (std::uint32_t)itemUid : 0;
+		return samJsFromValue(ctx, SAMAllyItems::toValue(SAMAllyItems::takeItem((int)player, id, item, (count < -1 || count > 0x7FFF) ? -1 : (int)count)));
+#else
+		return JS_UNDEFINED;
+#endif
+	}
+
 	// sam_party_get_info(uid) -> object | undefined.
 	JSValue js_sam_party_get_info(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
@@ -9338,6 +9390,8 @@ namespace
 		samJsRegister(ctx, g, "sam_monster_can_equip", js_sam_monster_can_equip, 3);
 		samJsRegister(ctx, g, "sam_monster_equip_item", js_sam_monster_equip_item, 3);
 		samJsRegister(ctx, g, "sam_monster_unequip_to_inventory", js_sam_monster_unequip_to_inventory, 2);
+		samJsRegister(ctx, g, "sam_give_item_to_ally", js_sam_give_item_to_ally, 4);
+		samJsRegister(ctx, g, "sam_take_item_from_ally", js_sam_take_item_from_ally, 4);
 		samJsRegister(ctx, g, "sam_party_get_info", js_sam_party_get_info, 1);
 		samJsRegister(ctx, g, "sam_party_set_options", js_sam_party_set_options, 2);
 		samJsRegister(ctx, g, "sam_party_list", js_sam_party_list, 0);

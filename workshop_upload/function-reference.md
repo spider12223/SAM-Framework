@@ -1,6 +1,6 @@
 # S.A.M function reference
 
-Every script function the framework exposes: **362 functions** and **94 events**.
+Every script function the framework exposes: **364 functions** and **96 events**.
 All of them work identically in Lua, JavaScript and TypeScript.
 
 This page is generated from the API definition, so it cannot fall behind the code. If a
@@ -15,7 +15,7 @@ the kind, so the line is always what really happens:
 
 | kind | what it means for your script |
 |---|---|
-| `host` (165) | Runs on the host, where your events and timers already run. A client's call is refused with a one-time warning. The result reaches every player. |
+| `host` (167) | Runs on the host, where your events and timers already run. A client's call is refused with a one-time warning. The result reaches every player. |
 | `owner` (14) | Changes something that lives on the player's own machine (their backpack, their spells). Call it on the host; S.A.M carries it to that player's machine. |
 | `screen` (29) | Shows something on one player's screen. Name the player, or leave it out inside an event about a player; -1 means every player. S.A.M carries it to their machine. |
 | `read` (50) | Reads a player. The host can read everyone; a client can read only its own player. |
@@ -51,7 +51,7 @@ For guides and worked examples, see [scripting-reference.md](scripting-reference
 - [Multiplayer](#multiplayer) (3)
 - [Networking](#networking) (1)
 - [Panels](#panels) (16)
-- [Party](#party) (15)
+- [Party](#party) (17)
 - [Persistence](#persistence) (13)
 - [Pictures](#pictures) (16)
 - [Player state](#player-state) (13)
@@ -67,7 +67,7 @@ For guides and worked examples, see [scripting-reference.md](scripting-reference
 - [Truth](#truth) (17)
 - [World](#world) (23)
 - [Your own logic](#your-own-logic) (7)
-- [Events](#events) (94)
+- [Events](#events) (96)
 
 
 ## Camera
@@ -2667,6 +2667,23 @@ Whose follower a creature is. Works for any ally the player's side owns, not onl
 
 **Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript. Host only, like the monsters themselves.
 
+### `sam_give_item_to_ally(player, uid, item_uid, [count])`
+
+Hands an item from a player's backpack to an ally that follows them. count is how many (leave it out, or 0, for the whole stack). The whole stack moves as the same item, with the same uid; a part makes a new item for the part and the player keeps the rest under the old uid. Nothing moves until the next game tick, so the call is safe from inside any event handler.
+
+Only the host's own player works so far: a remote player's backpack is not reachable yet and answers not_owner. The ally's pockets count as full at Barony's own limit (9 items, 5 for an automaton).
+
+| argument | type |
+|---|---|
+| `player` | int (0-3) |
+| `uid` | uid (the ally) |
+| `item_uid` | uid (an item in the player's backpack, from sam_get_inventory) |
+| `count` *(optional)* | int |
+
+**Returns:** a table { ok, reason, text, ticket }. ok means ACCEPTED, not done: the outcome arrives as item.on_ally_transfer_done or item.on_ally_transfer_failed with the same ticket. Refused at the call: no_ally, not_owner, unknown_item, equipped, cursed, busy, pockets_full, bad_count.
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Host only, like the monsters themselves.
+
 ### `sam_monster_can_equip(uid, item, slot)`
 
 Asks whether an ally may wear an item in a slot, and changes nothing. The checks run in the order the reasons are listed: the creature must be a monster that follows a player, the slot must exist, the item must exist, it must belong in that slot, the ally's body must allow it (a kobold wears no helmet, an insectoid no gloves), the item in the slot must not be cursed, and last item.on_before_monster_equip gives mods the final say. An item given as a number is read as the uid of an item in the ally's pockets or in a player's backpack when there is one, and as an item type otherwise.
@@ -2840,6 +2857,23 @@ Spawn from game.on_game_start or later (a timer of a tick is safest): before the
 **Returns:** the new party member's uid (int), or nil/undefined when refused (the reason is in the log)
 
 **Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Party members are monsters, so every machine sees them the way it sees any ally the host spawned.
+
+### `sam_take_item_from_ally(player, uid, item_uid, [count])`
+
+Takes an item out of an ally's pockets into a player's backpack. Barony's own pick-up places it, and it may join a stack there, so item.on_ally_transfer_done tells you the uid it ended up under (new_item_uid). Something the ally wears has to come off first (sam_monster_unequip_to_inventory).
+
+Refused with backpack_full when the backpack has no free slot, even for an item that would have joined a stack. Only the host's own player works so far.
+
+| argument | type |
+|---|---|
+| `player` | int (0-3) |
+| `uid` | uid (the ally) |
+| `item_uid` | uid (an item in the ally's pockets, from sam_monster_get_inventory) |
+| `count` *(optional)* | int |
+
+**Returns:** a table { ok, reason, text, ticket }. ok means ACCEPTED, not done: the outcome arrives as item.on_ally_transfer_done or item.on_ally_transfer_failed with the same ticket. Refused at the call: no_ally, not_owner, unknown_item, equipped, busy, backpack_full, bad_count.
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Host only, like the monsters themselves.
 
 
 ## Persistence
@@ -5013,6 +5047,39 @@ A HUD that shows the speed listens here and reads sam_get_game_speed(); it does 
 Percent, because event fields are whole numbers: 100 is 1x, 250 is 2.5x. temporary is 0/1: 1 while a timed window is running, 0 when one has ended or a plain set was made. The value is already stored when this fires, so sam_get_game_speed() inside the handler is the exact new multiplier. Setting the value already set fires nothing.
 
 **Multiplayer:** Fires on the host, in singleplayer.
+
+### `item.on_ally_transfer_done`
+
+Fires an item moved between a player and an ally, the tick after sam_give_item_to_ally or sam_take_item_from_ally accepted it.
+
+| field | type |
+|---|---|
+| `player` | int |
+| `uid` | uid (the ally) |
+| `ticket` | int (the ticket the call returned) |
+| `item_uid` | uid (the item you named) |
+| `new_item_uid` | uid (the item where it ended up: the same uid for a whole stack given to an ally, a new one for a part, for a take and when it joined a stack) |
+| `count` | int (how many moved) |
+
+Every transfer ends in exactly one of this and item.on_ally_transfer_failed. Match your own by ticket.
+
+**Multiplayer:** Fires on the host.
+
+### `item.on_ally_transfer_failed`
+
+Fires a transfer that a call accepted could not be finished.
+
+| field | type |
+|---|---|
+| `player` | int |
+| `uid` | uid (the ally) |
+| `ticket` | int |
+| `item_uid` | uid |
+| `reason` | string (ally_gone, player_gone, item_gone, equipped, bad_count, pockets_full, backpack_full) |
+
+Nothing is lost: the item never left where it was.
+
+**Multiplayer:** Fires on the host.
 
 ### `item.on_before_monster_equip`
 

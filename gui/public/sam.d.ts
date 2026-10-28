@@ -4,7 +4,7 @@
 // Drop this beside your mod's .ts files, or reference it:
 //   /// <reference path="sam.d.ts" />
 //
-// 362 functions, 94 events. Each function's "Multiplayer:" line starts with
+// 364 functions, 96 events. Each function's "Multiplayer:" line starts with
 // its kind (host, owner, screen, read, all, local, any); see docs/multiplayer.md.
 
 declare global {
@@ -952,6 +952,13 @@ declare global {
    * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. The chunks are seen by every player. A custom gib sprite crosses as a model number, so use vanilla model numbers for gibs in multiplayer.
    */
   function sam_gib(entity_uid: number, sprite?: number): boolean;
+
+  /**
+   * Hands an item from a player's backpack to an ally that follows them. count is how many (leave it out, or 0, for the whole stack). The whole stack moves as the same item, with the same uid; a part makes a new item for the part and the player keeps the rest under the old uid. Nothing moves until the next game tick, so the call is safe from inside any event handler.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Host only, like the monsters themselves.
+   */
+  function sam_give_item_to_ally(player: number, uid: number, item_uid: number, count?: number): any;
 
   /**
    * Add gold to a player (clamped to >= 0), syncing the client HUD.
@@ -2354,6 +2361,13 @@ declare global {
   function sam_stop_sound(sound: string): number;
 
   /**
+   * Takes an item out of an ally's pockets into a player's backpack. Barony's own pick-up places it, and it may join a stack there, so item.on_ally_transfer_done tells you the uid it ended up under (new_item_uid). Something the ally wears has to come off first (sam_monster_unequip_to_inventory).
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Host only, like the monsters themselves.
+   */
+  function sam_take_item_from_ally(player: number, uid: number, item_uid: number, count?: number): any;
+
+  /**
    * End an unattended test run started with barony.exe -samtest=YourMod. Writes the verdict to sam_log.txt and quits the game, setting the process exit code to 0 when failed is 0 and 1 otherwise, so a script can run your mod's tests and read the answer without anyone playing.
    *
    * Multiplayer: local. Answers for the machine running the script.
@@ -2554,6 +2568,10 @@ declare global {
     | "game.on_level_entered"
     /** Fires the simulation speed really changes: a sam_set_game_speed or /sam_gamespeed that set a different value, a temporary window ending, and the reset to 1x when a run ends or a new one starts. Multiplayer: Fires on the host, in singleplayer. */
     | "game.on_speed_changed"
+    /** Fires an item moved between a player and an ally, the tick after sam_give_item_to_ally or sam_take_item_from_ally accepted it. Multiplayer: Fires on the host. */
+    | "item.on_ally_transfer_done"
+    /** Fires a transfer that a call accepted could not be finished. Multiplayer: Fires on the host. */
+    | "item.on_ally_transfer_failed"
     /** Fires an ally is about to be allowed to wear an item: sam_monster_can_equip and sam_monster_equip_item ask, after every built-in check has passed. Multiplayer: Fires on the host, each time one of those calls reaches this point. */
     | "item.on_before_monster_equip"
     /** Fires the host pressed a control on a card a mod shows in a lobby slot. Multiplayer: Fires on the host. */

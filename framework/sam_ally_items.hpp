@@ -82,4 +82,20 @@ namespace SAMAllyItems
 	// in order, and the reason each gives: no_monster, no_ally, bad_slot, unknown_item, wrong_slot,
 	// race, cursed_in_slot, then item.on_before_monster_equip (mod_veto). Moves nothing.
 	Result canEquip(std::uint32_t uid, const SamValue& item, const std::string& slot);
+
+	// ---- moving between a player and an ally (a player who plays on this machine)
+
+	// Hand an item from `player`'s backpack to one of their allies / take one out of its pockets.
+	// `count` 0 is the whole stack. ok means ACCEPTED: the outcome always arrives as
+	// item.on_ally_transfer_done or item.on_ally_transfer_failed (both carry the ticket), never
+	// from the call itself, so a mod has one code path. Nothing moves until the next tick().
+	// Refused at the call: no_ally, not_owner, unknown_item, equipped, cursed, busy, pockets_full,
+	// backpack_full, bad_count.
+	Result giveItem(int player, std::uint32_t allyUid, std::uint32_t itemUid, int count);
+	Result takeItem(int player, std::uint32_t allyUid, std::uint32_t itemUid, int count);
+
+	// Called once a game tick on the host: completes the transfers waiting for it and fires their
+	// events. A transfer whose ally or item went away in between fails with the reason, and
+	// nothing is lost: the item never left its owner.
+	void tick();
 }

@@ -2763,6 +2763,42 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 #endif
 	}
 
+	// sam_give_item_to_ally(player, uid, item_uid, [count]) -> { ok, reason, text, ticket }.
+	int lua_sam_give_item_to_ally(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const lua_Integer player = luaL_checkinteger(Ls, 1);
+		const lua_Integer uid = luaL_checkinteger(Ls, 2);
+		const lua_Integer itemUid = luaL_checkinteger(Ls, 3);
+		const lua_Integer count = luaL_optinteger(Ls, 4, 0);
+#ifdef SAM_LUA_HAVE_BARONY
+		const std::uint32_t id = (uid > 0 && uid <= 0xFFFFFFFFLL) ? (std::uint32_t)uid : 0;
+		const std::uint32_t item = (itemUid > 0 && itemUid <= 0xFFFFFFFFLL) ? (std::uint32_t)itemUid : 0;
+		return samLuaPushValue(Ls, SAMAllyItems::toValue(SAMAllyItems::giveItem((int)player, id, item, (count < -1 || count > 0x7FFF) ? -1 : (int)count)));
+#else
+		(void)player; (void)uid; (void)itemUid; (void)count;
+		lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_take_item_from_ally(player, uid, item_uid, [count]) -> { ok, reason, text, ticket }.
+	int lua_sam_take_item_from_ally(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const lua_Integer player = luaL_checkinteger(Ls, 1);
+		const lua_Integer uid = luaL_checkinteger(Ls, 2);
+		const lua_Integer itemUid = luaL_checkinteger(Ls, 3);
+		const lua_Integer count = luaL_optinteger(Ls, 4, 0);
+#ifdef SAM_LUA_HAVE_BARONY
+		const std::uint32_t id = (uid > 0 && uid <= 0xFFFFFFFFLL) ? (std::uint32_t)uid : 0;
+		const std::uint32_t item = (itemUid > 0 && itemUid <= 0xFFFFFFFFLL) ? (std::uint32_t)itemUid : 0;
+		return samLuaPushValue(Ls, SAMAllyItems::toValue(SAMAllyItems::takeItem((int)player, id, item, (count < -1 || count > 0x7FFF) ? -1 : (int)count)));
+#else
+		(void)player; (void)uid; (void)itemUid; (void)count;
+		lua_pushnil(Ls); return 1;
+#endif
+	}
+
 	// sam_party_get_info(uid) -> table | nil.
 	int lua_sam_party_get_info(lua_State* Ls)
 	{
@@ -11242,6 +11278,8 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		samLuaRegister(L, "sam_monster_can_equip", lua_sam_monster_can_equip);
 		samLuaRegister(L, "sam_monster_equip_item", lua_sam_monster_equip_item);
 		samLuaRegister(L, "sam_monster_unequip_to_inventory", lua_sam_monster_unequip_to_inventory);
+		samLuaRegister(L, "sam_give_item_to_ally", lua_sam_give_item_to_ally);
+		samLuaRegister(L, "sam_take_item_from_ally", lua_sam_take_item_from_ally);
 		samLuaRegister(L, "sam_party_get_info", lua_sam_party_get_info);
 		samLuaRegister(L, "sam_party_set_options", lua_sam_party_set_options);
 		samLuaRegister(L, "sam_party_list", lua_sam_party_list);

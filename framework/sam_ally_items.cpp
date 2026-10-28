@@ -28,6 +28,8 @@
 
 #include <cctype>
 #include <cstdlib>
+#include <map>
+#include <vector>
 
 namespace
 {
@@ -233,6 +235,95 @@ namespace
 		item->node = node;
 	}
 
+	SAMAllyItems::Result refuse(const char* reason, const char* text);
+
+	// ---- transfers
+
+	struct Ticket
+	{
+		std::uint32_t id = 0;
+		bool give = false;
+		int player = 0;
+		std::uint32_t allyUid = 0;
+		std::uint32_t itemUid = 0;
+		int count = 0;   // how many units; already the whole stack when the script said 0
+	};
+	std::map<std::uint32_t, Ticket> g_tickets;   // in the order they were made
+	std::uint32_t g_nextTicket = 1;
+
+	void noFree(void*) {}   // a node deconstructor that leaves its element alone
+
+	bool localPlayer(int p)
+	{
+		return p >= 0 && p < MAXPLAYERS && players[p] && stats[p] && players[p]->isLocalPlayer();
+	}
+
+	Item* findIn(list_t* list, std::uint32_t uid)
+	{
+		for ( node_t* node = list->first; node; node = node->next )
+		{
+			Item* it = (Item*)node->element;
+			if ( it && it->uid == uid ) { return it; }
+		}
+		return nullptr;
+	}
+
+	bool ticketHolds(std::uint32_t itemUid)
+	{
+		for ( const auto& kv : g_tickets ) { if ( kv.second.itemUid == itemUid ) { return true; } }
+		return false;
+	}
+
+	// Barony's own test for room in a player's backpack. It does not look for a stack the item
+	// could join, so a backpack with no free slot refuses even an item that would stack.
+	bool backpackHasRoom(int p)
+	{
+		return players[p]->inventoryUI.bItemInventoryHasFreeSlot();
+	}
+
+	// Everything that can be told at the call, in the order the reasons are listed in the header.
+	// `item` and `ally` are set on success.
+	SAMAllyItems::Result checkTransfer(bool give, int player, std::uint32_t allyUid, std::uint32_t itemUid, int count, int* resolvedCount)
+	{
+		Stat* as = nullptr;
+		if ( !monsterOf(allyUid, &as) || SAMAllyItems::leaderOf(allyUid) < 0 ) { return refuse("no_ally", "That is not an ally."); }
+		if ( SAMAllyItems::leaderOf(allyUid) != player ) { return refuse("not_owner", "That ally follows someone else."); }
+		if ( !localPlayer(player) ) { return refuse("not_owner", "That player is not here."); }
+		list_t* from = give ? &stats[player]->inventory : &as->inventory;
+		Item* item = findIn(from, itemUid);
+		if ( !item ) { return refuse("unknown_item", give ? "You do not have that." : "It is not carrying that."); }
+		if ( give && itemIsEquipped(item, player) )
+		{
+			return SAMAllyItems::canUnequipQuiet(item, stats[player]) ? refuse("equipped", "Take that off first.") : refuse("cursed", "That is cursed and will not come off.");
+		}
+		if ( !give && isWorn(as, item) ) { return refuse("equipped", "It is wearing that."); }
+		if ( ticketHolds(itemUid) ) { return refuse("busy", "That item is already being moved."); }
+		if ( count < 0 || count > item->count ) { return refuse("bad_count", "There is not that many."); }
+		if ( give && pocketsFull(as) ) { return refuse("pockets_full", "Its pockets are full."); }
+		if ( !give && !backpackHasRoom(player) ) { return refuse("backpack_full", "Your backpack is full."); }
+		if ( resolvedCount ) { *resolvedCount = count == 0 ? (int)item->count : count; }
+		SAMAllyItems::Result ok;
+		ok.ok = true;
+		return ok;
+	}
+
+	SAMAllyItems::Result queueTransfer(bool give, int player, std::uint32_t allyUid, std::uint32_t itemUid, int count)
+	{
+		int n = 0;
+		SAMAllyItems::Result r = checkTransfer(give, player, allyUid, itemUid, count, &n);
+		if ( !r.ok ) { return r; }
+		Ticket t;
+		t.id = g_nextTicket++;
+		t.give = give;
+		t.player = player;
+		t.allyUid = allyUid;
+		t.itemUid = itemUid;
+		t.count = n;
+		g_tickets[t.id] = t;
+		r.ticket = t.id;
+		return r;
+	}
+
 	SAMAllyItems::Result refuse(const char* reason, const char* text)
 	{
 		SAMAllyItems::Result r;
@@ -400,5 +491,122 @@ namespace SAMAllyItems
 		Result ok;
 		ok.ok = true;
 		return ok;
+	}
+
+	Result giveItem(int player, std::uint32_t allyUid, std::uint32_t itemUid, int count)
+	{
+		return queueTransfer(true, player, allyUid, itemUid, count);
+	}
+
+	Result takeItem(int player, std::uint32_t allyUid, std::uint32_t itemUid, int count)
+	{
+		return queueTransfer(false, player, allyUid, itemUid, count);
+	}
+
+	namespace
+	{
+		struct Outcome
+		{
+			Ticket t;
+			bool done = false;
+			std::string reason;
+			std::uint32_t newItemUid = 0;
+		};
+
+		void fail(Outcome& o, const char* reason) { o.done = false; o.reason = reason; }
+
+		// The move itself, on a ticket that was accepted a tick ago: everything is looked at again,
+		// because the game went on in between.
+		void perform(Outcome& o)
+		{
+			const Ticket& t = o.t;
+			Stat* as = nullptr;
+			if ( !monsterOf(t.allyUid, &as) || leaderOf(t.allyUid) != t.player ) { fail(o, "ally_gone"); return; }
+			if ( !localPlayer(t.player) ) { fail(o, "player_gone"); return; }
+			Item* item = findIn(t.give ? &stats[t.player]->inventory : &as->inventory, t.itemUid);
+			if ( !item ) { fail(o, "item_gone"); return; }
+			if ( t.give ? itemIsEquipped(item, t.player) : isWorn(as, item) ) { fail(o, "equipped"); return; }
+			if ( t.count > item->count || t.count <= 0 ) { fail(o, "bad_count"); return; }
+			const bool whole = t.count == item->count;
+
+			if ( t.give )
+			{
+				if ( pocketsFull(as) ) { fail(o, "pockets_full"); return; }
+				if ( whole )
+				{
+					// The same Item changes hands: its node goes (the list's own clean-up of
+					// selection, hotbar and doll runs, the item is not freed) and the ally's list takes it.
+					node_t* node = item->node;
+					node->deconstructor = &noFree;
+					list_RemoveNode(node);
+					item->node = nullptr;
+					addToPockets(as, item);
+					o.newItemUid = item->uid;
+				}
+				else
+				{
+					Item* part = newItem(item->type, item->status, item->beatitude, (Sint16)t.count, item->appearance, item->identified, &as->inventory);
+					part->ownerUid = item->ownerUid;
+					item->count -= (Sint16)t.count;
+					o.newItemUid = part->uid;
+				}
+			}
+			else
+			{
+				if ( !backpackHasRoom(t.player) ) { fail(o, "backpack_full"); return; }
+				// Into a backpack Barony's own pick-up does the placing (it stacks, and keeps looks
+				// apart), and it makes a new Item or joins an existing stack: that item's uid is the
+				// new one. The pocket item is spent.
+				Item* got = nullptr;
+				if ( whole )
+				{
+					got = itemPickup(t.player, item);
+					if ( got ) { list_RemoveNode(item->node); }
+				}
+				else
+				{
+					Item* part = newItem(item->type, item->status, item->beatitude, (Sint16)t.count, item->appearance, item->identified, nullptr);
+					part->ownerUid = item->ownerUid;
+					got = itemPickup(t.player, part);
+					free(part);
+					if ( got ) { item->count -= (Sint16)t.count; }
+				}
+				if ( !got ) { fail(o, "backpack_full"); return; }
+				o.newItemUid = got->uid;
+			}
+			o.done = true;
+		}
+	}
+
+	void tick()
+	{
+		if ( g_tickets.empty() ) { return; }
+		// Take the waiting tickets out first: a handler may start new transfers while we fire.
+		std::vector<Outcome> work;
+		for ( const auto& kv : g_tickets )
+		{
+			Outcome o;
+			o.t = kv.second;
+			work.push_back(o);
+		}
+		g_tickets.clear();
+		for ( Outcome& o : work )
+		{
+			perform(o);
+			if ( o.done )
+			{
+				SamEvent e("item.on_ally_transfer_done");
+				e.i("player", o.t.player).i("uid", (long long)o.t.allyUid).i("ticket", (long long)o.t.id)
+					.i("item_uid", (long long)o.t.itemUid).i("new_item_uid", (long long)o.newItemUid).i("count", o.t.count);
+				e.fire();
+			}
+			else
+			{
+				SamEvent e("item.on_ally_transfer_failed");
+				e.i("player", o.t.player).i("uid", (long long)o.t.allyUid).i("ticket", (long long)o.t.id)
+					.i("item_uid", (long long)o.t.itemUid).s("reason", o.reason);
+				e.fire();
+			}
+		}
 	}
 }
