@@ -95,6 +95,9 @@ public:
 	// host reads it as a re-request and simply answers again.
 	static void acknowledgeFingerprint();
 
+	// CLIENT: the host has sent its fingerprint (even an empty one), which a stock host never does.
+	static bool hostShownSam();
+
 	// HOST: remember that this player answered. Called from the SAMF server handler.
 	static void noteClientAck(int player);
 

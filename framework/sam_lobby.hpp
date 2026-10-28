@@ -38,10 +38,13 @@
 	  * A claimed slot is LOCKED, through vanilla 'LOCK', whose handler every client already
 	    has (vanilla never sends it after the join, but every build handles it). So a STOCK
 	    client draws a locked slot and no human can join into a slot a mod is using.
-	  * A S.A.M client says hello on 'SAML' when its lobby opens. The host answers with every
-	    card (as display text) and DONE, and from then on sends that client every change. It
-	    draws the card read-only. A client that never says hello is never sent 'SAML' at all,
-	    following sam_sync.hpp's rule that a host must look vanilla to a stock peer.
+	  * A S.A.M client says hello on 'SAML' once its lobby is open AND the host has shown it
+	    runs S.A.M (the host's 'SAMF' fingerprint has arrived), so a stock host is sent nothing.
+	    The host answers with every card (as display text) and DONE, and from then on sends that
+	    client every change. It draws the card read-only. A client that never says hello is
+	    never sent 'SAML' at all, following sam_sync.hpp's rule that a host must look vanilla to
+	    a stock peer. The host remembers a client's hello for as long as it stays connected,
+	    through a restarted run.
 
 	WIRE ('SAML', lobby only, reliable via sendPacketSafe):
 
@@ -54,8 +57,6 @@
 	vanilla lobby packet give it. A lie only adds a slot to the ones sent the host's cards
 	(which are public: every player can see them), or marks a stock client as S.A.M for the
 	difficulty gate in sam_party.hpp. For friends-only co-op that is acceptable.
-
-	A stock 5.0.2 host logs one "mystery packet" line for a client's hello.
 
 	Game build only (GAME_SOURCES): calls net code.
 
@@ -147,6 +148,10 @@ namespace SAMLobby
 	void lobbyClosed();
 	// Mods were loaded or unloaded: give every slot back and forget every action.
 	void clear();
+
+	// Client: the host has just shown it runs S.A.M (its fingerprint arrived). Says hello now if
+	// the lobby is already open; lobbyOpened says it when this came first.
+	void hostShownSam();
 
 	// A client just joined into `slot` (it has not said hello yet).
 	void playerJoined(int slot);

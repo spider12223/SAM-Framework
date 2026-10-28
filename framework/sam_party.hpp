@@ -124,8 +124,10 @@ namespace SAMParty
 	// checkEnemy / checkFriend, right after the everybodyfriendly early-out:
 	//   int r = SAMParty::allegiance(this, myStats, your, yourStats, askingIfEnemy);
 	//   if ( r >= 0 ) { return r == 1; }
-	// -1 (no opinion) unless a party member is on one side, and also while that member's
-	// leader is alive: then the normal follower path decides, masks and confusion included.
+	// -1 (no opinion) unless a party member is on one side. A player, a party member or a
+	// follower of either on the other side is answered "friend" here, before anything else.
+	// Otherwise -1 while the member's leader is alive: then the normal follower path decides,
+	// masks and confusion included.
 	int allegiance(Entity* me, Stat* myStats, Entity* you, Stat* yourStats, bool askingIfEnemy);
 
 	// actMonster's death block, BEFORE the gear drops (Keep Inventory decides which side keeps it).

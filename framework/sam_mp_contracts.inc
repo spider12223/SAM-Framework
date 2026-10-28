@@ -161,7 +161,7 @@ SAM_MP(sam_unpatch_class,                 All,    None,      0, False)
 // ---- Lobby
 // Cards are the host's (the host draws them and sends them on); an action is registered by
 // every machine at top level, like sam_register_action; a slot is read from this machine's copy.
-SAM_MP(sam_lobby_add_slot_action,         Local,  None,      0, False)
+SAM_MP(sam_lobby_add_slot_action,         All,    None,      0, False)
 SAM_MP(sam_lobby_clear_card,              Host,   None,      0, False)
 SAM_MP(sam_lobby_get_slot,                Local,  None,      0, Nil)
 SAM_MP(sam_lobby_set_card,                Host,   None,      0, False)

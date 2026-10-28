@@ -83,15 +83,16 @@ sam_party_is_member(uid)                          -- one integer test; cheap
 | level-ups | a monster's random roll | its class's growth (`playerStatIncrease`) |
 | follower limit | counts against its leader's | does not count |
 | its leader dies | turns hostile, or vanishes if summoned | stays on the players' side |
-| an exit | leaves it behind | waits for it (`wait_at_exit`) |
+| an exit | comes along | waits for it (`wait_at_exit`) |
 | it dies | gone | back next floor (`respawn`) |
 | difficulty | nothing | can count as a player (below) |
 
-**Loyalty.** While its leader is alive the normal follower rules decide friend and foe, masks
-and confusion included. While its leader is down, it judges every creature the way a living
-player would, by asking that player's own `checkEnemy` / `checkFriend`. That runs the race arms
-for that player's race, so a custom race's declared allegiances still apply to the whole party.
-Players, party members and anyone's followers are always friends.
+**Loyalty.** Players, party members and anyone's followers are friends before anything else is
+asked, so a mask or confusion does not change that answer. For every other creature, while its
+leader is alive the normal follower rules decide friend and foe, masks and confusion included.
+While its leader is down, it judges those creatures the way a living player would, by asking that
+player's own `checkEnemy` / `checkFriend`. That runs the race arms for that player's race, so a
+custom race's declared allegiances still apply to the whole party. (Read in the code, not run.)
 
 **Death.** `party.on_member_died` fires before its gear drops. Return `false` and it stays dead,
 which is all a permadeath option needs. Gear follows a player's rule: with Keep Inventory on it

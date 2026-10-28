@@ -323,7 +323,7 @@ namespace
 				give(monster, s, newItem((ItemType)type, statusFromName(si.status), (Sint16)si.beatitude,
 					(Sint16)std::max(1, si.count), (Uint32)si.appearance, si.identified, nullptr), si.equip);
 			}
-			if ( def->gold > 0 ) { s->GOLD += def->gold; }
+			// (the class's gold is already in: initClassStats applies it through SAMClasses::applyStats)
 			return;
 		}
 		for ( const LoadoutEntry& e : kLoadouts )
@@ -997,7 +997,7 @@ namespace SAMParty
 			*slot = nullptr;
 		}
 		list_FreeAll(&strip->inventory);
-		if ( !keepInventoryGlobal ) { strip->GOLD = 0; }
+		strip->GOLD = 0;   // the copy or the body, whichever is stripped: gold is never on both
 		for ( int c = 0; c < NUMEFFECTS; ++c )
 		{
 			comeback->clearEffect(c);

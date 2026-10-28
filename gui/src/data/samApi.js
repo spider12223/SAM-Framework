@@ -1887,7 +1887,7 @@ export const SAM_FUNCTIONS = [
   // ---- Lobby (unreleased) -----------------------------------------------------------
   // A mod's links on empty player slots and its own cards in the slots it claims.
   // framework/sam_lobby.hpp has the design and the wire.
-  { name: "sam_lobby_add_slot_action", category: "Lobby", mp: "local", hostOnly: false,
+  { name: "sam_lobby_add_slot_action", category: "Lobby", mp: "all", hostOnly: true,
     params: [{ name: "id", type: "string (letters, digits, _ . -; up to 32)" }, { name: "label", type: "string (up to 40 characters)" }],
     returns: "true when the action exists (boolean); false for a bad id or label, or when four actions are already registered",
     desc: "Put a link on every empty player slot of the host's lobby, like \"+ Add Companion\". Pressing it fires lobby.on_slot_action with your namespace as mod, this id as action and the slot. Call it at top level, beside sam_register_action. Registering the same id again changes its label.",

@@ -14,6 +14,7 @@
 #include "sam_lobby.hpp"
 #include "sam_event.hpp"
 #include "sam_logger.hpp"
+#include "sam_sync.hpp"
 
 #include "main.hpp"     // multiplayer, clientnum, client_disconnected, net_packet, net_clients, net_sock
 #include "game.hpp"
@@ -37,6 +38,7 @@ namespace
 	bool g_loadingSave = false;
 	bool g_hello[MAXPLAYERS] = {};    // host: that client's S.A.M said hello
 	bool g_hostAnswered = false;      // client: the host sent DONE
+	bool g_helloSent = false;         // client: this lobby's hello has gone to the host
 
 	void say(std::string* why, const std::string& text)
 	{
@@ -108,7 +110,8 @@ namespace
 			say(why, "row " + std::to_string(index) + " must be a table like { text = \"...\" }");
 			return false;
 		}
-		if ( const SamValue* buttons = v.get("buttons") )
+		const SamValue* buttons = v.get("buttons");
+		if ( buttons && !buttons->isNil() )   // a JavaScript undefined or null is a Lua nil: the key is not there
 		{
 			if ( buttons->type != SamValue::Type::Arr || buttons->arr.empty() || (int)buttons->arr.size() > SAMLobby::MAX_BUTTONS )
 			{
@@ -148,7 +151,8 @@ namespace
 			}
 			return true;
 		}
-		if ( const SamValue* cycle = v.get("cycle") )
+		const SamValue* cycle = v.get("cycle");
+		if ( cycle && !cycle->isNil() )
 		{
 			if ( cycle->type != SamValue::Type::Str || !SAMLobby::validId(cycle->s) || cycle->s == "title" )
 			{
@@ -429,26 +433,44 @@ namespace SAMLobby
 		e.fire();
 	}
 
+	// The hello a client says once the host has shown it runs S.A.M. A stock host gets nothing:
+	// a host must look vanilla to a stock peer, and a client must look vanilla to a stock host.
+	void sendHello()
+	{
+		if ( multiplayer != CLIENT || !g_open || g_helloSent ) { return; }
+		if ( clientnum < 0 || clientnum >= MAXPLAYERS ) { return; }
+		g_helloSent = true;
+		std::string hello("SAML", 4);
+		hello.push_back((char)Op::Hello);
+		hello.push_back((char)PROTOCOL);
+		hello.push_back((char)clientnum);
+		sendFrame(0, net_server, hello);
+	}
+
+	void hostShownSam()
+	{
+		sendHello();
+	}
+
 	void lobbyOpened(bool loadingSave)
 	{
 		g_open = true;
 		g_loadingSave = loadingSave;
 		g_hostAnswered = false;
+		g_helloSent = false;
 		forgetCards();
-		for ( auto& h : g_hello ) { h = false; }
 		if ( multiplayer == CLIENT )
 		{
 			// Hello whether or not this machine has a mod loaded: the host's difficulty gate
 			// (sam_party.hpp) asks whether every client can READ the start packet's tail, and
-			// that is the framework, not a mod.
-			if ( clientnum < 0 || clientnum >= MAXPLAYERS ) { return; }
-			std::string hello("SAML", 4);
-			hello.push_back((char)Op::Hello);
-			hello.push_back((char)PROTOCOL);
-			hello.push_back((char)clientnum);
-			sendFrame(0, net_server, hello);
+			// that is the framework, not a mod. But only to a host that has shown it runs
+			// S.A.M (it sent its fingerprint); if that has not happened yet, hostShownSam()
+			// sends it when it does.
+			if ( SAMSync::hostShownSam() ) { sendHello(); }
 			return;
 		}
+		// The host keeps what each connected client said: the connection outlives the lobby,
+		// so a restarted run must not forget it (playerJoined clears a slot for a new one).
 		SamEvent e("lobby.on_lobby_opened");
 		e.i("loading_save", loadingSave ? 1 : 0).i("online", multiplayer == SERVER ? 1 : 0);
 		e.fire();
@@ -459,8 +481,9 @@ namespace SAMLobby
 		g_open = false;
 		g_loadingSave = false;
 		g_hostAnswered = false;
+		g_helloSent = false;
 		forgetCards();
-		for ( auto& h : g_hello ) { h = false; }
+		// g_hello stays: see lobbyOpened.
 	}
 
 	void clear()
