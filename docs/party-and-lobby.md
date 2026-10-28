@@ -9,7 +9,7 @@ it, and let the host choose one in the lobby, in a player slot.
 - **Lobby cards** (`sam_lobby_*`): a link on every empty player slot ("+ Add Companion"), and a
   card of your own in a slot you claim, with text, cycles and buttons the host presses.
 
-Both are general. Companions are the obvious use (the Fellowship mod is built on them), but a
+Both are general. Companions are the obvious use (a companion mod is the obvious use), but a
 hireling you pay at a shop, a pet that starts the run with you, or a "bring a friend's ghost"
 mod need exactly the same two things.
 
@@ -47,7 +47,7 @@ the world for her to stand beside.
 | `class` | `"warrior"` | an id from `sam_party_choices()`, or a S.A.M custom class (`"mymod:knight"`) |
 | `sex` | random | `"male"` or `"female"` |
 | `appearance` | 0 | 0 to 17, the character screen's looks (humans only) |
-| `tag` | your namespace | anything up to 31 characters you want back later: `"fellowship:2"` |
+| `tag` | your namespace | anything up to 31 characters you want back later: `"mymod:2"` |
 | `wait_at_exit` | true | every exit waits until it is within 4 tiles |
 | `respawn` | true | after it dies, it comes back beside its leader on the next floor |
 | `grow_like_class` | true | level-ups raise stats the way its class does for a player |
@@ -215,7 +215,7 @@ leaves it alone until you give it back with `sam_lobby_clear_card`.
 
 **What the slots hold.** `sam_lobby_get_slot(n)` answers `player` (with the name shown for them),
 `card` (with the mod and title), `open` (you may claim it), or `closed` (the player-count setting,
-or a saved game's lobby). Fellowship uses it for its "Follows: <player>" button.
+or a saved game's lobby). A mod can use it for a "Follows: <player>" button of its own.
 
 **When.** Cards exist only while a lobby is open: set them from `lobby.on_lobby_opened`,
 `lobby.on_slot_action`, `lobby.on_card_input` or `mod.on_setting_changed`. They are forgotten when
