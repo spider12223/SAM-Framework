@@ -8,6 +8,8 @@
 --   3. reads and changes them, and checks the refusals leave nothing behind;
 --   4. kills all three: only Alpha should be waiting to come back;
 --   5. takes the stairs, and checks that Alpha, and only Alpha, rejoined beside player 0.
+-- Not here: the party carrying the run on after every player falls. That ends the run, so it is
+-- played by hand (solo and online) rather than from a test that must finish.
 -- The lobby half (cards, links, the 'SAML' exchange) needs a lobby, so it is checked by hand;
 -- here only what a script sees in a game is checked: no card can be set, slots read back.
 
@@ -72,6 +74,11 @@ local function firstFloor()
 	local items = sam_get_container_items(alpha) or {}
 	check("a warrior carries its kit's food", #items >= 2, #items .. " items")
 
+	check("carrying the run on is off unless asked for", (sam_party_get_info(alpha) or {}).carry_on == false and b.carry_on == false, tostring(a.carry_on) .. " " .. tostring(b.carry_on))
+	check("a carry_on that is not true or false is refused", sam_party_set_options(bravo, { carry_on = "yes" }) == false)
+	check("and changed nothing", (sam_party_get_info(bravo) or {}).carry_on == false)
+	check("carry_on can be turned on while a player stands", sam_party_set_options(bravo, { carry_on = true }) == true and (sam_party_get_info(bravo) or {}).carry_on == true)
+	check("and off again", sam_party_set_options(bravo, { carry_on = false }) == true and (sam_party_get_info(bravo) or {}).carry_on == false)
 	check("options change", sam_party_set_options(bravo, { wait_at_exit = false }) == true)
 	check("and read back", (sam_party_get_info(bravo) or {}).wait_at_exit == false)
 	check("a player takes no options", sam_party_set_options(sam_get_player_uid(0), { respawn = true }) == false)
