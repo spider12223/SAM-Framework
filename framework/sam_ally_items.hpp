@@ -36,4 +36,11 @@ namespace SAMAllyItems
 	// The player index (0..3) a creature follows, or -1 for a creature that follows nobody
 	// (a wild monster, a player, a uid that is nothing).
 	int leaderOf(std::uint32_t uid);
+
+	// What a monster carries and wears: { pockets = [item...], worn = { helmet = item, ... } }, or
+	// nil for a uid that is not a monster. An item is the same row sam_get_inventory gives
+	// ({ uid, type, name, count, beatitude, status, identified, equipped }) plus `appearance`.
+	// The slots are helmet, breastplate, gloves, shoes, shield, weapon, cloak, amulet, ring, mask.
+	// An item a slot points to is listed under worn only, even when it also sits in the list.
+	SamValue getInventory(std::uint32_t uid);
 }

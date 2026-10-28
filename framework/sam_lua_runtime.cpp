@@ -2689,6 +2689,20 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 #endif
 	}
 
+	// sam_monster_get_inventory(uid) -> { pockets = [item...], worn = { slot = item } } | nil.
+	int lua_sam_monster_get_inventory(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const lua_Integer uid = luaL_checkinteger(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( uid <= 0 || uid > 0xFFFFFFFFLL ) { lua_pushnil(Ls); return 1; }
+		return samLuaPushValue(Ls, SAMAllyItems::getInventory((std::uint32_t)uid));
+#else
+		(void)uid;
+		lua_pushnil(Ls); return 1;
+#endif
+	}
+
 	// sam_party_get_info(uid) -> table | nil.
 	int lua_sam_party_get_info(lua_State* Ls)
 	{
@@ -11164,6 +11178,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		samLuaRegister(L, "sam_party_spawn", lua_sam_party_spawn);
 		samLuaRegister(L, "sam_party_is_member", lua_sam_party_is_member);
 		samLuaRegister(L, "sam_get_follower_leader", lua_sam_get_follower_leader);
+		samLuaRegister(L, "sam_monster_get_inventory", lua_sam_monster_get_inventory);
 		samLuaRegister(L, "sam_party_get_info", lua_sam_party_get_info);
 		samLuaRegister(L, "sam_party_set_options", lua_sam_party_set_options);
 		samLuaRegister(L, "sam_party_list", lua_sam_party_list);

@@ -6765,6 +6765,22 @@ namespace
 #endif
 	}
 
+	// sam_monster_get_inventory(uid) -> object | undefined.
+	JSValue js_sam_monster_get_inventory(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_monster_get_inventory") ) { return JS_UNDEFINED; }
+#ifdef SAM_JS_HAVE_BARONY
+		if ( uid <= 0 || uid > 0xFFFFFFFFLL ) { return JS_UNDEFINED; }
+		const SamValue inv = SAMAllyItems::getInventory((std::uint32_t)uid);
+		if ( inv.isNil() ) { return JS_UNDEFINED; }
+		return samJsFromValue(ctx, inv);
+#else
+		return JS_UNDEFINED;
+#endif
+	}
+
 	// sam_party_get_info(uid) -> object | undefined.
 	JSValue js_sam_party_get_info(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
@@ -9245,6 +9261,7 @@ namespace
 		samJsRegister(ctx, g, "sam_party_spawn", js_sam_party_spawn, 2);
 		samJsRegister(ctx, g, "sam_party_is_member", js_sam_party_is_member, 1);
 		samJsRegister(ctx, g, "sam_get_follower_leader", js_sam_get_follower_leader, 1);
+		samJsRegister(ctx, g, "sam_monster_get_inventory", js_sam_monster_get_inventory, 1);
 		samJsRegister(ctx, g, "sam_party_get_info", js_sam_party_get_info, 1);
 		samJsRegister(ctx, g, "sam_party_set_options", js_sam_party_set_options, 2);
 		samJsRegister(ctx, g, "sam_party_list", js_sam_party_list, 0);

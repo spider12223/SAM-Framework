@@ -4,7 +4,7 @@
 // Drop this beside your mod's .ts files, or reference it:
 //   /// <reference path="sam.d.ts" />
 //
-// 358 functions, 93 events. Each function's "Multiplayer:" line starts with
+// 359 functions, 93 events. Each function's "Multiplayer:" line starts with
 // its kind (host, owner, screen, read, all, local, any); see docs/multiplayer.md.
 
 declare global {
@@ -310,7 +310,7 @@ declare global {
   function sam_get_class(player: number): string | undefined;
 
   /**
-   * What is inside a chest, or what a creature is carrying.
+   * What is inside a chest, or what a creature is carrying. For a creature, sam_monster_get_inventory also tells worn gear from pockets and gives each item's uid.
    *
    * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript).
    */
@@ -1477,6 +1477,13 @@ declare global {
    * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
    */
   function sam_monster_face(uid: number, tileX: number, tileY: number): boolean;
+
+  /**
+   * What a monster carries in its pockets and what it wears, with the uid of each item. An item a slot points to is listed under worn only, and its equipped is true. Unlike sam_get_container_items it tells worn gear from pocket gear, and the uids work with the other ally item functions.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Host only, like the monsters themselves.
+   */
+  function sam_monster_get_inventory(uid: number): any;
 
   /**
    * The monster counterpart of sam_has_effect — e.g. react when a monster you just hit is POISONED. Pass a monster UID (from a monster event or sam_get_nearby_entities).

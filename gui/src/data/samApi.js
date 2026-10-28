@@ -1009,7 +1009,7 @@ export const SAM_FUNCTIONS = [
   { name: "sam_get_container_items", category: "Terrain", mp: "host", hostOnly: true,
     params: [{ name: "uid", type: "uid" }],
     returns: "array of tables { type, name, count, status, beatitude, identified } or nil",
-    desc: "What is inside a chest, or what a creature is carrying." },
+    desc: "What is inside a chest, or what a creature is carrying. For a creature, sam_monster_get_inventory also tells worn gear from pockets and gives each item's uid." },
 
   // ---- Mechanisms (v1.10.3) ----------------------------------------------------
   // The framework already FIRED world.on_door_opened and world.on_switch_toggled while giving
@@ -1850,6 +1850,11 @@ export const SAM_FUNCTIONS = [
     params: [{ name: "uid", type: "uid" }],
     returns: "the player index (0-3) the creature follows (number), or nil/undefined for a creature that follows nobody",
     desc: "Whose follower a creature is. Works for any ally the player's side owns, not only party members: a recruited monster, a party member, a summon that follows. A wild monster, a player and a uid that is nothing all answer nil/undefined.",
+    mpNote: "Host only, like the monsters themselves." },
+  { name: "sam_monster_get_inventory", category: "Party", mp: "host", hostOnly: true,
+    params: [{ name: "uid", type: "uid" }],
+    returns: "a table { pockets, worn }, or nil/undefined for a creature that is not a monster. pockets is an array of items; worn is a table keyed by slot (helmet, breastplate, gloves, shoes, shield, weapon, cloak, amulet, ring, mask) holding only the slots that are filled. An item is { uid, type, name, count, beatitude, status, identified, equipped, appearance }: the same fields sam_get_inventory gives, plus appearance.",
+    desc: "What a monster carries in its pockets and what it wears, with the uid of each item. An item a slot points to is listed under worn only, and its equipped is true. Unlike sam_get_container_items it tells worn gear from pocket gear, and the uids work with the other ally item functions.",
     mpNote: "Host only, like the monsters themselves." },
   { name: "sam_party_get_info", category: "Party", mp: "host", hostOnly: true,
     params: [{ name: "uid", type: "uid" }],

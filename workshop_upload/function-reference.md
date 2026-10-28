@@ -1,6 +1,6 @@
 # S.A.M function reference
 
-Every script function the framework exposes: **358 functions** and **93 events**.
+Every script function the framework exposes: **359 functions** and **93 events**.
 All of them work identically in Lua, JavaScript and TypeScript.
 
 This page is generated from the API definition, so it cannot fall behind the code. If a
@@ -15,7 +15,7 @@ the kind, so the line is always what really happens:
 
 | kind | what it means for your script |
 |---|---|
-| `host` (161) | Runs on the host, where your events and timers already run. A client's call is refused with a one-time warning. The result reaches every player. |
+| `host` (162) | Runs on the host, where your events and timers already run. A client's call is refused with a one-time warning. The result reaches every player. |
 | `owner` (14) | Changes something that lives on the player's own machine (their backpack, their spells). Call it on the host; S.A.M carries it to that player's machine. |
 | `screen` (29) | Shows something on one player's screen. Name the player, or leave it out inside an event about a player; -1 means every player. S.A.M carries it to their machine. |
 | `read` (50) | Reads a player. The host can read everyone; a client can read only its own player. |
@@ -51,7 +51,7 @@ For guides and worked examples, see [scripting-reference.md](scripting-reference
 - [Multiplayer](#multiplayer) (3)
 - [Networking](#networking) (1)
 - [Panels](#panels) (16)
-- [Party](#party) (11)
+- [Party](#party) (12)
 - [Persistence](#persistence) (13)
 - [Pictures](#pictures) (16)
 - [Player state](#player-state) (13)
@@ -2667,6 +2667,18 @@ Whose follower a creature is. Works for any ally the player's side owns, not onl
 
 **Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript. Host only, like the monsters themselves.
 
+### `sam_monster_get_inventory(uid)`
+
+What a monster carries in its pockets and what it wears, with the uid of each item. An item a slot points to is listed under worn only, and its equipped is true. Unlike sam_get_container_items it tells worn gear from pocket gear, and the uids work with the other ally item functions.
+
+| argument | type |
+|---|---|
+| `uid` | uid |
+
+**Returns:** a table { pockets, worn }, or nil/undefined for a creature that is not a monster. pockets is an array of items; worn is a table keyed by slot (helmet, breastplate, gloves, shoes, shield, weapon, cloak, amulet, ring, mask) holding only the slots that are filled. An item is { uid, type, name, count, beatitude, status, identified, equipped, appearance }: the same fields sam_get_inventory gives, plus appearance.
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Host only, like the monsters themselves.
+
 ### `sam_party_choice_allowed(race, class)`
 
 The character screen's own rule for this machine: DLC ownership, and the race unlocks that gate some classes. A S.A.M custom race or class carries no gate of its own, so it is always allowed.
@@ -4140,7 +4152,7 @@ Entities of a KIND near a tile. This is the gap sam_get_nearby_entities leaves: 
 
 ### `sam_get_container_items(uid)`
 
-What is inside a chest, or what a creature is carrying.
+What is inside a chest, or what a creature is carrying. For a creature, sam_monster_get_inventory also tells worn gear from pockets and gives each item's uid.
 
 | argument | type |
 |---|---|
