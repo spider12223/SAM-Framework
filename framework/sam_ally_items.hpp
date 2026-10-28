@@ -90,7 +90,7 @@ namespace SAMAllyItems
 	// item.on_ally_transfer_done or item.on_ally_transfer_failed (both carry the ticket), never
 	// from the call itself, so a mod has one code path. Nothing moves until the next tick().
 	// Refused at the call: no_ally, not_owner, unknown_item, equipped, cursed, busy, pockets_full,
-	// backpack_full, bad_count.
+	// backpack_full, bad_count, stock_peer (a player whose game does not run S.A.M.).
 	Result giveItem(int player, std::uint32_t allyUid, std::uint32_t itemUid, int count);
 	Result takeItem(int player, std::uint32_t allyUid, std::uint32_t itemUid, int count);
 
@@ -98,4 +98,13 @@ namespace SAMAllyItems
 	// events. A transfer whose ally or item went away in between fails with the reason, and
 	// nothing is lost: the item never left its owner.
 	void tick();
+
+	// ---- a player on another machine. The give asks that machine to take the item off itself
+	// (onGiveRequest runs THERE) and the item is made in the pockets when its reply arrives
+	// (onGiveReply, on the host). Registered with SAMNet by this module; public so the tests can
+	// call them without a socket.
+	void onGiveRequest(const std::string& body);
+	void onGiveReply(int from, const std::string& body);
+	void onHello(int player);   // a repaired connection: a request that was out may be lost
+	void onClear();             // a game ended or a new run started
 }

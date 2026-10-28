@@ -16,6 +16,8 @@
 #include "sam_mp_inventory.hpp"
 #include "sam_event.hpp"
 #include "sam_items.hpp"
+#include "sam_net.hpp"
+#include "sam_logger.hpp"
 
 #include "main.hpp"
 #include "game.hpp"
@@ -30,6 +32,8 @@
 #include <cstdlib>
 #include <map>
 #include <vector>
+
+static const char* MOD = "ALLYITEMS";
 
 namespace
 {
@@ -247,9 +251,22 @@ namespace
 		std::uint32_t allyUid = 0;
 		std::uint32_t itemUid = 0;
 		int count = 0;   // how many units; already the whole stack when the script said 0
+		bool remote = false;      // the player plays on another machine
+		bool awaiting = false;    // a give whose request is out: only the player's machine can answer it
+		std::uint32_t ownerUid = 0;   // a remote give: the uid the player's own machine knows the item by
 	};
 	std::map<std::uint32_t, Ticket> g_tickets;   // in the order they were made
 	std::uint32_t g_nextTicket = 1;
+
+	// The ops (offsets inside SAMNet::Op::PartyFirst; see sam_net.hpp). Host -> client and
+	// client -> host are separate op spaces, so offset 0 is free on the way to the host.
+	std::uint8_t requestOp() { return (std::uint8_t)(SAMNet::Op::PartyFirst + 2); }   // host -> client
+	std::uint8_t replyOp() { return (std::uint8_t)(SAMNet::Op::PartyFirst + 0); }     // client -> host
+
+	bool remotePlayer(int p)
+	{
+		return p > 0 && p < MAXPLAYERS && players[p] && !players[p]->isLocalPlayer() && !client_disconnected[p];
+	}
 
 	void noFree(void*) {}   // a node deconstructor that leaves its element alone
 
@@ -288,11 +305,24 @@ namespace
 		Stat* as = nullptr;
 		if ( !monsterOf(allyUid, &as) || SAMAllyItems::leaderOf(allyUid) < 0 ) { return refuse("no_ally", "That is not an ally."); }
 		if ( SAMAllyItems::leaderOf(allyUid) != player ) { return refuse("not_owner", "That ally follows someone else."); }
-		if ( !localPlayer(player) ) { return refuse("not_owner", "That player is not here."); }
-		list_t* from = give ? &stats[player]->inventory : &as->inventory;
-		Item* item = findIn(from, itemUid);
+		const bool local = localPlayer(player);
+		const bool remote = !local && remotePlayer(player);
+		if ( !local && !remote ) { return refuse("not_owner", "That player is not here."); }
+		// A mod item sent to a stock game would arrive as a rock, and a stock game cannot answer.
+		if ( remote && !SAMNet::peerHasSam(player) ) { return refuse("stock_peer", "That player's game does not run S.A.M."); }
+		Item* item = nullptr;
+		if ( remote && give )
+		{
+			int owner = -1;
+			item = SAMMpInventory::findMirrorItem(itemUid, &owner);
+			if ( owner != player ) { item = nullptr; }
+		}
+		else
+		{
+			item = findIn(give ? &stats[player]->inventory : &as->inventory, itemUid);
+		}
 		if ( !item ) { return refuse("unknown_item", give ? "You do not have that." : "It is not carrying that."); }
-		if ( give && itemIsEquipped(item, player) )
+		if ( give && (remote ? SAMMpInventory::isEquipped(player, item) : itemIsEquipped(item, player)) )
 		{
 			return SAMAllyItems::canUnequipQuiet(item, stats[player]) ? refuse("equipped", "Take that off first.") : refuse("cursed", "That is cursed and will not come off.");
 		}
@@ -300,7 +330,7 @@ namespace
 		if ( ticketHolds(itemUid) ) { return refuse("busy", "That item is already being moved."); }
 		if ( count < 0 || count > item->count ) { return refuse("bad_count", "There is not that many."); }
 		if ( give && pocketsFull(as) ) { return refuse("pockets_full", "Its pockets are full."); }
-		if ( !give && !backpackHasRoom(player) ) { return refuse("backpack_full", "Your backpack is full."); }
+		if ( !give && local && !backpackHasRoom(player) ) { return refuse("backpack_full", "Your backpack is full."); }
 		if ( resolvedCount ) { *resolvedCount = count == 0 ? (int)item->count : count; }
 		SAMAllyItems::Result ok;
 		ok.ok = true;
@@ -319,6 +349,21 @@ namespace
 		t.allyUid = allyUid;
 		t.itemUid = itemUid;
 		t.count = n;
+		t.remote = !localPlayer(player);
+		if ( t.remote && give )
+		{
+			// The item is the player's own, on their machine: ask it. Nothing is created here until it says yes.
+			int holder = -1;
+			std::uint32_t theirUid = 0;
+			if ( !SAMNet::routeItem(itemUid, holder, theirUid) || holder != player ) { return refuse("unknown_item", "You do not have that."); }
+			t.ownerUid = theirUid;
+			SAMNet::Writer w;
+			w.u32(t.id);
+			w.u32(theirUid);
+			w.u16((std::uint16_t)n);
+			if ( !SAMNet::sendToClient(player, requestOp(), w.buf) ) { return refuse("stock_peer", "That player's game cannot take the request."); }
+			t.awaiting = true;
+		}
 		g_tickets[t.id] = t;
 		r.ticket = t.id;
 		return r;
@@ -330,6 +375,29 @@ namespace
 		r.reason = reason;
 		r.text = text;
 		return r;
+	}
+
+	void fireDone(const Ticket& t, std::uint32_t newItemUid)
+	{
+		SamEvent e("item.on_ally_transfer_done");
+		e.i("player", t.player).i("uid", (long long)t.allyUid).i("ticket", (long long)t.id)
+			.i("item_uid", (long long)t.itemUid).i("new_item_uid", (long long)newItemUid).i("count", t.count);
+		e.fire();
+	}
+
+	void fireFailed(const Ticket& t, const std::string& reason)
+	{
+		SamEvent e("item.on_ally_transfer_failed");
+		e.i("player", t.player).i("uid", (long long)t.allyUid).i("ticket", (long long)t.id)
+			.i("item_uid", (long long)t.itemUid).s("reason", reason);
+		e.fire();
+	}
+
+	// Put an item back in a remote player's hands (a give whose ally could not take it after all).
+	void sendBack(int player, int type, int status, int beatitude, int count, std::uint32_t appearance, bool identified)
+	{
+		Item* back = newItem((ItemType)type, (Status)status, (Sint16)beatitude, (Sint16)count, appearance, identified, nullptr);
+		SAMMpInventory::deliverItem(player, back, "sam_give_item_to_ally");
 	}
 }
 
@@ -511,6 +579,7 @@ namespace SAMAllyItems
 			bool done = false;
 			std::string reason;
 			std::uint32_t newItemUid = 0;
+			bool skipPerform = false;
 		};
 
 		void fail(Outcome& o, const char* reason) { o.done = false; o.reason = reason; }
@@ -522,7 +591,8 @@ namespace SAMAllyItems
 			const Ticket& t = o.t;
 			Stat* as = nullptr;
 			if ( !monsterOf(t.allyUid, &as) || leaderOf(t.allyUid) != t.player ) { fail(o, "ally_gone"); return; }
-			if ( !localPlayer(t.player) ) { fail(o, "player_gone"); return; }
+			if ( t.remote ? !remotePlayer(t.player) : !localPlayer(t.player) ) { fail(o, "player_gone"); return; }
+			if ( t.remote && !SAMNet::peerHasSam(t.player) ) { fail(o, "stock_peer"); return; }
 			Item* item = findIn(t.give ? &stats[t.player]->inventory : &as->inventory, t.itemUid);
 			if ( !item ) { fail(o, "item_gone"); return; }
 			if ( t.give ? itemIsEquipped(item, t.player) : isWorn(as, item) ) { fail(o, "equipped"); return; }
@@ -550,6 +620,16 @@ namespace SAMAllyItems
 					item->count -= (Sint16)t.count;
 					o.newItemUid = part->uid;
 				}
+			}
+			else if ( t.remote )
+			{
+				// To a player on another machine: the vanilla pick-up path, with every field.
+				Item* copy = newItem(item->type, item->status, item->beatitude, (Sint16)t.count, item->appearance, item->identified, nullptr);
+				copy->ownerUid = item->ownerUid;
+				if ( !SAMMpInventory::deliverItem(t.player, copy, "sam_take_item_from_ally") ) { fail(o, "player_gone"); return; }
+				if ( whole ) { list_RemoveNode(item->node); }
+				else { item->count -= (Sint16)t.count; }
+				o.newItemUid = 0;   // the player's machine gives it its own uid
 			}
 			else
 			{
@@ -581,32 +661,146 @@ namespace SAMAllyItems
 	void tick()
 	{
 		if ( g_tickets.empty() ) { return; }
-		// Take the waiting tickets out first: a handler may start new transfers while we fire.
+		// Take the ready tickets out first: a handler may start new transfers while we fire. A give
+		// whose request is out stays until the reply comes, unless its player left.
 		std::vector<Outcome> work;
-		for ( const auto& kv : g_tickets )
+		for ( auto it = g_tickets.begin(); it != g_tickets.end(); )
 		{
 			Outcome o;
-			o.t = kv.second;
+			o.t = it->second;
+			if ( o.t.awaiting )
+			{
+				if ( remotePlayer(o.t.player) ) { ++it; continue; }
+				fail(o, "player_gone");
+				o.t.awaiting = false;
+				o.skipPerform = true;
+			}
 			work.push_back(o);
+			it = g_tickets.erase(it);
 		}
-		g_tickets.clear();
 		for ( Outcome& o : work )
 		{
-			perform(o);
-			if ( o.done )
-			{
-				SamEvent e("item.on_ally_transfer_done");
-				e.i("player", o.t.player).i("uid", (long long)o.t.allyUid).i("ticket", (long long)o.t.id)
-					.i("item_uid", (long long)o.t.itemUid).i("new_item_uid", (long long)o.newItemUid).i("count", o.t.count);
-				e.fire();
-			}
-			else
-			{
-				SamEvent e("item.on_ally_transfer_failed");
-				e.i("player", o.t.player).i("uid", (long long)o.t.allyUid).i("ticket", (long long)o.t.id)
-					.i("item_uid", (long long)o.t.itemUid).s("reason", o.reason);
-				e.fire();
-			}
+			if ( !o.skipPerform ) { perform(o); }
+			if ( o.done ) { fireDone(o.t, o.newItemUid); }
+			else { fireFailed(o.t, o.reason); }
 		}
 	}
+
+	void onGiveRequest(const std::string& body)
+	{
+		SAMNet::Reader rd(body);
+		const std::uint32_t ticket = rd.u32(), uid = rd.u32();
+		const int count = rd.u16();
+		if ( !rd.ok ) { return; }
+		auto no = [&](const char* why) {
+			SAMNet::Writer w;
+			w.u32(ticket);
+			w.u8(0);
+			w.str8(why);
+			SAMNet::sendToHost(replyOp(), w.buf);
+		};
+		const int me = clientnum;
+		if ( me < 0 || me >= MAXPLAYERS || !stats[me] ) { no("player_gone"); return; }
+		Item* item = findIn(&stats[me]->inventory, uid);
+		if ( !item ) { no("item_gone"); return; }
+		if ( itemIsEquipped(item, me) ) { no(canUnequipQuiet(item, stats[me]) ? "equipped" : "cursed"); return; }
+		if ( count <= 0 || count > item->count ) { no("bad_count"); return; }
+		SAMNet::Writer w;
+		w.u32(ticket);
+		w.u8(1);
+		w.u32((std::uint32_t)item->type);
+		w.u16((std::uint16_t)count);
+		w.u8((std::uint8_t)item->status);
+		w.i64((long long)item->beatitude);
+		w.u32((std::uint32_t)item->appearance);
+		w.u8(item->identified ? 1 : 0);
+		if ( count == item->count ) { SAMItems::queueDestroy(item->uid, me); }
+		else { item->count -= (Sint16)count; }
+		SAMMpInventory::nudgeReport();
+		SAMNet::sendToHost(replyOp(), w.buf);
+	}
+
+	void onGiveReply(int from, const std::string& body)
+	{
+		SAMNet::Reader rd(body);
+		const std::uint32_t id = rd.u32();
+		const int ok = rd.u8();
+		if ( !rd.ok ) { return; }
+		auto found = g_tickets.find(id);
+		if ( found == g_tickets.end() ) { return; }
+		const Ticket t = found->second;
+		if ( !t.give || !t.remote || !t.awaiting || t.player != from ) { return; }
+		g_tickets.erase(found);
+		if ( !ok )
+		{
+			const std::string why = rd.str8();
+			fireFailed(t, rd.ok && !why.empty() ? why : "item_gone");
+			return;
+		}
+		const int type = (int)rd.u32(), count = rd.u16(), status = rd.u8();
+		const long long beat = rd.i64();
+		const std::uint32_t appearance = rd.u32();
+		const bool identified = rd.u8() != 0;
+		if ( !rd.ok ) { fireFailed(t, "link_reset"); return; }
+		Stat* as = nullptr;
+		if ( !monsterOf(t.allyUid, &as) || leaderOf(t.allyUid) != t.player )
+		{
+			sendBack(t.player, type, status, (int)beat, count, appearance, identified);
+			fireFailed(t, "ally_gone");
+			return;
+		}
+		if ( pocketsFull(as) )
+		{
+			sendBack(t.player, type, status, (int)beat, count, appearance, identified);
+			fireFailed(t, "pockets_full");
+			return;
+		}
+		Item* made = newItem((ItemType)type, (Status)status, (Sint16)beat, (Sint16)count, appearance, identified, &as->inventory);
+		fireDone(t, made ? made->uid : 0);
+	}
+
+	void onHello(int player)
+	{
+		// The player's connection was repaired: a request that was out may have been lost, or the item may
+		// already be off their side. Fail it so a script is not left waiting, and say so in the log.
+		for ( auto it = g_tickets.begin(); it != g_tickets.end(); )
+		{
+			if ( it->second.awaiting && it->second.player == player )
+			{
+				const Ticket t = it->second;
+				it = g_tickets.erase(it);
+				SAM_WARN(MOD, "An item given to an ally by player " + std::to_string(player) + " (ticket " + std::to_string(t.id)
+					+ ") was still waiting when their connection was repaired; it may have been taken from them (possible loss).");
+				fireFailed(t, "link_reset");
+			}
+			else { ++it; }
+		}
+	}
+
+	void onClear()
+	{
+		for ( const auto& kv : g_tickets )
+		{
+			if ( kv.second.awaiting )
+			{
+				SAM_WARN(MOD, "A new run began while an item given to an ally was in transit (ticket " + std::to_string(kv.first) + "; possible loss).");
+			}
+		}
+		g_tickets.clear();
+	}
+}
+
+namespace
+{
+	struct AllyItemsNet
+	{
+		AllyItemsNet()
+		{
+			SAMNet::onClientOp(requestOp(), &SAMAllyItems::onGiveRequest);
+			SAMNet::onHostOp(replyOp(), &SAMAllyItems::onGiveReply);
+			SAMNet::addHelloHook(&SAMAllyItems::onHello);
+			SAMNet::addClearHook(&SAMAllyItems::onClear);
+		}
+	};
+	AllyItemsNet g_allyItemsNet;
 }

@@ -2671,7 +2671,7 @@ Whose follower a creature is. Works for any ally the player's side owns, not onl
 
 Hands an item from a player's backpack to an ally that follows them. count is how many (leave it out, or 0, for the whole stack). The whole stack moves as the same item, with the same uid; a part makes a new item for the part and the player keeps the rest under the old uid. Nothing moves until the next game tick, so the call is safe from inside any event handler.
 
-Only the host's own player works so far: a remote player's backpack is not reachable yet and answers not_owner. The ally's pockets count as full at Barony's own limit (9 items, 5 for an automaton).
+For a player on another machine the host asks that machine to take the item off itself and makes the ally's copy when it answers, so the done event can come a few ticks later (its new_item_uid is the new pocket item); a player whose game does not run S.A.M. answers stock_peer. If the connection is repaired or the player leaves while the question is out, the transfer fails (link_reset, player_gone) and the item MAY already have left the player: see the log. The ally's pockets count as full at Barony's own limit (9 items, 5 for an automaton).
 
 | argument | type |
 |---|---|
@@ -2680,7 +2680,7 @@ Only the host's own player works so far: a remote player's backpack is not reach
 | `item_uid` | uid (an item in the player's backpack, from sam_get_inventory) |
 | `count` *(optional)* | int |
 
-**Returns:** a table { ok, reason, text, ticket }. ok means ACCEPTED, not done: the outcome arrives as item.on_ally_transfer_done or item.on_ally_transfer_failed with the same ticket. Refused at the call: no_ally, not_owner, unknown_item, equipped, cursed, busy, pockets_full, bad_count.
+**Returns:** a table { ok, reason, text, ticket }. ok means ACCEPTED, not done: the outcome arrives as item.on_ally_transfer_done or item.on_ally_transfer_failed with the same ticket. Refused at the call: no_ally, not_owner, unknown_item, equipped, cursed, busy, pockets_full, bad_count, stock_peer.
 
 **Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Host only, like the monsters themselves.
 
@@ -2862,7 +2862,7 @@ Spawn from game.on_game_start or later (a timer of a tick is safest): before the
 
 Takes an item out of an ally's pockets into a player's backpack. Barony's own pick-up places it, and it may join a stack there, so item.on_ally_transfer_done tells you the uid it ended up under (new_item_uid). Something the ally wears has to come off first (sam_monster_unequip_to_inventory).
 
-Refused with backpack_full when the backpack has no free slot, even for an item that would have joined a stack. Only the host's own player works so far.
+Refused with backpack_full when the backpack has no free slot, even for an item that would have joined a stack (a player on another machine is not checked; their game places the item). For a player on another machine new_item_uid is 0, because their game gives the item its own uid, and a player whose game does not run S.A.M. answers stock_peer.
 
 | argument | type |
 |---|---|
@@ -2871,7 +2871,7 @@ Refused with backpack_full when the backpack has no free slot, even for an item 
 | `item_uid` | uid (an item in the ally's pockets, from sam_monster_get_inventory) |
 | `count` *(optional)* | int |
 
-**Returns:** a table { ok, reason, text, ticket }. ok means ACCEPTED, not done: the outcome arrives as item.on_ally_transfer_done or item.on_ally_transfer_failed with the same ticket. Refused at the call: no_ally, not_owner, unknown_item, equipped, busy, backpack_full, bad_count.
+**Returns:** a table { ok, reason, text, ticket }. ok means ACCEPTED, not done: the outcome arrives as item.on_ally_transfer_done or item.on_ally_transfer_failed with the same ticket. Refused at the call: no_ally, not_owner, unknown_item, equipped, busy, backpack_full, bad_count, stock_peer.
 
 **Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Host only, like the monsters themselves.
 
@@ -5075,9 +5075,9 @@ Fires a transfer that a call accepted could not be finished.
 | `uid` | uid (the ally) |
 | `ticket` | int |
 | `item_uid` | uid |
-| `reason` | string (ally_gone, player_gone, item_gone, equipped, bad_count, pockets_full, backpack_full) |
+| `reason` | string (ally_gone, player_gone, item_gone, equipped, cursed, bad_count, pockets_full, backpack_full, stock_peer, link_reset) |
 
-Nothing is lost: the item never left where it was.
+On the host's own machine nothing is lost: the item never left where it was. For a player on another machine, link_reset (their connection was repaired while the question was out) can mean the item already left them; the log says so.
 
 **Multiplayer:** Fires on the host.
 
