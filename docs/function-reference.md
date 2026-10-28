@@ -1,6 +1,6 @@
 # S.A.M function reference
 
-Every script function the framework exposes: **359 functions** and **93 events**.
+Every script function the framework exposes: **360 functions** and **94 events**.
 All of them work identically in Lua, JavaScript and TypeScript.
 
 This page is generated from the API definition, so it cannot fall behind the code. If a
@@ -15,7 +15,7 @@ the kind, so the line is always what really happens:
 
 | kind | what it means for your script |
 |---|---|
-| `host` (162) | Runs on the host, where your events and timers already run. A client's call is refused with a one-time warning. The result reaches every player. |
+| `host` (163) | Runs on the host, where your events and timers already run. A client's call is refused with a one-time warning. The result reaches every player. |
 | `owner` (14) | Changes something that lives on the player's own machine (their backpack, their spells). Call it on the host; S.A.M carries it to that player's machine. |
 | `screen` (29) | Shows something on one player's screen. Name the player, or leave it out inside an event about a player; -1 means every player. S.A.M carries it to their machine. |
 | `read` (50) | Reads a player. The host can read everyone; a client can read only its own player. |
@@ -51,7 +51,7 @@ For guides and worked examples, see [scripting-reference.md](scripting-reference
 - [Multiplayer](#multiplayer) (3)
 - [Networking](#networking) (1)
 - [Panels](#panels) (16)
-- [Party](#party) (12)
+- [Party](#party) (13)
 - [Persistence](#persistence) (13)
 - [Pictures](#pictures) (16)
 - [Player state](#player-state) (13)
@@ -67,7 +67,7 @@ For guides and worked examples, see [scripting-reference.md](scripting-reference
 - [Truth](#truth) (17)
 - [World](#world) (23)
 - [Your own logic](#your-own-logic) (7)
-- [Events](#events) (93)
+- [Events](#events) (94)
 
 
 ## Camera
@@ -2667,6 +2667,22 @@ Whose follower a creature is. Works for any ally the player's side owns, not onl
 
 **Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript. Host only, like the monsters themselves.
 
+### `sam_monster_can_equip(uid, item, slot)`
+
+Asks whether an ally may wear an item in a slot, and changes nothing. The checks run in the order the reasons are listed: the creature must be a monster that follows a player, the slot must exist, the item must exist, it must belong in that slot, the ally's body must allow it (a kobold wears no helmet, an insectoid no gloves), the item in the slot must not be cursed, and last item.on_before_monster_equip gives mods the final say. An item given as a number is read as the uid of an item in the ally's pockets or in a player's backpack when there is one, and as an item type otherwise.
+
+Barony ships no class rules for allies. A mod that wants one (only warriors wear plate) cancels item.on_before_monster_equip.
+
+| argument | type |
+|---|---|
+| `uid` | uid |
+| `item` | uid or item (an item uid, an item type, a vanilla name or "namespace:item") |
+| `slot` | string — one of: `helmet`, `breastplate`, `gloves`, `shoes`, `shield`, `weapon`, `cloak`, `amulet`, `ring`, `mask` |
+
+**Returns:** a table { ok, reason, text }: ok is true when the ally may wear it; otherwise reason is one of no_monster, no_ally, bad_slot, unknown_item, wrong_slot, race, cursed_in_slot, mod_veto, and text is a sentence you can show a player. Both are empty when ok is true.
+
+**Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Host only, like the monsters themselves.
+
 ### `sam_monster_get_inventory(uid)`
 
 What a monster carries in its pockets and what it wears, with the uid of each item. An item a slot points to is listed under worn only, and its equipped is true. Unlike sam_get_container_items it tells worn gear from pocket gear, and the uids work with the other ally item functions.
@@ -4968,6 +4984,28 @@ A HUD that shows the speed listens here and reads sam_get_game_speed(); it does 
 Percent, because event fields are whole numbers: 100 is 1x, 250 is 2.5x. temporary is 0/1: 1 while a timed window is running, 0 when one has ended or a plain set was made. The value is already stored when this fires, so sam_get_game_speed() inside the handler is the exact new multiplier. Setting the value already set fires nothing.
 
 **Multiplayer:** Fires on the host, in singleplayer.
+
+### `item.on_before_monster_equip`
+
+> Cancellable: return `false` to stop it.
+
+Fires an ally is about to be allowed to wear an item: sam_monster_can_equip and sam_monster_equip_item ask, after every built-in check has passed.
+
+| field | type |
+|---|---|
+| `uid` | uid (the ally) |
+| `leader` | int (the player it follows) |
+| `slot` | string |
+| `item_uid` | uid (0 when sam_monster_can_equip was asked about an item type) |
+| `item_type` | int |
+| `item_name` | string |
+| `message` | string |
+
+Return false to refuse; the caller gets reason mod_veto and message as its text. Set e.message to say why ("Only warriors wear that."). Every mod receives it: check sam_party_get_info(e.uid) or your own tag before deciding for an ally that is not yours.
+
+The framework ships no rules of its own for this; a mod that never listens changes nothing. It does not fire for sam_monster_unequip_to_inventory.
+
+**Multiplayer:** Fires on the host, each time one of those calls reaches this point.
 
 ### `lobby.on_card_input`
 

@@ -4,7 +4,7 @@
 // Drop this beside your mod's .ts files, or reference it:
 //   /// <reference path="sam.d.ts" />
 //
-// 359 functions, 93 events. Each function's "Multiplayer:" line starts with
+// 360 functions, 94 events. Each function's "Multiplayer:" line starts with
 // its kind (host, owner, screen, read, all, local, any); see docs/multiplayer.md.
 
 declare global {
@@ -1444,6 +1444,13 @@ declare global {
   function sam_monster_attack(uid: number): boolean;
 
   /**
+   * Asks whether an ally may wear an item in a slot, and changes nothing. The checks run in the order the reasons are listed: the creature must be a monster that follows a player, the slot must exist, the item must exist, it must belong in that slot, the ally's body must allow it (a kobold wears no helmet, an insectoid no gloves), the item in the slot must not be cursed, and last item.on_before_monster_equip gives mods the final say. An item given as a number is read as the uid of an item in the ally's pockets or in a player's backpack when there is one, and as an item type otherwise.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Host only, like the monsters themselves.
+   */
+  function sam_monster_can_equip(uid: number, item: number, slot: string): any;
+
+  /**
    * Whether a creature's AI knows how to use a kind of item. Only five species have that behaviour at all: goblins, humans, goatmen, automatons and shadows. Everything else answers false, including custom races, even though sam_monster_equip will happily put the item in their hand. It runs on the host, because it reads the monster's stats.
    *
    * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nothing at all -- no value in Lua, undefined in JavaScript.
@@ -2533,6 +2540,8 @@ declare global {
     | "game.on_level_entered"
     /** Fires the simulation speed really changes: a sam_set_game_speed or /sam_gamespeed that set a different value, a temporary window ending, and the reset to 1x when a run ends or a new one starts. Multiplayer: Fires on the host, in singleplayer. */
     | "game.on_speed_changed"
+    /** Fires an ally is about to be allowed to wear an item: sam_monster_can_equip and sam_monster_equip_item ask, after every built-in check has passed. Multiplayer: Fires on the host, each time one of those calls reaches this point. */
+    | "item.on_before_monster_equip"
     /** Fires the host pressed a control on a card a mod shows in a lobby slot. Multiplayer: Fires on the host. */
     | "lobby.on_card_input"
     /** Fires the lobby screen has been built, before anyone presses anything. Multiplayer: Fires on the host, and in a local lobby. A client's lobby fires nothing: it asks the host for the cards instead. */

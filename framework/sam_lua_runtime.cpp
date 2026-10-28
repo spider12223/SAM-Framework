@@ -2703,6 +2703,34 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 #endif
 	}
 
+	// An item argument that is a uid or a type: a number, a name ("IRON_HELM", "ns:item"), or nothing.
+	SamValue samLuaItemArg(lua_State* Ls, int idx)
+	{
+		if ( lua_type(Ls, idx) == LUA_TSTRING ) { return SamValue::string(lua_tostring(Ls, idx)); }
+		if ( lua_type(Ls, idx) == LUA_TNUMBER )
+		{
+			if ( lua_isinteger(Ls, idx) ) { return SamValue::integer((long long)lua_tointeger(Ls, idx)); }
+			return SamValue::number((double)lua_tonumber(Ls, idx));
+		}
+		return SamValue::nil();
+	}
+
+	// sam_monster_can_equip(uid, item, slot) -> { ok, reason, text }.
+	int lua_sam_monster_can_equip(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const lua_Integer uid = luaL_checkinteger(Ls, 1);
+		const SamValue item = samLuaItemArg(Ls, 2);
+		const char* slot = luaL_checkstring(Ls, 3);
+#ifdef SAM_LUA_HAVE_BARONY
+		const std::uint32_t id = (uid > 0 && uid <= 0xFFFFFFFFLL) ? (std::uint32_t)uid : 0;
+		return samLuaPushValue(Ls, SAMAllyItems::toValue(SAMAllyItems::canEquip(id, item, slot)));
+#else
+		(void)uid; (void)item; (void)slot;
+		lua_pushnil(Ls); return 1;
+#endif
+	}
+
 	// sam_party_get_info(uid) -> table | nil.
 	int lua_sam_party_get_info(lua_State* Ls)
 	{
@@ -11179,6 +11207,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		samLuaRegister(L, "sam_party_is_member", lua_sam_party_is_member);
 		samLuaRegister(L, "sam_get_follower_leader", lua_sam_get_follower_leader);
 		samLuaRegister(L, "sam_monster_get_inventory", lua_sam_monster_get_inventory);
+		samLuaRegister(L, "sam_monster_can_equip", lua_sam_monster_can_equip);
 		samLuaRegister(L, "sam_party_get_info", lua_sam_party_get_info);
 		samLuaRegister(L, "sam_party_set_options", lua_sam_party_set_options);
 		samLuaRegister(L, "sam_party_list", lua_sam_party_list);

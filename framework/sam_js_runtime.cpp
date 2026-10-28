@@ -6781,6 +6781,45 @@ namespace
 #endif
 	}
 
+	// An item argument that is a uid or a type: a number, a name ("IRON_HELM", "ns:item"), or nothing
+	// (undefined and null both read as nothing, like nil in Lua).
+	SamValue samJsItemArg(JSContext* ctx, int argc, JSValueConst* argv, int i)
+	{
+		if ( !samHasArg(argc, argv, i) ) { return SamValue::nil(); }
+		if ( JS_IsString(argv[i]) )
+		{
+			const char* c = JS_ToCString(ctx, argv[i]);
+			SamValue v = SamValue::string(c ? c : "");
+			if ( c ) { JS_FreeCString(ctx, c); }
+			return v;
+		}
+		if ( JS_IsNumber(argv[i]) )
+		{
+			double d = 0;
+			JS_ToFloat64(ctx, &d, argv[i]);
+			if ( d == (double)(long long)d ) { return SamValue::integer((long long)d); }
+			return SamValue::number(d);
+		}
+		return SamValue::nil();
+	}
+
+	// sam_monster_can_equip(uid, item, slot) -> { ok, reason, text } | undefined.
+	JSValue js_sam_monster_can_equip(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0;
+		std::string slot;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_monster_can_equip") ) { return JS_UNDEFINED; }
+		if ( !samJsReqStr(ctx, argc, argv, 2, "sam_monster_can_equip", &slot) ) { return JS_UNDEFINED; }
+#ifdef SAM_JS_HAVE_BARONY
+		const SamValue item = samJsItemArg(ctx, argc, argv, 1);
+		const std::uint32_t id = (uid > 0 && uid <= 0xFFFFFFFFLL) ? (std::uint32_t)uid : 0;
+		return samJsFromValue(ctx, SAMAllyItems::toValue(SAMAllyItems::canEquip(id, item, slot)));
+#else
+		return JS_UNDEFINED;
+#endif
+	}
+
 	// sam_party_get_info(uid) -> object | undefined.
 	JSValue js_sam_party_get_info(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
@@ -9262,6 +9301,7 @@ namespace
 		samJsRegister(ctx, g, "sam_party_is_member", js_sam_party_is_member, 1);
 		samJsRegister(ctx, g, "sam_get_follower_leader", js_sam_get_follower_leader, 1);
 		samJsRegister(ctx, g, "sam_monster_get_inventory", js_sam_monster_get_inventory, 1);
+		samJsRegister(ctx, g, "sam_monster_can_equip", js_sam_monster_can_equip, 3);
 		samJsRegister(ctx, g, "sam_party_get_info", js_sam_party_get_info, 1);
 		samJsRegister(ctx, g, "sam_party_set_options", js_sam_party_set_options, 2);
 		samJsRegister(ctx, g, "sam_party_list", js_sam_party_list, 0);
