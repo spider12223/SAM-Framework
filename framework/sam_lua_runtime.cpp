@@ -2770,13 +2770,22 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		const lua_Integer player = luaL_checkinteger(Ls, 1);
 		const lua_Integer uid = luaL_checkinteger(Ls, 2);
 		const lua_Integer itemUid = luaL_checkinteger(Ls, 3);
-		const lua_Integer count = luaL_optinteger(Ls, 4, 0);
+		// nil is the whole stack; a number (or numeric string) is read as an integer, like JS; anything
+		// else is bad_count, the same answer JS gives.
+		bool countOk = true;
+		lua_Integer count = 0;
+		if ( !lua_isnoneornil(Ls, 4) )
+		{
+			if ( lua_isnumber(Ls, 4) ) { count = (lua_Integer)lua_tonumber(Ls, 4); }
+			else { countOk = false; }
+		}
 #ifdef SAM_LUA_HAVE_BARONY
+		if ( !countOk ) { return samLuaPushValue(Ls, SAMAllyItems::toValue(SAMAllyItems::Result{false, "bad_count", "That is not a number.", 0})); }
 		const std::uint32_t id = (uid > 0 && uid <= 0xFFFFFFFFLL) ? (std::uint32_t)uid : 0;
 		const std::uint32_t item = (itemUid > 0 && itemUid <= 0xFFFFFFFFLL) ? (std::uint32_t)itemUid : 0;
 		return samLuaPushValue(Ls, SAMAllyItems::toValue(SAMAllyItems::giveItem((int)player, id, item, (count < -1 || count > 0x7FFF) ? -1 : (int)count)));
 #else
-		(void)player; (void)uid; (void)itemUid; (void)count;
+		(void)player; (void)uid; (void)itemUid; (void)count; (void)countOk;
 		lua_pushnil(Ls); return 1;
 #endif
 	}
@@ -2788,13 +2797,22 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		const lua_Integer player = luaL_checkinteger(Ls, 1);
 		const lua_Integer uid = luaL_checkinteger(Ls, 2);
 		const lua_Integer itemUid = luaL_checkinteger(Ls, 3);
-		const lua_Integer count = luaL_optinteger(Ls, 4, 0);
+		// nil is the whole stack; a number (or numeric string) is read as an integer, like JS; anything
+		// else is bad_count, the same answer JS gives.
+		bool countOk = true;
+		lua_Integer count = 0;
+		if ( !lua_isnoneornil(Ls, 4) )
+		{
+			if ( lua_isnumber(Ls, 4) ) { count = (lua_Integer)lua_tonumber(Ls, 4); }
+			else { countOk = false; }
+		}
 #ifdef SAM_LUA_HAVE_BARONY
+		if ( !countOk ) { return samLuaPushValue(Ls, SAMAllyItems::toValue(SAMAllyItems::Result{false, "bad_count", "That is not a number.", 0})); }
 		const std::uint32_t id = (uid > 0 && uid <= 0xFFFFFFFFLL) ? (std::uint32_t)uid : 0;
 		const std::uint32_t item = (itemUid > 0 && itemUid <= 0xFFFFFFFFLL) ? (std::uint32_t)itemUid : 0;
 		return samLuaPushValue(Ls, SAMAllyItems::toValue(SAMAllyItems::takeItem((int)player, id, item, (count < -1 || count > 0x7FFF) ? -1 : (int)count)));
 #else
-		(void)player; (void)uid; (void)itemUid; (void)count;
+		(void)player; (void)uid; (void)itemUid; (void)count; (void)countOk;
 		lua_pushnil(Ls); return 1;
 #endif
 	}

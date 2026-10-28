@@ -21,9 +21,6 @@
 class Item;
 class Stat;
 
-class Item;
-class Stat;
-
 namespace SAMAllyItems
 {
 	// What a call answers: ok, or the reason it was refused (a short code a script can compare)
@@ -70,18 +67,6 @@ namespace SAMAllyItems
 	// Takes what is worn in `slot` back to the pockets (same Item, same uid). Refused: empty_slot,
 	// cursed (the engine's rule), pockets_full.
 	Result unequipToInventory(std::uint32_t uid, const std::string& slot);
-
-	// Item::canUnequip's decision without its side effect (it identifies the item): false for a
-	// cursed item its wielder cannot take off. The same rule as the runtimes' samItemCanUnequipQuiet
-	// (which are file-local, one per runtime); the ally calls need it in C++.
-	bool canUnequipQuiet(const Item* it, const Stat* wielder);
-
-	// Whether the ally `uid` may wear `item` in `slot`. `item` is the uid of an item in the ally's
-	// pockets or in a player's backpack on this host, or an item type (a number, a vanilla name or
-	// "ns:item"); a uid that names such an item wins over a type with the same number. The checks,
-	// in order, and the reason each gives: no_monster, no_ally, bad_slot, unknown_item, wrong_slot,
-	// race, cursed_in_slot, then item.on_before_monster_equip (mod_veto). Moves nothing.
-	Result canEquip(std::uint32_t uid, const SamValue& item, const std::string& slot);
 
 	// ---- moving between a player and an ally (a player who plays on this machine)
 

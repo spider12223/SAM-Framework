@@ -296,6 +296,10 @@ public:
 	// than a success that quietly does nothing.
 	static bool queueDestroy(uint32_t itemUid, int owner);
 
+	// Null every raw Item* the UI keeps outside the inventory list (an open book, ...) before an
+	// item changes owner without being freed: list_RemoveNode misses some of them.
+	static void forgetItemPointer(const Item* it);
+
 	// Called once per frame from game.cpp, after gameLogic() has returned and before any
 	// script runs, so nothing on the stack can be holding what we are about to free. On a
 	// multiplayer CLIENT, game.cpp never calls it (that call is host-only), so the inventory

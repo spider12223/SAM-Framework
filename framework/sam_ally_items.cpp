@@ -256,6 +256,9 @@ namespace
 		std::uint32_t ownerUid = 0;   // a remote give: the uid the player's own machine knows the item by
 	};
 	std::map<std::uint32_t, Ticket> g_tickets;   // in the order they were made
+	// Gives whose request was out when they were failed (link_reset, player_gone, a new run): the
+	// player's game may still answer ok, and by then the item has left them. id -> player.
+	std::map<std::uint32_t, int> g_lost;
 	std::uint32_t g_nextTicket = 1;
 
 	// The ops (offsets inside SAMNet::Op::PartyFirst; see sam_net.hpp). Host -> client and
@@ -539,7 +542,7 @@ namespace SAMAllyItems
 		Item* occupant = *slotPtr;
 		removeFromPockets(item);
 		*slotPtr = item;
-		if ( occupant && occupant != item ) { addToPockets(s, occupant); }
+		if ( occupant && occupant != item && !occupant->node ) { addToPockets(s, occupant); }
 		return r;
 	}
 
@@ -606,6 +609,7 @@ namespace SAMAllyItems
 				{
 					// The same Item changes hands: its node goes (the list's own clean-up of
 					// selection, hotbar and doll runs, the item is not freed) and the ally's list takes it.
+					SAMItems::forgetItemPointer(item);   // an open book is not cleared by the list
 					node_t* node = item->node;
 					node->deconstructor = &noFree;
 					list_RemoveNode(node);
@@ -671,6 +675,8 @@ namespace SAMAllyItems
 			if ( o.t.awaiting )
 			{
 				if ( remotePlayer(o.t.player) ) { ++it; continue; }
+				g_lost[o.t.id] = o.t.player;
+				SAM_WARN(MOD, "Player " + std::to_string(o.t.player) + " left while an item they gave to an ally was in transit (ticket " + std::to_string(o.t.id) + "; possible loss).");
 				fail(o, "player_gone");
 				o.t.awaiting = false;
 				o.skipPerform = true;
@@ -727,7 +733,26 @@ namespace SAMAllyItems
 		const int ok = rd.u8();
 		if ( !rd.ok ) { return; }
 		auto found = g_tickets.find(id);
-		if ( found == g_tickets.end() ) { return; }
+		if ( found == g_tickets.end() )
+		{
+			// Failed already (a repaired connection, a new run, a player who left) but the player's game
+			// went on and took the item off itself: nothing was made here, so it goes back to them.
+			auto lost = g_lost.find(id);
+			if ( lost != g_lost.end() && lost->second == from && ok )
+			{
+				g_lost.erase(lost);
+				const int type = (int)rd.u32(), count = rd.u16(), status = rd.u8();
+				const long long beat = rd.i64();
+				const std::uint32_t appearance = rd.u32();
+				const bool identified = rd.u8() != 0;
+				if ( rd.ok )
+				{
+					SAM_WARN(MOD, "An item player " + std::to_string(from) + " gave to an ally (ticket " + std::to_string(id) + ") arrived after the transfer had failed; it was sent back to them.");
+					sendBack(from, type, status, (int)beat, count, appearance, identified);
+				}
+			}
+			return;
+		}
 		const Ticket t = found->second;
 		if ( !t.give || !t.remote || !t.awaiting || t.player != from ) { return; }
 		g_tickets.erase(found);
@@ -741,7 +766,12 @@ namespace SAMAllyItems
 		const long long beat = rd.i64();
 		const std::uint32_t appearance = rd.u32();
 		const bool identified = rd.u8() != 0;
-		if ( !rd.ok ) { fireFailed(t, "link_reset"); return; }
+		if ( !rd.ok )
+		{
+			SAM_WARN(MOD, "Player " + std::to_string(from) + " answered an item given to an ally (ticket " + std::to_string(id) + ") with a broken message; it has left them (possible loss).");
+			fireFailed(t, "link_reset");
+			return;
+		}
 		Stat* as = nullptr;
 		if ( !monsterOf(t.allyUid, &as) || leaderOf(t.allyUid) != t.player )
 		{
@@ -768,6 +798,7 @@ namespace SAMAllyItems
 			if ( it->second.awaiting && it->second.player == player )
 			{
 				const Ticket t = it->second;
+				g_lost[t.id] = t.player;
 				it = g_tickets.erase(it);
 				SAM_WARN(MOD, "An item given to an ally by player " + std::to_string(player) + " (ticket " + std::to_string(t.id)
 					+ ") was still waiting when their connection was repaired; it may have been taken from them (possible loss).");
@@ -787,6 +818,7 @@ namespace SAMAllyItems
 			}
 		}
 		g_tickets.clear();
+		g_lost.clear();   // a new run: nothing that arrives now belongs to it
 	}
 }
 
