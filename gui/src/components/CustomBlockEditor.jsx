@@ -60,8 +60,8 @@ export default function CustomBlockEditor({ blocks, onChange, onClose }) {
   };
 
   return (
-    <Panel title="🧱 Your own blocks — “lego pack”">
-      <div className="text-xs mb-3" style={{ color: '#8a7a4a' }}>
+    <Panel title="Your own blocks — “lego pack”">
+      <div className="text-xs mb-3" style={{ color: 'var(--color-ink-dim)' }}>
         Build a brick once, reuse it forever, hand the pack to a friend. Use <span className="sam-mono">{'{name}'}</span> in
         the Lua for each parameter, and <span className="sam-mono">player</span> for whoever triggered it.
         Every template is checked against the real API before it saves.
@@ -84,8 +84,8 @@ export default function CustomBlockEditor({ blocks, onChange, onClose }) {
               <TextInput value={p.values} onChange={(v) => patchParam(i, 'values', v)} placeholder="HP, MP, GOLD" />
             </Field>
           )}
-          <GoldButton tone="red" className="mb-[2px]"
-            onClick={() => setDraft({ ...draft, params: draft.params.filter((_, j) => j !== i) })}>✕</GoldButton>
+          <GoldButton tone="red" className="mb-[2px] sam-remove" aria-label="remove this parameter"
+                onClick={() => setDraft({ ...draft, params: draft.params.filter((_, j) => j !== i) })}>✕</GoldButton>
         </div>
       ))}
       <GoldButton onClick={() => setDraft({ ...draft, params: [...draft.params, { name: '', type: 'text', default: '', values: '' }] })}>
@@ -98,7 +98,7 @@ export default function CustomBlockEditor({ blocks, onChange, onClose }) {
       </Field>
 
       <div className="sam-label mt-3 mb-1">Preview</div>
-      <pre className="sam-well p-2 text-xs overflow-x-auto" style={{ color: '#e8d5a3', whiteSpace: 'pre' }}>{preview}</pre>
+      <pre className="sam-well p-2 text-xs overflow-x-auto" style={{ color: 'var(--color-bone)', whiteSpace: 'pre' }}>{preview}</pre>
 
       {errors.length > 0 && <div className="mt-2"><ErrorList errors={errors} /></div>}
 
@@ -114,9 +114,9 @@ export default function CustomBlockEditor({ blocks, onChange, onClose }) {
           {blocks.map((b) => (
             <div key={b.id} className="sam-well p-2 mb-1 flex items-center gap-2">
               <span style={{ color: 'var(--color-gold-bright)', fontSize: '0.8rem' }}>{b.label}</span>
-              <span className="text-xs" style={{ color: '#6b5a35' }}>{b.kind}</span>
+              <span className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>{b.kind}</span>
               <GoldButton className="ml-auto" onClick={() => setDraft(b)}>Edit</GoldButton>
-              <GoldButton tone="red" onClick={() => onChange(blocks.filter((x) => x.id !== b.id))}>✕</GoldButton>
+              <GoldButton tone="red" className="sam-remove" aria-label={`remove ${b.id}`} onClick={() => onChange(blocks.filter((x) => x.id !== b.id))}>✕</GoldButton>
             </div>
           ))}
         </>

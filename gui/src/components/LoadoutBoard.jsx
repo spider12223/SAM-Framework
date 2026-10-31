@@ -16,7 +16,8 @@
  * and `_slot` are UI-only and stripped on save (see ClassEditor buildDef).
  */
 import { useState } from 'react';
-import { Panel, Select, NumberInput, ItemPickerModal } from '@/components/ui.jsx';
+import { Panel, Select, NumberInput, ItemPickerModal, PixelIcon, Gem } from '@/components/ui.jsx';
+import { itemIconUrl, SLOT_ICON_FILE } from '@/data/fallbackIcons.js';
 import {
   EQUIP_SLOTS, equipSlotOf, itemsForSlot, findSlot,
   BLESSING_MIN, BLESSING_MAX, blessingLabel, STATUSES, newEntry,
@@ -48,7 +49,7 @@ function Cell({ entry, ghostIcon, label, selected, onClick, onRemove, removeTitl
       <span className={`sam-slot-ico ${entry.identified ? '' : 'sam-slot-unid'}`} aria-hidden>{ghostIcon}</span>
       {b !== 0 && <span className={`sam-slot-bless ${b > 0 ? 'bless-pos' : 'bless-neg'}`}>{b > 0 ? `+${b}` : b}</span>}
       {entry.count > 1 && <span className="sam-slot-count">×{entry.count}</span>}
-      {handBadge && entry.count <= 1 && <span className="sam-slot-count" title="Also starts in hand (equipped)">✋</span>}
+      {handBadge && entry.count <= 1 && <span className="sam-slot-count" title="Also starts in hand (equipped)"><PixelIcon name="hand" /></span>}
       {!entry.identified && <span className="sam-slot-pip" title="unidentified">?</span>}
       <span className="sam-slot-x" title={removeTitle} onClick={(e) => { e.stopPropagation(); onRemove(); }}>✕</span>
     </div>
@@ -66,7 +67,7 @@ function EquipColumn({ slots, items, iconFor, selectedKey, onPick, onSelect, onR
             <div className="sam-slot-label">{slot.label}</div>
             <Cell
               entry={entry}
-              ghostIcon={entry ? iconFor(entry.type) : slot.icon}
+              ghostIcon={entry ? iconFor(entry.type) : <img className="sam-item-icon" src={itemIconUrl(SLOT_ICON_FILE[slot.id])} alt="" draggable={false} />}
               label={slot.label}
               selected={entry && entry._key === selectedKey}
               onClick={() => (entry ? onSelect(entry._key) : onPick(slot))}
@@ -110,7 +111,7 @@ function BlessingDial({ value, onChange }) {
           <button type="button" className="sam-linkish" title="a value beyond ±3" onClick={() => setManual(true)}>±</button>
         </div>
       )}
-      <div className="text-xs mt-1" style={{ color: b > 0 ? 'var(--color-gold-bright)' : b < 0 ? 'var(--color-blood)' : '#8a7749' }}>
+      <div className="text-xs mt-1" style={{ color: b > 0 ? 'var(--color-gold-bright)' : b < 0 ? 'var(--color-blood)' : 'var(--color-ink-dim)' }}>
         {blessingLabel(b)}
       </div>
     </div>
@@ -132,7 +133,7 @@ function DetailStrip({ entry, patch, onHotbar, iconFor, onRemove, category }) {
       <div className="flex items-center gap-2 mb-3">
         <span className="sam-pick-icon" aria-hidden>{iconFor(entry.type)}</span>
         <span className="flex-1 min-w-0 truncate" style={{ color: 'var(--color-parchment)', fontWeight: 600 }}>{entry.type}</span>
-        <span className="text-xs" style={{ color: '#8a7749' }}>{equipped ? 'equipped' : 'in backpack'}</span>
+        <span className="text-xs" style={{ color: 'var(--color-ink-dim)' }}>{equipped ? 'equipped' : 'in backpack'}</span>
         <button type="button" className="sam-step sam-remove" onClick={onRemove} aria-label="remove">✕</button>
       </div>
       <div className="sam-detailgrid">
@@ -166,7 +167,7 @@ function DetailStrip({ entry, patch, onHotbar, iconFor, onRemove, category }) {
           </div>
         )}
       </div>
-      <div className="text-xs mt-3" style={{ color: '#8a7749' }}>In game: <span style={{ color: 'var(--color-parchment)' }}>{plain}</span></div>
+      <div className="text-xs mt-3" style={{ color: 'var(--color-ink-dim)' }}>In game: <span style={{ color: 'var(--color-parchment)' }}>{plain}</span></div>
     </div>
   );
 }
@@ -243,11 +244,11 @@ export default function LoadoutBoard({ items, onChange, allTypes, iconFor, categ
     <Panel title="Starting Loadout">
       {onGold && (
         <div className="flex items-center gap-2 mb-3">
-          <span className="sam-label" style={{ fontSize: '0.8rem' }}>💰 Starting gold</span>
+          <span className="sam-label"><PixelIcon name="coin" /> Starting gold</span>
           <div style={{ width: 140 }}>
             <NumberInput value={gold} min={0} onChange={(v) => onGold(v === '' ? 0 : Math.max(0, Number(v)))} aria-label="starting gold" />
           </div>
-          <span className="text-xs" style={{ color: '#6b5a35' }}>Coins the class begins the run with.</span>
+          <span className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>Coins the class begins the run with.</span>
         </div>
       )}
       <div className="sam-loadout">
@@ -259,7 +260,7 @@ export default function LoadoutBoard({ items, onChange, allTypes, iconFor, categ
             <div className="sam-paperdoll-center">
               {portraitUrl
                 ? <img src={portraitUrl} alt="" className="sam-paperdoll-portrait" />
-                : <span className="sam-paperdoll-glyph" aria-hidden>🧍</span>}
+                : <span className="sam-paperdoll-empty">No portrait yet</span>}
             </div>
             <EquipColumn slots={right} items={items} iconFor={iconFor} selectedKey={selectedKey}
               onPick={(s) => setPicker({ slot: s })} onSelect={setSelectedKey} onRemove={remove} />
@@ -285,7 +286,7 @@ export default function LoadoutBoard({ items, onChange, allTypes, iconFor, categ
               </button>
             </div>
             {backpack.length === 0 && (
-              <div className="text-xs mt-2" style={{ color: '#6b5a35' }}>Backpack empty — click + to stash starting supplies.</div>
+              <div className="text-xs mt-2" style={{ color: 'var(--color-ink-faint)' }}>Backpack empty — click + to stash starting supplies.</div>
             )}
           </div>
 
@@ -310,19 +311,19 @@ export default function LoadoutBoard({ items, onChange, allTypes, iconFor, categ
                 );
               })}
             </div>
-            <div className="text-xs mt-2" style={{ color: '#6b5a35' }}>Numbered quick-use slots. Click one to pin a starting item, or set an item's Hotbar in its details. A pinned item that is not worn still counts as in the pack; a worn one (marked ✋) starts in hand and on that key, like the Wizard's staff.</div>
+            <div className="text-xs mt-2" style={{ color: 'var(--color-ink-faint)' }}>Numbered quick-use slots. Click one to pin a starting item, or set an item's Hotbar in its details. A pinned item that is not worn still counts as in the pack; a worn one (marked with a hand) starts in hand and on that key, like the Wizard's staff.</div>
           </div>
         </div>
       </div>
 
       {conflicts.length > 0 && (
-        <div className="sam-well mt-3" style={{ borderColor: 'var(--color-blood)' }}>
-          <div className="sam-error text-sm mb-2">⚠ {conflicts.length} item(s) want a slot that's already taken (Barony has one of each). Move them to the backpack:</div>
+        <div className="sam-well mt-3" style={{ borderImageSource: 'var(--px-field-error)' }}>
+          <div className="sam-error text-sm mb-2"><Gem kind="ruby" /> {conflicts.length} item(s) want a slot that's already taken (Barony has one of each). Move them to the backpack:</div>
           <div className="flex flex-wrap gap-2">
             {conflicts.map((it) => (
               <button key={it._key} type="button" className="sam-btn" style={{ padding: '0.2rem 0.5rem', fontSize: '0.78rem' }}
                 onClick={() => patch(it._key, { equip: false, _slot: undefined })}>
-                {iconFor(it.type)} {it.type} → backpack
+                <span className="sam-btn-icon">{iconFor(it.type)}</span> {it.type} → backpack
               </button>
             ))}
           </div>
@@ -332,7 +333,7 @@ export default function LoadoutBoard({ items, onChange, allTypes, iconFor, categ
       {/* DETAIL STRIP */}
       {selected
         ? <div className="mt-4"><DetailStrip entry={selected} patch={(f) => patch(selected._key, f)} onHotbar={(n) => setHotbar(selected._key, n)} iconFor={iconFor} category={categoryFor(selected.type)} onRemove={() => remove(selected._key)} /></div>
-        : <div className="text-sm mt-4 text-center" style={{ color: '#6b5a35' }}>Click a slot to gear up, or click an item to set its blessing.</div>}
+        : <div className="text-sm mt-4 text-center" style={{ color: 'var(--color-ink-faint)' }}>Click a slot to gear up, or click an item to set its blessing.</div>}
 
       {picker && (
         <ItemPickerModal

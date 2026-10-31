@@ -34,8 +34,9 @@ const MONSTER_TRAITS = [
 ];
 import {
   Panel, Field, TextInput, NumberInput, Select, Stepper, GoldButton,
-  SearchSelect, ErrorList, SavedNote, BalanceHints,
+  SearchSelect, ErrorList, SavedNote, BalanceHints, Gem,
 } from '@/components/ui.jsx';
+import { itemIconUrl } from '@/data/fallbackIcons.js';
 import { SoundMapEditor, soundMapToRows, rowsToSoundMap } from '@/components/AudioParts.jsx';
 
 function slugify(name) {
@@ -335,15 +336,15 @@ export default function MonsterEditor() {
   const hints = useMemo(() => checkBalance('monster', def), [def]);
 
   return (
-    <div className="space-y-4 max-w-7xl mx-auto">
+    <div className="space-y-4 max-w-7xl">
       {/* ------------------------------------------------ name + emblem */}
       <div className="flex items-center gap-4">
         <div
           className="sam-panel flex items-center justify-center shrink-0"
-          style={{ width: 84, height: 84, fontSize: '2.4rem' }}
+          style={{ width: 92, height: 92 }}
           aria-hidden
         >
-          👹
+          <img src={itemIconUrl('skull_mask.png')} alt="" className="sam-px" style={{ width: 72, height: 72 }} draggable={false} />
         </div>
         <div className="flex-1">
           <TextInput
@@ -353,7 +354,7 @@ export default function MonsterEditor() {
             style={{ fontSize: '1.5rem', padding: '0.7rem 1rem' }}
             aria-label="Monster name"
           />
-          <div className="mt-1 text-xs" style={{ color: '#6b5a35' }}>
+          <div className="mt-1 text-xs" style={{ color: 'var(--color-ink-faint)' }}>
             id: <span className="sam-mono">{monsterId}</span>{' '}(namespace comes from the Mod Builder)
           </div>
         </div>
@@ -382,7 +383,7 @@ export default function MonsterEditor() {
                   />
                   <span>
                     <span className="sam-mono">{key}</span>
-                    <span style={{ color: '#8a7749' }}> — {blurb}</span>
+                    <span style={{ color: 'var(--color-ink-dim)' }}> — {blurb}</span>
                   </span>
                 </label>
               ))}
@@ -434,7 +435,7 @@ export default function MonsterEditor() {
                 <div className="grid grid-cols-3 gap-3">
                   {[['forward', 'Forward'], ['side', 'Side'], ['up', 'Up']].map(([key, label]) => (
                     <label key={key} style={{ display: 'block' }}>
-                      <span style={{ fontSize: 11, color: '#8a7749' }}>{label}</span>
+                      <span style={{ fontSize: 11, color: 'var(--color-ink-dim)' }}>{label}</span>
                       <NumberInput
                         value={bodyOffset[key]}
                         onChange={(v) => setBodyOffset({ ...bodyOffset, [key]: v })}
@@ -461,7 +462,7 @@ export default function MonsterEditor() {
         </Panel>
 
         <Panel title="Stats" bodyClassName="max-h-[460px] overflow-y-auto">
-          <div className="text-xs mb-2" style={{ color: '#6b5a35' }}>Leave blank to keep the base type's value.</div>
+          <div className="text-xs mb-2" style={{ color: 'var(--color-ink-faint)' }}>Leave blank to keep the base type's value.</div>
           <div className="grid grid-cols-2 gap-2">
             {MONSTER_STAT_KEYS.map((k) => (
               <Field key={k} label={k}>
@@ -472,7 +473,7 @@ export default function MonsterEditor() {
         </Panel>
 
         <Panel title="Random Variance" bodyClassName="max-h-[460px] overflow-y-auto">
-          <div className="text-xs mb-2" style={{ color: '#6b5a35' }}>Adds a random 0..N to the stat on spawn.</div>
+          <div className="text-xs mb-2" style={{ color: 'var(--color-ink-faint)' }}>Adds a random 0..N to the stat on spawn.</div>
           <div className="grid grid-cols-2 gap-2">
             {MONSTER_RANDOM_STAT_KEYS.map((k) => (
               <Field key={k} label={k.replace('RANDOM_', '')}>
@@ -508,7 +509,7 @@ export default function MonsterEditor() {
                 className="justify-start text-left"
                 onClick={() => setFlags((p) => ({ ...p, [f]: !p[f] }))}
               >
-                {flags[f] ? '✓' : '○'} {flagLabel(f)}
+                {flags[f] && <Gem kind="emerald" />} {flagLabel(f)}
               </GoldButton>
             ))}
           </div>
@@ -541,7 +542,7 @@ export default function MonsterEditor() {
               <SearchSelect options={ownTrackIds} value={theme} onPick={setTheme} allowCustom
                 placeholder={ownTrackIds.length ? 'pick one of your tracks' : 'make one in the Music Editor'} />
               {theme && (
-                <button type="button" className="mt-1 text-xs underline" style={{ color: '#a03327' }} onClick={() => { setTheme(''); setThemeRange(''); }}>clear</button>
+                <button type="button" className="mt-1 text-xs underline" style={{ color: 'var(--color-ruby)' }} onClick={() => { setTheme(''); setThemeRange(''); }}>clear</button>
               )}
             </Field>
             <Field label="Within (tiles)" hint="Empty = anywhere on the floor.">
@@ -554,12 +555,12 @@ export default function MonsterEditor() {
       {/* ------------------------------------------------ equipment + inventory */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
         <Panel title="Equipped Items">
-          <div className="text-xs mb-2" style={{ color: '#6b5a35' }}>
+          <div className="text-xs mb-2" style={{ color: 'var(--color-ink-faint)' }}>
             Two+ entries in the same slot become a weighted random pick.
           </div>
           <div className="space-y-2 mb-3">
             {equip.length === 0 && (
-              <div className="text-sm py-2 text-center" style={{ color: '#6b5a35' }}>No equipment yet.</div>
+              <div className="text-sm py-2 text-center" style={{ color: 'var(--color-ink-faint)' }}>No equipment yet.</div>
             )}
             {equip.map((e, i) => (
               <EntryRow
@@ -575,12 +576,12 @@ export default function MonsterEditor() {
         </Panel>
 
         <Panel title="Inventory">
-          <div className="text-xs mb-2" style={{ color: '#6b5a35' }}>
+          <div className="text-xs mb-2" style={{ color: 'var(--color-ink-faint)' }}>
             Carried items — e.g. spellbooks it casts, potions, loot to drop.
           </div>
           <div className="space-y-2 mb-3">
             {inventory.length === 0 && (
-              <div className="text-sm py-2 text-center" style={{ color: '#6b5a35' }}>No inventory yet.</div>
+              <div className="text-sm py-2 text-center" style={{ color: 'var(--color-ink-faint)' }}>No inventory yet.</div>
             )}
             {inventory.map((e, i) => (
               <EntryRow
@@ -603,7 +604,7 @@ export default function MonsterEditor() {
             <NumberInput value={numFollowers} min={0} onChange={(v) => setNumFollowers(v === '' ? 0 : v)} />
           </Field>
           <div className="sam-divider" />
-          <div className="text-xs mb-2" style={{ color: '#6b5a35' }}>
+          <div className="text-xs mb-2" style={{ color: 'var(--color-ink-faint)' }}>
             Weighted picks. Reference other monsters as <span className="sam-mono">namespace:monster</span>, or <span className="sam-mono">default</span> for a vanilla one.
           </div>
           <div className="space-y-2 mb-3">
@@ -657,7 +658,7 @@ export default function MonsterEditor() {
                 tone={shop.generate_default_shop_items ? 'green' : 'gold'}
                 onClick={() => setShop((s) => ({ ...s, generate_default_shop_items: !s.generate_default_shop_items }))}
               >
-                {shop.generate_default_shop_items ? '✓ Yes' : '✗ No'}
+                {shop.generate_default_shop_items ? 'Yes' : 'No'}
               </GoldButton>
             </Field>
             <div className="grid grid-cols-3 gap-2 mt-3">
@@ -686,13 +687,13 @@ export default function MonsterEditor() {
       <div className="flex items-center justify-end gap-3">
         {savedAs && <SavedNote>Saved <span className="sam-mono">{savedAs}</span> to this session's mod — see Mod Builder.</SavedNote>}
         <GoldButton tone="red" onClick={save} disabled={!name.trim()}>
-          👹 Save Monster
+          Save Monster
         </GoldButton>
       </div>
 
       {/* ------------------------------------------------------ live JSON */}
       <Panel title="Live JSON Preview" bodyClassName="p-0">
-        <pre className="sam-mono m-0 p-4 overflow-x-auto text-xs" style={{ color: '#9b8a5a' }}>
+        <pre className="sam-mono m-0 p-4 overflow-x-auto text-xs" style={{ color: 'var(--color-ink-dim)' }}>
           {preview}
         </pre>
       </Panel>
@@ -705,12 +706,12 @@ function SpawnEditor({ spawn, setSpawn }) {
   const set = (i, patch) => setSpawn((prev) => prev.map((x, j) => (j === i ? { ...x, ...patch } : x)));
   return (
     <>
-      <div className="text-xs mb-2" style={{ color: '#6b5a35' }}>
+      <div className="text-xs mb-2" style={{ color: 'var(--color-ink-faint)' }}>
         Listing a level makes S.A.M manage its random spawns — keep <span className="sam-mono">default weight</span> &gt; 0 so vanilla monsters still appear.
       </div>
       <div className="space-y-3 mb-3">
         {spawn.length === 0 && (
-          <div className="text-sm py-2 text-center" style={{ color: '#6b5a35' }}>
+          <div className="text-sm py-2 text-center" style={{ color: 'var(--color-ink-faint)' }}>
             No spawns — this monster will only appear via followers, map editor, or the console.
           </div>
         )}

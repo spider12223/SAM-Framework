@@ -14,16 +14,16 @@
 /** Paperdoll slots in Barony's inventory-screen arrangement: two side columns flanking the
  *  character, with the weapon and shield at the bottom. `col` drives layout. */
 export const EQUIP_SLOTS = [
-  { id: 'helmet',      label: 'Head',    icon: '🪖', col: 'left'   },
-  { id: 'breastplate', label: 'Body',    icon: '🛡️', col: 'left'   },
-  { id: 'gloves',      label: 'Hands',   icon: '🧤', col: 'left'   },
-  { id: 'boots',       label: 'Feet',    icon: '🥾', col: 'left'   },
-  { id: 'cloak',       label: 'Cloak',   icon: '🧥', col: 'right'  },
-  { id: 'amulet',      label: 'Amulet',  icon: '📿', col: 'right'  },
-  { id: 'ring',        label: 'Ring',    icon: '💍', col: 'right'  },
-  { id: 'mask',        label: 'Face',    icon: '🕶️', col: 'right'  },
-  { id: 'weapon',      label: 'Weapon',  icon: '⚔️', col: 'bottom' },
-  { id: 'shield',      label: 'Offhand', icon: '🛡', col: 'bottom' },
+  { id: 'helmet',      label: 'Head',    col: 'left'   },
+  { id: 'breastplate', label: 'Body',    col: 'left'   },
+  { id: 'gloves',      label: 'Hands',   col: 'left'   },
+  { id: 'boots',       label: 'Feet',    col: 'left'   },
+  { id: 'cloak',       label: 'Cloak',   col: 'right'  },
+  { id: 'amulet',      label: 'Amulet',  col: 'right'  },
+  { id: 'ring',        label: 'Ring',    col: 'right'  },
+  { id: 'mask',        label: 'Face',    col: 'right'  },
+  { id: 'weapon',      label: 'Weapon',  col: 'bottom' },
+  { id: 'shield',      label: 'Offhand', col: 'bottom' },
 ];
 
 export const EQUIP_SLOT_IDS = EQUIP_SLOTS.map((s) => s.id);

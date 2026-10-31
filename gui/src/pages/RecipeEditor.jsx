@@ -17,7 +17,7 @@ import { validate } from '@/lib/validate.js';
 import { carryUnknown } from '@/lib/editorKeys.js';
 import { useMod } from '@/state/ModContext.jsx';
 import {
-  Panel, Field, NumberInput, Select, GoldButton, ErrorList, SavedNote, SearchSelect,
+  Panel, Field, NumberInput, Select, GoldButton, ErrorList, SavedNote, SearchSelect, Gem,
 } from '@/components/ui.jsx';
 
 const GRID_W = 5;
@@ -142,7 +142,7 @@ export default function RecipeEditor() {
     [item, kit, payWith, metal, magic, matA, matACount, matB, matBCount, tier, status, namespace, recipes]);
 
   return (
-    <div className="space-y-4 max-w-5xl mx-auto">
+    <div className="space-y-4 max-w-5xl">
       <Panel title="Crafting Recipes">
         <div className="text-sm mb-3" style={{ color: 'var(--color-parchment)' }}>
           Make one of your items craftable at a bench. The <b>Hunter's Workbench</b> ships inside
@@ -177,10 +177,10 @@ export default function RecipeEditor() {
 
         <div className="flex gap-2 my-3">
           <GoldButton tone={payWith === 'scrap' ? 'green' : 'gold'} onClick={() => setPayWith('scrap')}>
-            ⚙ Costs scrap
+            Costs scrap
           </GoldButton>
           <GoldButton tone={payWith === 'materials' ? 'green' : 'gold'} onClick={() => setPayWith('materials')}>
-            🦴 Costs your own items
+            Costs your own items
           </GoldButton>
         </div>
 
@@ -204,7 +204,7 @@ export default function RecipeEditor() {
               <div className="sam-well px-3 py-2 mt-2 text-sm" style={{ color: 'var(--color-parchment)' }}>
                 costs: <span className="sam-mono">{matACount} x {matA}</span>
                 {matB && <> + <span className="sam-mono">{matBCount || 1} x {matB}</span></>}
-                <div className="text-xs mt-1" style={{ color: '#8a7749' }}>
+                <div className="text-xs mt-1" style={{ color: 'var(--color-ink-dim)' }}>
                   Give each material an <b>icon</b> in the Item Editor, or the crafting panel shows
                   the scrap icon beside the number instead of your material.
                 </div>
@@ -213,10 +213,10 @@ export default function RecipeEditor() {
           </>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <Field label="⚙ Metal scrap" hint="Metal scrap consumed per craft.">
+            <Field label="Metal scrap" hint="Metal scrap consumed per craft.">
               <NumberInput value={metal} min={0} onChange={setMetal} />
             </Field>
-            <Field label="💎 Magic scrap" hint="Magic scrap consumed per craft.">
+            <Field label="Magic scrap" hint="Magic scrap consumed per craft.">
               <NumberInput value={magic} min={0} onChange={setMagic} />
             </Field>
             <div />
@@ -249,14 +249,14 @@ export default function RecipeEditor() {
 
         <div className="flex items-center justify-end gap-3 mt-4">
           {savedAs && <SavedNote>Saved <span className="sam-mono">{savedAs}</span> — see Mod Builder.</SavedNote>}
-          <GoldButton tone="red" onClick={save}>🔧 Save Recipe</GoldButton>
+          <GoldButton tone="red" onClick={save}>Save Recipe</GoldButton>
         </div>
         <ErrorList errors={errors} />
       </Panel>
 
       {/* ---------------------------------------------- the live grid preview */}
       <Panel title="Bench Grid Preview">
-        <div className="text-xs mb-3" style={{ color: '#8a7749' }}>
+        <div className="text-xs mb-3" style={{ color: 'var(--color-ink-dim)' }}>
           Each bench has a fixed <b>5 x 4 = 20 cells</b>, all of them yours. A recipe with
           nowhere to go is <b>invisible in game</b>, so watch the count.
         </div>
@@ -267,7 +267,7 @@ export default function RecipeEditor() {
               <div className="text-sm mb-1" style={{ color: 'var(--color-parchment)' }}>
                 {b === BUILTIN_KIT ? "Hunter's Workbench" : b}
               </div>
-              <div className="sam-well p-3" style={{ display: 'inline-block' }}>
+              <div className="sam-well p-3" style={{ display: 'inline-block', maxWidth: '100%', overflowX: 'auto' }}>
                 {Array.from({ length: GRID_H }, (_, y) => (
                   <div key={y} className="flex gap-1 mb-1">
                     {Array.from({ length: GRID_W }, (_, x) => {
@@ -278,12 +278,12 @@ export default function RecipeEditor() {
                           title={c ? c.full : 'empty cell'}
                           style={{
                             width: 92, height: 46,
-                            background: c ? 'rgba(157,199,106,0.18)' : 'transparent',
-                            border: c ? '1px solid #9dc76a' : '1px dashed #6b5a35',
+                            background: c ? 'rgba(63,154,85,0.18)' : 'transparent',
+                            border: c ? '1px solid var(--color-emerald-text)' : '1px dashed var(--color-ink-faint)',
                             borderRadius: 3,
                             display: 'flex', alignItems: 'center', justifyContent: 'center',
                             fontSize: '0.62rem', textAlign: 'center', padding: 2, overflow: 'hidden',
-                            color: c ? '#c8e6a0' : '#5a4a2a',
+                            color: c ? 'var(--color-emerald-text)' : 'var(--color-edge)',
                           }}
                         >
                           {c ? c.label : '—'}
@@ -294,13 +294,13 @@ export default function RecipeEditor() {
                 ))}
               </div>
               <div className="mt-2 text-sm">
-                <span style={{ color: lay.free > 0 ? '#9dc76a' : '#e07a6a' }}>
+                <span style={{ color: lay.free > 0 ? 'var(--color-emerald-text)' : 'var(--color-ruby-text)' }}>
                   {lay.free} free {lay.free === 1 ? 'cell' : 'cells'}
                 </span>
               </div>
               {lay.overflow.length > 0 && (
                 <div className="sam-error text-sm mt-2">
-                  ⚠ No room for {lay.overflow.length} recipe(s): {lay.overflow.join(', ')}.
+                  <Gem kind="ruby" /> No room for {lay.overflow.length} recipe(s): {lay.overflow.join(', ')}.
                   They will NOT appear in game.
                 </div>
               )}
@@ -316,8 +316,8 @@ export default function RecipeEditor() {
             {recipes.map((r) => (
               <div key={r.id} className="sam-well px-3 py-2 flex items-center gap-3">
                 <span style={{ flex: 1, color: 'var(--color-parchment)' }} className="text-sm">
-                  🔧 <span className="sam-mono">{r.item}</span>
-                  <span style={{ color: '#8a7749' }}>
+                  <span className="sam-mono">{r.item}</span>
+                  <span style={{ color: 'var(--color-ink-dim)' }}>
                     {' '}on {r.kit === BUILTIN_KIT ? "Hunter's Workbench" : r.kit}
                     {' '}— {r.materials
                       ? r.materials.map((m) => `${m.count ?? 1} x ${String(m.item).split(':').pop()}`).join(' + ')
@@ -337,7 +337,7 @@ export default function RecipeEditor() {
       )}
 
       <Panel title="Live JSON Preview" bodyClassName="p-0">
-        <pre className="sam-mono m-0 p-4 overflow-x-auto text-xs" style={{ color: '#9b8a5a' }}>{preview}</pre>
+        <pre className="sam-mono m-0 p-4 overflow-x-auto text-xs" style={{ color: 'var(--color-ink-dim)' }}>{preview}</pre>
       </Panel>
     </div>
   );

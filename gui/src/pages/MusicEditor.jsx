@@ -160,7 +160,7 @@ export default function MusicEditor() {
   const playsWhere = floors.values.length || maps.length;
 
   return (
-    <div className="space-y-4 max-w-5xl mx-auto">
+    <div className="space-y-4 max-w-5xl">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <ModeSwitch value={form.mode} onChange={(mode) => set({ mode })}
           options={[{ value: 'add', label: 'Add a track' }, { value: 'replace', label: 'Replace a game track' }]} />
@@ -176,7 +176,7 @@ export default function MusicEditor() {
         <div>
           <TextInput value={form.name} onChange={(name) => set({ name })} placeholder="Track name — e.g. Boss Fight"
             style={{ fontSize: '1.5rem', padding: '0.7rem 1rem' }} aria-label="Track name" />
-          <div className="mt-1 text-xs" style={{ color: '#6b5a35' }}>
+          <div className="mt-1 text-xs" style={{ color: 'var(--color-ink-faint)' }}>
             id: <span className="sam-mono">{trackId}</span> · play it from a script with{' '}
             <span className="sam-mono">sam_play_music("{trackId}")</span>, make it a monster's theme in the
             Monster Editor, or give it floors or maps below.
@@ -189,7 +189,7 @@ export default function MusicEditor() {
               ? 'Pick a track below. Everyone playing with your mod hears yours wherever the game would play it.'
               : isKnownMusicTarget(replaceValue)
                 ? <>Replacing <span className="sam-mono" style={{ color: 'var(--color-gold)' }}>{replaceValue}</span>.</>
-                : <span style={{ color: '#d4a84b' }}>“{replaceValue}” is not one of the listed names. An exact file name (like mines03) works; anything else is logged and skipped. /sam_music vanilla in the game console lists them all.</span>}
+                : <span style={{ color: 'var(--color-gold)' }}>“{replaceValue}” is not one of the listed names. An exact file name (like mines03) works; anything else is logged and skipped. /sam_music vanilla in the game console lists them all.</span>}
           </div>
           <VanillaMusicPicker value={form.replace} onPick={(name) => set({ replace: name })} />
           <Field label="…or type an exact name" className="mt-3" hint="A theme (shop), an area (mines), its fight track (mines_combat), or one exact file (mines03).">
@@ -210,7 +210,7 @@ export default function MusicEditor() {
           uploadLabel={form.rows.length ? 'Add another file' : 'Upload audio'}
           emptyText="No audio yet. Upload a track — several files take turns, the way the game rotates an area's tracks."
         />
-        <div className="text-xs mt-2" style={{ color: '#6b5a35' }}>
+        <div className="text-xs mt-2" style={{ color: 'var(--color-ink-faint)' }}>
           .ogg keeps a long track small. Tracks this big are not kept if you reload the page, so export or
           use Test in Barony before you close the tab.
         </div>
@@ -233,7 +233,7 @@ export default function MusicEditor() {
             </div>
             <div className="mt-4">
               <div className="sam-label mb-1">Fight track (optional)</div>
-              <div className="text-xs mb-2" style={{ color: '#6b5a35' }}>
+              <div className="text-xs mb-2" style={{ color: 'var(--color-ink-faint)' }}>
                 Played on those floors or maps while monsters are after you.
                 {!playsWhere && form.combat.length > 0 && ' It only does anything once the track has floors or maps.'}
               </div>
@@ -252,7 +252,7 @@ export default function MusicEditor() {
             </div>
           </>
         ) : (
-          <div className="text-xs mt-2" style={{ color: '#6b5a35' }}>
+          <div className="text-xs mt-2" style={{ color: 'var(--color-ink-faint)' }}>
             A replacement plays wherever the game would play the original, so it has no floors or maps of its
             own. To change an area's fight music, replace its <span className="sam-mono">_combat</span> track
             (e.g. <span className="sam-mono">mines_combat</span>).
@@ -263,11 +263,11 @@ export default function MusicEditor() {
       <ErrorList errors={errors} />
       <div className="flex items-center justify-end gap-3">
         {savedAs && <SavedNote>Saved <span className="sam-mono">{savedAs}</span> — see Mod Builder.</SavedNote>}
-        <GoldButton tone="green" onClick={save}>🎵 {origKey ? 'Save changes' : 'Save track'}</GoldButton>
+        <GoldButton tone="green" onClick={save}>{origKey ? 'Save changes' : 'Save track'}</GoldButton>
       </div>
 
       <Panel title='Live preview — this entry goes into mod.json "music"' bodyClassName="p-0">
-        <pre className="sam-mono m-0 p-4 overflow-x-auto text-xs" style={{ color: '#9b8a5a' }}>{JSON.stringify(def, null, 2)}</pre>
+        <pre className="sam-mono m-0 p-4 overflow-x-auto text-xs" style={{ color: 'var(--color-ink-dim)' }}>{JSON.stringify(def, null, 2)}</pre>
       </Panel>
     </div>
   );

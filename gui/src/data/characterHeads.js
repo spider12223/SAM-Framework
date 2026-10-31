@@ -47,7 +47,7 @@ export const HUMAN_HEADS = (() => {
       out.push({
         id: String(humanHeadSprite(sex, a)),
         index: humanHeadSprite(sex, a),
-        label: `${sex === 'male' ? '♂' : '♀'} ${toneOf(a)} — ${APPEARANCE_NAMES[a]}`,
+        label: `${sex === 'male' ? 'Male' : 'Female'}, ${toneOf(a)} — ${APPEARANCE_NAMES[a]}`,
         race: 'HUMAN',
         sex,
         tone: toneOf(a),
@@ -78,9 +78,9 @@ export const RACE_HEADS = [
   { race: 'GREMLIN',   male: 2047, female: 2048 },
   { race: 'GNOME',     male: 2213, female: 2214 },
 ].flatMap((r) => ([
-  { id: String(r.male), index: r.male, label: `♂ ${r.race}`, race: r.race, sex: 'male' },
+  { id: String(r.male), index: r.male, label: `${r.race}, male`, race: r.race, sex: 'male' },
   ...(r.female !== r.male
-    ? [{ id: String(r.female), index: r.female, label: `♀ ${r.race}`, race: r.race, sex: 'female' }]
+    ? [{ id: String(r.female), index: r.female, label: `${r.race}, female`, race: r.race, sex: 'female' }]
     : []),
 ]));
 

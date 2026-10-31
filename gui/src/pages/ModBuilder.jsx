@@ -19,7 +19,11 @@ import { isFsSupported, isFilePickSupported, getModsDirHandle, writeModToDir, re
 import { canonicalize, diffLines, collapseHunks, diffSummary } from '@/lib/jsonDiff.js';
 import { useMod } from '@/state/ModContext.jsx';
 import { Panel, Field, TextInput, GoldButton, ItemRow, ErrorList, SavedNote } from '@/components/ui.jsx';
+import { NAV_ICONS } from '@/data/navIcons.js';
 import { audioKey, audioFiles } from '@/lib/audio.js';
+
+// The picture for a saved thing in the lists below: the same item icon its editor has in the nav.
+const rowIcon = (to) => <img className="sam-item-icon" src={NAV_ICONS[to]} alt="" draggable={false} />;
 
 const BARONY_APPID = '371970';
 
@@ -188,7 +192,7 @@ export default function ModBuilder() {
   const summary = diffRows ? diffSummary(diffRows) : null;
 
   return (
-    <div className="space-y-4 max-w-7xl mx-auto">
+    <div className="space-y-4 max-w-7xl">
       {/* ------------------------------------------------ manifest */}
       <Panel title="Mod Manifest">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -221,15 +225,15 @@ export default function ModBuilder() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
         <Panel title="Dependencies">
           <div className="flex flex-wrap gap-2 mb-3 min-h-8">
-            {meta.dependencies.length === 0 && <span className="text-sm" style={{ color: '#6b5a35' }}>No dependencies. Add other S.A.M mods this one needs, integrates with, or conflicts with.</span>}
+            {meta.dependencies.length === 0 && <span className="text-sm" style={{ color: 'var(--color-ink-faint)' }}>No dependencies. Add other S.A.M mods this one needs, integrates with, or conflicts with.</span>}
             {meta.dependencies.map((d) => (
               <span key={d} className="sam-well px-2 py-1 text-sm inline-flex items-center gap-2" style={{ color: 'var(--color-parchment)' }}>
-                {d.startsWith('!') ? '⛔' : d.startsWith('?') ? '◇' : '◆'} <span className="sam-mono">{d}</span>
+                <span className="sam-hostonly" style={{ marginLeft: 0 }}>{d.startsWith('!') ? 'conflicts' : d.startsWith('?') ? 'optional' : 'requires'}</span> <span className="sam-mono">{d}</span>
                 <button type="button" className="sam-step sam-remove" style={{ width: 18, height: 18, fontSize: '0.7rem' }} onClick={() => removeDep(d)} aria-label={`remove ${d}`}>✕</button>
               </span>
             ))}
           </div>
-          <div className="grid grid-cols-[1fr_9rem_7rem_auto] gap-2 items-center">
+          <div className="grid grid-cols-2 sm:grid-cols-[1fr_9rem_7rem_auto] gap-2 items-center">
             <TextInput value={depDraft.ns} onChange={(v) => setDepDraft((p) => ({ ...p, ns: v }))} placeholder="other_mod" />
             <select className="sam-input" value={depDraft.kind} onChange={(e) => setDepDraft((p) => ({ ...p, kind: e.target.value }))}>
               <option value="required">required</option>
@@ -261,7 +265,7 @@ export default function ModBuilder() {
           <div className="space-y-2">
             {classes.length === 0 && <EmptyHint where="/class-editor" what="classes" />}
             {classes.map((def) => (
-              <ItemRow key={def.id} icon={scripts[def.id] ? '🛡📜' : '🛡'} name={def.name} sub={`${def.id}${scripts[def.id] ? ` · ${scripts[def.id].lang} script` : ''}`}
+              <ItemRow key={def.id} icon={rowIcon('/class-editor')} name={def.name} sub={`${def.id}${scripts[def.id] ? ` · ${scripts[def.id].lang} script` : ''}`}
                 onEdit={() => edit('class', def.id, '/class-editor')}
                 onClone={() => clone(def, 'saveClass', classes)}
                 onRemove={() => dispatch({ type: 'removeClass', id: def.id })} />
@@ -272,7 +276,7 @@ export default function ModBuilder() {
           <div className="space-y-2">
             {items.length === 0 && <EmptyHint where="/item-editor" what="items" />}
             {items.map((def) => (
-              <ItemRow key={def.id} icon="⚔" name={def.name_identified} sub={def.id}
+              <ItemRow key={def.id} icon={rowIcon('/item-editor')} name={def.name_identified} sub={def.id}
                 onEdit={() => edit('item', def.id, '/item-editor')}
                 onClone={() => clone(def, 'saveItem', items)}
                 onRemove={() => dispatch({ type: 'removeItem', id: def.id })} />
@@ -283,7 +287,7 @@ export default function ModBuilder() {
           <div className="space-y-2">
             {monsters.length === 0 && <EmptyHint where="/monster-editor" what="monsters" />}
             {monsters.map((def) => (
-              <ItemRow key={def.id} icon="👹" name={def.name} sub={def.id}
+              <ItemRow key={def.id} icon={rowIcon('/monster-editor')} name={def.name} sub={def.id}
                 onEdit={() => edit('monster', def.id, '/monster-editor')}
                 onClone={() => clone(def, 'saveMonster', monsters)}
                 onRemove={() => dispatch({ type: 'removeMonster', id: def.id })} />
@@ -297,7 +301,7 @@ export default function ModBuilder() {
           <div className="space-y-2">
             {spells.length === 0 && <EmptyHint where="/spell-editor" what="spells" />}
             {spells.map((def) => (
-              <ItemRow key={def.id} icon="✨" name={def.name} sub={`${def.id} · ${def.payload}`}
+              <ItemRow key={def.id} icon={rowIcon('/spell-editor')} name={def.name} sub={`${def.id} · ${def.payload}`}
                 onEdit={() => edit('spell', def.id, '/spell-editor')}
                 onClone={() => clone(def, 'saveSpell', spells)}
                 onRemove={() => dispatch({ type: 'removeSpell', id: def.id })} />
@@ -308,7 +312,7 @@ export default function ModBuilder() {
           <div className="space-y-2">
             {effects.length === 0 && <EmptyHint where="/effect-editor" what="effects" />}
             {effects.map((def) => (
-              <ItemRow key={def.id} icon="🌀" name={def.name} sub={effectSub(def)}
+              <ItemRow key={def.id} icon={rowIcon('/effect-editor')} name={def.name} sub={effectSub(def)}
                 onEdit={() => edit('effect', def.id, '/effect-editor')}
                 onClone={() => clone(def, 'saveEffect', effects)}
                 onRemove={() => dispatch({ type: 'removeEffect', id: def.id })} />
@@ -319,7 +323,7 @@ export default function ModBuilder() {
           <div className="space-y-2">
             {races.length === 0 && <EmptyHint where="/race-editor" what="races" />}
             {races.map((def) => (
-              <ItemRow key={def.id} icon={scripts[def.id] ? '🧬📜' : '🧬'} name={def.name} sub={raceSub(def, scripts)}
+              <ItemRow key={def.id} icon={rowIcon('/race-editor')} name={def.name} sub={raceSub(def, scripts)}
                 onEdit={() => edit('race', def.id, '/race-editor')}
                 onClone={() => clone(def, 'saveRace', races)}
                 onRemove={() => dispatch({ type: 'removeRace', id: def.id })} />
@@ -331,7 +335,7 @@ export default function ModBuilder() {
             {sounds.length === 0 && <EmptyHint where="/sound-editor" what="sounds" />}
             {/* Only an added sound can be duplicated: two entries replacing one game sound is one too many. */}
             {sounds.map((def) => (
-              <ItemRow key={audioKey(def)} icon={def.id ? '🔊' : '↻'} name={audioName(def)} sub={audioSub(def, assets, soundBits)}
+              <ItemRow key={audioKey(def)} icon={rowIcon('/sound-editor')} name={audioName(def)} sub={audioSub(def, assets, soundBits)}
                 onEdit={() => edit('sound', audioKey(def), '/sound-editor')}
                 onClone={def.id ? () => clone(def, 'saveSound', sounds) : undefined}
                 onRemove={() => dispatch({ type: 'removeSound', key: audioKey(def) })} />
@@ -342,7 +346,7 @@ export default function ModBuilder() {
           <div className="space-y-2">
             {music.length === 0 && <EmptyHint where="/music-editor" what="music" />}
             {music.map((def) => (
-              <ItemRow key={audioKey(def)} icon={def.id ? '🎵' : '↻'} name={audioName(def)} sub={audioSub(def, assets, musicBits)}
+              <ItemRow key={audioKey(def)} icon={rowIcon('/music-editor')} name={audioName(def)} sub={audioSub(def, assets, musicBits)}
                 onEdit={() => edit('music', audioKey(def), '/music-editor')}
                 onRemove={() => dispatch({ type: 'removeMusic', key: audioKey(def) })} />
             ))}
@@ -352,7 +356,7 @@ export default function ModBuilder() {
           <div className="space-y-2">
             {patches.length === 0 && <EmptyHint where="/patch-editor" what="patches" />}
             {patches.map((def) => (
-              <ItemRow key={def.target} icon="🧩" name={def.target} sub={`${def.operations.length} operation(s)`}
+              <ItemRow key={def.target} icon={rowIcon('/patch-editor')} name={def.target} sub={`${def.operations.length} operation(s)`}
                 onEdit={() => edit('patch', def.target, '/patch-editor')}
                 onRemove={() => dispatch({ type: 'removePatch', target: def.target })} />
             ))}
@@ -364,7 +368,7 @@ export default function ModBuilder() {
       <ErrorList errors={errors} />
       {importReport.length > 0 && (
         <div className="sam-well p-3">
-          <div className="sam-label mb-2" style={{ color: '#d4a84b' }}>Import notes ({importReport.length} skipped/flagged)</div>
+          <div className="sam-label mb-2" style={{ color: 'var(--color-gold)' }}>Import notes ({importReport.length} skipped/flagged)</div>
           <ul className="space-y-1">
             {importReport.map((r, i) => (
               <li key={i} className="text-sm"><span className="sam-mono">{r.path}</span> <span style={{ color: 'var(--color-parchment)' }}>— {r.message}</span></li>
@@ -384,16 +388,16 @@ export default function ModBuilder() {
 
       <input ref={zipRef} type="file" accept=".zip,application/zip" className="hidden" onChange={onImportFile} />
       <div className="flex flex-wrap items-center justify-end gap-3">
-        <a className="sam-btn" href={`steam://run/${BARONY_APPID}`} title="Launch Barony via Steam">▶ Launch Barony</a>
-        {isFilePickSupported && <GoldButton onClick={viewLog}>📄 Read sam_log.txt</GoldButton>}
-        <GoldButton onClick={() => zipRef.current?.click()}>📥 Import Mod (.zip)</GoldButton>
-        <GoldButton onClick={testInBarony} disabled={!canExport}>{isFsSupported ? '⚔ Test in Barony' : '⚔ Test in Barony (download)'}</GoldButton>
-        <GoldButton tone="green" onClick={exportMod} disabled={!canExport}>📦 Export Mod (.zip)</GoldButton>
+        <a className="sam-btn" href={`steam://run/${BARONY_APPID}`} title="Launch Barony via Steam">Launch Barony</a>
+        {isFilePickSupported && <GoldButton onClick={viewLog}>Read sam_log.txt</GoldButton>}
+        <GoldButton onClick={() => zipRef.current?.click()}>Import Mod (.zip)</GoldButton>
+        <GoldButton onClick={testInBarony} disabled={!canExport}>{isFsSupported ? 'Test in Barony' : 'Test in Barony (download)'}</GoldButton>
+        <GoldButton tone="green" onClick={exportMod} disabled={!canExport}>Export Mod (.zip)</GoldButton>
       </div>
       {isFsSupported && (
-        <div className="text-right text-xs" style={{ color: '#6b5a35' }}>
+        <div className="text-right text-xs" style={{ color: 'var(--color-ink-faint)' }}>
           "Test in Barony" writes <span className="sam-mono">mods/{meta.namespace || '<namespace>'}/</span> into a folder you pick once.
-          {' '}<button type="button" className="underline" style={{ color: '#8a6d2e' }} onClick={changeFolder}>change folder</button>
+          {' '}<button type="button" className="underline" style={{ color: 'var(--color-gold-dim)' }} onClick={changeFolder}>change folder</button>
         </div>
       )}
 
@@ -401,11 +405,11 @@ export default function ModBuilder() {
         <Panel title={`sam_log.txt — ${logLines.shown.length} of ${logLines.total} lines (errors/warnings + this mod)`}>
           <pre className="sam-mono m-0 p-3 overflow-x-auto text-xs sam-well" style={{ maxHeight: 320 }}>
             {logLines.shown.map((l, i) => (
-              <div key={i} style={{ color: /error/i.test(l) ? '#e07a6a' : /warn/i.test(l) ? '#d4a84b' : '#9b8a5a' }}>{l || ' '}</div>
+              <div key={i} style={{ color: /error/i.test(l) ? 'var(--color-ruby-text)' : /warn/i.test(l) ? 'var(--color-gold)' : 'var(--color-ink-dim)' }}>{l || ' '}</div>
             ))}
           </pre>
-          <div className="text-xs mt-2" style={{ color: '#6b5a35' }}>
-            Tip: sam_log.txt lives next to your Barony save data. <button type="button" className="underline" style={{ color: '#8a6d2e' }} onClick={() => readSamLog({ forcePick: true }).then(viewLog).catch(() => {})}>pick a different file</button>
+          <div className="text-xs mt-2" style={{ color: 'var(--color-ink-faint)' }}>
+            Tip: sam_log.txt lives next to your Barony save data. <button type="button" className="underline" style={{ color: 'var(--color-gold-dim)' }} onClick={() => readSamLog({ forcePick: true }).then(viewLog).catch(() => {})}>pick a different file</button>
           </div>
         </Panel>
       )}
@@ -413,15 +417,15 @@ export default function ModBuilder() {
       {/* ------------------------------------------------------- changes */}
       <Panel title="Changes Since Last Export / Import">
         {!baseline ? (
-          <div className="text-sm" style={{ color: '#6b5a35' }}>Export or import once to set a baseline — then this panel shows exactly what you've changed.</div>
+          <div className="text-sm" style={{ color: 'var(--color-ink-faint)' }}>Export or import once to set a baseline — then this panel shows exactly what you've changed.</div>
         ) : (
           <>
             <div className="flex items-center gap-3 mb-2">
-              <GoldButton onClick={() => setShowDiff((s) => !s)}>{showDiff ? '▾ Hide changes' : '▸ Show changes'}</GoldButton>
+              <GoldButton onClick={() => setShowDiff((s) => !s)}>{showDiff ? 'Hide changes' : 'Show changes'}</GoldButton>
               {summary && (
                 <span className="sam-mono text-sm">
                   {summary.added === 0 && summary.removed === 0
-                    ? <span style={{ color: '#6b5a35' }}>no changes since baseline</span>
+                    ? <span style={{ color: 'var(--color-ink-faint)' }}>no changes since baseline</span>
                     : <><span className="sam-diff-add-text">+{summary.added}</span>{' '}<span className="sam-diff-del-text">−{summary.removed}</span> lines</>}
                 </span>
               )}
@@ -442,7 +446,7 @@ export default function ModBuilder() {
 
       {/* --------------------------------------------------- layout hint */}
       <Panel title="Zip Layout">
-        <pre className="sam-mono m-0 text-xs" style={{ color: '#9b8a5a' }}>
+        <pre className="sam-mono m-0 text-xs" style={{ color: 'var(--color-ink-dim)' }}>
 {`${meta.namespace || 'mynamespace'}.zip
 ├─ mod.json
 ├─ classes/*.json   classes/*.lua|js|ts   (behavior scripts)
@@ -455,7 +459,7 @@ export default function ModBuilder() {
 ├─ patches/*.json
 └─ portraits/*.png  (uploaded art)`}
         </pre>
-        <p className="mt-2 text-sm" style={{ color: '#6b5a35' }}>
+        <p className="mt-2 text-sm" style={{ color: 'var(--color-ink-faint)' }}>
           Unzip into <span className="sam-mono">Barony/mods/{meta.namespace || '<namespace>'}/</span> and S.A.M loads it from the mods menu.
         </p>
       </Panel>
@@ -497,7 +501,7 @@ function audioSub(def, assets, extraBits) {
   const main = Array.isArray(def.file) ? def.file : def.file ? [def.file] : [];
   const bits = [main.length > 1 ? `${main.length} files` : (main[0] || '(no file)'), ...extraBits(def)];
   const missing = files.filter((f) => !assets?.[f]).length;
-  if (missing) bits.push(missing === files.length ? '⚠ audio not bundled' : `⚠ ${missing} of ${files.length} files not bundled`);
+  if (missing) bits.push(missing === files.length ? 'audio not bundled' : `${missing} of ${files.length} files not bundled`);
   return `${def.id ?? String(def.replace)} · ${bits.join(', ')}`;
 }
 
@@ -536,7 +540,7 @@ function effectSub(def) {
 
 function EmptyHint({ where, what }) {
   return (
-    <div className="text-sm py-2 text-center" style={{ color: '#6b5a35' }}>
+    <div className="text-sm py-2 text-center" style={{ color: 'var(--color-ink-faint)' }}>
       No {what} yet — forge one in the{' '}
       <span className="sam-mono" style={{ color: 'var(--color-parchment)' }}>{where}</span>.
     </div>

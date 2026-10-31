@@ -151,10 +151,10 @@ export default function CharacterBox({ sex = 'male', onSexChange, headId = '', h
       <div className="flex items-center gap-2 mb-2">
         {['male', 'female'].map((s) => (
           <GoldToggle key={s} active={sex === s} onClick={() => onSexChange?.(s)}>
-            {s === 'male' ? '♂ Male' : '♀ Female'}
+            {s === 'male' ? 'Male' : 'Female'}
           </GoldToggle>
         ))}
-        <span className="text-xs ml-auto" style={{ color: '#6b5a35' }}>drag to rotate</span>
+        <span className="text-xs ml-auto" style={{ color: 'var(--color-ink-faint)' }}>drag to rotate</span>
       </div>
       <canvas
         ref={canvasRef}
@@ -165,7 +165,7 @@ export default function CharacterBox({ sex = 'male', onSexChange, headId = '', h
         className="sam-well"
         style={{ width: '100%', height: 300, touchAction: 'none', cursor: 'grab', display: 'block' }}
       />
-      <div className="text-xs mt-1" style={{ color: '#6b5a35' }}>
+      <div className="text-xs mt-1" style={{ color: 'var(--color-ink-faint)' }}>
         {headLabel ? <>Head → {headLabel}</> : 'Head → (unset — players keep their own head)'}
         {!headModel.real && headId && (
           <span className="sam-error"> — custom .vox can’t be previewed; showing the default head</span>
@@ -182,8 +182,8 @@ function GoldToggle({ active, onClick, children }) {
       type="button" onClick={onClick} className="sam-btn"
       style={{
         padding: '0.25rem 0.7rem', fontSize: '0.78rem',
-        borderColor: active ? '#d4a84b' : undefined,
-        color: active ? '#f0cd7a' : undefined,
+        borderColor: active ? 'var(--color-gold)' : undefined,
+        color: active ? 'var(--color-gold-bright)' : undefined,
       }}
     >
       {children}

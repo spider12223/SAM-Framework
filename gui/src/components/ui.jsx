@@ -5,20 +5,42 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-/** Ornate panel with the «—◆ TITLE ◆—» header. */
+/** A framed window opened by a crimson option band, a fleur-de-lis either side of the title. */
 export function Panel({ title, children, className = '', bodyClassName = '' }) {
   return (
     <section className={`sam-panel ${className}`}>
       {title && (
         <header className="sam-panel-header">
-          <span className="sam-ornament">◆</span>
+          <span className="sam-fleur" aria-hidden />
           <span>{title}</span>
-          <span className="sam-ornament">◆</span>
+          <span className="sam-fleur" aria-hidden />
         </header>
       )}
       <div className={`p-4 ${bodyClassName}`}>{children}</div>
     </section>
   );
+}
+
+/**
+ * A drawn icon from scripts/pixel-art.mjs (`--icon-<name>`): the attributes (str dex con int per chr),
+ * the skills (sword axe mace polearm bow shield stealth key lens coin crown orb sparkle amulet flask)
+ * and a few marks (hand, mana). 20px is 2px a pixel; keep sizes to multiples of 10.
+ */
+export function PixelIcon({ name, size = 20, className = '', title }) {
+  if (!name) return null;
+  return (
+    <span
+      className={`sam-picon ${className}`}
+      style={{ width: size, height: size, backgroundImage: `var(--icon-${name})`, backgroundSize: `${size}px ${size}px` }}
+      aria-hidden={title ? undefined : true}
+      title={title}
+    />
+  );
+}
+
+/** One of Barony's three gems leading a state line: ruby an error, sapphire advice, emerald done. */
+export function Gem({ kind = 'sapphire' }) {
+  return <span className={`sam-gem sam-gem-sm sam-gem-${kind}`} aria-hidden />;
 }
 
 /** Small-caps label + arbitrary control. */
@@ -27,7 +49,7 @@ export function Field({ label, children, hint, className = '' }) {
     <label className={`block ${className}`}>
       <div className="sam-label mb-1">{label}</div>
       {children}
-      {hint && <div className="mt-1 text-xs" style={{ color: '#6b5a35' }}>{hint}</div>}
+      {hint && <div className="mt-1 text-xs" style={{ color: 'var(--color-ink-faint)' }}>{hint}</div>}
     </label>
   );
 }
@@ -103,7 +125,7 @@ export function GoldSlider({
   const clampBox = (v) => (v === '' ? 0 : Math.max(inputMin, Math.min(inputMax, v)));
   return (
     <div className="flex items-center gap-3 py-1.5">
-      {icon && <span className="w-5 text-center" aria-hidden>{icon}</span>}
+      {icon && <PixelIcon name={icon} />}
       <span className="sam-label w-11 shrink-0" style={{ fontSize: '0.95rem' }}>{label}</span>
       <input
         className="sam-slider flex-1"
@@ -131,10 +153,11 @@ export function GoldSlider({
 /** −/value/+ stepper row (matches Skill Levels rows). The ± buttons nudge by `step`, but
  *  the value box is editable so you can type an EXACT number — a class can start with
  *  Swords 3, not just multiples of 5. */
-export function Stepper({ label, sub, value, onChange, min = 0, max = 100, step = 1 }) {
+export function Stepper({ label, icon, sub, value, onChange, min = 0, max = 100, step = 1 }) {
   const clamp = (v) => Math.min(max, Math.max(min, v));
   return (
     <div className="flex items-center gap-2 py-1">
+      {icon && <PixelIcon name={icon} />}
       <span className="sam-label flex-1 truncate" style={{ fontSize: '0.95rem' }} title={sub}>
         {label}
       </span>
@@ -225,14 +248,14 @@ export function SearchSelect({ options, value, onPick, placeholder = 'Search…'
             allowCustom && query.trim() ? (
               <div
                 role="option"
-                className="px-3 py-1.5 cursor-pointer text-sm hover:bg-[rgba(212,168,75,0.12)]"
+                className="px-3 py-1.5 cursor-pointer text-sm hover:bg-[rgba(226,176,78,0.12)]"
                 style={{ color: 'var(--color-parchment)' }}
                 onMouseDown={() => { onPick(query.trim()); setOpen(false); }}
               >
-                Use “<span className="sam-mono">{query.trim()}</span>” <span style={{ color: '#6b5a35' }}>(custom)</span>
+                Use “<span className="sam-mono">{query.trim()}</span>” <span style={{ color: 'var(--color-ink-faint)' }}>(custom)</span>
               </div>
             ) : (
-              <div className="px-3 py-2 text-sm" style={{ color: '#6b5a35' }}>No matches</div>
+              <div className="px-3 py-2 text-sm" style={{ color: 'var(--color-ink-faint)' }}>No matches</div>
             )
           )}
           {matches.map((o) => (
@@ -240,7 +263,7 @@ export function SearchSelect({ options, value, onPick, placeholder = 'Search…'
               key={o}
               role="option"
               aria-selected={o === value}
-              className="px-3 py-1.5 cursor-pointer text-sm hover:bg-[rgba(212,168,75,0.12)]"
+              className="px-3 py-1.5 cursor-pointer text-sm hover:bg-[rgba(226,176,78,0.12)]"
               style={{ color: 'var(--color-parchment)' }}
               onMouseDown={() => { onPick(o); setOpen(false); }}
             >
@@ -248,7 +271,7 @@ export function SearchSelect({ options, value, onPick, placeholder = 'Search…'
             </div>
           ))}
           {matches.length === maxShown && (
-            <div className="px-3 py-1 text-xs" style={{ color: '#6b5a35' }}>
+            <div className="px-3 py-1 text-xs" style={{ color: 'var(--color-ink-faint)' }}>
               …type to narrow further
             </div>
           )}
@@ -259,14 +282,14 @@ export function SearchSelect({ options, value, onPick, placeholder = 'Search…'
 }
 
 /** Row in a Starting Items-style list: name, count box, optional clone, red X. */
-export function ItemRow({ icon = '⚔', name, count, onCount, onRemove, onClone, onEdit, sub }) {
+export function ItemRow({ icon = null, name, count, onCount, onRemove, onClone, onEdit, sub }) {
   return (
     <div className="sam-well flex items-center gap-3 px-3 py-2">
-      <span className="opacity-40 select-none cursor-grab" aria-hidden>⣿</span>
-      <span className="w-6 text-center" aria-hidden>{icon}</span>
+      <span className="sam-ico sam-ico-grip select-none cursor-grab" aria-hidden />
+      {icon && <span className="sam-row-icon" aria-hidden>{icon}</span>}
       <div className="flex-1 min-w-0">
         <div className="truncate" style={{ color: 'var(--color-parchment)' }}>{name}</div>
-        {sub && <div className="text-xs truncate" style={{ color: '#6b5a35' }}>{sub}</div>}
+        {sub && <div className="text-xs truncate" style={{ color: 'var(--color-ink-faint)' }}>{sub}</div>}
       </div>
       {onCount && (
         <input
@@ -279,10 +302,10 @@ export function ItemRow({ icon = '⚔', name, count, onCount, onRemove, onClone,
         />
       )}
       {onEdit && (
-        <button type="button" className="sam-step" onClick={onEdit} title="Edit" aria-label={`edit ${name}`}>✎</button>
+        <button type="button" className="sam-step" onClick={onEdit} title="Edit" aria-label={`edit ${name}`}><span className="sam-ico sam-ico-edit" aria-hidden /></button>
       )}
       {onClone && (
-        <button type="button" className="sam-step" onClick={onClone} title="Duplicate" aria-label={`duplicate ${name}`}>⧉</button>
+        <button type="button" className="sam-step" onClick={onClone} title="Duplicate" aria-label={`duplicate ${name}`}><span className="sam-ico sam-ico-copy" aria-hidden /></button>
       )}
       <button type="button" className="sam-step sam-remove" onClick={onRemove} aria-label={`remove ${name}`}>✕</button>
     </div>
@@ -293,17 +316,18 @@ export function ItemRow({ icon = '⚔', name, count, onCount, onRemove, onClone,
 export function BalanceHints({ hints }) {
   if (!hints || hints.length === 0) return null;
   return (
-    <div className="sam-well p-3" style={{ borderColor: '#7a5a2a' }}>
-      <div className="sam-label mb-2" style={{ color: '#d4a84b' }}>⚖ Balance Hints</div>
+    <div className="sam-well sam-well-advice p-3">
+      <div className="sam-label mb-2 flex items-center gap-2">
+        <span className="sam-gem sam-gem-sm sam-gem-sapphire" aria-hidden /> Balance hints
+      </div>
       <ul className="space-y-1">
         {hints.map((h, i) => (
-          <li key={i} className="text-sm" style={{ color: 'var(--color-parchment)' }}>
-            <span aria-hidden>{h.level === 'warn' ? '⚠' : 'ℹ'}</span>{' '}
+          <li key={i} className="text-sm" style={{ color: h.level === 'warn' ? 'var(--color-gold)' : 'var(--color-parchment)' }}>
             {h.message}
           </li>
         ))}
       </ul>
-      <div className="text-xs mt-2" style={{ color: '#6b5a35' }}>advisory only — these never block saving or exporting</div>
+      <div className="text-xs mt-2" style={{ color: 'var(--color-ink-faint)' }}>advisory only — these never block saving or exporting</div>
     </div>
   );
 }
@@ -313,7 +337,9 @@ export function ErrorList({ errors, className = '' }) {
   if (!errors || errors.length === 0) return null;
   return (
     <div className={`sam-well p-3 ${className}`}>
-      <div className="sam-label mb-2" style={{ color: '#e07a6a' }}>Validation Errors</div>
+      <div className="sam-label mb-2 flex items-center gap-2" style={{ color: 'var(--color-ruby-text)' }}>
+        <span className="sam-gem sam-gem-sm sam-gem-ruby" aria-hidden /> Validation errors
+      </div>
       <ul className="space-y-1">
         {errors.map((e, i) => (
           <li key={i} className="text-sm">
@@ -328,7 +354,12 @@ export function ErrorList({ errors, className = '' }) {
 
 /** Toast-ish inline confirmation. */
 export function SavedNote({ children }) {
-  return <div className="sam-ok text-sm mt-2">{children}</div>;
+  return (
+    <div className="sam-ok text-sm mt-2 flex items-center gap-2">
+      <span className="sam-gem sam-gem-sm sam-gem-emerald" aria-hidden />
+      <span>{children}</span>
+    </div>
+  );
 }
 
 /**
@@ -389,9 +420,9 @@ export function ItemPickerModal({ allTypes, iconFor, categoryFor, categories, on
     <div className="sam-modal-backdrop" onMouseDown={onClose}>
       <div className="sam-panel sam-modal" onMouseDown={(e) => e.stopPropagation()}>
         <header className="sam-panel-header">
-          <span className="sam-ornament">◆</span>
+          <span className="sam-fleur" aria-hidden />
           <span>{title}</span>
-          <span className="sam-ornament">◆</span>
+          <span className="sam-fleur" aria-hidden />
         </header>
         <div className="p-3">
           <input
@@ -402,9 +433,9 @@ export function ItemPickerModal({ allTypes, iconFor, categoryFor, categories, on
             placeholder={`Search ${allTypes.length} items — e.g. IRON_SWORD`}
           />
         </div>
-        <div className="flex-1 overflow-y-auto" style={{ borderTop: '1px solid #4a3617' }}>
+        <div className="flex-1 overflow-y-auto" style={{ borderTop: '1px solid var(--color-edge)' }}>
           {total === 0 ? (
-            <div className="px-3 py-6 text-sm text-center" style={{ color: '#6b5a35' }}>
+            <div className="px-3 py-6 text-sm text-center" style={{ color: 'var(--color-ink-faint)' }}>
               No items match “{query}”.
             </div>
           ) : (
@@ -415,15 +446,15 @@ export function ItemPickerModal({ allTypes, iconFor, categoryFor, categories, on
                   <div key={t} className="sam-pick-row" onMouseDown={() => { onPick(t); onClose(); }}>
                     <span className="sam-pick-icon" aria-hidden>{iconFor(t)}</span>
                     <span className="flex-1 truncate" style={{ color: 'var(--color-parchment)' }}>{t}</span>
-                    <span className="text-xs shrink-0" style={{ color: '#6b5a35' }}>{nice(cat)}</span>
+                    <span className="text-xs shrink-0" style={{ color: 'var(--color-ink-faint)' }}>{nice(cat)}</span>
                   </div>
                 ))}
               </div>
             ))
           )}
         </div>
-        <div className="px-3 py-2 flex items-center justify-between" style={{ borderTop: '1px solid #4a3617' }}>
-          <span className="text-xs" style={{ color: '#6b5a35' }}>{total} shown · Esc to close</span>
+        <div className="px-3 py-2 flex items-center justify-between" style={{ borderTop: '1px solid var(--color-edge)' }}>
+          <span className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>{total} shown · Esc to close</span>
           <GoldButton onClick={onClose}>Close</GoldButton>
         </div>
       </div>
@@ -496,7 +527,7 @@ export function InventoryGrid({ items, allTypes, iconFor, categoryFor, categorie
       </div>
 
       {items.length === 0 ? (
-        <div className="text-sm py-3 text-center" style={{ color: '#6b5a35' }}>
+        <div className="text-sm py-3 text-center" style={{ color: 'var(--color-ink-faint)' }}>
           Empty loadout — click a slot to add starting gear.
         </div>
       ) : (

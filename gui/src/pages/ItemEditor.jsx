@@ -43,8 +43,9 @@ import { checkOnHitEffect, describeOnHitEffect } from '@/lib/spellEffectRef.js';
 import { useMod } from '@/state/ModContext.jsx';
 import {
   Panel, Field, TextInput, NumberInput, Select, SearchSelect, GoldButton,
-  ErrorList, SavedNote, BalanceHints,
+  ErrorList, SavedNote, BalanceHints, Gem,
 } from '@/components/ui.jsx';
+import { itemIconUrl, CATEGORY_ICON_FILE } from '@/data/fallbackIcons.js';
 import { SoundMapEditor, soundMapToRows, rowsToSoundMap } from '@/components/AudioParts.jsx';
 
 function slugify(name) {
@@ -190,16 +191,16 @@ export default function ItemEditor() {
   const hints = useMemo(() => checkBalance('item', def), [def]);
 
   return (
-    <div className="space-y-4 max-w-7xl mx-auto">
+    <div className="space-y-4 max-w-7xl">
       {/* --------------------------------------------- names + emblem */}
       <div className="flex items-center gap-4">
         <div
           className="sam-panel flex items-center justify-center shrink-0"
-          style={{ width: 84, height: 84, fontSize: '2.2rem' }}
-          title="Item emblem (custom item art is planned — not yet loaded)"
+          style={{ width: 92, height: 92 }}
+          title="The icon of a vanilla item of this category"
           aria-hidden
         >
-          ⚔
+          <img src={itemIconUrl(CATEGORY_ICON_FILE[category] || 'SteelSword.png')} alt="" className="sam-px" style={{ width: 72, height: 72 }} draggable={false} />
         </div>
         <div className="flex-1 space-y-2">
           <TextInput
@@ -215,7 +216,7 @@ export default function ItemEditor() {
             placeholder="dark sword"
             aria-label="Unidentified item name"
           />
-          <div className="text-xs" style={{ color: '#6b5a35' }}>
+          <div className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>
             id: <span className="sam-mono">{itemId}</span>
             {' '}(namespace comes from the Mod Builder)
           </div>
@@ -258,7 +259,7 @@ export default function ItemEditor() {
                     />
                     <span>
                       <span className="sam-mono">{key}</span>
-                      <span style={{ color: '#8a7749' }}> — {blurb}</span>
+                      <span style={{ color: 'var(--color-ink-dim)' }}> — {blurb}</span>
                     </span>
                   </label>
                 ))}
@@ -287,7 +288,7 @@ export default function ItemEditor() {
                       <span className="sam-mono">EFF_POISONED</span>.
                       {onHitNote && (
                         <span className={onHitNote.tone === 'warn' ? 'sam-error block mt-1' : 'block mt-1'}
-                          style={onHitNote.tone === 'ok' ? { color: '#9dc76a' } : undefined}>
+                          style={onHitNote.tone === 'ok' ? { color: 'var(--color-emerald-text)' } : undefined}>
                           {onHitNote.tone === 'ok' ? '\u2713 ' : '\u26a0 '}{onHitNote.text}
                         </span>
                       )}
@@ -349,14 +350,14 @@ export default function ItemEditor() {
               tone={stackable ? 'green' : 'gold'}
               onClick={() => setStackable((s) => !s)}
             >
-              {stackable ? '✓ Stacks in one slot' : '✗ Does not stack'}
+              {stackable ? 'Stacks in one slot' : 'Does not stack'}
             </GoldButton>
           </Field>
         </Panel>
 
         <Panel title="Appearance">
-          <div className="mb-3 text-xs" style={{ color: '#9dc76a' }}>
-            ✓ Ship your OWN <span className="sam-mono">.vox</span> model, borrow a vanilla one, or set a custom
+          <div className="mb-3 text-xs" style={{ color: 'var(--color-emerald-text)' }}>
+            <Gem kind="emerald" /> Ship your OWN <span className="sam-mono">.vox</span> model, borrow a vanilla one, or set a custom
             2D icon — all load in-game (custom models: v1.3.3+).
           </div>
           <div className="space-y-3">
@@ -385,7 +386,7 @@ export default function ItemEditor() {
                 allowCustom
               />
               {modelFromItem && (
-                <button type="button" className="mt-1 text-xs underline" style={{ color: '#a03327' }} onClick={() => setModelFromItem('')}>clear</button>
+                <button type="button" className="mt-1 text-xs underline" style={{ color: 'var(--color-ruby)' }} onClick={() => setModelFromItem('')}>clear</button>
               )}
             </Field>
             {WORN_SLOTS[slot] && (
@@ -403,7 +404,7 @@ export default function ItemEditor() {
                   allowCustom
                 />
                 {wornLike && (
-                  <button type="button" className="mt-1 text-xs underline" style={{ color: '#a03327' }} onClick={() => setWornLike('')}>clear</button>
+                  <button type="button" className="mt-1 text-xs underline" style={{ color: 'var(--color-ruby)' }} onClick={() => setWornLike('')}>clear</button>
                 )}
               </Field>
             )}
@@ -414,7 +415,7 @@ export default function ItemEditor() {
         </Panel>
 
         <Panel title="Attributes">
-          <div className="text-xs mb-2" style={{ color: '#6b5a35' }}>
+          <div className="text-xs mb-2" style={{ color: 'var(--color-ink-faint)' }}>
             Whole numbers the game reads: <span className="sam-mono">ATK</span> and <span className="sam-mono">AC</span>,
             the two <span className="sam-mono">TINKER_SALVAGE_</span> keys, and the spell keys{' '}
             (<span className="sam-mono">spellbook_spell</span>, <span className="sam-mono">tome_spell</span>,{' '}
@@ -426,7 +427,7 @@ export default function ItemEditor() {
           </div>
           <div className="flex flex-wrap gap-2 mb-3 min-h-8">
             {attribs.length === 0 && (
-              <div className="text-sm" style={{ color: '#6b5a35' }}>No attributes yet.</div>
+              <div className="text-sm" style={{ color: 'var(--color-ink-faint)' }}>No attributes yet.</div>
             )}
             {attribs.map((a) => (
               <span
@@ -500,23 +501,23 @@ export default function ItemEditor() {
           </SavedNote>
         )}
         <GoldButton tone="red" onClick={save} disabled={!nameId.trim()}>
-          ⚔ Save Item
+          Save Item
         </GoldButton>
       </div>
 
       {/* --------------------------------------------------- preview card */}
       <Panel title="Preview">
         <div className="sam-well p-3 flex gap-3 items-start" style={{ maxWidth: 440 }}>
-          <div className="sam-panel flex items-center justify-center shrink-0" style={{ width: 56, height: 56, fontSize: '1.8rem', padding: 0 }} aria-hidden>⚔</div>
+          <div className="sam-panel flex items-center justify-center shrink-0" style={{ width: 56, height: 56, padding: 0 }} aria-hidden><img src={itemIconUrl(CATEGORY_ICON_FILE[category] || 'SteelSword.png')} alt="" className="sam-px" style={{ width: 36, height: 36 }} draggable={false} /></div>
           <div className="flex-1 min-w-0">
             <div style={{ color: 'var(--color-gold-bright)', fontSize: '1.05rem' }}>{def.name_identified || 'Unnamed item'}</div>
-            {def.name_unidentified && <div className="text-xs" style={{ color: '#6b5a35' }}>unidentified: “{def.name_unidentified}”</div>}
+            {def.name_unidentified && <div className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>unidentified: “{def.name_unidentified}”</div>}
             <div className="text-xs mt-1" style={{ color: 'var(--color-parchment)' }}>
               {def.category}{def.slot && def.slot !== 'NO_EQUIP' ? ` · ${def.slot.replace('EQUIPPABLE_IN_SLOT_', '').toLowerCase()}` : ''}
               {def.stackable ? ' · stackable' : ''}{def.magic_level ? ` · magic ${def.magic_level}` : ''}
             </div>
-            <div className="text-xs mt-1 sam-mono" style={{ color: '#9b8a5a' }}>wgt {def.weight} · {def.gold_value}g · lvl {def.level}</div>
-            <div className="text-xs mt-1" style={{ color: '#9dc76a' }}>
+            <div className="text-xs mt-1 sam-mono" style={{ color: 'var(--color-ink-dim)' }}>wgt {def.weight} · {def.gold_value}g · lvl {def.level}</div>
+            <div className="text-xs mt-1" style={{ color: 'var(--color-emerald-text)' }}>
               model: {def.model_from_item || (def.slot && def.slot !== 'NO_EQUIP' ? `auto (${def.slot.replace('EQUIPPABLE_IN_SLOT_', '').toLowerCase()} placeholder)` : 'category placeholder')}
             </div>
             {def.attributes && (
@@ -532,7 +533,7 @@ export default function ItemEditor() {
 
       {/* -------------------------------------------------- live JSON */}
       <Panel title="Live JSON Preview" bodyClassName="p-0">
-        <pre className="sam-mono m-0 p-4 overflow-x-auto text-xs" style={{ color: '#9b8a5a' }}>
+        <pre className="sam-mono m-0 p-4 overflow-x-auto text-xs" style={{ color: 'var(--color-ink-dim)' }}>
           {preview}
         </pre>
       </Panel>

@@ -7,7 +7,7 @@
 import { useRef, useState } from 'react';
 import { SCHEMA_KINDS, validate } from '@/lib/validate.js';
 import {
-  Panel, Field, Select, GoldButton, ErrorList, SavedNote,
+  Panel, Field, Select, GoldButton, ErrorList, SavedNote, Gem,
 } from '@/components/ui.jsx';
 
 /** Friendly labels for the schema kinds. */
@@ -65,7 +65,7 @@ function highlight(raw, token) {
   if (!token) return raw;
   const parts = raw.split(token);
   if (parts.length === 1) return raw; // token not present — skip highlight
-  const markStyle = { background: 'rgba(160,51,39,0.35)', color: '#e07a6a' };
+  const markStyle = { background: 'rgba(160,51,39,0.35)', color: 'var(--color-ruby-text)' };
   const out = [];
   parts.forEach((part, i) => {
     if (i > 0) out.push(<mark key={`m${i}`} style={markStyle}>{token}</mark>);
@@ -140,7 +140,7 @@ export default function Validator() {
   const token = showSource ? lastToken(errors[0]?.path) : '';
 
   return (
-    <div className="space-y-4 max-w-7xl mx-auto">
+    <div className="space-y-4 max-w-7xl">
       {/* ------------------------------------------------------ load JSON */}
       <Panel title="Load JSON">
         <input
@@ -151,8 +151,8 @@ export default function Validator() {
           onChange={onFile}
         />
         <div className="flex items-center gap-3 mb-3">
-          <GoldButton onClick={() => fileRef.current?.click()}>📂 Upload .json</GoldButton>
-          <span className="text-xs" style={{ color: '#6b5a35' }}>
+          <GoldButton onClick={() => fileRef.current?.click()}>Upload .json</GoldButton>
+          <span className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>
             …or paste the JSON below. Uploading fills the box.
           </span>
         </div>
@@ -177,7 +177,7 @@ export default function Validator() {
             <Select value={schemaKind} onChange={setSchemaKind} options={schemaOptions} />
           </Field>
           <GoldButton onClick={runValidate} disabled={!text.trim()}>
-            ✓ Validate
+            Validate
           </GoldButton>
         </div>
       </Panel>
@@ -185,7 +185,7 @@ export default function Validator() {
       {/* -------------------------------------------------------- results */}
       {success && (
         <SavedNote>
-          ✓ Valid {success.kind} JSON — {success.count} field{success.count === 1 ? '' : 's'} checked.
+          <Gem kind="emerald" /> Valid {success.kind} JSON — {success.count} field{success.count === 1 ? '' : 's'} checked.
           {' '}Validated against <span className="sam-mono">{success.file}</span>.
         </SavedNote>
       )}
@@ -193,12 +193,12 @@ export default function Validator() {
 
       {showSource && (
         <Panel title="Source" bodyClassName="p-0">
-          <div className="px-4 pt-3 text-xs" style={{ color: '#6b5a35' }}>
+          <div className="px-4 pt-3 text-xs" style={{ color: 'var(--color-ink-faint)' }}>
             {token
               ? <>Highlighting <span className="sam-mono sam-error">{token}</span> — the field at the first error.</>
               : 'The JSON that failed to validate.'}
           </div>
-          <pre className="sam-mono m-0 p-4 overflow-x-auto text-xs" style={{ color: '#9b8a5a' }}>
+          <pre className="sam-mono m-0 p-4 overflow-x-auto text-xs" style={{ color: 'var(--color-ink-dim)' }}>
             {highlight(text, token)}
           </pre>
         </Panel>
@@ -209,12 +209,12 @@ export default function Validator() {
         <div className="text-sm space-y-1" style={{ color: 'var(--color-parchment)' }}>
           <div>Validation runs against the six source-of-truth schemas that live in <span className="sam-mono">SAM-Framework/schemas/</span>:</div>
           <ul className="space-y-1 mt-2">
-            <li><span className="sam-mono">mod.schema.json</span> <span style={{ color: '#6b5a35' }}>— the {SCHEMA_LABELS.mod.toLowerCase()}</span></li>
-            <li><span className="sam-mono">class.schema.json</span> <span style={{ color: '#6b5a35' }}>— a {SCHEMA_LABELS.class.toLowerCase()}</span></li>
-            <li><span className="sam-mono">item.schema.json</span> <span style={{ color: '#6b5a35' }}>— an {SCHEMA_LABELS.item.toLowerCase()}</span></li>
-            <li><span className="sam-mono">monster.schema.json</span> <span style={{ color: '#6b5a35' }}>— a {SCHEMA_LABELS.monster.toLowerCase()}</span></li>
-            <li><span className="sam-mono">spell.schema.json</span> <span style={{ color: '#6b5a35' }}>— a {SCHEMA_LABELS.spell.toLowerCase()}</span></li>
-            <li><span className="sam-mono">patch.schema.json</span> <span style={{ color: '#6b5a35' }}>— a {SCHEMA_LABELS.patch.toLowerCase()}</span></li>
+            <li><span className="sam-mono">mod.schema.json</span> <span style={{ color: 'var(--color-ink-faint)' }}>— the {SCHEMA_LABELS.mod.toLowerCase()}</span></li>
+            <li><span className="sam-mono">class.schema.json</span> <span style={{ color: 'var(--color-ink-faint)' }}>— a {SCHEMA_LABELS.class.toLowerCase()}</span></li>
+            <li><span className="sam-mono">item.schema.json</span> <span style={{ color: 'var(--color-ink-faint)' }}>— an {SCHEMA_LABELS.item.toLowerCase()}</span></li>
+            <li><span className="sam-mono">monster.schema.json</span> <span style={{ color: 'var(--color-ink-faint)' }}>— a {SCHEMA_LABELS.monster.toLowerCase()}</span></li>
+            <li><span className="sam-mono">spell.schema.json</span> <span style={{ color: 'var(--color-ink-faint)' }}>— a {SCHEMA_LABELS.spell.toLowerCase()}</span></li>
+            <li><span className="sam-mono">patch.schema.json</span> <span style={{ color: 'var(--color-ink-faint)' }}>— a {SCHEMA_LABELS.patch.toLowerCase()}</span></li>
           </ul>
         </div>
       </Panel>

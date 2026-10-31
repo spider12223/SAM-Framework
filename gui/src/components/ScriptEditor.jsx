@@ -9,7 +9,7 @@ import { SAM_FUNCTIONS, SAM_EVENTS } from '@/data/samApi.js';
 import { SNIPPETS } from '@/data/snippets.js';
 import { lintScript } from '@/lib/lintScript.js';
 import { generateLua } from '@/lib/codegen.js';
-import { GoldButton } from '@/components/ui.jsx';
+import { GoldButton, Gem } from '@/components/ui.jsx';
 import BlockBuilder from '@/components/BlockBuilder.jsx';
 
 const LANGS = [
@@ -105,7 +105,7 @@ export default function ScriptEditor({ code, onCode, lang, onLang, pathHint = 'c
   const ModeTabs = (
     <div className="flex items-center gap-1 mb-3">
       {[
-        { id: 'basic', label: '🧱 Basic', hint: 'build it from blocks' },
+        { id: 'basic', label: 'Basic', hint: 'build it from blocks' },
         { id: 'advanced', label: '</> Advanced', hint: 'write the code' },
       ].map((m) => (
         <button
@@ -121,7 +121,7 @@ export default function ScriptEditor({ code, onCode, lang, onLang, pathHint = 'c
           onClick={() => setMode(m.id)}
         >{m.label}</button>
       ))}
-      <span className="text-xs ml-2" style={{ color: '#6b5a35' }}>
+      <span className="text-xs ml-2" style={{ color: 'var(--color-ink-faint)' }}>
         {mode === 'basic'
           ? 'Pick a trigger, add conditions and actions — it writes the Lua for you.'
           : 'Full editor with the API, events and snippets.'}
@@ -155,7 +155,7 @@ export default function ScriptEditor({ code, onCode, lang, onLang, pathHint = 'c
       {/* -------- editor -------- */}
       <div>
         <div className="flex items-center gap-2 mb-2">
-          <span className="sam-label" style={{ color: '#8a6d2e' }}>Language</span>
+          <span className="sam-label" style={{ color: 'var(--color-gold-dim)' }}>Language</span>
           <div className="flex gap-1">
             {LANGS.map((l) => (
               <button
@@ -171,7 +171,7 @@ export default function ScriptEditor({ code, onCode, lang, onLang, pathHint = 'c
               >{l.label}</button>
             ))}
           </div>
-          <span className="text-xs ml-auto" style={{ color: '#6b5a35' }}>
+          <span className="text-xs ml-auto" style={{ color: 'var(--color-ink-faint)' }}>
             ships as <span className="sam-mono">{pathHint}.{lang}</span>
           </span>
         </div>
@@ -187,16 +187,16 @@ export default function ScriptEditor({ code, onCode, lang, onLang, pathHint = 'c
           style={{ fontSize: '0.8rem', lineHeight: 1.5, whiteSpace: 'pre', overflowWrap: 'normal', tabSize: 4 }}
         />
         {diagnostics.length > 0 && (
-          <div className="sam-well p-2 mt-2" style={{ borderColor: '#7a5a2a' }}>
-            <div className="sam-label mb-1" style={{ color: '#d4a84b' }}>⚠ {diagnostics.length} hint{diagnostics.length === 1 ? '' : 's'}</div>
+          <div className="sam-well p-2 mt-2" style={{ borderColor: 'var(--color-gold-dim)' }}>
+            <div className="sam-label mb-1" style={{ color: 'var(--color-gold)' }}><Gem kind="sapphire" /> {diagnostics.length} hint{diagnostics.length === 1 ? '' : 's'}</div>
             <ul className="space-y-1">
               {diagnostics.slice(0, 20).map((d, i) => (
                 <li key={i} className="text-xs" style={{ color: 'var(--color-parchment)' }}>
-                  <span className="sam-mono" style={{ color: '#8a6d2e' }}>line {d.line}</span> — {d.message}
+                  <span className="sam-mono" style={{ color: 'var(--color-gold-dim)' }}>line {d.line}</span> — {d.message}
                 </li>
               ))}
             </ul>
-            <div className="text-xs mt-1" style={{ color: '#6b5a35' }}>advisory — checked against the SAM API; never blocks saving/export</div>
+            <div className="text-xs mt-1" style={{ color: 'var(--color-ink-faint)' }}>advisory — checked against the SAM API; never blocks saving/export</div>
           </div>
         )}
       </div>
@@ -237,7 +237,7 @@ export default function ScriptEditor({ code, onCode, lang, onLang, pathHint = 'c
             >
               <span className="sam-mono" style={{ color: 'var(--color-gold)', fontSize: '0.72rem' }}>{callSignature(f)}</span>
               {f.hostOnly && <span className="sam-hostonly" title="Host-authoritative — runs on host/singleplayer only">host</span>}
-              <span className="block text-xs" style={{ color: '#6b5a35' }}>{f.desc}</span>
+              <span className="block text-xs" style={{ color: 'var(--color-ink-faint)' }}>{f.desc}</span>
             </button>
           ))}
           {tab === 'events' && events.map((e) => (
@@ -249,8 +249,8 @@ export default function ScriptEditor({ code, onCode, lang, onLang, pathHint = 'c
               onClick={() => insert(eventSkeleton(e, lang))}
             >
               <span className="sam-mono" style={{ color: 'var(--color-gold)', fontSize: '0.72rem' }}>{e.name}</span>
-              {e.cancellable && <span className="sam-hostonly" style={{ background: '#3a2a10' }}>cancel</span>}
-              <span className="block text-xs" style={{ color: '#6b5a35' }}>{e.whenFired}{e.gotcha ? ` — ${e.gotcha}` : ''}</span>
+              {e.cancellable && <span className="sam-hostonly" style={{ background: 'var(--color-edge)' }}>cancel</span>}
+              <span className="block text-xs" style={{ color: 'var(--color-ink-faint)' }}>{e.whenFired}{e.gotcha ? ` — ${e.gotcha}` : ''}</span>
             </button>
           ))}
           {tab === 'snippets' && snippets.map((s) => (
@@ -262,7 +262,7 @@ export default function ScriptEditor({ code, onCode, lang, onLang, pathHint = 'c
               onClick={() => insert((code && !code.endsWith('\n') ? '\n\n' : '') + s[langForSnippet])}
             >
               <span style={{ color: 'var(--color-gold-bright)', fontSize: '0.78rem' }}>{s.title}</span>
-              <span className="block text-xs" style={{ color: '#6b5a35' }}>{s.desc}</span>
+              <span className="block text-xs" style={{ color: 'var(--color-ink-faint)' }}>{s.desc}</span>
             </button>
           ))}
         </div>

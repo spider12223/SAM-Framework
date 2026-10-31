@@ -5,7 +5,7 @@
  * one idea per line, no jargon. This is the app's default landing page.
  */
 import { useNavigate } from 'react-router-dom';
-import { Panel, GoldButton } from '@/components/ui.jsx';
+import { Panel, GoldButton, PixelIcon } from '@/components/ui.jsx';
 
 const WORKSHOP_URL = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472';
 const INSTALLER_URL = 'https://github.com/spider12223/SAM-Framework/releases/latest';
@@ -24,7 +24,7 @@ function Step({ n, title, children }) {
           width: '2.2rem',
           height: '2.2rem',
           borderRadius: '50%',
-          background: 'rgba(212,168,75,0.14)',
+          background: 'rgba(226,176,78,0.14)',
           border: '1px solid var(--color-gold-dim)',
           color: 'var(--color-gold-bright)',
           fontWeight: 600,
@@ -49,7 +49,7 @@ export default function StartHere() {
   const navigate = useNavigate();
 
   return (
-    <div className="space-y-4 max-w-4xl mx-auto">
+    <div className="space-y-4 max-w-4xl">
       {/* ---------------------------------------------------------- intro */}
       <Panel title="Start Here">
         <p className="m-0" style={{ color: 'var(--color-parchment)' }}>
@@ -87,8 +87,8 @@ export default function StartHere() {
               into your Barony folder by hand). The installer is the simplest way to do it.
             </p>
             <div className="mt-1 flex flex-wrap gap-3">
-              <a className="sam-btn" href={INSTALLER_URL} target="_blank" rel="noreferrer">⬇ Download Installer</a>
-              <a className="sam-btn" href={WORKSHOP_URL} target="_blank" rel="noreferrer">🎮 S.A.M on Steam Workshop</a>
+              <a className="sam-btn" href={INSTALLER_URL} target="_blank" rel="noreferrer">Download Installer</a>
+              <a className="sam-btn" href={WORKSHOP_URL} target="_blank" rel="noreferrer">S.A.M on Steam Workshop</a>
             </div>
           </Step>
 
@@ -106,8 +106,8 @@ export default function StartHere() {
               Save each thing you make. It gets added to the mod you are building.
             </p>
             <div className="mt-1 flex flex-wrap gap-3">
-              <GoldButton onClick={() => navigate('/class-editor')}>🛡 Open Class Editor</GoldButton>
-              <GoldButton onClick={() => navigate('/item-editor')}>⚔ Open Item Editor</GoldButton>
+              <GoldButton onClick={() => navigate('/class-editor')}>Open Class Editor</GoldButton>
+              <GoldButton onClick={() => navigate('/item-editor')}>Open Item Editor</GoldButton>
             </div>
           </Step>
 
@@ -122,7 +122,7 @@ export default function StartHere() {
               zip file.
             </p>
             <div className="mt-1 flex flex-wrap gap-3">
-              <GoldButton onClick={() => navigate('/mod-builder')}>📦 Open Mod Builder</GoldButton>
+              <GoldButton onClick={() => navigate('/mod-builder')}>Open Mod Builder</GoldButton>
             </div>
           </Step>
 
@@ -156,13 +156,13 @@ export default function StartHere() {
           <li>
             <strong style={{ color: 'var(--color-gold)' }}>Check it worked.</strong> Look at the bottom of the main menu. If you see the{' '}
             <span style={{ color: 'var(--color-gold-bright)' }}>S.A.M Framework</span> line with its shield icon, near Barony's own version, it is installed and running.
-            <div className="mt-1" style={{ color: '#8a7038' }}>No badge there means the installer did not patch the right folder. Re-run it, or use the by-hand steps below.</div>
+            <div className="mt-1" style={{ color: 'var(--color-gold-dim)' }}>No badge there means the installer did not patch the right folder. Re-run it, or use the by-hand steps below.</div>
           </li>
           <li><strong style={{ color: 'var(--color-gold)' }}>Add a mod.</strong> Unzip the mod's folder into Barony's <span className="sam-mono">mods</span> folder (in Steam: right click Barony, Manage, Browse local files, open <span className="sam-mono">mods</span>).</li>
           <li><strong style={{ color: 'var(--color-gold)' }}>Turn it on.</strong> Open the <span className="sam-label">Mods</span> menu in Barony, enable the mod, and start a game. That is it.</li>
         </ol>
         <div className="mt-4">
-          <a className="sam-btn" href={INSTALLER_URL} target="_blank" rel="noreferrer">⬇ Download Installer</a>
+          <a className="sam-btn" href={INSTALLER_URL} target="_blank" rel="noreferrer">Download Installer</a>
         </div>
 
         <div className="mt-4 sam-well p-4">
@@ -195,7 +195,7 @@ export default function StartHere() {
         </p>
 
         <div className="mt-4 sam-well p-4">
-          <div className="sam-label mb-2">✨ Spells</div>
+          <div className="sam-label mb-2"><PixelIcon name="sparkle" /> Spells</div>
           <div className="space-y-2 text-sm leading-relaxed" style={{ color: 'var(--color-parchment)' }}>
             <p>
               A custom spell really casts. It fires, deals your damage, and does whatever its element
@@ -216,7 +216,7 @@ export default function StartHere() {
               If you make only a spell and nothing grants it, no one ever learns it, so it looks broken.
               That is the most common reason a custom spell seems to do nothing.
             </p>
-            <p style={{ color: '#8a7038' }}>
+            <p style={{ color: 'var(--color-gold-dim)' }}>
               The on-hit effect and range work: pick the effect from the list (your own effects show
               up there) and the spell applies it to whatever it hits. Speed and Damage min are saved but
               not used yet. You get the element's built-in behavior plus your Damage max.
@@ -225,7 +225,7 @@ export default function StartHere() {
         </div>
 
         <div className="mt-3 sam-well p-4">
-          <div className="sam-label mb-2">🌀 Status effects</div>
+          <div className="sam-label mb-2"><PixelIcon name="flask" /> Status effects</div>
           <div className="space-y-2 text-sm leading-relaxed" style={{ color: 'var(--color-parchment)' }}>
             <p>
               A custom status effect fully works once it is on someone. It counts down on its own,
@@ -239,7 +239,7 @@ export default function StartHere() {
               className="sam-mono text-xs p-3 overflow-x-auto"
               style={{ background: 'rgba(0,0,0,0.28)', color: 'var(--color-parchment)', borderRadius: 4, margin: 0 }}
             >{`sam_apply_effect(player, "yourmod:effect", 150)  -- 150 ticks, and 50 ticks is 1 second`}</pre>
-            <p style={{ color: '#8a7038' }}>
+            <p style={{ color: 'var(--color-gold-dim)' }}>
               Heads up: the effect blocks in the visual builder only list the built-in effects for now,
               so your own effect will not show up there yet. Use the script line above to apply it. A
               picker for your custom effects is on the way.
@@ -248,9 +248,9 @@ export default function StartHere() {
         </div>
 
         <div className="mt-4 flex flex-wrap gap-3">
-          <GoldButton onClick={() => navigate('/spell-editor')}>✨ Open Spell Editor</GoldButton>
-          <GoldButton onClick={() => navigate('/effect-editor')}>🌀 Open Effect Editor</GoldButton>
-          <GoldButton onClick={() => navigate('/api-reference')}>📖 API Reference</GoldButton>
+          <GoldButton onClick={() => navigate('/spell-editor')}>Open Spell Editor</GoldButton>
+          <GoldButton onClick={() => navigate('/effect-editor')}>Open Effect Editor</GoldButton>
+          <GoldButton onClick={() => navigate('/api-reference')}>API Reference</GoldButton>
         </div>
       </Panel>
 
@@ -265,7 +265,7 @@ export default function StartHere() {
               API Reference lists every command you can call and what each one does, with examples.
             </p>
             <div className="mt-3">
-              <GoldButton onClick={() => navigate('/api-reference')}>📖 Open API Reference</GoldButton>
+              <GoldButton onClick={() => navigate('/api-reference')}>Open API Reference</GoldButton>
             </div>
           </div>
 
@@ -276,11 +276,11 @@ export default function StartHere() {
               anything that is off, so you catch mistakes before players do.
             </p>
             <div className="mt-3">
-              <GoldButton onClick={() => navigate('/validator')}>📜 Open Validator</GoldButton>
+              <GoldButton onClick={() => navigate('/validator')}>Open Validator</GoldButton>
             </div>
           </div>
 
-          <p className="m-0 text-sm" style={{ color: '#6b5a35' }}>
+          <p className="m-0 text-sm" style={{ color: 'var(--color-ink-faint)' }}>
             When you are ready, the Dashboard shows what you have built so far and links to every editor.{' '}
             <button
               type="button"

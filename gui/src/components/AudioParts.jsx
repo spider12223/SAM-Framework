@@ -11,7 +11,7 @@ import {
   searchVanillaSounds, groupNameMeansGroup, describeSoundTarget, VANILLA_SOUND_COUNT,
   resolveVanillaSound, singleSoundTarget,
 } from '@/lib/audio.js';
-import { Field, TextInput, GoldButton, SearchSelect } from '@/components/ui.jsx';
+import { Field, TextInput, GoldButton, SearchSelect, PixelIcon, Gem } from '@/components/ui.jsx';
 
 let rowSeq = 0;
 /** A fresh React key for a file row. */
@@ -29,7 +29,7 @@ export function ModeSwitch({ value, onChange, options }) {
           tone={value === o.value ? 'green' : 'gold'}
           onClick={() => onChange(o.value)}
         >
-          {value === o.value ? '●' : '○'} {o.label}
+          {value === o.value && <Gem kind="emerald" />} {o.label}
         </GoldButton>
       ))}
     </div>
@@ -116,7 +116,7 @@ export function AudioFileList({
 
   return (
     <div className="space-y-2">
-      {rows.length === 0 && <div className="text-sm" style={{ color: '#6b5a35' }}>{emptyText}</div>}
+      {rows.length === 0 && <div className="text-sm" style={{ color: 'var(--color-ink-faint)' }}>{emptyText}</div>}
       {rows.map((r, i) => {
         const path = paths?.[i] || r.path || '';
         // A renamed entry's file is still stored under its old path until the save moves it.
@@ -128,7 +128,7 @@ export function AudioFileList({
             <div className="flex items-center gap-3 flex-wrap">
               <div className="flex-1 min-w-[12rem]">
                 <div className="sam-mono text-sm truncate" style={{ color: 'var(--color-parchment)' }}>{path || '(path chosen on save)'}</div>
-                <div className="text-xs" style={{ color: '#6b5a35' }}>
+                <div className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>
                   {r.name ? <>from <span className="sam-mono">{r.name}</span>{r.size ? ` · ${kb(r.size)}` : ''}{r.dataUrl ? ' · not saved yet' : ''}</> : null}
                   {!r.name && bundled && !moving && 'bundled with the mod'}
                   {moving && <> · renamed from <span className="sam-mono">{r.path}</span> on save</>}
@@ -138,8 +138,8 @@ export function AudioFileList({
               <button type="button" className="sam-step sam-remove" onClick={() => onChange(rows.filter((_, j) => j !== i))} aria-label={`remove ${path}`}>✕</button>
             </div>
             {!bundled && (
-              <div className="text-xs mt-1" style={{ color: '#d4a84b' }}>
-                ⚠ Not bundled in this session (big files are not kept when the page reloads). Upload it
+              <div className="text-xs mt-1" style={{ color: 'var(--color-gold)' }}>
+                <Gem kind="sapphire" /> Not bundled in this session (big files are not kept when the page reloads). Upload it
                 again, or copy it into your mod folder at this path yourself.
               </div>
             )}
@@ -148,10 +148,10 @@ export function AudioFileList({
       })}
       <div className="flex items-center gap-3 flex-wrap">
         <input ref={inputRef} type="file" accept={AUDIO_ACCEPT} multiple={!single} className="hidden" onChange={onPick} />
-        <GoldButton onClick={() => inputRef.current?.click()}>🎵 {uploadLabel}</GoldButton>
-        <span className="text-xs" style={{ color: '#6b5a35' }}>.ogg · .wav · .mp3 · .flac — up to {maxLabel} each</span>
+        <GoldButton onClick={() => inputRef.current?.click()}>{uploadLabel}</GoldButton>
+        <span className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>.ogg · .wav · .mp3 · .flac — up to {maxLabel} each</span>
       </div>
-      <details className="text-xs" style={{ color: '#6b5a35' }}>
+      <details className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>
         <summary className="cursor-pointer">The file is already in my mod folder…</summary>
         <div className="flex gap-2 mt-2 items-center">
           <div className="flex-1">
@@ -176,8 +176,8 @@ function PickChip({ active, onClick, children, title }) {
       onClick={onClick}
       className="px-2 py-0.5 text-xs sam-mono cursor-pointer"
       style={{
-        border: `1px solid ${active ? 'var(--color-gold)' : '#4a3617'}`,
-        background: active ? 'rgba(212,168,75,0.18)' : 'transparent',
+        border: `1px solid ${active ? 'var(--color-gold)' : 'var(--color-edge)'}`,
+        background: active ? 'rgba(226,176,78,0.18)' : 'transparent',
         color: active ? 'var(--color-gold-bright)' : 'var(--color-parchment)',
         borderRadius: 3,
       }}
@@ -211,18 +211,18 @@ export function VanillaSoundPicker({ value, onPick, initialQuery = '' }) {
             <div className="space-y-1">
               {VANILLA_SOUNDS.common.map((c) => (
                 <button key={c.name} type="button" onClick={() => onPick(c.name)}
-                  className="w-full text-left px-2 py-1 text-sm cursor-pointer hover:bg-[rgba(212,168,75,0.12)]"
+                  className="w-full text-left px-2 py-1 text-sm cursor-pointer hover:bg-[rgba(226,176,78,0.12)]"
                   style={{ color: 'var(--color-parchment)', border: `1px solid ${isCurrent(c.name) ? 'var(--color-gold)' : 'transparent'}`, borderRadius: 3 }}>
                   <span className="sam-mono" style={{ color: 'var(--color-gold)' }}>{c.name}</span>
-                  <span style={{ color: '#8a7749' }}> — {c.what}</span>
-                  <span className="text-xs" style={{ color: '#6b5a35' }}> · {describeSoundTarget(c.name)?.label}</span>
+                  <span style={{ color: 'var(--color-ink-dim)' }}> — {c.what}</span>
+                  <span className="text-xs" style={{ color: 'var(--color-ink-faint)' }}> · {describeSoundTarget(c.name)?.label}</span>
                 </button>
               ))}
             </div>
-            <div className="text-xs mt-2" style={{ color: '#6b5a35' }}>Not here? Type to search all of them.</div>
+            <div className="text-xs mt-2" style={{ color: 'var(--color-ink-faint)' }}>Not here? Type to search all of them.</div>
           </>
         ) : groups.length === 0 ? (
-          <div className="text-sm" style={{ color: '#6b5a35' }}>Nothing matches “{q}”.</div>
+          <div className="text-sm" style={{ color: 'var(--color-ink-faint)' }}>Nothing matches “{q}”.</div>
         ) : (
           <div className="space-y-2">
             {groups.map((g) => {
@@ -230,14 +230,14 @@ export function VanillaSoundPicker({ value, onPick, initialQuery = '' }) {
               const whole = groupNameMeansGroup(g.group);
               const soundsInGroup = whole ? resolveVanillaSound(g.group).sounds.length : 1;
               return (
-                <div key={g.group} className="px-2 py-1" style={{ borderLeft: '2px solid #4a3617' }}>
+                <div key={g.group} className="px-2 py-1" style={{ borderLeft: '2px solid var(--color-edge)' }}>
                   <div className="flex items-center gap-2 flex-wrap">
                     {whole ? (
                       <PickChip active={isCurrent(g.group)} onClick={() => onPick(g.group)} title="Replace every sound in this group">
                         {g.group} — whole group ({soundsInGroup})
                       </PickChip>
                     ) : (
-                      <span className="sam-mono text-xs" style={{ color: '#8a7749' }}>{g.group}</span>
+                      <span className="sam-mono text-xs" style={{ color: 'var(--color-ink-dim)' }}>{g.group}</span>
                     )}
                   </div>
                   <div className="flex flex-wrap gap-1 mt-1">
@@ -255,7 +255,7 @@ export function VanillaSoundPicker({ value, onPick, initialQuery = '' }) {
               );
             })}
             {total > groups.length && (
-              <div className="text-xs" style={{ color: '#6b5a35' }}>…{total - groups.length} more — type more to narrow it down.</div>
+              <div className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>…{total - groups.length} more — type more to narrow it down.</div>
             )}
           </div>
         )}
@@ -280,13 +280,13 @@ export function VanillaMusicPicker({ value, onPick }) {
       <div className="mt-2 overflow-y-auto space-y-1" style={{ maxHeight: 300 }}>
         {list.map((m) => (
           <button key={m.name} type="button" onClick={() => onPick(m.name)}
-            className="w-full text-left px-2 py-1 text-sm cursor-pointer hover:bg-[rgba(212,168,75,0.12)]"
+            className="w-full text-left px-2 py-1 text-sm cursor-pointer hover:bg-[rgba(226,176,78,0.12)]"
             style={{ color: 'var(--color-parchment)', border: `1px solid ${m.name.toLowerCase() === current ? 'var(--color-gold)' : 'transparent'}`, borderRadius: 3 }}>
             <span className="sam-mono" style={{ color: 'var(--color-gold)' }}>{m.name}</span>
-            <span style={{ color: '#8a7749' }}> — {m.what}</span>
+            <span style={{ color: 'var(--color-ink-dim)' }}> — {m.what}</span>
           </button>
         ))}
-        {list.length === 0 && <div className="text-sm" style={{ color: '#6b5a35' }}>Nothing matches “{q}”.</div>}
+        {list.length === 0 && <div className="text-sm" style={{ color: 'var(--color-ink-faint)' }}>Nothing matches “{q}”.</div>}
       </div>
     </div>
   );
@@ -303,8 +303,8 @@ export function SoundMapEditor({ rows, onChange, ownSounds, initialQuery = '', h
   const set = (k, patch) => onChange(rows.map((r) => (r.key === k ? { ...r, ...patch } : r)));
   return (
     <div className="space-y-2">
-      {hint && <div className="text-xs" style={{ color: '#6b5a35' }}>{hint}</div>}
-      {rows.length === 0 && <div className="text-sm" style={{ color: '#6b5a35' }}>No sounds changed — it plays the base game's.</div>}
+      {hint && <div className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>{hint}</div>}
+      {rows.length === 0 && <div className="text-sm" style={{ color: 'var(--color-ink-faint)' }}>No sounds changed — it plays the base game's.</div>}
       {rows.map((r) => {
         const target = describeSoundTarget(r.from);
         return (
@@ -314,7 +314,7 @@ export function SoundMapEditor({ rows, onChange, ownSounds, initialQuery = '', h
                 <div className="flex gap-1">
                   <div className="flex-1"><TextInput value={r.from} onChange={(v) => set(r.key, { from: v })} placeholder="SwingWeapon" /></div>
                   <GoldButton onClick={() => setPicking(picking === r.key ? null : r.key)} title="Pick from the game's sounds">
-                    {picking === r.key ? '▾' : '🔍'}
+                    {picking === r.key ? <span className="sam-ico sam-ico-chevron" aria-hidden /> : <PixelIcon name="lens" />}
                   </GoldButton>
                 </div>
               </Field>
@@ -325,8 +325,8 @@ export function SoundMapEditor({ rows, onChange, ownSounds, initialQuery = '', h
               <button type="button" className="sam-step sam-remove mb-[6px]" onClick={() => onChange(rows.filter((x) => x.key !== r.key))} aria-label="remove sound mapping">✕</button>
             </div>
             {r.from.trim() && (
-              <div className="text-xs mt-1" style={{ color: target ? '#6b5a35' : '#d4a84b' }}>
-                {target ? `replaces ${target.label}` : `⚠ the game has no sound or group called “${r.from.trim()}”`}
+              <div className="text-xs mt-1" style={{ color: target ? 'var(--color-ink-faint)' : 'var(--color-gold)' }}>
+                {target ? `replaces ${target.label}` : `the game has no sound or group called “${r.from.trim()}”`}
               </div>
             )}
             {picking === r.key && (

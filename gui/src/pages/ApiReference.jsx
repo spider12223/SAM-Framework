@@ -8,7 +8,7 @@
 import { useMemo, useState } from 'react';
 import { SAM_FUNCTIONS, SAM_EVENTS } from '@/data/samApi.js';
 import { callSignature } from '@/components/ScriptEditor.jsx';
-import { Panel } from '@/components/ui.jsx';
+import { Panel, Gem } from '@/components/ui.jsx';
 
 const CATEGORY_ORDER = [
   'Logging', 'Player state', 'Rewards', 'Status effects', 'Inventory', 'World', 'Entities',
@@ -41,9 +41,9 @@ export default function ApiReference() {
   }, [fns]);
 
   return (
-    <div className="space-y-4 max-w-7xl mx-auto">
+    <div className="space-y-4 max-w-7xl">
       <Panel title="Scripting API Reference">
-        <p className="text-sm mb-3" style={{ color: '#6b5a35' }}>
+        <p className="text-sm mb-3" style={{ color: 'var(--color-ink-faint)' }}>
           Every <span className="sam-mono">sam_*</span> function and event a behavior script can use — the same
           surface in Lua, JS and TS. Scripts define <span className="sam-mono">on_event(event)</span> and/or{' '}
           <span className="sam-mono">on_tick(event)</span>. A{' '}
@@ -56,12 +56,9 @@ export default function ApiReference() {
               <button
                 key={id}
                 type="button"
-                className="sam-btn"
-                style={{
-                  padding: '0.35rem 0.8rem',
-                  borderColor: view === id ? 'var(--color-gold)' : undefined,
-                  color: view === id ? 'var(--color-gold-bright)' : undefined,
-                }}
+                // Barony's tabs: oak when not chosen, crimson when chosen.
+                className={`sam-btn ${view === id ? 'sam-btn-red' : 'sam-btn-oak'}`}
+                aria-pressed={view === id}
                 onClick={() => setView(id)}
               >{label}</button>
             ))}
@@ -86,7 +83,7 @@ export default function ApiReference() {
                   {f.hostOnly && <span className="sam-hostonly" style={{ position: 'static' }}>host</span>}
                 </div>
                 <div className="text-sm mt-1" style={{ color: 'var(--color-parchment)' }}>{f.desc}</div>
-                <div className="text-xs mt-1 sam-mono" style={{ color: '#6b5a35' }}>
+                <div className="text-xs mt-1 sam-mono" style={{ color: 'var(--color-ink-faint)' }}>
                   {paramList(f) && <>args: {paramList(f)} · </>}returns: {f.returns}
                 </div>
               </div>
@@ -102,16 +99,16 @@ export default function ApiReference() {
               <div key={e.name} className="sam-well p-2">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="sam-mono" style={{ color: 'var(--color-gold-bright)' }}>{e.name}</span>
-                  <span className="text-xs" style={{ color: '#6b5a35' }}>[{e.category}]</span>
-                  {e.cancellable && <span className="sam-hostonly" style={{ position: 'static', background: '#3a2a10' }}>cancellable</span>}
+                  <span className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>[{e.category}]</span>
+                  {e.cancellable && <span className="sam-hostonly" style={{ position: 'static', background: 'var(--color-edge)' }}>cancellable</span>}
                 </div>
                 <div className="text-sm mt-1" style={{ color: 'var(--color-parchment)' }}>{e.whenFired}</div>
                 {e.payload?.length > 0 && (
-                  <div className="text-xs mt-1 sam-mono" style={{ color: '#6b5a35' }}>
+                  <div className="text-xs mt-1 sam-mono" style={{ color: 'var(--color-ink-faint)' }}>
                     event: {e.payload.map((p) => `${p.field}: ${p.type}`).join(', ')}
                   </div>
                 )}
-                {e.gotcha && <div className="text-xs mt-1" style={{ color: '#a5763a' }}>⚠ {e.gotcha}</div>}
+                {e.gotcha && <div className="text-xs mt-1" style={{ color: 'var(--color-gold-dim)' }}><Gem kind="sapphire" /> {e.gotcha}</div>}
               </div>
             ))}
           </div>

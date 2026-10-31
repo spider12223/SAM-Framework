@@ -14,7 +14,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { validate } from '@/lib/validate.js';
 import { useMod } from '@/state/ModContext.jsx';
-import { Panel, Field, TextInput, NumberInput, GoldButton, ErrorList, SavedNote } from '@/components/ui.jsx';
+import { Panel, Field, TextInput, NumberInput, GoldButton, ErrorList, SavedNote, Gem } from '@/components/ui.jsx';
 import { ModeSwitch, AudioFileList, VanillaSoundPicker, newRowKey } from '@/components/AudioParts.jsx';
 import {
   slugify, audioKey, audioFiles, fileField, assignAudioPaths, planAudioRows, describeSoundTarget, MAX_SOUND_BYTES,
@@ -124,7 +124,7 @@ export default function SoundEditor() {
   const editingLabel = origDef ? (origDef.id ?? `replacement for ${origDef.replace}`) : null;
 
   return (
-    <div className="space-y-4 max-w-5xl mx-auto">
+    <div className="space-y-4 max-w-5xl">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <ModeSwitch value={form.mode} onChange={(mode) => set({ mode })}
           options={[{ value: 'add', label: 'Add a new sound' }, { value: 'replace', label: 'Replace a game sound' }]} />
@@ -140,7 +140,7 @@ export default function SoundEditor() {
         <div>
           <TextInput value={form.name} onChange={(name) => set({ name })} placeholder="Sound name — e.g. Boom"
             style={{ fontSize: '1.5rem', padding: '0.7rem 1rem' }} aria-label="Sound name" />
-          <div className="mt-1 text-xs" style={{ color: '#6b5a35' }}>
+          <div className="mt-1 text-xs" style={{ color: 'var(--color-ink-faint)' }}>
             id: <span className="sam-mono">{soundId}</span> · play it from a script with{' '}
             <span className="sam-mono">sam_play_sound("{soundId}")</span>, test it in game with{' '}
             <span className="sam-mono">/sam_playsound {soundId}</span>, or give it to a monster or item in their editors.
@@ -153,7 +153,7 @@ export default function SoundEditor() {
               ? 'Pick a sound below. Everyone playing with your mod hears yours instead — no script needed.'
               : target
                 ? <>Replacing <span className="sam-mono" style={{ color: 'var(--color-gold)' }}>{String(replaceValue)}</span> — {target.label}.</>
-                : <span style={{ color: '#d4a84b' }}>⚠ The game has no sound or group called “{String(replaceValue)}”. It would log that and skip this entry.</span>}
+                : <span style={{ color: 'var(--color-gold)' }}><Gem kind="sapphire" /> The game has no sound or group called “{String(replaceValue)}”. It would log that and skip this entry.</span>}
           </div>
           <VanillaSoundPicker value={form.replace} onPick={(name) => set({ replace: name })} />
           <Field label="…or type the exact name or index" className="mt-3" hint="Exact file names (SwingWeapon3V1), group names (SwingWeapon) and index numbers all work. /sam_sounds vanilla <text> in the game console searches the same list.">
@@ -175,7 +175,7 @@ export default function SoundEditor() {
           emptyText="No audio yet. Upload a file — several files make it pick one at random each time, the way the game varies its footsteps and swings."
         />
         {form.rows.length > 1 && (
-          <div className="text-xs mt-2" style={{ color: '#9dc76a' }}>✓ {form.rows.length} files — one is picked at random each time it plays.</div>
+          <div className="text-xs mt-2" style={{ color: 'var(--color-emerald-text)' }}><Gem kind="emerald" /> {form.rows.length} files — one is picked at random each time it plays.</div>
         )}
       </Panel>
 
@@ -194,11 +194,11 @@ export default function SoundEditor() {
       <ErrorList errors={errors} />
       <div className="flex items-center justify-end gap-3">
         {savedAs && <SavedNote>Saved <span className="sam-mono">{savedAs}</span> — see Mod Builder.</SavedNote>}
-        <GoldButton tone="green" onClick={save}>🔊 {origKey ? 'Save changes' : 'Save sound'}</GoldButton>
+        <GoldButton tone="green" onClick={save}>{origKey ? 'Save changes' : 'Save sound'}</GoldButton>
       </div>
 
       <Panel title='Live preview — this entry goes into mod.json "sounds"' bodyClassName="p-0">
-        <pre className="sam-mono m-0 p-4 overflow-x-auto text-xs" style={{ color: '#9b8a5a' }}>{JSON.stringify(def, null, 2)}</pre>
+        <pre className="sam-mono m-0 p-4 overflow-x-auto text-xs" style={{ color: 'var(--color-ink-dim)' }}>{JSON.stringify(def, null, 2)}</pre>
       </Panel>
     </div>
   );

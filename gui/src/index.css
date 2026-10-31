@@ -1,573 +1,603 @@
 @import "tailwindcss";
+@import "@fontsource/pixelify-sans/400.css";
+@import "@fontsource/pixelify-sans/500.css";
+@import "@fontsource/pixelify-sans/700.css";
+@import "@fontsource/barlow/400.css";
+@import "@fontsource/barlow/500.css";
+@import "@fontsource/barlow/600.css";
+@import "./pixel-art.css";
 
 /* ---------------------------------------------------------------------------
-   S.A.M Framework — medieval RPG theme (matches the design reference)
-   Background #1a1208 · Panels #2a1f0e · Gold text #d4a84b · Fills #c9922a
+   S.A.M Mod Builder: Barony's in-game menus, redrawn.
+
+   The world is the game's Settings and Play windows: a speckled slate floor, oak-and-iron
+   frames with gold rivets, crimson option bands across every section, gold plaques for the
+   buttons and black rows for the values. None of it is the game's own art: the frames,
+   plaques and ornaments are drawn in scripts/pixel-art.mjs, and both faces are free
+   (Pixelify Sans, Barlow; SIL Open Font License).
+
+   Two voices. Pixel type is the menu: titles, bands, buttons, the nav and field labels.
+   Barlow is everything a person reads or types: values, hints, explanations. Long text in a
+   pixel face is a chore over an hour of editing, so it never carries a paragraph.
 --------------------------------------------------------------------------- */
 @theme {
-  --color-abyss: #120c05;        /* page edge vignette */
-  --color-stone: #1a1208;        /* main background     */
-  --color-wood: #2b2010;         /* panel background    */
-  --color-wood-deep: #201708;    /* inset wells         */
-  --color-wood-raised: #38290f;  /* hover / raised      */
-  --color-gold: #d8ac4e;         /* primary text/accent */
-  --color-gold-bright: #f3d488;  /* highlights          */
-  --color-gold-fill: #c9922a;    /* slider fills        */
-  --color-gold-dim: #9a7c3a;     /* muted gold (labels) */
-  --color-parchment: #ecd9a8;    /* light text          */
-  --color-ember: #7a1f1a;        /* red accent (save)   */
-  --color-moss: #2e4a1f;         /* green accent (test) */
-  --color-blood: #a03327;        /* remove/error        */
-  /* derived lines/edges — used everywhere instead of ad-hoc hexes */
-  --color-line: #4f3a18;         /* standard border     */
-  --color-line-bright: #6a4e22;  /* hovered/raised edge */
-  --color-line-dark: #0c0803;    /* deep inner edge     */
-  --font-medieval: "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
+  /* the floor and the windows */
+  --color-floor: #141925;
+  --color-window: #1c2333;      /* the slate inside a window, lighter than the floor */
+  --color-row: #050608;         /* option rows and inputs: black, as in the game */
+  --color-edge: #3c4454;        /* field outline */
+  --color-iron: #2f343e;
 
-  /* ---------------------------------------------------------------- motion
-     The built-in CSS easings are too weak to read as intentional; these are the
-     stronger variants. ease-out for anything entering or responding to a press,
-     because it moves immediately -- which is the instant the eye is on it.
-     ease-in is deliberately absent: it holds still at exactly the wrong moment
-     and makes the whole tool feel slower at the same duration.
+  /* the frame woods and the plaques */
+  --color-oak: #4f301b;
+  --color-oak-lit: #7d5434;
+  --color-crimson: #86202a;
+  --color-crimson-lit: #c2463f;
+  --color-crimson-deep: #45101a;
 
-     Durations are deliberately short. This is a tool someone keeps open for an
-     hour, not a landing page: every value here is under the 300ms ceiling, and
-     the ones tied to a click are near the floor. */
-  /* ------------------------------------------------------------ typography
-     Tracking is a function of size, so it is a token per size, not one value.
-     The direction is the standard one -- looser as text gets smaller, tighter
-     as it grows -- applied within the small-caps idiom rather than against it. */
-  --track-display: 0.065em;  /* 2rem+ : the word has to hold together */
-  --track-title: 0.11em;     /* panel headers */
-  --track-label: 0.15em;     /* 0.8rem and under, where air aids legibility */
-  --leading-display: 1.08;   /* tight, because large text needs less */
-  --leading-body: 1.55;
+  /* gold: plaques, emphasis, links */
+  --color-gold: #e2b04e;
+  --color-gold-bright: #f7d677;
+  --color-gold-dim: #b88a3a;
+  --color-gold-ink: #2b1907;    /* lettering on a gold plaque */
 
+  /* ink on the dark */
+  --color-bone: #f2ead7;        /* pixel chrome */
+  --color-ink: #ded7c6;         /* body text */
+  --color-ink-dim: #b6b0a2;     /* secondary text */
+  --color-ink-faint: #a49f93;   /* hints: 6:1 on the window, 7.7:1 on a row */
+  --color-label: #dcc896;       /* field labels */
+
+  /* the three gems on Barony's title bar do the state work */
+  --color-ruby: #d4483d;
+  --color-ruby-text: #f08378;
+  --color-sapphire: #4f93d8;
+  --color-emerald: #3f9a55;
+  --color-emerald-text: #8fd49c;
+
+  /* names the pages already use, pointed at the new world */
+  --color-parchment: var(--color-ink);
+  --color-blood: var(--color-ruby);
+
+  /* Hints carry the guidance a non-coder needs, so the small sizes are not small. */
+  --text-xs: 0.875rem;
+  --text-xs--line-height: 1.45;
+
+  --font-pixel: "Pixelify Sans", "Barlow", system-ui, sans-serif;
+  --font-body: "Barlow", system-ui, sans-serif;
+  --font-code: Consolas, "Cascadia Mono", "Courier New", monospace;
+
+  /* motion: short, ease-out, never on the nav */
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
-  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
-  --dur-press: 120ms;    /* the click itself */
-  --dur-hover: 130ms;    /* pointer arriving and leaving */
-  --dur-enter: 200ms;    /* something appearing that was not there */
+  --dur-press: 90ms;
+  --dur-hover: 120ms;
+  --dur-enter: 200ms;
 }
 
 :root {
   color-scheme: dark;
+  caret-color: var(--color-gold-bright);
 }
 
-html, body, #root {
-  height: 100%;
-}
-
-/* Body copy sat at 1.5. These panels are dense and the measure is wide, so the extra
-   leading is what keeps a paragraph of explanation from reading as a block of text. */
-body {
-  line-height: var(--leading-body);
-  text-rendering: optimizeLegibility;
-}
+html, body, #root { height: 100%; }
 
 body {
   margin: 0;
-  background:
-    radial-gradient(ellipse at 50% -10%, #2c2010 0%, transparent 55%),
-    radial-gradient(ellipse at 15% 110%, #241a0c 0%, transparent 45%),
-    var(--color-stone);
-  color: var(--color-gold);
-  font-family: var(--font-medieval);
-  letter-spacing: 0.02em;
+  background: var(--px-stone) 0 0 / 64px 64px repeat, var(--color-floor);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
 }
 
-/* faint stone grain over everything */
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  opacity: 0.05;
-  background-image: repeating-linear-gradient(0deg, transparent 0 2px, #000 2px 3px),
-    repeating-linear-gradient(90deg, transparent 0 3px, #000 3px 4px);
-  z-index: 50;
+::selection { background: var(--color-crimson); color: var(--color-bone); }
+
+a { color: var(--color-gold); text-underline-offset: 3px; text-decoration-thickness: 1px; }
+a:hover { color: var(--color-gold-bright); }
+
+/* Pixel art is drawn at 2px a pixel; smoothing would blur every edge it scales. */
+img.sam-px, .sam-item-icon, .sam-paperdoll-portrait { image-rendering: pixelated; }
+
+/* ------------------------------------------------------------------- pixel voice */
+.sam-title,
+.sam-subtitle,
+.sam-panel-header,
+.sam-btn,
+.sam-step,
+.sam-nav-item,
+.sam-nav-group-label,
+.sam-label,
+.sam-cat-header,
+.sam-slot-label,
+.sam-hostonly {
+  font-family: var(--font-pixel);
+  font-variant: normal;
+  letter-spacing: 0.01em;
 }
 
-/* ------------------------------------------------------------------ text */
-.sam-title {
-  font-variant: small-caps;
-  /* Was 0.1em at every size this class is used at. At 2.25rem that is enough air
-     to break the word into letters; at 1.5rem it is right. Size-specific now. */
-  letter-spacing: var(--track-display);
-  line-height: var(--leading-display);
-  font-optical-sizing: auto;
-  color: var(--color-gold); /* fallback where background-clip:text is unsupported */
-  background: linear-gradient(180deg, var(--color-gold-bright) 0%, var(--color-gold) 55%, #b78a34 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent; /* clips to text only where supported; else keeps gold */
-  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.9)) drop-shadow(0 0 22px rgba(212, 168, 75, 0.18));
-}
-
-.sam-subtitle {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.7rem;
-  font-variant: small-caps;
-  letter-spacing: 0.35em;
-  color: var(--color-gold-dim);
-}
-.sam-subtitle::before,
-.sam-subtitle::after {
-  content: "";
-  width: 34px;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--color-gold-dim));
-}
-.sam-subtitle::after { background: linear-gradient(90deg, var(--color-gold-dim), transparent); }
-
-/* ------------------------------------------------------------- ornate panel */
-.sam-panel {
-  position: relative;
-  background:
-    linear-gradient(180deg, rgba(255, 235, 180, 0.045) 0%, transparent 22%),
-    var(--color-wood);
-  border: 1px solid var(--color-line);
-  outline: 1px solid var(--color-line-dark);
-  outline-offset: -4px;
-  box-shadow:
-    inset 0 0 0 1px rgba(0, 0, 0, 0.45),
-    inset 0 14px 26px rgba(0, 0, 0, 0.28),
-    0 6px 20px rgba(0, 0, 0, 0.6);
-  border-radius: 5px;
-}
-
-/* gold corner nubs */
-.sam-panel::before,
-.sam-panel::after {
-  content: "";
-  position: absolute;
-  width: 7px;
-  height: 7px;
-  background: linear-gradient(135deg, var(--color-gold-bright), var(--color-gold-dim));
-  transform: rotate(45deg);
-  box-shadow: 0 0 4px rgba(0, 0, 0, 0.8);
-  z-index: 1;
-}
-.sam-panel::before { top: -3px; left: -3px; }
-.sam-panel::after { bottom: -3px; right: -3px; }
-
-.sam-panel-header {
+/* --------------------------------------------------------------------- title bar
+   The top of Barony's Settings window: a framed bar, the name in a black plaque, gold rods
+   either side and a gem at each end. */
+.sam-topbar {
+  margin: 12px 12px 6px;
+  border: 10px solid transparent;
+  border-image: var(--px-window) 5 / 10px stretch;
+  background: var(--px-stone-window) 0 0 / 64px 64px repeat padding-box, var(--color-window) padding-box;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.6rem;
-  padding: 0.6rem 1rem 0.55rem;
-  border-bottom: 1px solid var(--color-line);
-  background:
-    linear-gradient(180deg, rgba(243, 212, 136, 0.06), transparent 60%),
-    linear-gradient(180deg, #2b2010, #1f1609);
-  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.5);
-  font-variant: small-caps;
-  letter-spacing: var(--track-title);
-  font-size: 1.04rem;
-  font-weight: 600;
-  color: var(--color-gold-bright);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9), 0 0 14px rgba(212, 168, 75, 0.12);
-  border-radius: 5px 5px 0 0;
+  gap: 10px;
+  padding: 8px 0;
+  position: relative;
 }
-
-.sam-ornament {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--color-gold-dim);
-  font-size: 0.65rem;
+.sam-titleplate {
+  border: 6px solid transparent;
+  border-image: var(--px-field) 3 / 6px stretch;
+  background: var(--color-row) padding-box;
+  padding: 4px 22px 2px;
+  text-align: center;
+  position: relative;
 }
-.sam-ornament::before,
-.sam-ornament::after {
+.sam-titleplate::before {           /* the sapphire sits on the plaque's top edge */
   content: "";
+  position: absolute;
+  top: -19px;
+  left: 50%;
+  width: 21px;
+  height: 21px;
+  margin-left: -10px;
+  background: var(--px-gem-sapphire) center / 21px 21px no-repeat;
+}
+.sam-title {
+  margin: 0;
+  font-size: 30px;
+  line-height: 1.15;
+  font-weight: 700;
+  color: var(--color-bone);
+  text-shadow: 0 2px 0 #000;
+}
+.sam-subtitle {
   display: block;
-  width: 26px;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--color-gold-dim));
+  font-size: 14px;
+  line-height: 1.2;
+  color: var(--color-gold);
+  text-shadow: 0 1px 0 #000;
 }
-.sam-ornament::after {
-  background: linear-gradient(90deg, var(--color-gold-dim), transparent);
+.sam-rail {
+  flex: 1;
+  min-width: 0;
+  height: 10px;
+  background: linear-gradient(180deg, #07080b 0 2px, #f7d677 2px 4px, #d9a23f 4px 6px, #8c5a15 6px 8px, #07080b 8px);
+}
+.sam-knot { width: 21px; height: 21px; flex-shrink: 0; margin: 0 -5px; position: relative; background: var(--px-knot) center / 21px 21px no-repeat; }
+.sam-gem { width: 21px; height: 21px; flex-shrink: 0; background: center / 21px 21px no-repeat; }
+.sam-gem-ruby { background-image: var(--px-gem-ruby); }
+.sam-gem-sapphire { background-image: var(--px-gem-sapphire); }
+.sam-gem-emerald { background-image: var(--px-gem-emerald); }
+/* a gem leading a state line: ruby an error, sapphire advice, emerald done */
+.sam-gem-sm { width: 14px; height: 14px; background-size: 14px 14px; display: inline-block; vertical-align: -2px; }
+
+/* ------------------------------------------------------------------------ windows */
+.sam-panel {
+  position: relative;
+  border: 10px solid transparent;
+  border-image: var(--px-window) 5 / 10px stretch;
+  background: var(--px-stone-window) 0 0 / 64px 64px repeat padding-box, var(--color-window) padding-box;
 }
 
-/* -------------------------------------------------------------- inset well */
+/* The signature: Barony's crimson option band ("Inventory Options") opens every section,
+   a fleur-de-lis either side of the name and three crosses at each end. */
+.sam-panel-header {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 4px 44px;
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--color-bone);
+  text-shadow: 0 2px 0 #000;
+  text-align: center;
+  background: linear-gradient(
+    180deg,
+    #07080b 0 2px,
+    var(--color-crimson-lit) 2px 4px,
+    var(--color-crimson) 4px calc(100% - 4px),
+    var(--color-crimson-deep) calc(100% - 4px) calc(100% - 2px),
+    #07080b calc(100% - 2px)
+  );
+}
+.sam-panel-header::before,
+.sam-panel-header::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 22px;
+  height: 6px;
+  margin-top: -3px;
+  background: var(--px-crosses) center / 22px 6px no-repeat;
+}
+.sam-panel-header::before { left: 10px; }
+.sam-panel-header::after { right: 10px; }
+.sam-fleur {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  background: var(--px-fleur) center / 18px 18px no-repeat;
+}
+/* Kept for any page that still writes the old ornament: it now draws the fleur. */
+.sam-ornament {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  font-size: 0;
+  color: transparent;
+  background: var(--px-fleur) center / 18px 18px no-repeat;
+}
+
+/* Black option rows: Barony puts every value on one. */
 .sam-well {
-  background: linear-gradient(180deg, #241a0b 0%, var(--color-wood-deep) 40%);
-  border: 1px solid #0e0a04;
-  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(212, 168, 75, 0.05), 0 1px 0 rgba(212, 168, 75, 0.06);
-  border-radius: 4px;
+  border: 6px solid transparent;
+  border-image: var(--px-field) 3 / 6px stretch;
+  background: var(--color-row) padding-box;
 }
+.sam-well-advice { border-image-source: var(--px-field-info); }
 
-/* ------------------------------------------------------------------ inputs */
+/* -------------------------------------------------------------------------- fields */
 .sam-input {
-  background: linear-gradient(180deg, #17100a, #1d1409);
-  border: 1px solid #4a3617;
-  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.8);
-  color: var(--color-parchment);
-  border-radius: 3px;
-  padding: 0.45rem 0.7rem;
-  font-family: inherit;
-  font-size: 0.95rem;
-  outline: none;
   width: 100%;
+  border: 6px solid transparent;
+  border-image: var(--px-field) 3 / 6px stretch;
+  background: var(--color-row) padding-box;
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  font-size: 15.5px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+  padding: 3px 6px;
+  outline: none;
+  border-radius: 0;
 }
-.sam-input:focus {
-  border-color: var(--color-gold-dim);
-  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.8), 0 0 9px rgba(212, 168, 75, 0.3);
-}
+.sam-input:hover { border-image-source: var(--px-slot); }
+.sam-input:focus,
+.sam-input:focus-visible { border-image-source: var(--px-field-focus); }
+.sam-input[aria-invalid="true"] { border-image-source: var(--px-field-error); }
+.sam-input::placeholder { color: var(--color-ink-faint); opacity: 1; }
+.sam-input:disabled { opacity: 0.5; }
+textarea.sam-input { resize: vertical; }
 
-/* Unified keyboard-focus ring: visible only for keyboard users, gold to match theme.
-   Applies across every interactive control so tabbing is legible everywhere. */
-.sam-btn:focus-visible,
-.sam-step:focus-visible,
-.sam-slot:focus-visible,
-.sam-nav-item:focus-visible,
-.sam-check:focus-visible,
-.sam-input:focus-visible,
-.sam-bstop:focus-visible,
-.sam-linkish:focus-visible {
-  outline: 2px solid var(--color-gold-bright);
-  outline-offset: 2px;
-  border-radius: 4px;
-}
-
-/*
- * Native <select> popups are painted by the browser, not by us, and Chrome takes their
- * colour from the element's background-COLOR. `.sam-input` sets `background:
- * linear-gradient(...)`, and that shorthand resets background-color to TRANSPARENT — so
- * the popup fell back to its default white while our options kept the light parchment
- * text, which is why the open list was a blinding white-on-cream.
- *
- * `color-scheme: dark` (set on :root) doesn't rescue it: once the element carries its own
- * colour, the popup honours that rather than the scheme. So give the select and its
- * options a SOLID colour. The gradient still paints the closed control — it's a
- * background-image, so it sits on top of this and nothing visibly changes when shut.
- */
+/* A <select>'s open list is drawn by the browser from the element's background-color, so
+   give it a solid one; the closed control carries the pixel chevron. */
 select.sam-input {
-  background-color: #1d1409;
+  appearance: none;
+  cursor: var(--sam-cursor);
+  background: var(--px-chevron) right 8px center / 14px 8px no-repeat padding-box, var(--color-row) padding-box;
+  background-color: var(--color-row);
+  padding-right: 30px;
 }
-select.sam-input option {
-  background-color: #1d1409;
-  color: var(--color-parchment);
-}
-/* The highlighted row would otherwise be the OS accent (bright blue). */
+select.sam-input option { background-color: var(--color-row); color: var(--color-ink); }
 select.sam-input option:checked,
-select.sam-input option:hover {
-  background-color: var(--color-gold-dim);
-  color: #150f06;
-}
-.sam-input::placeholder { color: #6b5a35; opacity: 0.7; }
-
-select.sam-input { appearance: none; cursor: var(--sam-cursor); }
+select.sam-input option:hover { background-color: var(--color-crimson); color: var(--color-bone); }
 
 .sam-label {
-  font-variant: small-caps;
-  letter-spacing: 0.1em;
-  color: var(--color-gold-dim);
-  font-size: 0.85rem;
+  font-size: 15px;
+  line-height: 1.3;
+  color: var(--color-label);
+  text-shadow: 0 1px 0 #000;
 }
 
-/* ------------------------------------------------------------------ slider */
+.sam-valuebox {
+  min-width: 3rem;
+  text-align: center;
+  border: 6px solid transparent;
+  border-image: var(--px-field) 3 / 6px stretch;
+  background: var(--color-row) padding-box;
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  padding: 2px 4px;
+  outline: none;
+}
+.sam-valuebox:focus { border-image-source: var(--px-field-focus); }
+
+/* --------------------------------------------------------------------------- slider
+   Barony's slider: a grey-teal rail and a wooden block. The fill shows how far along. */
 .sam-slider {
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
-  height: 6px;
-  border-radius: 3px;
+  height: 10px;
   background:
-    linear-gradient(var(--color-gold-fill), var(--color-gold-fill)) 0 / var(--fill, 50%) 100% no-repeat,
-    linear-gradient(180deg, #0d0905, #171006);
-  border: 1px solid #0c0803;
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.9);
+    linear-gradient(#8fb3ad, #8fb3ad) 0 2px / var(--fill, 50%) 2px no-repeat,
+    linear-gradient(#5f8580, #5f8580) 0 2px / var(--fill, 50%) 6px no-repeat,
+    linear-gradient(180deg, #07080b 0 2px, #33454b 2px 8px, #07080b 8px);
   outline: none;
   cursor: var(--sam-cursor);
 }
 .sam-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 15px;
-  height: 15px;
-  background: linear-gradient(135deg, var(--color-gold-bright) 0%, var(--color-gold-fill) 55%, #8a6217 100%);
-  transform: rotate(45deg);
-  border: 1px solid #3a2a08;
-  border-radius: 2px;
-  box-shadow: 0 0 5px rgba(0, 0, 0, 0.9), 0 0 6px rgba(212, 168, 75, 0.35);
+  width: 16px;
+  height: 24px;
+  border: 0;
+  background: var(--px-thumb) center / 16px 24px no-repeat;
+  cursor: var(--sam-cursor);
 }
 .sam-slider::-moz-range-thumb {
-  width: 13px;
-  height: 13px;
-  background: linear-gradient(135deg, var(--color-gold-bright) 0%, var(--color-gold-fill) 55%, #8a6217 100%);
-  transform: rotate(45deg);
-  border: 1px solid #3a2a08;
-  border-radius: 2px;
-  box-shadow: 0 0 5px rgba(0, 0, 0, 0.9), 0 0 6px rgba(212, 168, 75, 0.35);
+  width: 16px;
+  height: 24px;
+  border: 0;
+  border-radius: 0;
+  background: var(--px-thumb) center / 16px 24px no-repeat;
 }
+.sam-slider:focus-visible::-webkit-slider-thumb { filter: brightness(1.35); }
 
-/* value box beside sliders / steppers */
-.sam-valuebox {
-  min-width: 3rem;
-  text-align: center;
-  padding: 0.3rem 0.4rem;
-  background: linear-gradient(180deg, #17100a, #1d1409);
-  border: 1px solid #4a3617;
-  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.8);
-  border-radius: 3px;
-  color: var(--color-parchment);
-  font-size: 0.95rem;
-}
-
-/* ----------------------------------------------------------------- buttons */
+/* -------------------------------------------------------------------------- buttons
+   Gold plaques with dark lettering, like Barony's Confirm and Customize. A press swaps the
+   bevel and drops the label a pixel, which is all a pixel button ever does. */
 .sam-btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
-  padding: 0.5rem 1.4rem;
-  background: linear-gradient(180deg, #3c2c11, #281c0b);
-  border: 1px solid var(--color-line-bright);
-  outline: 1px solid var(--color-line-dark);
-  outline-offset: -3px;
-  border-radius: 4px;
-  color: var(--color-gold-bright);
-  font-family: inherit;
-  font-variant: small-caps;
-  letter-spacing: 0.13em;
-  font-size: 1rem;
+  gap: 8px;
+  min-height: 40px;
+  padding: 2px 14px;
+  border: 6px solid transparent;
+  border-image: var(--px-plaque-gold) 3 fill / 6px stretch;
+  background: none;
+  color: var(--color-gold-ink);
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.1;
+  text-decoration: none;
+  text-shadow: 0 1px 0 rgba(255, 236, 170, 0.55);
   cursor: var(--sam-cursor);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
-  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(243, 212, 136, 0.14);
-  transition:
-    filter var(--dur-hover) var(--ease-out),
-    transform var(--dur-press) var(--ease-out),
-    box-shadow var(--dur-hover) var(--ease-out),
-    border-color var(--dur-hover) var(--ease-out);
   user-select: none;
+  transition: filter var(--dur-hover) var(--ease-out);
 }
-/* Hover is gated: a touch device fires :hover on tap, so an ungated lift makes every
-   tap look like it half-worked before the press state lands. */
+.sam-btn:hover { color: var(--color-gold-ink); }
+.sam-btn-icon { width: 36px; height: 36px; margin: -6px 0; image-rendering: pixelated; }
 @media (hover: hover) and (pointer: fine) {
-  .sam-btn:hover {
-    filter: brightness(1.14);
-    transform: translateY(-1px);
-    border-color: var(--color-gold-dim);
-    box-shadow: 0 6px 14px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(243, 212, 136, 0.2), 0 0 12px rgba(212, 168, 75, 0.12);
-  }
+  .sam-btn:hover { filter: brightness(1.1); }
 }
-/* Scale, not just un-lift. translateY(0) alone reads as "the hover stopped"; a real
-   press has to move toward the finger. Kept subtle -- scale() takes the label and icon
-   with it, so anything deeper than 0.97 starts to look like a rendering glitch. */
-.sam-btn:active { transform: translateY(0) scale(0.97); filter: brightness(1.05); box-shadow: 0 2px 5px rgba(0, 0, 0, 0.6); }
-.sam-btn:disabled { opacity: 0.4; cursor: not-allowed; filter: none; transform: none; box-shadow: none; }
+.sam-btn:active {
+  border-image-source: var(--px-plaque-gold-down);
+  padding-top: 4px;
+  padding-bottom: 0;
+}
+.sam-btn:disabled {
+  filter: grayscale(0.85) brightness(0.7);
+  cursor: not-allowed;
+  border-image-source: var(--px-plaque-gold);
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
 
-.sam-btn-red { background: linear-gradient(180deg, #67201a, #3f110d); border-color: #b23c30; color: #f2c3ba; }
-.sam-btn-green { background: linear-gradient(180deg, #35521f, #203413); border-color: #6a8c44; color: #d3e8b6; }
+.sam-btn-red { border-image-source: var(--px-plaque-crimson); color: var(--color-bone); text-shadow: 0 2px 0 #000; }
+.sam-btn-red:hover { color: var(--color-bone); }
+.sam-btn-red:active { border-image-source: var(--px-plaque-crimson-down); }
+.sam-btn-green { border-image-source: var(--px-plaque-emerald); color: var(--color-bone); text-shadow: 0 2px 0 #000; }
+.sam-btn-green:hover { color: var(--color-bone); }
+.sam-btn-green:active { border-image-source: var(--px-plaque-emerald-down); }
+.sam-btn-oak { border-image-source: var(--px-plaque-oak); color: var(--color-bone); text-shadow: 0 2px 0 #000; }
+.sam-btn-oak:hover { color: var(--color-bone); }
+.sam-btn-oak:active { border-image-source: var(--px-plaque-oak-down); }
 
-/* small square +/- stepper buttons */
+/* small square steppers and row tools: oak, like Barony's arrow buttons */
 .sam-step {
-  width: 26px;
-  height: 26px;
+  position: relative;
+  width: 30px;
+  height: 30px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(180deg, #33260f, #241a0b);
-  border: 1px solid #4a3617;
-  border-radius: 3px;
-  color: var(--color-gold);
-  font-size: 1rem;
+  flex-shrink: 0;
+  padding: 0;
+  border: 6px solid transparent;
+  border-image: var(--px-plaque-oak) 3 fill / 6px stretch;
+  background: none;
+  color: var(--color-bone);
+  font-size: 16px;
   line-height: 1;
+  text-shadow: 0 1px 0 #000;
   cursor: var(--sam-cursor);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.6);
   user-select: none;
-}
-/* transform was missing from the transition list, so the press snapped while every other
-   property eased -- two different speeds inside one button. */
-.sam-step {
-  transition:
-    filter var(--dur-press) var(--ease-out),
-    border-color var(--dur-press) var(--ease-out),
-    box-shadow var(--dur-press) var(--ease-out),
-    transform var(--dur-press) var(--ease-out);
+  transition: filter var(--dur-press) var(--ease-out);
 }
 @media (hover: hover) and (pointer: fine) {
-  .sam-step:hover { filter: brightness(1.22); border-color: var(--color-gold-dim); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6), 0 0 8px rgba(212, 168, 75, 0.14); }
+  .sam-step:hover { filter: brightness(1.2); }
 }
-.sam-step:active { transform: scale(0.94); }
-
-.sam-remove {
-  color: #d46a5a;
-  border-color: #5c1813;
+.sam-step:active { border-image-source: var(--px-plaque-oak-down); }
+.sam-remove { border-image-source: var(--px-plaque-crimson); color: var(--color-bone); font-size: 0; }
+.sam-remove::before,
+.sam-slot-x::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+  background: var(--px-xmark) center / 10px 10px no-repeat;
 }
-.sam-remove:hover { border-color: var(--color-blood); }
+.sam-ico { display: inline-block; flex-shrink: 0; background: center no-repeat; }
+.sam-picon { display: inline-block; flex-shrink: 0; vertical-align: -4px; background-position: center; background-repeat: no-repeat; }
+.sam-ico-chevron { width: 14px; height: 8px; background-image: var(--px-chevron); background-size: 14px 8px; }
+/* a saved thing's item icon at the head of its row (Mod Builder lists) */
+.sam-row-icon { width: 36px; height: 36px; flex-shrink: 0; display: inline-flex; image-rendering: pixelated; }
+.sam-ico-edit { width: 12px; height: 12px; background-image: var(--px-pencil); background-size: 12px 12px; }
+.sam-ico-copy { width: 14px; height: 14px; background-image: var(--px-copy); background-size: 14px 14px; }
+.sam-ico-grip { width: 6px; height: 14px; background-image: var(--px-grip); background-size: 6px 14px; }
+.sam-remove:active { border-image-source: var(--px-plaque-crimson-down); }
 
-/* --------------------------------------------------------------- nav (left) */
-/* Group headings. Deliberately quiet: they are signposts you read once while learning
-   the shape of the tool, not competition for the destinations underneath. Small-caps and
-   dim gold puts them below every nav row in the visual hierarchy while still breaking
-   the list up. */
-.sam-nav-group + .sam-nav-group { margin-top: 0.85rem; }
+/* ------------------------------------------------------------------ the selector
+   Barony marks the chosen tab, and the one a pad is on, with gold corner brackets. Here they
+   mark the current page in the nav and whatever has keyboard focus. */
+.sam-btn:focus-visible,
+.sam-step:focus-visible,
+.sam-slot:focus-visible,
+.sam-nav-item:focus-visible,
+.sam-bstop:focus-visible,
+.sam-linkish:focus-visible,
+.sam-ref-item:focus-visible { outline: none; }
+.sam-btn:focus-visible::after,
+.sam-step:focus-visible::after,
+.sam-slot:focus-visible::after,
+.sam-nav-item.active::after,
+.sam-nav-item:focus-visible::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
+  border: 10px solid transparent;
+  border-image: var(--px-bracket) 5 / 10px stretch;
+  pointer-events: none;
+  z-index: 2;
+}
+.sam-check:focus-visible,
+.sam-bstop:focus-visible,
+.sam-linkish:focus-visible,
+.sam-ref-item:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--color-gold-bright);
+  outline-offset: 2px;
+}
+
+/* ----------------------------------------------------------------------------- nav */
+.sam-nav {
+  width: 236px;
+  flex-shrink: 0;
+  padding: 10px 12px 24px 14px;
+  /* The editors run long; the way out of one stays on screen. */
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  max-height: 100vh;
+  overflow-y: auto;
+}
+.sam-nav-group + .sam-nav-group { margin-top: 14px; }
 .sam-nav-group-label {
-  font-variant: small-caps;
-  letter-spacing: 0.18em;
-  font-size: 0.72rem;
-  color: #7a6330;
-  padding: 0 0 0.25rem 1.05rem;
+  font-size: 13px;
+  color: var(--color-gold-dim);
+  padding: 0 0 4px 8px;
+  text-shadow: 0 1px 0 #000;
   user-select: none;
 }
-.sam-nav-item + .sam-nav-item { margin-top: 0.15rem; }
-
 .sam-nav-item {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 0.7rem;
-  padding: 0.62rem 1rem 0.62rem 1.05rem;
-  color: #b39456;
-  font-variant: small-caps;
-  letter-spacing: 0.08em;
-  font-size: 1.02rem;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  cursor: var(--sam-cursor);
+  gap: 8px;
+  min-height: 48px;
+  padding: 0 8px 0 2px;
+  border: 6px solid transparent;
+  color: var(--color-bone);
+  font-size: 17px;
+  line-height: 1.15;
   text-decoration: none;
-  /* No transform on the nav item itself and no page transition anywhere in this app:
-     the sidebar is used dozens of times an hour, and motion on a repeated action is
-     felt as latency long before it is noticed as polish. Colour only. */
-  transition:
-    color var(--dur-hover) var(--ease-out),
-    background var(--dur-hover) var(--ease-out),
-    border-color var(--dur-hover) var(--ease-out);
+  text-shadow: 0 2px 0 #000;
+  cursor: var(--sam-cursor);
 }
-.sam-nav-item::before {
-  content: "";
-  position: absolute;
-  left: 0; top: 50%;
-  height: 40%; width: 3px;
-  /* Held at full height and scaled down instead of grown from height: 0. Animating
-     height re-lays-out the row on every frame; scaleY only composites, and scaling from
-     the middle keeps the marker centred without a second translate. */
-  transform: translateY(-50%) scaleY(0);
-  transform-origin: center;
-  border-radius: 0 2px 2px 0;
-  background: linear-gradient(180deg, var(--color-gold-bright), var(--color-gold-fill));
-  transition: transform var(--dur-hover) var(--ease-out);
-}
+.sam-nav-item + .sam-nav-item { margin-top: 2px; }
+.sam-nav-icon { width: 36px; height: 36px; flex-shrink: 0; image-rendering: pixelated; }
 @media (hover: hover) and (pointer: fine) {
   .sam-nav-item:hover {
-    color: var(--color-gold-bright);
-    background: rgba(212, 168, 75, 0.07);
+    border-image: var(--px-plaque-oak) 3 fill / 6px stretch;
+    color: var(--color-bone);
   }
-  .sam-nav-item:hover::before { transform: translateY(-50%) scaleY(1); }
 }
-.sam-nav-item.active {
-  color: var(--color-gold-bright);
-  background: linear-gradient(90deg, rgba(112, 30, 24, 0.85), rgba(58, 15, 12, 0.7));
-  border-color: #7a2a1e;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(243, 212, 136, 0.12);
+.sam-nav-item.active,
+.sam-nav-item.active:hover {
+  border-image: var(--px-plaque-crimson) 3 fill / 6px stretch;
+  color: var(--color-bone);
 }
-.sam-nav-item.active::before { height: 62%; }
 
-/* --------------------------------------------------------------- scrollbars */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: #4a3617 #17100a;
-}
-*::-webkit-scrollbar { width: 10px; height: 10px; }
-*::-webkit-scrollbar-track { background: #17100a; }
+/* ------------------------------------------------------------------------ scrollbar
+   An iron rail and a grey stone, after the Settings window's scroll pole. */
+* { scrollbar-width: thin; scrollbar-color: #6c707a var(--color-row); }
+*::-webkit-scrollbar { width: 12px; height: 12px; }
+*::-webkit-scrollbar-track { background: var(--color-row); box-shadow: inset 2px 0 0 #07080b, inset -2px 0 0 #07080b; }
 *::-webkit-scrollbar-thumb {
-  background: linear-gradient(180deg, #4a3617, #33260f);
-  border-radius: 5px;
-  border: 2px solid #17100a;
+  background: linear-gradient(90deg, #8a8e97 0 2px, #6c707a 2px calc(100% - 2px), #43464e calc(100% - 2px));
+  border: 2px solid #07080b;
 }
 
-/* --------------------------------------------------------------- misc */
-.sam-error { color: #e07a6a; }
-.sam-ok { color: #9dc76a; }
-.sam-mono { font-family: Consolas, "Courier New", monospace; font-size: 0.85rem; }
+/* ---------------------------------------------------------------------------- misc */
+.sam-error { color: var(--color-ruby-text); }
+.sam-ok { color: var(--color-emerald-text); }
+/* Paths and long argument lists ("ASLEEP|POISONED|...") have no spaces to break at. */
+.sam-mono { font-family: var(--font-code); font-size: 0.85rem; overflow-wrap: anywhere; }
+pre.sam-mono { overflow-wrap: normal; overflow-x: auto; max-width: 100%; }
 
 .sam-divider {
-  height: 1px;
-  background: linear-gradient(90deg, transparent, #4a3617 20%, #4a3617 80%, transparent);
-  margin: 0.6rem 0;
+  height: 2px;
+  margin: 10px 0 12px;
+  background: var(--color-iron);
+  box-shadow: 0 2px 0 #07080b;
 }
 
-/* ---- Barony-style inventory slots (Class Editor starting items) ----- */
+/* ------------------------------------------------- inventory slots (Class Editor) */
 .sam-slot {
   position: relative;
   width: 64px;
   height: 64px;
-  background:
-    radial-gradient(ellipse at 50% 25%, rgba(255, 235, 180, 0.05), transparent 70%),
-    var(--color-stone);
-  border: 2px solid var(--color-gold-fill);          /* #c9922a gold */
-  border-radius: 3px;
-  box-shadow: inset 0 0 12px rgba(0, 0, 0, 0.8), inset 0 0 0 1px rgba(0, 0, 0, 0.65), 0 1px 2px rgba(0, 0, 0, 0.6);
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 0;
+  border: 6px solid transparent;
+  border-image: var(--px-slot) 3 / 6px stretch;
+  background: var(--color-row) padding-box;
+  color: var(--color-ink);
   font-size: 1.9rem;
   cursor: var(--sam-cursor);
   user-select: none;
-  transition:
-    border-color var(--dur-press) var(--ease-out),
-    filter var(--dur-press) var(--ease-out),
-    box-shadow var(--dur-press) var(--ease-out),
-    transform var(--dur-press) var(--ease-out);
+  transition: filter var(--dur-press) var(--ease-out);
 }
 @media (hover: hover) and (pointer: fine) {
-  .sam-slot:hover { border-color: var(--color-gold-bright); filter: brightness(1.12); }
+  .sam-slot:hover { filter: brightness(1.25); }
 }
-.sam-slot:active { transform: scale(0.96); }
-.sam-slot-empty {
-  border-color: var(--color-gold-dim);
-  border-style: dashed;
-  color: var(--color-gold-dim);
-  font-size: 1.4rem;
-}
-.sam-slot-empty:hover { border-color: var(--color-gold); border-style: solid; color: var(--color-gold); }
-.sam-slot.selected {                                  /* brighter gold highlight */
-  border-color: var(--color-gold-bright);
-  box-shadow: inset 0 0 12px rgba(0, 0, 0, 0.8), 0 0 9px rgba(240, 205, 122, 0.5);
-}
+.sam-slot.selected { border-image-source: var(--px-field-focus); }
+.sam-slot-empty { border-image-source: var(--px-field); color: var(--color-ink-faint); font-family: var(--font-pixel); font-size: 1.4rem; }
+.sam-slot-empty:hover { color: var(--color-gold); }
 .sam-slot-count {
   position: absolute;
-  bottom: 0;
-  right: 2px;
-  font-family: Consolas, monospace;
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: var(--color-gold-bright);
-  text-shadow: 0 1px 2px #000, 0 0 3px #000, 0 0 3px #000;
+  bottom: -2px;
+  right: 0;
+  font-family: var(--font-pixel);
+  font-size: 13px;
+  color: var(--color-bone);
+  text-shadow: 0 1px 0 #000, 1px 0 0 #000, -1px 0 0 #000, 0 -1px 0 #000;
   pointer-events: none;
 }
 .sam-slot-x {
   position: absolute;
-  top: -6px;
-  left: -6px;
-  width: 17px;
-  height: 17px;
-  border-radius: 50%;
-  background: var(--color-blood);
-  color: #fff;
-  border: 1px solid #000;
-  font-size: 0.7rem;
-  line-height: 1;
+  top: -10px;
+  left: -10px;
+  width: 20px;
+  height: 20px;
   display: none;
   align-items: center;
   justify-content: center;
+  border: 4px solid transparent;
+  border-image: var(--px-plaque-crimson) 3 fill / 4px stretch;
+  color: var(--color-bone);
+  font-size: 0;
+  line-height: 1;
   cursor: var(--sam-cursor);
-  z-index: 2;
+  z-index: 3;
 }
-.sam-slot:hover .sam-slot-x { display: flex; }
-.sam-slot-x:hover { filter: brightness(1.2); }
+.sam-slot:hover .sam-slot-x,
+.sam-slot:focus-within .sam-slot-x { display: flex; }
 
-/* ---- item-picker modal (choose from all vanilla ItemTypes) ---------- */
+/* ---------------------------------------------------------------- item picker modal */
 .sam-modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(8, 5, 2, 0.72);
-  backdrop-filter: blur(2px);
+  background: rgba(4, 5, 8, 0.78);
   z-index: 100;
   display: flex;
   align-items: center;
@@ -584,27 +614,24 @@ select.sam-input { appearance: none; cursor: var(--sam-cursor); }
   position: sticky;
   top: 0;
   z-index: 1;
-  padding: 0.3rem 0.7rem;
-  background: linear-gradient(180deg, #241a0b, #1a1207);
-  border-top: 1px solid #4a3617;
-  border-bottom: 1px solid #0e0a04;
-  font-variant: small-caps;
-  letter-spacing: 0.14em;
-  font-size: 0.78rem;
-  color: var(--color-gold-dim);
+  padding: 3px 10px;
+  font-size: 13px;
+  color: var(--color-bone);
+  text-shadow: 0 1px 0 #000;
+  background: linear-gradient(180deg, var(--color-crimson) 0 calc(100% - 2px), #07080b calc(100% - 2px));
 }
 .sam-pick-row {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
-  padding: 0.32rem 0.7rem;
+  gap: 10px;
+  padding: 4px 10px;
   cursor: var(--sam-cursor);
-  border-bottom: 1px solid rgba(74, 54, 23, 0.35);
+  border-bottom: 2px solid #07080b;
 }
-.sam-pick-row:hover { background: rgba(212, 168, 75, 0.12); }
+.sam-pick-row:hover { background: rgba(226, 176, 78, 0.12); }
 .sam-pick-icon {
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -613,15 +640,8 @@ select.sam-input { appearance: none; cursor: var(--sam-cursor); }
   flex-shrink: 0;
 }
 
-/* real in-game item icon (falls back to an emoji if the PNG is absent) */
-.sam-item-icon {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  image-rendering: pixelated;
-  display: block;
-}
-/* fixed icon box inside a 64x64 slot — sizes the emoji (font) or the img (fill) */
+/* a real in-game item icon (falls back to an emoji when the PNG is absent) */
+.sam-item-icon { width: 100%; height: 100%; object-fit: contain; display: block; }
 .sam-slot-ico {
   width: 44px;
   height: 44px;
@@ -634,7 +654,7 @@ select.sam-input { appearance: none; cursor: var(--sam-cursor); }
 }
 .sam-slot-unid { opacity: 0.55; filter: grayscale(0.5); }
 
-/* ---- Starting Loadout board ----------------------------------------- */
+/* -------------------------------------------------------------- starting loadout */
 .sam-loadout {
   display: grid;
   grid-template-columns: minmax(300px, 340px) 1fr;
@@ -649,234 +669,213 @@ select.sam-input { appearance: none; cursor: var(--sam-cursor); }
 .sam-paperdoll-col { display: flex; flex-direction: column; gap: 8px; }
 .sam-paperdoll-center {
   min-height: 100%;
-  display: flex; align-items: center; justify-content: center;
-  border: 1px solid var(--color-border, #463619);
-  background: radial-gradient(ellipse at 50% 30%, rgba(255,235,180,0.05), transparent 70%), var(--color-stone);
-  border-radius: 3px;
-  box-shadow: inset 0 0 16px rgba(0,0,0,0.8);
-}
-.sam-paperdoll-portrait { width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; padding: 6px; }
-.sam-paperdoll-glyph { font-size: 3.4rem; opacity: 0.4; }
-
-.sam-slot-wrap { display: flex; flex-direction: column; align-items: center; gap: 2px; }
-.sam-slot-label {
-  font-family: Cinzel, Georgia, serif;
-  font-size: 0.6rem; letter-spacing: 0.12em; text-transform: uppercase;
-  color: var(--color-gold-dim, #8a7749);
-}
-.sam-slot-ghost { font-size: 1.5rem; opacity: 0.4; pointer-events: none; }
-.sam-slot-empty:hover .sam-slot-ghost { opacity: 0.9; }
-
-.sam-slot.is-blessed { box-shadow: inset 0 0 12px rgba(0,0,0,0.8), 0 0 8px rgba(240,205,122,0.45); }
-.sam-slot.is-cursed  { box-shadow: inset 0 0 12px rgba(0,0,0,0.8), 0 0 8px rgba(176,60,45,0.5); }
-.sam-slot-bless {
-  position: absolute; top: -6px; right: -6px;
-  min-width: 16px; height: 16px; padding: 0 3px;
-  display: flex; align-items: center; justify-content: center;
-  font-family: Consolas, monospace; font-size: 0.66rem; font-weight: 800; line-height: 1;
-  border-radius: 8px; text-shadow: 0 1px 1px #000;
-}
-.sam-slot-bless.bless-pos { background: var(--color-gold-fill, #c9922a); color: #1a1208; box-shadow: 0 0 5px rgba(240,205,122,0.7); }
-.sam-slot-bless.bless-neg { background: var(--color-blood, #b03c2d); color: #fff; box-shadow: 0 0 5px rgba(176,60,45,0.8); }
-.sam-slot-pip {
-  position: absolute; bottom: 0; left: 3px;
-  font-family: Consolas, monospace; font-size: 0.72rem; font-weight: 800; color: #d9b45a;
-  text-shadow: 0 1px 2px #000; pointer-events: none;
-}
-.sam-slot-tag {
-  position: absolute; top: 1px; left: 3px; font-size: 0.66rem; color: var(--color-blood, #b03c2d);
-  text-shadow: 0 1px 2px #000; pointer-events: none;
-}
-
-.sam-loadout-right { display: flex; flex-direction: column; gap: 0.8rem; }
-.sam-backpack { padding: 0.7rem 0.8rem; }
-.sam-backpack-grid { display: grid; grid-template-columns: repeat(auto-fill, 64px); gap: 4px; justify-content: start; }
-.sam-hotbar-panel { padding: 0.7rem 0.8rem; }
-.sam-hotbar { display: flex; flex-wrap: wrap; gap: 4px; }
-.sam-hotbar .sam-slot-label { color: var(--color-gold, #c9a227); font-family: Consolas, monospace; letter-spacing: 0; font-size: 0.68rem; }
-
-/* ---- inline detail strip + blessing dial ---------------------------- */
-.sam-detailstrip { padding: 0.9rem 1rem; }
-.sam-detailgrid {
-  display: grid; gap: 0.9rem 1.2rem;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  align-items: start;
-}
-.sam-beatitude { display: inline-flex; border: 1px solid var(--color-gold-dim, #8a7749); border-radius: 4px; overflow: hidden; }
-.sam-bstop {
-  width: 30px; height: 30px; border: 0; border-right: 1px solid rgba(0,0,0,0.5);
-  background: #17110a; color: #9a8552; font-family: Consolas, monospace; font-size: 0.78rem; font-weight: 700;
-  cursor: var(--sam-cursor);
-}
-.sam-bstop:last-child { border-right: 0; }
-.sam-bstop:hover { filter: brightness(1.3); }
-.sam-bstop.neg.on { background: var(--color-blood, #b03c2d); color: #fff; }
-.sam-bstop.pos.on { background: var(--color-gold-fill, #c9922a); color: #1a1208; }
-.sam-bstop.zero.on { background: #5a4a24; color: #f0d488; }
-.sam-linkish {
-  background: none; border: 0; color: var(--color-gold, #c9a227); font-size: 0.8rem;
-  text-decoration: underline; cursor: var(--sam-cursor); padding: 0 2px;
-}
-
-/* ---- equip checkbox (loadout list) ---------------------------------- */
-.sam-check {
-  appearance: none;
-  width: 18px;
-  height: 18px;
-  border: 1px solid var(--color-gold-dim);
-  border-radius: 3px;
-  background: linear-gradient(180deg, #17100a, #1d1409);
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.8);
-  cursor: var(--sam-cursor);
-  position: relative;
-  flex-shrink: 0;
-}
-.sam-check:checked {
-  border-color: var(--color-gold);
-  background: linear-gradient(135deg, var(--color-gold-bright), var(--color-gold-fill));
-}
-.sam-check:checked::after {
-  content: "✓";
-  position: absolute;
-  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #1a1208;
-  font-size: 0.8rem;
-  font-weight: 900;
+  border: 6px solid transparent;
+  border-image: var(--px-field) 3 / 6px stretch;
+  background: var(--color-row) padding-box;
+}
+.sam-paperdoll-portrait { width: 100%; height: 100%; object-fit: contain; padding: 6px; }
+.sam-paperdoll-empty { padding: 8px; font-family: var(--font-pixel); font-size: 13px; color: var(--color-ink-faint); text-align: center; }
+
+.sam-slot-wrap { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.sam-slot-label { font-size: 12px; color: var(--color-ink-dim); }
+.sam-slot-ghost {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  opacity: 0.35;
+  pointer-events: none;
+}
+.sam-slot-empty:hover .sam-slot-ghost { opacity: 0.9; }
+
+.sam-slot.is-blessed { box-shadow: 0 0 0 2px rgba(247, 214, 119, 0.55); }
+.sam-slot.is-cursed { box-shadow: 0 0 0 2px rgba(212, 72, 61, 0.65); }
+.sam-slot-bless {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-pixel);
+  font-size: 12px;
+  line-height: 1;
+  border: 2px solid #07080b;
+}
+.sam-slot-bless.bless-pos { background: var(--color-gold); color: var(--color-gold-ink); }
+.sam-slot-bless.bless-neg { background: var(--color-ruby); color: var(--color-bone); }
+.sam-slot-pip {
+  position: absolute;
+  bottom: -2px;
+  left: 1px;
+  font-family: var(--font-pixel);
+  font-size: 12px;
+  color: var(--color-gold);
+  text-shadow: 0 1px 0 #000;
+  pointer-events: none;
 }
 
-/* ------ JSON diff viewer (Mod Builder "Changes" panel) --------------- */
-.sam-diff-add { color: #9dc76a; background: rgba(90, 122, 58, 0.16); white-space: pre; }
-.sam-diff-del { color: #e07a6a; background: rgba(160, 51, 39, 0.16); white-space: pre; }
-.sam-diff-ctx { color: #9b8a5a; white-space: pre; }
-.sam-diff-add-text { color: #9dc76a; }
-.sam-diff-del-text { color: #e07a6a; }
+.sam-loadout-right { display: flex; flex-direction: column; gap: 0.8rem; }
+.sam-backpack { padding: 0.5rem 0.6rem; }
+.sam-backpack-grid { display: grid; grid-template-columns: repeat(auto-fill, 64px); gap: 4px; justify-content: start; }
+.sam-hotbar-panel { padding: 0.5rem 0.6rem; }
+.sam-hotbar { display: flex; flex-wrap: wrap; gap: 4px; }
+.sam-hotbar .sam-slot-label { color: var(--color-gold); }
 
-/* ------ Script editor reference panel + API Reference ---------------- */
+/* ----------------------------------------------------- detail strip + blessing dial */
+.sam-detailstrip { padding: 0.7rem 0.8rem; }
+.sam-detailgrid {
+  display: grid;
+  gap: 0.9rem 1.2rem;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  align-items: start;
+}
+.sam-beatitude { display: inline-flex; border: 2px solid #07080b; background: #07080b; gap: 2px; }
+.sam-bstop {
+  width: 30px;
+  height: 30px;
+  border: 0;
+  background: var(--color-row);
+  color: var(--color-ink-dim);
+  font-family: var(--font-pixel);
+  font-size: 13px;
+  cursor: var(--sam-cursor);
+}
+.sam-bstop:hover { color: var(--color-bone); background: #1a1e28; }
+.sam-bstop.neg.on { background: var(--color-ruby); color: var(--color-bone); }
+.sam-bstop.pos.on { background: var(--color-gold); color: var(--color-gold-ink); }
+.sam-bstop.zero.on { background: var(--color-oak); color: var(--color-bone); }
+.sam-linkish {
+  background: none;
+  border: 0;
+  padding: 0 2px;
+  color: var(--color-gold);
+  font: inherit;
+  font-size: 0.85rem;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: var(--sam-cursor);
+}
+
+/* --------------------------------------------------------------------- checkbox */
+.sam-check {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  margin: 0;
+  background: var(--color-row);
+  border: 2px solid var(--color-edge);
+  box-shadow: inset 0 2px 0 #030405;
+  cursor: var(--sam-cursor);
+}
+.sam-check:hover { border-color: #7f8b9f; }
+.sam-check:checked {
+  background: var(--px-check) center / 14px 12px no-repeat, var(--color-gold);
+  border-color: #07080b;
+  box-shadow: inset 0 2px 0 var(--color-gold-bright), inset 0 -2px 0 #8c5a15;
+}
+
+/* ------------------------------------------------------- JSON diff (Mod Builder) */
+.sam-diff-add { color: var(--color-emerald-text); background: rgba(63, 154, 85, 0.16); white-space: pre; }
+.sam-diff-del { color: var(--color-ruby-text); background: rgba(212, 72, 61, 0.16); white-space: pre; }
+.sam-diff-ctx { color: var(--color-ink-faint); white-space: pre; }
+.sam-diff-add-text { color: var(--color-emerald-text); }
+.sam-diff-del-text { color: var(--color-ruby-text); }
+
+/* ------------------------------------------------- script reference + API reference */
 .sam-ref-item {
   display: block;
   width: 100%;
   text-align: left;
-  padding: 0.4rem 0.5rem;
+  padding: 6px 8px;
   border: none;
-  border-bottom: 1px solid rgba(201, 146, 42, 0.12);
+  border-bottom: 2px solid #07080b;
   background: transparent;
+  color: var(--color-ink);
+  font: inherit;
   cursor: var(--sam-cursor);
-  color: var(--color-parchment);
 }
-.sam-ref-item:hover { background: rgba(201, 146, 42, 0.10); }
+.sam-ref-item:hover { background: rgba(226, 176, 78, 0.1); }
 .sam-ref-item:last-child { border-bottom: none; }
 
 .sam-hostonly {
   display: inline-block;
-  font-size: 0.6rem;
-  line-height: 1;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  padding: 2px 5px;
   margin-left: 4px;
-  border-radius: 3px;
-  background: #4a2410;
-  color: #e0a060;
-  border: 1px solid #6b3a1a;
+  padding: 1px 5px;
+  font-size: 11px;
+  line-height: 1.2;
   vertical-align: middle;
+  color: var(--color-bone);
+  background: var(--color-crimson);
+  border: 2px solid #07080b;
 }
 
-/* ------------------------------------------------------------------- feedback
-   Everything above is a response to something the user did to an element that was
-   already on screen. This is the one element that ARRIVES, and it arrives because a
-   save succeeded -- rare, and worth confirming. Without a transition it simply blinks
-   into place, which reads as a glitch rather than as an answer.
-
-   scale(0.96), not scale(0): nothing in the world appears from literally nothing, and
-   an element that grows from a point looks like it came from somewhere else. */
+/* ---------------------------------------------------------------- the save note
+   The one thing that arrives on its own: a save landed. It eases in rather than blinking
+   into place, which would read as a glitch. */
 .sam-ok {
   transition:
     opacity var(--dur-enter) var(--ease-out),
     transform var(--dur-enter) var(--ease-out);
 }
 @starting-style {
-  .sam-ok {
-    opacity: 0;
-    transform: translateY(-4px) scale(0.96);
-  }
+  .sam-ok { opacity: 0; transform: translateY(-4px); }
 }
 
-/* ---------------------------------------------------------------- reduced motion
-   Reduced motion means gentler, not none. The colour and opacity changes carry
-   meaning -- which button is hovered, that a save landed -- so they stay. What goes is
-   everything that MOVES: the lift, the press scale, the marker growing. A user who asks
-   for less motion still needs to be able to tell that the interface heard them. */
+/* --------------------------------------------------------------------- page shell */
+.sam-shell { min-height: 100%; display: flex; flex-direction: column; }
+/* A paragraph stops near 75 characters however wide its window is. */
+.sam-main p,
+.sam-main .text-sm,
+.sam-main .text-xs { max-width: 75ch; }
+.sam-body { display: flex; flex: 1; min-height: 0; }
+.sam-main { flex: 1; min-width: 0; padding: 10px 14px 32px 4px; }
+
+/* On a phone the nav becomes a strip that scrolls sideways under the title bar. */
+@media (max-width: 760px) {
+  .sam-topbar { margin: 8px 8px 4px; padding: 6px 4px; gap: 6px; }
+  .sam-rail, .sam-knot { display: none; }
+  .sam-title { font-size: 22px; }
+  .sam-subtitle { font-size: 12px; }
+  .sam-body { flex-direction: column; }
+  .sam-nav {
+    width: auto;
+    position: static;
+    align-self: stretch;
+    max-height: none;
+    display: flex;
+    gap: 2px;
+    overflow-x: auto;
+    padding: 8px 10px 10px;
+  }
+  .sam-nav-group { display: contents; }
+  .sam-nav-group-label { display: none; }
+  .sam-nav-item { flex-shrink: 0; min-height: 44px; font-size: 15px; white-space: nowrap; }
+  .sam-nav-item + .sam-nav-item { margin-top: 0; }
+  .sam-nav-icon { width: 28px; height: 28px; }
+  .sam-main { padding: 6px 8px 24px; }
+  .sam-panel-header { padding: 4px 36px; font-size: 15px; }
+  .sam-panel-header::before { left: 6px; }
+  .sam-panel-header::after { right: 6px; }
+}
+
+/* ----------------------------------------------------------------- reduced motion */
 @media (prefers-reduced-motion: reduce) {
-  .sam-btn:hover,
-  .sam-btn:active,
-  .sam-step:active,
-  .sam-slot:active { transform: none; }
-
-  .sam-nav-item::before { transition: none; }
-
-  .sam-ok { transform: none; }
-  @starting-style {
-    .sam-ok { transform: none; }
-  }
+  .sam-ok { transition: opacity var(--dur-enter) linear; }
+  @starting-style { .sam-ok { transform: none; } }
 }
 
-/* ===================================================================== materials
-   Material weight encodes hierarchy. Everything in this tool was the same opaque wood
-   slab at three shadow depths, so a panel, the page header and an inset well read as
-   the same kind of object at different brightnesses rather than as different layers.
-
-   Three tiers now, and the rule is that a bigger surface reads as a THICKER one:
-
-     .sam-banner   the page header. The largest chrome, so the strongest blur and the
-                   deepest shadow. Translucent, so the ambient radial gradient behind
-                   the page shows through it and it reads as glass over the room rather
-                   than a slab bolted on top.
-     .sam-panel    structural, opaque, medium shadow. Unchanged: content sits ON it, and
-                   a translucent surface under body copy is where legibility goes.
-     .sam-well     inset. Unchanged.
-
-   Never a light translucent surface on another translucent one -- that is the one
-   stacking rule that collapses legibility, and it is why only the banner is glass. */
-.sam-banner {
-  background:
-    linear-gradient(180deg, rgba(255, 235, 180, 0.05) 0%, transparent 30%),
-    rgba(43, 32, 16, 0.62);
-  backdrop-filter: blur(20px) saturate(150%);
-  -webkit-backdrop-filter: blur(20px) saturate(150%);
-  /* A bright top edge is the light catching the near face of the material. Without it a
-     translucent surface reads as a hole in the page instead of something lying on it. */
-  border-top: 1px solid rgba(243, 212, 136, 0.16);
-  box-shadow:
-    inset 0 0 0 1px rgba(0, 0, 0, 0.4),
-    0 10px 34px rgba(0, 0, 0, 0.62);
-}
-/* Vibrancy: text over a translucent, moving background needs more contrast and a touch
-   more weight than the same text over an opaque one, or it dissolves into whatever
-   happens to be behind it. */
-.sam-banner .sam-subtitle { color: #b39456; letter-spacing: 0.34em; }
-
-/* -------------------------------------------------------------- reduced transparency
-   A named user setting, and one this stylesheet did not answer. Frostier, not blurrier:
-   raise the background to opaque and drop the blur entirely, keeping the same edges so
-   the layout does not shift. */
-@media (prefers-reduced-transparency: reduce) {
-  .sam-banner {
-    background: linear-gradient(180deg, rgba(255, 235, 180, 0.05) 0%, transparent 30%), var(--color-wood);
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-  }
-}
-
-/* ------------------------------------------------------------------ more contrast
-   Near-solid backgrounds with a defined, contrasting border. The palette leans on
-   mid-golds against mid-browns, which is the first thing to fail for anyone who has
-   asked the OS for more contrast. */
+/* ------------------------------------------------------------------ more contrast */
 @media (prefers-contrast: more) {
-  .sam-banner { background: var(--color-wood); backdrop-filter: none; -webkit-backdrop-filter: none; }
-  .sam-panel, .sam-well, .sam-input { border-color: var(--color-gold-dim); }
-  .sam-nav-item { color: var(--color-parchment); }
-  .sam-label, .sam-subtitle { color: var(--color-gold); }
+  :root { --color-ink-faint: var(--color-ink-dim); --color-label: var(--color-bone); }
+  .sam-input, .sam-well, .sam-valuebox { border-image-source: var(--px-slot); }
 }

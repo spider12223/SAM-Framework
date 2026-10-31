@@ -16,6 +16,7 @@ import PatchEditor from '@/pages/PatchEditor.jsx';
 import ModBuilder from '@/pages/ModBuilder.jsx';
 import Validator from '@/pages/Validator.jsx';
 import ApiReference from '@/pages/ApiReference.jsx';
+import { NAV_ICONS } from '@/data/navIcons.js';
 
 // Fifteen destinations in one flat list is a scanning problem, not a styling one: every
 // row looks equally likely, so finding the Race Editor means reading all fifteen labels.
@@ -23,52 +24,57 @@ import ApiReference from '@/pages/ApiReference.jsx';
 // usually settles it before you read a single row.
 const NAV_GROUPS = [
   ['Start', [
-    { to: '/start', icon: '🧭', label: 'Start Here' },
-    { to: '/dashboard', icon: '🏰', label: 'Dashboard' },
+    { to: '/start', label: 'Start Here' },
+    { to: '/dashboard', label: 'Dashboard' },
   ]],
   ['Content', [
-    { to: '/class-editor', icon: '🛡', label: 'Class Editor' },
-    { to: '/item-editor', icon: '⚔', label: 'Item Editor' },
-    { to: '/monster-editor', icon: '👹', label: 'Monster Editor' },
-    { to: '/race-editor', icon: '🧬', label: 'Race Editor' },
+    { to: '/class-editor', label: 'Class Editor' },
+    { to: '/item-editor', label: 'Item Editor' },
+    { to: '/monster-editor', label: 'Monster Editor' },
+    { to: '/race-editor', label: 'Race Editor' },
   ]],
   ['Magic', [
-    { to: '/spell-editor', icon: '✨', label: 'Spell Editor' },
-    { to: '/effect-editor', icon: '🌀', label: 'Effect Editor' },
+    { to: '/spell-editor', label: 'Spell Editor' },
+    { to: '/effect-editor', label: 'Effect Editor' },
   ]],
   ['Assets', [
-    { to: '/sound-editor', icon: '🔊', label: 'Sound Editor' },
-    { to: '/music-editor', icon: '🎵', label: 'Music Editor' },
-    { to: '/model-editor', icon: '🧊', label: 'Model Editor' },
+    { to: '/sound-editor', label: 'Sound Editor' },
+    { to: '/music-editor', label: 'Music Editor' },
+    { to: '/model-editor', label: 'Model Editor' },
   ]],
   ['Tweaks', [
-    { to: '/recipe-editor', icon: '🔧', label: 'Recipe Editor' },
-    { to: '/patch-editor', icon: '🧩', label: 'Patch Editor' },
+    { to: '/recipe-editor', label: 'Recipe Editor' },
+    { to: '/patch-editor', label: 'Patch Editor' },
   ]],
   ['Ship', [
-    { to: '/mod-builder', icon: '📦', label: 'Mod Builder' },
-    { to: '/validator', icon: '📜', label: 'Validator' },
-    { to: '/api-reference', icon: '📖', label: 'API Reference' },
+    { to: '/mod-builder', label: 'Mod Builder' },
+    { to: '/validator', label: 'Validator' },
+    { to: '/api-reference', label: 'API Reference' },
   ]],
 ];
 
-function Banner() {
+// The top of Barony's Settings window: the name in a black plaque with a gem either side and the
+// sapphire on its top edge (drawn by CSS), and a gold rail running out to the frame.
+function TopBar() {
   return (
-    <header
-      className="sam-panel sam-banner mx-3 mt-3 mb-2 py-3 text-center"
-      style={{ borderRadius: 6 }}
-    >
-      <h1 className="sam-title text-4xl m-0" style={{ fontWeight: 600 }}>
-        S.A.M Framework
-      </h1>
-      <div className="sam-subtitle text-sm mt-1.5">Support All Mods</div>
+    <header className="sam-topbar">
+      <span className="sam-rail" aria-hidden />
+      <span className="sam-knot" aria-hidden />
+      <span className="sam-gem sam-gem-ruby" aria-hidden />
+      <div className="sam-titleplate">
+        <h1 className="sam-title">S.A.M Framework</h1>
+        <div className="sam-subtitle">Support All Mods</div>
+      </div>
+      <span className="sam-gem sam-gem-emerald" aria-hidden />
+      <span className="sam-knot" aria-hidden />
+      <span className="sam-rail" aria-hidden />
     </header>
   );
 }
 
 function Sidebar() {
   return (
-    <nav className="w-52 shrink-0 px-3 py-4">
+    <nav className="sam-nav" aria-label="Editors">
       {NAV_GROUPS.map(([group, items]) => (
         <div key={group} className="sam-nav-group">
           <div className="sam-nav-group-label">{group}</div>
@@ -78,7 +84,7 @@ function Sidebar() {
               to={n.to}
               className={({ isActive }) => `sam-nav-item ${isActive ? 'active' : ''}`}
             >
-              <span aria-hidden>{n.icon}</span>
+              <img className="sam-nav-icon" src={NAV_ICONS[n.to]} alt="" draggable={false} />
               <span>{n.label}</span>
             </NavLink>
           ))}
@@ -92,11 +98,11 @@ export default function App() {
   return (
     <ModProvider>
       <HashRouter>
-        <div className="min-h-full flex flex-col">
-          <Banner />
-          <div className="flex flex-1 min-h-0">
+        <div className="sam-shell">
+          <TopBar />
+          <div className="sam-body">
             <Sidebar />
-            <main className="flex-1 min-w-0 px-3 pb-6 overflow-y-auto">
+            <main className="sam-main">
               <Routes>
                 <Route path="/" element={<Navigate to="/start" replace />} />
                 <Route path="/start" element={<StartHere />} />

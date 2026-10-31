@@ -9,7 +9,7 @@ import { VANILLA_TARGETS, vanillaTarget, fillPath } from '@/data/vanillaCatalog.
 import { validate } from '@/lib/validate.js';
 import { carryUnknown } from '@/lib/editorKeys.js';
 import { useMod } from '@/state/ModContext.jsx';
-import { Panel, Field, TextInput, GoldButton, ErrorList, SavedNote } from '@/components/ui.jsx';
+import { Panel, Field, TextInput, GoldButton, ErrorList, SavedNote, Gem } from '@/components/ui.jsx';
 
 /**
  * Canonical target spelling. This is a correctness rule, not tidiness: the patcher
@@ -97,7 +97,7 @@ export default function PatchEditor() {
   const known = useMemo(() => vanillaTarget(canonicalTarget(target)), [target]);
 
   return (
-    <div className="space-y-4 max-w-5xl mx-auto">
+    <div className="space-y-4 max-w-5xl">
       <Panel title="Patch Target">
         <Field label="Vanilla file to patch" hint="One patch per target — every mod's ops stack in load order.">
           <select
@@ -123,19 +123,19 @@ export default function PatchEditor() {
         {known ? (
           <>
             {known.whatItControls && (
-              <div className="text-xs mt-2" style={{ color: '#6b5a35' }}>{known.whatItControls}</div>
+              <div className="text-xs mt-2" style={{ color: 'var(--color-ink-faint)' }}>{known.whatItControls}</div>
             )}
             {known.entryKeyStyle && (
-              <div className="text-xs mt-1" style={{ color: '#6b5a35' }}>
+              <div className="text-xs mt-1" style={{ color: 'var(--color-ink-faint)' }}>
                 <b>Entry keys:</b> {known.entryKeyStyle}
               </div>
             )}
             {known.caveat && (
-              <div className="text-xs mt-2 sam-error" style={{ whiteSpace: 'pre-wrap' }}>⚠ {known.caveat}</div>
+              <div className="text-xs mt-2 sam-error" style={{ whiteSpace: 'pre-wrap' }}><Gem kind="ruby" /> {known.caveat}</div>
             )}
           </>
         ) : (
-          <div className="text-xs mt-2" style={{ color: '#e0b46a' }}>
+          <div className="text-xs mt-2" style={{ color: 'var(--color-gold)' }}>
             Not in the catalog — you're on your own for paths. It'll still work if Barony really
             loads this file; if it doesn't, the patch is skipped with an error in{' '}
             <span className="sam-mono">sam_log.txt</span> and the game runs normally.
@@ -144,7 +144,7 @@ export default function PatchEditor() {
       </Panel>
 
       <Panel title="Operations">
-        <div className="text-xs mb-2" style={{ color: '#6b5a35' }}>
+        <div className="text-xs mb-2" style={{ color: 'var(--color-ink-faint)' }}>
           Path is dot-separated into the file, e.g. <span className="sam-mono">items.iron_sword.gold_value</span>.
           Value accepts JSON (<span className="sam-mono">150</span>, <span className="sam-mono">true</span>, <span className="sam-mono">"text"</span>); a bare word is treated as a string. <span className="sam-mono">multiply_field</span> needs a number; <span className="sam-mono">remove_field</span> takes no value.
         </div>
@@ -186,7 +186,7 @@ export default function PatchEditor() {
                     />
                   </div>
                 )}
-                <div className="grid grid-cols-[9rem_1fr_9rem_auto] gap-2 items-center">
+                <div className="grid grid-cols-1 sm:grid-cols-[9rem_1fr_9rem_auto] gap-2 items-center">
                   <select className="sam-input" value={o.op} onChange={(e) => setOp(i, { op: e.target.value })}>
                     {PATCH_OPS.map((op) => (
                       <option key={op} value={op} disabled={!allowed.includes(op)}>{op}</option>
@@ -201,15 +201,15 @@ export default function PatchEditor() {
                   />
                   <button type="button" className="sam-step sam-remove" style={{ width: 26, height: 26 }} onClick={() => removeOp(i)} aria-label="remove op">✕</button>
                 </div>
-                {fld?.note && <div className="text-xs" style={{ color: '#6b5a35' }}>{fld.note}</div>}
+                {fld?.note && <div className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>{fld.note}</div>}
                 {fld?.tooltipOnly && (
                   <div className="text-xs sam-error">
-                    ⚠ On a vanilla item this only changes the tooltip — real combat is hardcoded per
+                    <Gem kind="ruby" /> On a vanilla item this only changes the tooltip — real combat is hardcoded per
                     item id and won't read it. (On your own custom items it does apply.)
                   </div>
                 )}
                 {fld?.arrayBacked && (
-                  <div className="text-xs" style={{ color: '#e0b46a' }}>
+                  <div className="text-xs" style={{ color: 'var(--color-gold)' }}>
                     This path indexes an array — only <span className="sam-mono">edit_field</span> and{' '}
                     <span className="sam-mono">multiply_field</span> work, and indices shift if another
                     mod reorders it.
@@ -217,7 +217,7 @@ export default function PatchEditor() {
                 )}
                 {known?.noAddEntry && o.op === 'add_entry' && (
                   <div className="text-xs sam-error">
-                    ⚠ <span className="sam-mono">add_entry</span> on this file desyncs every item id
+                    <Gem kind="ruby" /> <span className="sam-mono">add_entry</span> on this file desyncs every item id
                     after it — Barony maps entry order to item ids. Add items as a custom item instead.
                   </div>
                 )}
@@ -231,11 +231,11 @@ export default function PatchEditor() {
       <ErrorList errors={errors} />
       <div className="flex items-center justify-end gap-3">
         {savedAs && <SavedNote>Saved patch for <span className="sam-mono">{savedAs}</span> — see Mod Builder.</SavedNote>}
-        <GoldButton tone="red" onClick={save} disabled={!target.trim()}>🧩 Save Patch</GoldButton>
+        <GoldButton tone="red" onClick={save} disabled={!target.trim()}>Save Patch</GoldButton>
       </div>
 
       <Panel title="Live JSON Preview" bodyClassName="p-0">
-        <pre className="sam-mono m-0 p-4 overflow-x-auto text-xs" style={{ color: '#9b8a5a' }}>{preview}</pre>
+        <pre className="sam-mono m-0 p-4 overflow-x-auto text-xs" style={{ color: 'var(--color-ink-dim)' }}>{preview}</pre>
       </Panel>
     </div>
   );

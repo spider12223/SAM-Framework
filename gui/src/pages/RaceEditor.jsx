@@ -9,13 +9,13 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { validate } from '@/lib/validate.js';
 import { carryUnknown } from '@/lib/editorKeys.js';
 import { useMod } from '@/state/ModContext.jsx';
-import { Panel, Field, TextInput, NumberInput, Select, SearchSelect, GoldButton, ErrorList, SavedNote } from '@/components/ui.jsx';
+import { Panel, Field, TextInput, NumberInput, Select, SearchSelect, GoldButton, ErrorList, SavedNote, PixelIcon } from '@/components/ui.jsx';
 import ScriptEditor from '@/components/ScriptEditor.jsx';
 import { MONSTERS, SPELLS } from '@/data/samApi.js';
 import { CLASS_SPELL_REF_PATTERN } from '@/data/schemas.js';
 
 const ATTRS = ['STR', 'DEX', 'CON', 'INT', 'PER', 'CHR'];
-const ATTR_ICONS = { STR: '💪', DEX: '🪶', CON: '❤️', INT: '📖', PER: '👁️', CHR: '🎭' };
+const ATTR_ICONS = { STR: 'str', DEX: 'dex', CON: 'con', INT: 'int', PER: 'per', CHR: 'chr' };  // <PixelIcon> names
 
 // The 18 monster bodies with a dedicated first-person arm (correct in both views).
 const HOST_BODIES = [
@@ -49,14 +49,14 @@ const RECRUITABLE = MONSTERS.filter((m) => !NEVER_RECRUITS.includes(m));
 // editors read the same way.
 function Chips({ items, icon, label = (x) => x, onRemove, empty }) {
   if (!items.length) {
-    return <div className="text-xs mb-3 min-h-8" style={{ color: '#6b5a35' }}>{empty}</div>;
+    return <div className="text-xs mb-3 min-h-8" style={{ color: 'var(--color-ink-faint)' }}>{empty}</div>;
   }
   return (
     <div className="flex flex-wrap gap-2 mb-3 min-h-8">
       {items.map((x) => (
         <span key={x} className="sam-well px-2 py-1 text-sm inline-flex items-center gap-2"
           style={{ color: 'var(--color-parchment)' }}>
-          {icon} {label(x)}
+          {icon && <PixelIcon name={icon} />} {label(x)}
           <button type="button" className="sam-step sam-remove"
             style={{ width: 18, height: 18, fontSize: '0.7rem' }}
             onClick={() => onRemove(x)} aria-label={`remove ${x}`}>✕</button>
@@ -198,11 +198,11 @@ export default function RaceEditor() {
   const setMod = (a, v) => setMods((prev) => ({ ...prev, [a]: v }));
 
   return (
-    <div className="space-y-4 max-w-5xl mx-auto">
+    <div className="space-y-4 max-w-5xl">
       <div>
         <TextInput value={name} onChange={setName} placeholder="Race name — e.g. Frostborn"
           style={{ fontSize: '1.5rem', padding: '0.7rem 1rem' }} aria-label="Race name" />
-        <div className="mt-1 text-xs" style={{ color: '#6b5a35' }}>
+        <div className="mt-1 text-xs" style={{ color: 'var(--color-ink-faint)' }}>
           id: <span className="sam-mono">{raceId}</span> · assigned a race id 200-255 · appears in the
           {' '}character-select race picker
         </div>
@@ -236,20 +236,20 @@ export default function RaceEditor() {
         </Panel>
 
         <Panel title="Attribute bonuses">
-          <div className="text-xs mb-2" style={{ color: '#8a7749' }}>
+          <div className="text-xs mb-2" style={{ color: 'var(--color-ink-dim)' }}>
             Added at character creation on top of the class (may be negative). Vanilla races give no
             attribute bonuses, so these are the race's whole identity. 0 = no change.
           </div>
           <div className="grid grid-cols-2 gap-3">
             {ATTRS.map((a) => (
-              <Field key={a} label={`${ATTR_ICONS[a]} ${a}`}>
+              <Field key={a} label={<><PixelIcon name={ATTR_ICONS[a]} /> {a}</>}>
                 <NumberInput value={mods[a]} onChange={(v) => setMod(a, v)} />
               </Field>
             ))}
-            <Field label="❤️ HP">
+            <Field label={<><PixelIcon name="con" /> HP</>}>
               <NumberInput value={mods.HP} onChange={(v) => setMod('HP', v)} />
             </Field>
-            <Field label="✨ MP">
+            <Field label={<><PixelIcon name="mana" /> MP</>}>
               <NumberInput value={mods.MP} onChange={(v) => setMod('MP', v)} />
             </Field>
           </div>
@@ -257,7 +257,7 @@ export default function RaceEditor() {
       </div>
 
       <Panel title="Body (optional)">
-        <div className="text-xs mb-3" style={{ color: '#8a7749' }}>
+        <div className="text-xs mb-3" style={{ color: 'var(--color-ink-dim)' }}>
           Leave these blank and you wear the host body's own models, which is what most
           races want. Fill one in to replace just that limb, or all six for a body of your
           own. The host body still decides the skeleton: the animation, the limb positions,
@@ -293,7 +293,7 @@ export default function RaceEditor() {
             </Fragment>
           ))}
         </div>
-        <div className="text-xs mt-3" style={{ color: '#6b5a35' }}>
+        <div className="text-xs mt-3" style={{ color: 'var(--color-ink-faint)' }}>
           First-person view keeps the host body's arm — the game has no first-person model
           for most creatures, so there is nothing to swap it for.
         </div>
@@ -301,15 +301,15 @@ export default function RaceEditor() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
         <Panel title="Allegiance">
-          <div className="text-xs mb-3" style={{ color: '#8a7749' }}>
+          <div className="text-xs mb-3" style={{ color: 'var(--color-ink-dim)' }}>
             Your race already inherits its host body's relations: a Goatman-bodied race is
             left alone by goatmen without doing anything here, and hated by humans and
             shopkeepers for the same reason. These lists are for relations the host body
             does <b>not</b> have. Leave them empty to inherit its relations unchanged.
           </div>
 
-          <div className="sam-label mb-1" style={{ color: '#8a6d2e' }}>Won't attack you</div>
-          <Chips items={allies} icon="🤝" label={prettyMonster}
+          <div className="sam-label mb-1" style={{ color: 'var(--color-gold-dim)' }}>Won't attack you</div>
+          <Chips items={allies} label={prettyMonster}
             onRemove={(m) => setAllies((p) => p.filter((x) => x !== m))}
             empty="Nothing added — the host body decides." />
           <SearchSelect
@@ -317,8 +317,8 @@ export default function RaceEditor() {
             onPick={(m) => setAllies((p) => (p.includes(m) ? p : [...p, m]))}
             placeholder="Search creatures… e.g. gnome" />
 
-          <div className="sam-label mb-1 mt-4" style={{ color: '#8a6d2e' }}>Always hostile</div>
-          <Chips items={enemies} icon="⚔️" label={prettyMonster}
+          <div className="sam-label mb-1 mt-4" style={{ color: 'var(--color-gold-dim)' }}>Always hostile</div>
+          <Chips items={enemies} label={prettyMonster}
             onRemove={(m) => setEnemies((p) => p.filter((x) => x !== m))}
             empty="Nothing added — the host body decides." />
           <SearchSelect
@@ -326,30 +326,30 @@ export default function RaceEditor() {
             onPick={(m) => setEnemies((p) => (p.includes(m) ? p : [...p, m]))}
             placeholder="Search creatures… e.g. shopkeeper" />
 
-          <div className="sam-label mb-1 mt-4" style={{ color: '#8a6d2e' }}>Neutral: leaves you alone, not your ally</div>
-          <Chips items={neutral} icon="🤚" label={prettyMonster}
+          <div className="sam-label mb-1 mt-4" style={{ color: 'var(--color-gold-dim)' }}>Neutral: leaves you alone, not your ally</div>
+          <Chips items={neutral} label={prettyMonster}
             onRemove={(m) => setNeutral((p) => p.filter((x) => x !== m))}
             empty="Nothing added — the host body decides." />
           <SearchSelect
             options={MONSTERS.filter((m) => !neutral.includes(m))}
             onPick={(m) => setNeutral((p) => (p.includes(m) ? p : [...p, m]))}
             placeholder="Search creatures… e.g. human" />
-          <div className="text-xs mt-1" style={{ color: '#8a7749' }}>
+          <div className="text-xs mt-1" style={{ color: 'var(--color-ink-dim)' }}>
             Like a Gremlin and the Goblins: no attack on sight, but they won't join you either
             (until Legendary Leadership, which recruits by body type), and one you hit fights back.
             The way to make a human-bodied race that humans leave alone without being its allies.
             A shopkeeper here will trade, except while you are shapeshifted.
           </div>
 
-          <div className="sam-label mb-1 mt-4" style={{ color: '#8a6d2e' }}>Can recruit: press Use to make a follower</div>
-          <Chips items={recruits} icon="🐀" label={prettyMonster}
+          <div className="sam-label mb-1 mt-4" style={{ color: 'var(--color-gold-dim)' }}>Can recruit: press Use to make a follower</div>
+          <Chips items={recruits} label={prettyMonster}
             onRemove={(m) => setRecruits((p) => p.filter((x) => x !== m))}
             empty="Nothing added — your body's own recruiting rules apply." />
           <SearchSelect
             options={RECRUITABLE.filter((m) => !recruits.includes(m))}
             onPick={(m) => setRecruits((p) => (p.includes(m) ? p : [...p, m]))}
             placeholder="Search creatures… e.g. rat" />
-          <div className="text-xs mt-1" style={{ color: '#8a7749' }}>
+          <div className="text-xs mt-1" style={{ color: 'var(--color-ink-dim)' }}>
             The game decides who you may recruit from your body (a spider body recruits spiders, scarabs
             and scorpions). This adds creatures for any body, and keeps working at Legendary Leadership.
             A creature here also counts as your ally. Your Leadership still caps how many
@@ -374,11 +374,11 @@ export default function RaceEditor() {
         </Panel>
 
         <Panel title="Innate Spells">
-          <div className="text-xs mb-3" style={{ color: '#8a7749' }}>
+          <div className="text-xs mb-3" style={{ color: 'var(--color-ink-dim)' }}>
             Known from character creation, whatever class you pick — the racial half of a
             spellbook. Vanilla races use this for things like a vampire's Bleed.
           </div>
-          <Chips items={startingSpells} icon="✨"
+          <Chips items={startingSpells} icon="sparkle"
             onRemove={(sp) => setStartingSpells((p) => p.filter((x) => x !== sp))}
             empty="No innate spells." />
           <SearchSelect
@@ -389,12 +389,12 @@ export default function RaceEditor() {
           {spellError && <div className="sam-error text-sm mt-1">{spellError}</div>}
           {modSpells.length > 0 && (
             <div className="mt-3">
-              <div className="sam-label mb-1" style={{ color: '#8a6d2e' }}>Your custom spells</div>
+              <div className="sam-label mb-1" style={{ color: 'var(--color-gold-dim)' }}>Your custom spells</div>
               <div className="flex flex-wrap gap-1">
                 {modSpells.map((sp) => (
                   <button key={sp.id} type="button" className="sam-btn"
                     style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
-                    onClick={() => addSpell(sp.id)} title={`add ${sp.id}`}>✨ {sp.name}</button>
+                    onClick={() => addSpell(sp.id)} title={`add ${sp.id}`}>{sp.name}</button>
                 ))}
               </div>
             </div>
@@ -403,7 +403,7 @@ export default function RaceEditor() {
       </div>
 
       <Panel title="Behavior Script (optional)">
-        <div className="text-xs mb-2" style={{ color: '#8a7749' }}>
+        <div className="text-xs mb-2" style={{ color: 'var(--color-ink-dim)' }}>
           Ships as <span className="sam-mono">races/{slugify(name)}.{scriptLang}</span> next to the race JSON and auto-loads
           in-game, with the same freedom class scripts have. React to any event hook and gate to this race with{' '}
           <span className="sam-mono">sam_get_race(player) == "{raceId}"</span>.
@@ -415,11 +415,11 @@ export default function RaceEditor() {
       <ErrorList errors={errors} />
       <div className="flex items-center justify-end gap-3">
         {savedAs && <SavedNote>Saved <span className="sam-mono">{savedAs}</span> — see Mod Builder.</SavedNote>}
-        <GoldButton tone="green" onClick={save} disabled={!name.trim()}>🧬 Save Race</GoldButton>
+        <GoldButton tone="green" onClick={save} disabled={!name.trim()}>Save Race</GoldButton>
       </div>
 
       <Panel title="Live JSON Preview" bodyClassName="p-0">
-        <pre className="sam-mono m-0 p-4 overflow-x-auto text-xs" style={{ color: '#9b8a5a' }}>{preview}</pre>
+        <pre className="sam-mono m-0 p-4 overflow-x-auto text-xs" style={{ color: 'var(--color-ink-dim)' }}>{preview}</pre>
       </Panel>
     </div>
   );

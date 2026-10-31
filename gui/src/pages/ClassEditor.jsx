@@ -20,8 +20,9 @@ import { useMod } from '@/state/ModContext.jsx';
 import ScriptEditor from '@/components/ScriptEditor.jsx';
 import {
   Panel, Field, TextInput, NumberInput, Stepper, GoldButton,
-  ItemIcon, ErrorList, SavedNote, BalanceHints, SearchSelect,
+  ItemIcon, ErrorList, SavedNote, BalanceHints, SearchSelect, PixelIcon, Gem,
 } from '@/components/ui.jsx';
+import { itemIconUrl, kindIconFile, CATEGORY_ICON_FILE } from '@/data/fallbackIcons.js';
 import LoadoutBoard from '@/components/LoadoutBoard.jsx';
 import { entryFromJson, entryToJson, newEntry, equipSlotOf } from '@/data/equipment.js';
 
@@ -45,39 +46,15 @@ const HPMP_GROWTH_HINTS = {
   MP_REGEN: 'How fast MP refills on its own. Higher = faster passive mana recovery; it ramps up with level. 3 is vanilla.',
 };
 
-const ATTR_ICONS = { STR: '💪', DEX: '🪶', CON: '❤️', INT: '📖', PER: '👁️', CHR: '🎭' };
+const ATTR_ICONS = { STR: 'str', DEX: 'dex', CON: 'con', INT: 'int', PER: 'per', CHR: 'chr' };  // <PixelIcon> names
 
-const SKILL_ICONS = {
-  PRO_SWORD: '⚔️', PRO_AXE: '🪓', PRO_MACE: '🔨', PRO_POLEARM: '🔱',
-  PRO_RANGED: '🏹', PRO_SHIELD: '🛡️', PRO_UNARMED: '👊', PRO_STEALTH: '🌑',
-  PRO_LOCKPICKING: '🗝️', PRO_APPRAISAL: '🔍', PRO_TRADING: '💰',
-  PRO_LEADERSHIP: '👑', PRO_SORCERY: '🔮', PRO_MYSTICISM: '✨',
-  PRO_THAUMATURGY: '📿', PRO_ALCHEMY: '⚗️',
+const SKILL_ICONS = {  // <PixelIcon> names
+  PRO_SWORD: 'sword', PRO_AXE: 'axe', PRO_MACE: 'mace', PRO_POLEARM: 'polearm',
+  PRO_RANGED: 'bow', PRO_SHIELD: 'shield', PRO_UNARMED: 'str', PRO_STEALTH: 'stealth',
+  PRO_LOCKPICKING: 'key', PRO_APPRAISAL: 'lens', PRO_TRADING: 'coin',
+  PRO_LEADERSHIP: 'crown', PRO_SORCERY: 'orb', PRO_MYSTICISM: 'sparkle',
+  PRO_THAUMATURGY: 'amulet', PRO_ALCHEMY: 'flask',
 };
-
-function itemEmoji(type) {
-  if (/SWORD|DAGGER|RAPIER|CLAYMORE|ANELACE|FALSHION/.test(type)) return '🗡️';
-  if (/SHIELD|SCUTUM/.test(type)) return '🛡️';
-  if (/BOW|CROSSBOW|SLING|QUIVER/.test(type)) return '🏹';
-  if (/AXE|TOMAHAWK/.test(type)) return '🪓';
-  if (/MACE|FLAIL|SHILLELAGH|KNUCKLES/.test(type)) return '🔨';
-  if (/SPEAR|HALBERD|TRIDENT|LANCE|POLEARM|GLAIVE/.test(type)) return '🔱';
-  if (/POTION/.test(type)) return '🧪';
-  if (/SCROLL/.test(type)) return '📜';
-  if (/SPELLBOOK|TOME|BOOK/.test(type)) return '📖';
-  if (/FOOD|BREAD|CHEESE|APPLE|MEAT|FISH|RATION/.test(type)) return '🍞';
-  if (/TORCH|LANTERN/.test(type)) return '🔥';
-  if (/RING/.test(type)) return '💍';
-  if (/AMULET/.test(type)) return '📿';
-  if (/GEM/.test(type)) return '💎';
-  if (/HAT|HELM|HOOD|MASK|CROWN|CIRCLET/.test(type)) return '🪖';
-  if (/BOOTS|LOAFERS|CLEAT/.test(type)) return '🥾';
-  if (/GLOVES|GAUNTLETS|BRACERS/.test(type)) return '🧤';
-  if (/CLOAK|ROBE|DOUBLET|BREASTPIECE|TUNIC|GAMBESON|HAUBERK|SHAWL|APRON/.test(type)) return '🥋';
-  if (/STAFF|SCEPTER/.test(type)) return '🪄';
-  if (/KEY/.test(type)) return '🗝️';
-  return '⚔️';
-}
 
 /* Real in-game icon URL for an ItemType, or null if we don't have one.
  * import.meta.env.BASE_URL is '/' in dev and '/SAM-Framework/' in the Pages build. */
@@ -86,10 +63,10 @@ function iconSrc(type) {
   return file ? `${import.meta.env.BASE_URL}item-icons/${file}` : null;
 }
 
-/* What the grid + picker render for an item: the real Barony PNG when it's
- * available locally, otherwise the emoji (so the public build still works). */
+/* What the grid + picker render for an item: its own Barony PNG, or else the icon of an item of
+ * the same kind (data/fallbackIcons.js). */
 function itemIcon(type) {
-  return <ItemIcon src={iconSrc(type)} emoji={itemEmoji(type)} />;
+  return <ItemIcon src={iconSrc(type) ?? itemIconUrl(kindIconFile(type))} />;
 }
 
 /* Group an ItemType into one of the schema's categories for the picker.
@@ -115,14 +92,9 @@ function itemCategory(t) {
   return 'TOOL';
 }
 
-// A custom item declares a `category` (WEAPON/ARMOR/POTION/…); pick a matching emoji so it
-// reads in the loadout picker even though it has no vanilla item-icon PNG.
-const CUSTOM_CATEGORY_EMOJI = {
-  WEAPON: '🗡️', ARMOR: '🛡️', POTION: '🧪', SCROLL: '📜', SPELLBOOK: '📖', TOME_SPELL: '📖',
-  MAGICSTAFF: '🪄', RING: '💍', AMULET: '📿', GEM: '💎', FOOD: '🍞', TOOL: '🧰', THROWN: '🌀',
-  BOOK: '📖', SPELL_CAT: '✨',
-};
-const customEmoji = (it) => (it && CUSTOM_CATEGORY_EMOJI[it.category]) || '📦';
+// A custom item declares a `category` (WEAPON/ARMOR/POTION/…); show the icon of a vanilla item of
+// that category so it reads in the loadout picker even though it has no PNG of its own.
+const customIconSrc = (it) => itemIconUrl((it && CATEGORY_ICON_FILE[it.category]) || 'tinker_toolkit.png');
 
 // A custom item's `slot` (EQUIPPABLE_IN_SLOT_*) → the loadout paperdoll slot id, so a
 // one-click add can EQUIP a weapon/armour custom item, not just stash it in the backpack.
@@ -156,7 +128,7 @@ export default function ClassEditor() {
   );
   // Icon + category resolvers that fall back to the custom item's own declared category.
   const iconForType = (type) =>
-    customItemMap[type] ? <ItemIcon src={null} emoji={customEmoji(customItemMap[type])} /> : itemIcon(type);
+    customItemMap[type] ? <ItemIcon src={customIconSrc(customItemMap[type])} /> : itemIcon(type);
   const categoryForType = (type) =>
     customItemMap[type] ? (customItemMap[type].category || 'TOOL') : itemCategory(type);
 
@@ -482,7 +454,7 @@ export default function ClassEditor() {
   );
 
   return (
-    <div className="space-y-4 max-w-7xl mx-auto">
+    <div className="space-y-4 max-w-7xl">
       {/* ------------------------------------------------ name + portrait */}
       <div className="flex items-center gap-4">
         <button
@@ -494,7 +466,7 @@ export default function ClassEditor() {
         >
           {portrait.dataUrl
             ? <img src={portrait.dataUrl} alt="Class portrait" style={{ width: 54, height: 54, imageRendering: 'pixelated' }} />
-            : <span aria-hidden>🛡</span>}
+            : <img src={itemIconUrl('SteelHelm.png')} alt="" className="sam-px" style={{ width: 36, height: 36 }} draggable={false} />}
         </button>
         <input ref={portraitRef} type="file" accept="image/png" className="hidden" onChange={onPortraitFile} />
         <div className="flex-1">
@@ -505,7 +477,7 @@ export default function ClassEditor() {
             style={{ fontSize: '1.5rem', padding: '0.7rem 1rem' }}
             aria-label="Class name"
           />
-          <div className="mt-1 text-xs" style={{ color: '#6b5a35' }}>
+          <div className="mt-1 text-xs" style={{ color: 'var(--color-ink-faint)' }}>
             id: <span className="sam-mono">{classId}</span>
             {' '}(namespace comes from the Mod Builder)
           </div>
@@ -515,7 +487,7 @@ export default function ClassEditor() {
       {/* ------------------------------------------------------- portrait */}
       <Panel title="Portrait">
         <div className="grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-4 items-end">
-          <GoldButton onClick={() => portraitRef.current?.click()}>🖼 Upload PNG</GoldButton>
+          <GoldButton onClick={() => portraitRef.current?.click()}>Upload PNG</GoldButton>
           <Field label="Portrait path (mod-relative)" hint="Shipped in the zip; shown as the class-select icon in-game.">
             <TextInput
               value={portrait.path}
@@ -536,9 +508,9 @@ export default function ClassEditor() {
           </Field>
         </div>
         {portrait.dataUrl && (
-          <div className="mt-2 text-xs" style={{ color: '#6b5a35' }}>
+          <div className="mt-2 text-xs" style={{ color: 'var(--color-ink-faint)' }}>
             PNG loaded — it will export at <span className="sam-mono">{portrait.path || defaultPortraitPath}</span>.
-            <button type="button" className="ml-2 underline" style={{ color: '#a03327' }} onClick={() => setPortrait((p) => ({ ...p, dataUrl: '' }))}>clear image</button>
+            <button type="button" className="ml-2 underline" style={{ color: 'var(--color-ruby)' }} onClick={() => setPortrait((p) => ({ ...p, dataUrl: '' }))}>clear image</button>
           </div>
         )}
         {portraitError && <div className="sam-error text-sm mt-1">{portraitError}</div>}
@@ -546,14 +518,14 @@ export default function ClassEditor() {
 
       {/* --------------------------------------------- character select card */}
       <Panel title="Character Select Card">
-        <div className="text-xs mb-3" style={{ color: '#8a7749' }}>
+        <div className="text-xs mb-3" style={{ color: 'var(--color-ink-dim)' }}>
           Purely cosmetic: the bars and stars a player sees before picking this class. Leave it
           all empty and the card shows blank grey bars. HP and MP are worked out from your
           attribute offsets, so there is nothing to set for them here.
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           {CORE_ATTRIBUTES.map((k) => (
-            <Field key={k} label={`${ATTR_ICONS[k] ?? ''} ${k} bar`}>
+            <Field key={k} label={<><PixelIcon name={ATTR_ICONS[k]} /> {k} bar</>}>
               <select
                 className="sam-input"
                 value={statBars[k] ?? ''}
@@ -575,7 +547,7 @@ export default function ClassEditor() {
           </Field>
         </div>
         {((survivalStars === '') !== (complexityStars === '')) && (
-          <div className="mt-2 text-xs" style={{ color: '#a03327' }}>
+          <div className="mt-2 text-xs" style={{ color: 'var(--color-ruby)' }}>
             Set both stars or neither — the game only draws the two lines when both have a value.
           </div>
         )}
@@ -585,13 +557,13 @@ export default function ClassEditor() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
         <div className="space-y-4">
           <Panel title="Core Attributes">
-            <div className="text-xs mb-2" style={{ color: '#8a7749' }}>
+            <div className="text-xs mb-2" style={{ color: 'var(--color-ink-dim)' }}>
               Modifiers added to the race base (may be negative) — not final values. 0 = no change.
               Vanilla classes net about 0 to +5 across all six, trading strengths for weaknesses.
             </div>
             <div className="grid grid-cols-3 gap-3">
               {CORE_ATTRIBUTES.map((a) => (
-                <Field key={a} label={`${ATTR_ICONS[a]} ${a}`}>
+                <Field key={a} label={<><PixelIcon name={ATTR_ICONS[a]} /> {a}</>}>
                   <NumberInput
                     value={attrs[a]}
                     onChange={(v) => setAttrs((prev) => ({ ...prev, [a]: v }))}
@@ -615,7 +587,7 @@ export default function ClassEditor() {
           {/* Stat growth lives with the attributes — it's the same idea: which of the six
               roll high or low as you level. (solidius: put it in the space the sliders freed.) */}
           <Panel title="Stat Growth">
-            <div className="text-xs mb-2" style={{ color: '#6b5a35' }}>
+            <div className="text-xs mb-2" style={{ color: 'var(--color-ink-faint)' }}>
               Each level-up raises <b>3</b> attributes, picked by <b>weight</b> — higher grows more
               often. <span className="sam-ok">2 = neutral</span>,{' '}
               <span className="sam-error">0 = never</span>. Vanilla classes run 1–6, so this is the
@@ -625,18 +597,18 @@ export default function ClassEditor() {
               {ROLL_STATS.map((a) => {
                 const w = growth[a];
                 const val = (w == null ? 2 : w);
-                const tone = val >= 4 ? '#9dc76a' : val <= 1 ? '#e07a6a' : undefined;
+                const tone = val >= 4 ? 'var(--color-emerald-text)' : val <= 1 ? 'var(--color-ruby-text)' : undefined;
                 return (
                   <div key={a} className="flex items-center gap-2">
                     <span className="sam-label shrink-0" style={{ width: '3.6rem', fontSize: '0.9rem', color: tone }}>
-                      {ATTR_ICONS[a]} {a}
+                      <PixelIcon name={ATTR_ICONS[a]} /> {a}
                     </span>
                     <NumberInput value={val} min={0} max={99} onChange={(v) => setGrowthWeight(a, v)} />
                   </div>
                 );
               })}
             </div>
-            <div className="text-xs mt-2" style={{ color: '#8a7749' }}>
+            <div className="text-xs mt-2" style={{ color: 'var(--color-ink-dim)' }}>
               Presets: weak = 1 · neutral = 2 · strong = 6. (Old <span className="sam-mono">strong_rolls</span>/
               <span className="sam-mono">weak_rolls</span> mods still load — strong→6, weak→1.)
             </div>
@@ -647,7 +619,8 @@ export default function ClassEditor() {
           {SKILLS.map((s) => (
             <Stepper
               key={s}
-              label={`${SKILL_ICONS[s] ?? '◆'} ${skillLabel(s)}`}
+              label={skillLabel(s)}
+              icon={SKILL_ICONS[s]}
               sub={`${s} — base ${skillBaseAttr(s)}`}
               value={skills[s]}
               min={0}
@@ -676,7 +649,7 @@ export default function ClassEditor() {
           appear in every slot/backpack picker on the board above. */}
       {modItems.length > 0 && (
         <div className="sam-well px-4 py-3">
-          <div className="sam-label mb-1" style={{ color: '#8a6d2e' }}>Your custom items — click to add to the starting kit</div>
+          <div className="sam-label mb-1" style={{ color: 'var(--color-gold-dim)' }}>Your custom items — click to add to the starting kit</div>
           <div className="flex flex-wrap gap-1">
             {modItems.map((it) => (
               <button
@@ -687,11 +660,11 @@ export default function ClassEditor() {
                 onClick={() => addCustomItem(it)}
                 title={CUSTOM_SLOT_TO_PAPERDOLL[it.slot] ? `equip ${it.id}` : `add ${it.id} to backpack`}
               >
-                {customEmoji(it)} {it.name_identified || it.name || it.id}
+                <img className="sam-btn-icon" src={customIconSrc(it)} alt="" draggable={false} /> {it.name_identified || it.name || it.id}
               </button>
             ))}
           </div>
-          <div className="text-xs mt-1" style={{ color: '#6b5a35' }}>
+          <div className="text-xs mt-1" style={{ color: 'var(--color-ink-faint)' }}>
             Equippable items (weapon, armour…) start <b>worn</b>; everything else goes in the
             backpack. The engine already grants these at spawn.
           </div>
@@ -705,7 +678,7 @@ export default function ClassEditor() {
             {spells.map((s) => (
               <span key={s} className="sam-well px-2 py-1 text-sm inline-flex items-center gap-2"
                 style={{ color: 'var(--color-parchment)' }}>
-                ✨ {s}
+                <PixelIcon name="sparkle" /> {s}
                 <button
                   type="button"
                   className="sam-step sam-remove"
@@ -731,11 +704,11 @@ export default function ClassEditor() {
           {spellError && <div className="sam-error text-sm mt-1">{spellError}</div>}
           {modSpells.length > 0 && (
             <div className="mt-3">
-              <div className="sam-label mb-1" style={{ color: '#8a6d2e' }}>Your custom spells</div>
+              <div className="sam-label mb-1" style={{ color: 'var(--color-gold-dim)' }}>Your custom spells</div>
               <div className="flex flex-wrap gap-1">
                 {modSpells.map((sp) => (
                   <button key={sp.id} type="button" className="sam-btn" style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
-                    onClick={() => addSpell(sp.id)} title={`add ${sp.id}`}>✨ {sp.name}</button>
+                    onClick={() => addSpell(sp.id)} title={`add ${sp.id}`}>{sp.name}</button>
                 ))}
               </div>
             </div>
@@ -743,8 +716,8 @@ export default function ClassEditor() {
         </Panel>
 
         <Panel title="Character Look">
-          <div className="text-xs mb-3" style={{ color: '#9dc76a' }}>
-            ✓ Works in-game (v1.3.x) — and shows on the character-select preview.
+          <div className="text-xs mb-3" style={{ color: 'var(--color-emerald-text)' }}>
+            <Gem kind="emerald" /> Works in-game (v1.3.x) — and shows on the character-select preview.
           </div>
 
           {/* Whole-body custom model — the v1.3.3 unlock: one .vox becomes the entire body. */}
@@ -758,14 +731,14 @@ export default function ClassEditor() {
           <div className="sam-divider" />
 
           <div className="sam-label mb-1">Per-race head</div>
-          <div className="text-xs mb-2" style={{ color: '#6b5a35' }}>
+          <div className="text-xs mb-2" style={{ color: 'var(--color-ink-faint)' }}>
             Force a head on everyone who plays this class. Pick a race, pick a head — or
             type a <span className="sam-mono">namespace:model</span> for your own
             <span className="sam-mono"> .vox</span> head.
             <span className="sam-ok"> default</span> covers any race you don't list.
           </div>
-          <div className="text-xs mb-3" style={{ color: '#8a7749' }}>
-            ⚠ Head only. Equipped armour re-assigns torso/arms/legs, so a per-race <b>body</b> look
+          <div className="text-xs mb-3" style={{ color: 'var(--color-ink-dim)' }}>
+            <Gem kind="sapphire" /> Head only. Equipped armour re-assigns torso/arms/legs, so a per-race <b>body</b> look
             can't stick here — use the <b>whole-body model</b> above to force a full body.
           </div>
           <div className="space-y-2">
@@ -805,7 +778,7 @@ export default function ClassEditor() {
             headLabel={previewHead ? previewHead.label : previewHeadId}
           />
           {looks.filter((l) => l.head).length > 0 && (
-            <div className="text-xs mt-2" style={{ color: '#6b5a35' }}>
+            <div className="text-xs mt-2" style={{ color: 'var(--color-ink-faint)' }}>
               {looks.filter((l) => l.head).map((l, i) => (
                 <div key={i}>
                   <span className="sam-mono">{l.race}</span> → {headLabel(l.head)}
@@ -822,14 +795,14 @@ export default function ClassEditor() {
                 tone={surviveShift ? 'green' : 'gold'}
                 onClick={() => setSurviveShift((s) => !s)}
               >
-                {surviveShift ? '✓ Survives polymorph' : '✗ Drops on polymorph'}
+                {surviveShift ? 'Survives polymorph' : 'Drops on polymorph'}
               </GoldButton>
             )}
           </div>
         </Panel>
 
         <Panel title="HP / MP Growth">
-          <div className="text-xs mb-2" style={{ color: '#6b5a35' }}>
+          <div className="text-xs mb-2" style={{ color: 'var(--color-ink-faint)' }}>
             <b>HP/MP per level</b> is how much max HP/MP a level-up grants. <b>Regen speed</b> is
             how fast HP/MP come back on their own (not an amount). Vanilla runs 1–5; 3 is the
             engine default — leave all four at 3 and nothing is written to your JSON.
@@ -846,7 +819,7 @@ export default function ClassEditor() {
             ))}
           </div>
           <div className="sam-divider" />
-          <div className="text-xs mb-2" style={{ color: '#6b5a35' }}>
+          <div className="text-xs mb-2" style={{ color: 'var(--color-ink-faint)' }}>
             <span className="sam-ok">Mana regen tuning</span> (optional). Heads up: vanilla
             scales mana regen off <b>PER</b> and <b>CHR</b> only — <b>INT does nothing</b>.
             Add an INT scaling below to make it matter.
@@ -861,7 +834,7 @@ export default function ClassEditor() {
           </div>
           <div className="grid grid-cols-3 gap-2 mt-2">
             {ROLL_STATS.map((a) => (
-              <Field key={a} label={`${ATTR_ICONS[a]} ${a}`} hint="MP/min per point">
+              <Field key={a} label={<><PixelIcon name={ATTR_ICONS[a]} /> {a}</>} hint="MP/min per point">
                 <NumberInput
                   value={mpRegenScaling[a]}
                   onChange={(v) => setMpRegenScaling((p) => ({ ...p, [a]: v }))}
@@ -875,7 +848,7 @@ export default function ClassEditor() {
 
       {/* ------------------------------------------------- behavior script */}
       <Panel title="Behavior Script">
-        <div className="text-xs mb-3" style={{ color: '#6b5a35' }}>
+        <div className="text-xs mb-3" style={{ color: 'var(--color-ink-faint)' }}>
           Optional — this is what makes the class actually DO things. Ships as{' '}
           <span className="sam-mono">classes/{slugify(name)}.{scriptLang}</span> next to the class JSON and auto-loads in-game.
           Click a function, event, or snippet on the right to insert it; the{' '}
@@ -891,13 +864,13 @@ export default function ClassEditor() {
       <div className="flex items-center justify-end gap-3">
         {savedAs && <SavedNote>Saved <span className="sam-mono">{savedAs}</span> to this session's mod — see Mod Builder.</SavedNote>}
         <GoldButton tone="red" onClick={save} disabled={!name.trim()}>
-          🛡 Save Class
+          Save Class
         </GoldButton>
       </div>
 
       {/* ------------------------------------------------------ live JSON */}
       <Panel title="Live JSON Preview" bodyClassName="p-0">
-        <pre className="sam-mono m-0 p-4 overflow-x-auto text-xs" style={{ color: '#9b8a5a' }}>
+        <pre className="sam-mono m-0 p-4 overflow-x-auto text-xs" style={{ color: 'var(--color-ink-dim)' }}>
           {preview}
         </pre>
       </Panel>

@@ -11,7 +11,7 @@ import { validate } from '@/lib/validate.js';
 import { carryUnknown } from '@/lib/editorKeys.js';
 import { checkOnHitEffect, describeOnHitEffect } from '@/lib/spellEffectRef.js';
 import { useMod } from '@/state/ModContext.jsx';
-import { Panel, Field, TextInput, NumberInput, GoldButton, ErrorList, SavedNote } from '@/components/ui.jsx';
+import { Panel, Field, TextInput, NumberInput, GoldButton, ErrorList, SavedNote, Gem } from '@/components/ui.jsx';
 
 function slugify(name) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'unnamed';
@@ -190,11 +190,11 @@ export default function SpellEditor() {
   const onHitNote = describeOnHitEffect(checkOnHitEffect(onHitEffect, customEffectIds));
 
   return (
-    <div className="space-y-4 max-w-5xl mx-auto">
+    <div className="space-y-4 max-w-5xl">
       <div>
         <TextInput value={name} onChange={setName} placeholder="Spell name — e.g. Shadow Bolt"
           style={{ fontSize: '1.5rem', padding: '0.7rem 1rem' }} aria-label="Spell name" />
-        <div className="mt-1 text-xs" style={{ color: '#6b5a35' }}>
+        <div className="mt-1 text-xs" style={{ color: 'var(--color-ink-faint)' }}>
           id: <span className="sam-mono">{spellId}</span> (namespace from the Mod Builder) · runtime id assigned ≥2000
         </div>
       </div>
@@ -232,8 +232,8 @@ export default function SpellEditor() {
                 like <span className="sam-mono">EFF_POISONED</span>.
                 {onHitNote && (
                   <span className={onHitNote.tone === 'warn' ? 'sam-error block mt-1' : 'block mt-1'}
-                    style={onHitNote.tone === 'ok' ? { color: '#9dc76a' } : undefined}>
-                    {onHitNote.tone === 'ok' ? '✓ ' : '⚠ '}{onHitNote.text}
+                    style={onHitNote.tone === 'ok' ? { color: 'var(--color-emerald-text)' } : undefined}>
+                    <Gem kind={onHitNote.tone === 'ok' ? 'emerald' : 'sapphire'} /> {onHitNote.text}
                   </span>
                 )}
               </>
@@ -257,11 +257,11 @@ export default function SpellEditor() {
             <TextInput value={icon} onChange={setIcon} placeholder="spells/shadow_bolt.png" />
           </Field>
           <div className="flex items-center gap-3 mt-2">
-            <GoldButton onClick={() => iconFileRef.current?.click()}>🖼 Upload PNG</GoldButton>
+            <GoldButton onClick={() => iconFileRef.current?.click()}>Upload PNG</GoldButton>
             <input ref={iconFileRef} type="file" accept="image/png" className="hidden" onChange={onIconFile} />
             {iconData && <img src={iconData} alt="Spell icon" style={{ width: 40, height: 40, imageRendering: 'pixelated' }} />}
             {iconData && (
-              <span className="text-xs" style={{ color: '#6b5a35' }}>
+              <span className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>
                 PNG loaded. It will export at <span className="sam-mono">{icon.trim() || `spells/${slugify(name)}.png`}</span>.
               </span>
             )}
@@ -271,7 +271,7 @@ export default function SpellEditor() {
             <input type="checkbox" className="sam-check" checked={startingSpell} onChange={(e) => setStartingSpell(e.target.checked)} />
             Intended as a class starting spell
           </label>
-          <div className="text-xs mt-2" style={{ color: '#6b5a35' }}>
+          <div className="text-xs mt-2" style={{ color: 'var(--color-ink-faint)' }}>
             To actually grant it, add <span className="sam-mono">{spellId}</span> to a class's Starting Spells.
           </div>
         </Panel>
@@ -285,7 +285,7 @@ export default function SpellEditor() {
                 {SCHOOLS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
               </select>
             </Field>
-            <div className="text-xs mb-2" style={{ color: '#6b5a35' }}>
+            <div className="text-xs mb-2" style={{ color: 'var(--color-ink-faint)' }}>
               The school picks the skill the learn difficulty is checked against (a difficulty of 0 checks none)
               and the skill a cast trains, and the stats that add to the spell's power. It also picks the school
               icon in the tooltip.
@@ -294,13 +294,13 @@ export default function SpellEditor() {
               hint="Your skill in the spell's school plus INT must reach this to learn it from a book. 0 means anyone can learn it. It also sets the spell's level (difficulty divided by 20).">
               <NumberInput value={difficulty} min={0} onChange={setDifficulty} />
             </Field>
-            <div className="text-xs" style={{ color: '#8a7749' }}>
+            <div className="text-xs" style={{ color: 'var(--color-ink-dim)' }}>
               Spell level: <span className="sam-mono">{TIERS[Math.min(5, Math.floor((Number(difficulty) || 0) / 20))]}</span>
             </div>
           </div>
           <div>
             <div className="sam-label mb-1" style={{ fontSize: '0.78rem' }}>Also needs, to learn it from a book</div>
-            <div className="text-xs mb-2" style={{ color: '#6b5a35' }}>Leave a box empty for no requirement.</div>
+            <div className="text-xs mb-2" style={{ color: 'var(--color-ink-faint)' }}>Leave a box empty for no requirement.</div>
             <div className="grid grid-cols-3 gap-3">
               {REQ_STATS.map((s) => (
                 <Field key={s} label={s}>
@@ -309,7 +309,7 @@ export default function SpellEditor() {
               ))}
             </div>
             <div className="flex flex-wrap gap-2 my-2 min-h-8">
-              {reqSkills.length === 0 && <div className="text-sm" style={{ color: '#6b5a35' }}>No skill requirement.</div>}
+              {reqSkills.length === 0 && <div className="text-sm" style={{ color: 'var(--color-ink-faint)' }}>No skill requirement.</div>}
               {reqSkills.map((r) => (
                 <span key={r.skill} className="sam-well px-2 py-1 text-sm inline-flex items-center gap-2" style={{ color: 'var(--color-parchment)' }}>
                   {skillWord(r.skill)} {r.value}
@@ -331,7 +331,7 @@ export default function SpellEditor() {
                 setReqSkills((p) => [...p.filter((x) => x.skill !== skillPick), { skill: skillPick, value: v }]);
               }}>Add</GoldButton>
             </div>
-            <div className="text-xs mt-2" style={{ color: '#6b5a35' }}>
+            <div className="text-xs mt-2" style={{ color: 'var(--color-ink-faint)' }}>
               Only checked when a spellbook of this spell is read. A spell a class, a race or a script hands over is always learned.
             </div>
           </div>
@@ -343,7 +343,7 @@ export default function SpellEditor() {
         </label>
         {makeBook && (
           existingBook ? (
-            <div className="text-xs mt-2" style={{ color: '#8a7749' }}>
+            <div className="text-xs mt-2" style={{ color: 'var(--color-ink-dim)' }}>
               <span className="sam-mono">{bookId}</span> already exists in this mod. Saving points it at this spell and leaves everything else on it as you set it.
             </div>
           ) : (
@@ -363,7 +363,7 @@ export default function SpellEditor() {
                   <NumberInput value={bookLevel} min={0} onChange={setBookLevel} />
                 </Field>
               )}
-              <div className="text-xs lg:col-span-2" style={{ color: '#6b5a35' }}>
+              <div className="text-xs lg:col-span-2" style={{ color: 'var(--color-ink-faint)' }}>
                 Creates <span className="sam-mono">{bookId}</span> as an item you can still edit in the Item Editor.
               </div>
             </div>
@@ -374,11 +374,11 @@ export default function SpellEditor() {
       <ErrorList errors={errors} />
       <div className="flex items-center justify-end gap-3">
         {savedAs && <SavedNote>Saved <span className="sam-mono">{savedAs}</span> — see Mod Builder.</SavedNote>}
-        <GoldButton tone="red" onClick={save} disabled={!name.trim()}>✨ Save Spell</GoldButton>
+        <GoldButton tone="red" onClick={save} disabled={!name.trim()}>Save Spell</GoldButton>
       </div>
 
       <Panel title="Live JSON Preview" bodyClassName="p-0">
-        <pre className="sam-mono m-0 p-4 overflow-x-auto text-xs" style={{ color: '#9b8a5a' }}>{preview}</pre>
+        <pre className="sam-mono m-0 p-4 overflow-x-auto text-xs" style={{ color: 'var(--color-ink-dim)' }}>{preview}</pre>
       </Panel>
     </div>
   );

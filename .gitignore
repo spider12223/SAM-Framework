@@ -58,3 +58,6 @@ log.txt
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# --- design review captures (impeccable skill), local only ---
+gui/.impeccable/review/

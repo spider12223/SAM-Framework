@@ -9,10 +9,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { validate } from '@/lib/validate.js';
 import { carryUnknown } from '@/lib/editorKeys.js';
 import { useMod } from '@/state/ModContext.jsx';
-import { Panel, Field, TextInput, NumberInput, GoldButton, ErrorList, SavedNote } from '@/components/ui.jsx';
+import { Panel, Field, TextInput, NumberInput, GoldButton, ErrorList, SavedNote, PixelIcon } from '@/components/ui.jsx';
 
 const ATTRS = ['STR', 'DEX', 'CON', 'INT', 'PER', 'CHR'];
-const ATTR_ICONS = { STR: '💪', DEX: '🪶', CON: '❤️', INT: '📖', PER: '👁️', CHR: '🎭' };
+const ATTR_ICONS = { STR: 'str', DEX: 'dex', CON: 'con', INT: 'int', PER: 'per', CHR: 'chr' };  // <PixelIcon> names
 const GRANT_FLAGS = ['LEVITATING', 'INVISIBLE', 'TELEPATH'];
 
 function slugify(name) {
@@ -95,11 +95,11 @@ export default function EffectEditor() {
   const setMod = (a, v) => setMods((prev) => ({ ...prev, [a]: v }));
 
   return (
-    <div className="space-y-4 max-w-5xl mx-auto">
+    <div className="space-y-4 max-w-5xl">
       <div>
         <TextInput value={name} onChange={setName} placeholder="Effect name — e.g. Frostbite"
           style={{ fontSize: '1.5rem', padding: '0.7rem 1rem' }} aria-label="Effect name" />
-        <div className="mt-1 text-xs" style={{ color: '#6b5a35' }}>
+        <div className="mt-1 text-xs" style={{ color: 'var(--color-ink-faint)' }}>
           id: <span className="sam-mono">{effectId}</span> · assigned an engine slot 135-159 · apply with{' '}
           <span className="sam-mono">sam_apply_effect(player, "{effectId}", ticks)</span>
         </div>
@@ -107,12 +107,12 @@ export default function EffectEditor() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
         <Panel title="While active — attribute modifiers">
-          <div className="text-xs mb-2" style={{ color: '#8a7749' }}>
+          <div className="text-xs mb-2" style={{ color: 'var(--color-ink-dim)' }}>
             Added to the affected creature's attributes while the effect is on (may be negative). 0 = no change.
           </div>
           <div className="grid grid-cols-2 gap-3">
             {ATTRS.map((a) => (
-              <Field key={a} label={`${ATTR_ICONS[a]} ${a}`}>
+              <Field key={a} label={<><PixelIcon name={ATTR_ICONS[a]} /> {a}</>}>
                 <NumberInput value={mods[a]} onChange={(v) => setMod(a, v)} />
               </Field>
             ))}
@@ -182,11 +182,11 @@ export default function EffectEditor() {
       <ErrorList errors={errors} />
       <div className="flex items-center justify-end gap-3">
         {savedAs && <SavedNote>Saved <span className="sam-mono">{savedAs}</span> — see Mod Builder.</SavedNote>}
-        <GoldButton tone="red" onClick={save} disabled={!name.trim()}>🌀 Save Effect</GoldButton>
+        <GoldButton tone="red" onClick={save} disabled={!name.trim()}>Save Effect</GoldButton>
       </div>
 
       <Panel title="Live JSON Preview" bodyClassName="p-0">
-        <pre className="sam-mono m-0 p-4 overflow-x-auto text-xs" style={{ color: '#9b8a5a' }}>{preview}</pre>
+        <pre className="sam-mono m-0 p-4 overflow-x-auto text-xs" style={{ color: 'var(--color-ink-dim)' }}>{preview}</pre>
       </Panel>
     </div>
   );

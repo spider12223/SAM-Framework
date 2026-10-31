@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-31T12:00:00Z",
+  "title": "Design System: S.A.M Mod Builder",
+  "extensions": {
+    "colorMeta": {
+      "crimson": { "role": "primary", "displayName": "Crimson Band", "tonalRamp": ["#2a070b", "#45101a", "#621520", "#86202a", "#a5302f", "#c2463f", "#d9746c", "#efc0bb"] },
+      "plaque-gold": { "role": "primary", "displayName": "Plaque Gold", "tonalRamp": ["#4a2f09", "#8c5a15", "#b57d27", "#d9a23f", "#e5b858", "#f7d677", "#fbe6a9", "#fdf4d8"] },
+      "oak": { "role": "secondary", "displayName": "Oak", "tonalRamp": ["#170c05", "#2b180c", "#3c2314", "#4f301b", "#664126", "#7d5434", "#a07a58", "#c9ad93"] },
+      "sapphire": { "role": "tertiary", "displayName": "Sapphire (advice)", "tonalRamp": ["#0f2f66", "#1a4688", "#2362b4", "#3a7cc8", "#4f93d8", "#69b0f3", "#a3cff8", "#d6eafc"] },
+      "ruby": { "role": "tertiary", "displayName": "Ruby (error)", "tonalRamp": ["#6a0d0c", "#8f1915", "#b8231f", "#c9352d", "#d4483d", "#ec5a4f", "#f08378", "#f8c2bc"] },
+      "emerald": { "role": "tertiary", "displayName": "Emerald (done)", "tonalRamp": ["#0d4b1e", "#17642c", "#22903f", "#3f9a55", "#58b36d", "#6fdc86", "#8fd49c", "#cfeed6"] },
+      "floor": { "role": "neutral", "displayName": "Slate Floor", "tonalRamp": ["#050608", "#0c0f16", "#141925", "#1c2333", "#262f43", "#3c4454", "#7f8b9f", "#c3c9d4"] },
+      "bone": { "role": "neutral", "displayName": "Bone", "tonalRamp": ["#5c574c", "#7b766a", "#a49f93", "#b6b0a2", "#dcc896", "#ded7c6", "#f2ead7", "#fbf8f1"] }
+    },
+    "typographyMeta": {
+      "title": { "displayName": "Title", "purpose": "The name in the title plaque only." },
+      "band": { "displayName": "Band", "purpose": "Section names on the crimson option band." },
+      "button": { "displayName": "Plaque", "purpose": "Button and tab lettering." },
+      "label": { "displayName": "Label", "purpose": "Field labels and short headings inside a window." },
+      "body": { "displayName": "Body", "purpose": "Prose and explanations, never pixel type." },
+      "input": { "displayName": "Value", "purpose": "Typed values, tabular figures." },
+      "hint": { "displayName": "Hint", "purpose": "Guidance under a field." }
+    },
+    "shadows": [
+      { "name": "pixel-drop-sm", "value": "0 1px 0 #000", "purpose": "Under pixel labels on dark ground, as the game draws text." },
+      { "name": "pixel-drop", "value": "0 2px 0 #000", "purpose": "Under bone lettering on the band, nav and titles." }
+    ],
+    "motion": [
+      { "name": "ease-out", "value": "cubic-bezier(0.23, 1, 0.32, 1)", "purpose": "Hover brightness and the save note." },
+      { "name": "dur-press", "value": "90ms", "purpose": "Steppers and slots responding to a press." },
+      { "name": "dur-hover", "value": "120ms", "purpose": "Button brightness on hover." },
+      { "name": "dur-enter", "value": "200ms", "purpose": "The save note easing in." }
+    ],
+    "breakpoints": [
+      { "name": "strip-nav", "value": "760px" },
+      { "name": "loadout-stack", "value": "900px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Gold plaque for the main action on a section.",
+      "html": "<button class=\"ds-btn\">Save Class</button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; min-height: 40px; padding: 2px 14px; border: 6px solid transparent; border-image: var(--px-plaque-gold) 3 fill / 6px stretch; background: none; color: #2b1907; font-family: 'Pixelify Sans', sans-serif; font-size: 17px; font-weight: 500; text-shadow: 0 1px 0 rgba(255,236,170,.55); } .ds-btn:hover { filter: brightness(1.1); } .ds-btn:active { border-image-source: var(--px-plaque-gold-down); padding-top: 4px; padding-bottom: 0; } .ds-btn:focus-visible { outline: 2px solid #f7d677; outline-offset: 4px; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Oak plaque for secondary actions and unchosen tabs.",
+      "html": "<button class=\"ds-btn-oak\">Events (87)</button>",
+      "css": ".ds-btn-oak { display: inline-flex; align-items: center; min-height: 40px; padding: 2px 14px; border: 6px solid transparent; border-image: var(--px-plaque-oak) 3 fill / 6px stretch; background: none; color: #f2ead7; font-family: 'Pixelify Sans', sans-serif; font-size: 17px; font-weight: 500; text-shadow: 0 2px 0 #000; } .ds-btn-oak:hover { filter: brightness(1.1); } .ds-btn-oak:active { border-image-source: var(--px-plaque-oak-down); }"
+    },
+    {
+      "name": "Danger Button",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Crimson plaque: removing, and the chosen tab.",
+      "html": "<button class=\"ds-btn-red\">Remove this ability</button>",
+      "css": ".ds-btn-red { display: inline-flex; align-items: center; min-height: 40px; padding: 2px 14px; border: 6px solid transparent; border-image: var(--px-plaque-crimson) 3 fill / 6px stretch; background: none; color: #f2ead7; font-family: 'Pixelify Sans', sans-serif; font-size: 17px; text-shadow: 0 2px 0 #000; } .ds-btn-red:hover { filter: brightness(1.1); } .ds-btn-red:active { border-image-source: var(--px-plaque-crimson-down); }"
+    },
+    {
+      "name": "Value Row",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "A black option row for any typed value.",
+      "html": "<input class=\"ds-input\" placeholder=\"Class name, e.g. Warden\">",
+      "css": ".ds-input { width: 100%; border: 6px solid transparent; border-image: var(--px-field) 3 / 6px stretch; background: #050608 padding-box; color: #ded7c6; font-family: Barlow, sans-serif; font-size: 15.5px; padding: 3px 6px; font-variant-numeric: tabular-nums; outline: none; } .ds-input:hover { border-image-source: var(--px-slot); } .ds-input:focus { border-image-source: var(--px-field-focus); } .ds-input::placeholder { color: #a49f93; }"
+    },
+    {
+      "name": "Option Band",
+      "kind": "custom",
+      "refersTo": "panel-band",
+      "description": "The crimson band that opens every section, a fleur-de-lis either side of the name.",
+      "html": "<header class=\"ds-band\"><span class=\"ds-fleur\"></span><span>Starting Loadout</span><span class=\"ds-fleur\"></span></header>",
+      "css": ".ds-band { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 36px; padding: 4px 44px; font-family: 'Pixelify Sans', sans-serif; font-size: 17px; font-weight: 500; color: #f2ead7; text-shadow: 0 2px 0 #000; background: linear-gradient(180deg, #07080b 0 2px, #c2463f 2px 4px, #86202a 4px calc(100% - 4px), #45101a calc(100% - 4px) calc(100% - 2px), #07080b calc(100% - 2px)); } .ds-fleur { width: 18px; height: 18px; background: var(--px-fleur) center / 18px 18px no-repeat; }"
+    },
+    {
+      "name": "Nav Row",
+      "kind": "nav",
+      "refersTo": "nav-item-active",
+      "description": "A destination in the rail: item icon and pixel label; crimson plaque in gold brackets when current.",
+      "html": "<a class=\"ds-nav ds-nav-on\" href=\"#\"><span class=\"ds-nav-ico\"></span>Class Editor</a>",
+      "css": ".ds-nav { position: relative; display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 0 8px 0 2px; border: 6px solid transparent; color: #f2ead7; font-family: 'Pixelify Sans', sans-serif; font-size: 17px; text-decoration: none; text-shadow: 0 2px 0 #000; } .ds-nav:hover { border-image: var(--px-plaque-oak) 3 fill / 6px stretch; } .ds-nav-on, .ds-nav-on:hover { border-image: var(--px-plaque-crimson) 3 fill / 6px stretch; } .ds-nav-on::after { content: ''; position: absolute; inset: -8px; border: 10px solid transparent; border-image: var(--px-bracket) 5 / 10px stretch; pointer-events: none; } .ds-nav-ico { width: 36px; height: 36px; background: #2b180c; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Options Window",
+    "overview": "The Mod Builder is Barony's own Settings and Play windows, redrawn so that building a mod feels like part of the game rather than a website about it. Every editor is a framed window on a speckled slate floor. Each section is opened by the crimson option band from Barony's Settings menu, and every value sits on a black option row. The art is pixel work drawn in scripts/pixel-art.mjs and scaled by whole numbers, 2px to a pixel, so no edge ever blurs. Nothing is taken from the game except the item icons the site already ships for its pickers.\n\nIt is a working tool used for an hour at a time, so the world contributes type, palette, density and one signature, the crimson band, and never the layout or the controls.",
+    "keyCharacteristics": [
+      "A crimson option band with a fleur-de-lis either side opens every section.",
+      "Gold plaques for the main action, oak plaques for secondary actions and tabs, crimson for removing.",
+      "Black option rows for every value, with a 2px slate edge that turns gold on focus.",
+      "Barony's gold corner brackets mark the current page and whatever has keyboard focus.",
+      "Two voices: pixel type for the menu, Barlow for anything read or typed.",
+      "Real Barony item icons (36px, 1:1) beside each destination."
+    ],
+    "rules": [
+      { "name": "The Three Gems Rule", "body": "State is said with Barony's gems: ruby for an error, sapphire for advice, emerald for done. A state line leads with its gem sprite, never a warning glyph.", "section": "colors" },
+      { "name": "The Black Row Rule", "body": "A value the user can read or change sits on a black row. Windows are slate, the floor is darker slate, and only rows are black, so a field always reads as a field.", "section": "colors" },
+      { "name": "The Two Voices Rule", "body": "Pixel type for titles, bands, buttons, the nav and labels; Barlow for values, hints and explanations. A sentence longer than a label is never set in the pixel face.", "section": "typography" },
+      { "name": "The Drawn Light Rule", "body": "Light comes from the art, not from CSS: bevels are pixels in the maps, presses swap to the pressed map. No blur shadows, no gradients pretending to be material.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do open every section with the crimson option band (Panel).",
+      "Do put values on black rows and let the edge carry hover, focus and error.",
+      "Do draw new ornaments, icons and frames as maps in scripts/pixel-art.mjs, then run it.",
+      "Do lead a state line with its gem: ruby, sapphire or emerald.",
+      "Do use the gold corner brackets for the chosen item and for keyboard focus.",
+      "Do keep sentences in Barlow and keep pixel type to menu chrome."
+    ],
+    "donts": [
+      "Don't copy menu art or fonts from the game; the item icons in public/item-icons/ are the only game art the site ships.",
+      "Don't round corners or add box shadows; depth and corners are in the pixel maps.",
+      "Don't nest a bordered box inside a window to make a sub-section.",
+      "Don't use emoji or font glyphs as icons on buttons or row tools.",
+      "Don't scale pixel art by anything but whole numbers."
+    ]
+  }
+}
