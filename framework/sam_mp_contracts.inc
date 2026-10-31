@@ -111,6 +111,10 @@ SAM_MP(sam_modify_value,                  Host,   None,      0, False)
 // ---- Input
 SAM_MP(sam_get_action_binding,            Read,   Player,    1, Nil)
 SAM_MP(sam_is_action_held,                Read,   Player,    1, None)
+SAM_MP(sam_hold_input,                    Owner,  Player,    1, False)
+SAM_MP(sam_press_input,                   Owner,  Player,    1, False)
+SAM_MP(sam_release_input,                 Owner,  Player,    1, False)
+SAM_MP(sam_set_facing,                    Owner,  Player,    1, False)
 SAM_MP(sam_is_key_held,                   Read,   Player,    2, None)
 SAM_MP(sam_register_action,               All,    None,      0, False)
 

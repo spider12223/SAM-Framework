@@ -387,6 +387,75 @@ something by passing a negative.
 
 ---
 
+## Moving a player from a script (new in 3.8.0)
+
+`sam_set_position`, `sam_move_entity` and `sam_apply_force` place or shove a player: the body changes place
+without walking, and none of them can turn the player or press Use. These four go through the game's own
+controls instead, so walking with the walk animation, turning, and picking something up with Use work as for
+a real key press (tried in the game). Footsteps and Attack go through the same code too, but were only read
+in it.
+
+| function | what it does |
+|---|---|
+| `sam_hold_input(player, action [, strength])` | holds a game action down until released |
+| `sam_press_input(player, action [, ticks])` | taps it: held for `ticks` game ticks (default 3), then let go |
+| `sam_release_input(player [, action])` | lets go of one action, or of all of them |
+| `sam_set_facing(player, yaw)` | turns the player to face an angle, the number `sam_get_facing` gives |
+
+The actions are the game's Controls names: `Move Forward`, `Move Backward`, `Move Left`, `Move Right`,
+`Turn Left`, `Turn Right`, `Look Up`, `Look Down`, `Quick Turn`, `Use`, `Attack`, `Cast Spell`, `Defend` and
+`Sneak`. `strength` (0 to 1) sets how fast `Turn Left` and `Turn Right` turn. The player's own keys keep
+working alongside a held action.
+
+A button that walks the player who pressed it two seconds forward, turns them around and presses Use:
+
+```lua
+local steps, who = nil, nil
+function on_event(e)
+  if e.name == "on_action_pressed" and e.action == "mymod:auto_walk" then
+    who = e.player
+    steps = { { "walk", 100 }, { "turn" }, { "use" } }
+    sam_hold_input(who, "Move Forward")
+  end
+end
+
+function on_tick(e)
+  if not steps then return end
+  local s = steps[1]
+  if s[1] == "walk" then
+    s[2] = s[2] - 1
+    if s[2] > 0 then return end
+    sam_release_input(who, "Move Forward")
+  elseif s[1] == "turn" then
+    local f = sam_get_facing(who)   -- nil if the player has no body right now
+    if f then sam_set_facing(who, (f + math.pi) % (2 * math.pi)) end
+  elseif s[1] == "use" then
+    sam_press_input(who, "Use")
+  end
+  table.remove(steps, 1)
+  if #steps == 0 then steps = nil end
+end
+```
+
+(`mymod:auto_walk` is an action registered with `sam_register_action`. `on_tick` runs once per game tick,
+50 to a second.)
+
+* A hold lasts until you release it or a new run starts. Release it, or the player keeps walking into a
+  wall.
+* A held `Use`, `Attack`, `Cast Spell`, `Defend`, `Sneak` or `Quick Turn` also counts as held for
+  `sam_is_action_held`, and fires `on_action_pressed` when it goes down and `on_action_released` when it
+  ends, like the real key. A handler that presses `Use` when `Use` is pressed is not called again by its own
+  press (the action is already down; the hold just lasts longer), but one that presses `Use` when `Use` is
+  released calls itself again and again.
+* A player on a game controller moves, turns and looks with the stick, so a held Move, Turn or Look action
+  does nothing for them. `Use`, `Attack`, `Cast Spell`, `Defend`, `Sneak` and `Quick Turn` work for them too.
+* Otherwise the game treats a held action as it treats the real key, so where the real key does nothing (the
+  game paused, for example) a held one does nothing either. No key needs to be bound to the action.
+* `sam_set_facing` turns only left and right. To pick up something on the floor, hold `Look Down` for a
+  moment before pressing `Use`.
+* In multiplayer each of these runs on the machine the player plays on, where their buttons are read; the
+  host's call about a joiner is carried there. A call made by a script on a joiner's own machine is refused.
+
 ## Every event
 
 Fields vary per event; `sam_log(e.name)` inside your handler and read the log if unsure.

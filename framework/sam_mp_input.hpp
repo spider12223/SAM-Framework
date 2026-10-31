@@ -42,6 +42,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 class Item;
 
@@ -220,4 +221,46 @@ namespace SAMMpInput
 	// asked, so ask it to take the marker down again (S.A.M clients; a stock client keeps it).
 	// `key` is the uid the host keyed the callout by.
 	void retractCallout(int player, unsigned int key);
+}
+
+// (3.8.0) A script moving a player through the game's own controls: sam_hold_input,
+// sam_press_input, sam_release_input and sam_set_facing.
+//
+// THE PROBLEM. A script could move a player only by teleporting it (sam_move_entity), which slides
+// the body across the floor with no walking animation, no footsteps, no turning and no way to open a
+// door or pick something up. Barony moves, turns and interacts a player from its BOUND ACTIONS
+// ("Move Forward", "Turn Left", "Use", ...), read from Input::inputs each frame.
+//
+// THE SHAPE. A script holds a game action down as if its key were held, and Input::update ORs that
+// into the action's binding, so everything downstream (walking, the walk animation, turning, Use on
+// whatever the player looks at, an attack swing) runs exactly as for a real key. The player's own
+// keys still work alongside. Holds live on the machine the player plays on (the Owner contract
+// carries a host call there), are keyed by that machine's Input index, and end when the script
+// releases them, when a timed press runs out, or when a run starts.
+namespace SAMScriptInput
+{
+	// The game actions a script may hold, by the names the game's Controls screen binds.
+	const std::vector<std::string>& actionNames();
+
+	// Hold `action` down for `player` (who must play on this machine). strength 0..1 is how far an
+	// analog action is pushed (turning speed); a key press is 1. ticks > 0 releases it by itself after
+	// that many game ticks (50 to a second) counted from the frame it first takes effect; 0 holds it
+	// until released. false, with the reason in *why, for an unknown action or a player not here.
+	bool hold(int player, const std::string& action, float strength, int ticks, std::string* why);
+
+	// Let go of one action, or every action ("" ) the scripts hold for `player`. Returns how many
+	// holds ended; -1 for a player not on this machine.
+	int release(int player, const std::string& action);
+
+	// Turn `player` (on this machine) to face `yaw` radians, sam_get_facing's convention. false, with
+	// the reason in *why, for a player not here or one with no body.
+	bool setFacing(int player, double yaw, std::string* why);
+
+	// Engine side, Input::update, for every binding every frame. anyHeld() is false whenever no
+	// script holds anything, which is always the case without a mod.
+	bool anyHeld();
+	bool heldFor(int inputIndex, const char* binding, float* strength);
+
+	// Every hold ends (a new run, the end of a game, the scripts reloading).
+	void clear();
 }

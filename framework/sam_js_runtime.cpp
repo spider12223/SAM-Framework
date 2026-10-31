@@ -33,6 +33,7 @@
 #include "sam_speed.hpp"  // sam_set_game_speed / sam_get_game_speed: the simulation speed
 #include "sam_loot.hpp"   // P_ITEMS: the loot pool, its tables, the containers and the shops
 #include "sam_settings.hpp"  // sam_register_action / sam_register_setting / sam_get_setting / sam_set_setting / sam_list_settings
+#include "sam_mp_input.hpp"  // SAMScriptInput: sam_hold_input / sam_press_input / sam_release_input / sam_set_facing
 #include "sam_logger.hpp"
 #include "sam_errors.hpp"   // writeFileAtomic
 
@@ -1634,6 +1635,106 @@ namespace
 		const char* b = SAMLua::actionBinding(player, action);
 		if ( !b || !b[0] ) { return JS_UNDEFINED; }
 		return JS_NewString(ctx, b);
+	}
+
+	// ===== 3.8.0: a script moving a player through the game's own controls (see the Lua twins) ====
+	static bool samJsReqStr(JSContext* ctx, int argc, JSValueConst* argv, int i, const char* who, std::string* out);
+
+	JSValue js_sam_hold_input(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1;
+		if ( !samJsReqI32(ctx, argc, argv, 0, &player, "sam_hold_input") ) { return JS_FALSE; }
+		std::string action;
+		if ( !samJsReqStr(ctx, argc, argv, 1, "sam_hold_input", &action) ) { return JS_FALSE; }
+		double strength = 1.0;
+		if ( samHasArg(argc, argv, 2) && JS_ToFloat64(ctx, &strength, argv[2]) < 0 ) { strength = 1.0; }
+#ifdef SAM_JS_HAVE_BARONY
+		std::string why;
+		if ( !SAMScriptInput::hold(player, action, (float)strength, 0, &why) )
+		{
+			SAMNet::warnOnce("sam_hold_input:" + why, "sam_hold_input refused: " + why);
+			return JS_FALSE;
+		}
+		return JS_TRUE;
+#else
+		(void)player; (void)strength;
+		return JS_FALSE;
+#endif
+	}
+
+	JSValue js_sam_press_input(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1;
+		if ( !samJsReqI32(ctx, argc, argv, 0, &player, "sam_press_input") ) { return JS_FALSE; }
+		std::string action;
+		if ( !samJsReqStr(ctx, argc, argv, 1, "sam_press_input", &action) ) { return JS_FALSE; }
+		int32_t ticks = 3;
+		if ( samHasArg(argc, argv, 2) && JS_ToInt32(ctx, &ticks, argv[2]) < 0 ) { ticks = 3; }
+		if ( ticks < 1 ) { ticks = 1; }
+		if ( ticks > 3000 ) { ticks = 3000; }
+#ifdef SAM_JS_HAVE_BARONY
+		std::string why;
+		if ( !SAMScriptInput::hold(player, action, 1.f, (int)ticks, &why) )
+		{
+			SAMNet::warnOnce("sam_press_input:" + why, "sam_press_input refused: " + why);
+			return JS_FALSE;
+		}
+		return JS_TRUE;
+#else
+		(void)player;
+		return JS_FALSE;
+#endif
+	}
+
+	JSValue js_sam_release_input(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1;
+		if ( !samJsReqI32(ctx, argc, argv, 0, &player, "sam_release_input") ) { return JS_FALSE; }
+		// Left out, undefined or null all mean "every action", as nil does in Lua.
+		std::string action;
+		if ( samHasArg(argc, argv, 1) && !JS_IsNull(argv[1]) && !JS_IsUndefined(argv[1]) )
+		{
+			const char* s = JS_ToCString(ctx, argv[1]);
+			if ( s ) { action = s; JS_FreeCString(ctx, s); }
+		}
+#ifdef SAM_JS_HAVE_BARONY
+		const int n = SAMScriptInput::release(player, action);
+		if ( n < 0 )
+		{
+			SAMNet::warnOnce("sam_release_input:" + std::to_string(player),
+				"sam_release_input: player " + std::to_string(player) + " does not play on this machine.");
+		}
+		return n >= 0 ? JS_TRUE : JS_FALSE;
+#else
+		(void)player;
+		return JS_FALSE;
+#endif
+	}
+
+	JSValue js_sam_set_facing(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1;
+		if ( !samJsReqI32(ctx, argc, argv, 0, &player, "sam_set_facing") ) { return JS_FALSE; }
+		// Required: undefined becomes NaN, which setFacing refuses, as luaL_checknumber would.
+		double yaw = 0.0;
+		if ( !samHasArg(argc, argv, 1) ) { SAM_ERROR("JS", "sam_set_facing: argument 2 (the angle) is required."); return JS_FALSE; }
+		JS_ToFloat64(ctx, &yaw, argv[1]);
+#ifdef SAM_JS_HAVE_BARONY
+		std::string why;
+		if ( !SAMScriptInput::setFacing(player, yaw, &why) )
+		{
+			SAMNet::warnOnce("sam_set_facing:" + why, "sam_set_facing refused: " + why);
+			return JS_FALSE;
+		}
+		return JS_TRUE;
+#else
+		(void)player; (void)yaw;
+		return JS_FALSE;
+#endif
 	}
 
 	JSValue js_sam_get_inventory_count(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
@@ -8858,6 +8959,10 @@ namespace
 		samJsRegister(ctx, g, "sam_get_equipped_item_id", js_sam_get_equipped_item_id, 2);
 		samJsRegister(ctx, g, "sam_is_defending", js_sam_is_defending, 1);
 		samJsRegister(ctx, g, "sam_is_action_held", js_sam_is_action_held, 2);
+		samJsRegister(ctx, g, "sam_hold_input", js_sam_hold_input, 3);
+		samJsRegister(ctx, g, "sam_press_input", js_sam_press_input, 3);
+		samJsRegister(ctx, g, "sam_release_input", js_sam_release_input, 2);
+		samJsRegister(ctx, g, "sam_set_facing", js_sam_set_facing, 2);
 		samJsRegister(ctx, g, "sam_get_action_binding", js_sam_get_action_binding, 2);
 		// P_SETTINGS: a mod's own rows in the Bindings page and the General tab (sam_settings.cpp).
 		samJsRegister(ctx, g, "sam_register_action", js_sam_register_action, 4);

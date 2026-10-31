@@ -10,7 +10,7 @@ import { useMod } from '@/state/ModContext.jsx';
 import { Panel, GoldButton } from '@/components/ui.jsx';
 
 /** The framework's own version (mods declare their own framework_min_version). */
-const SAM_FRAMEWORK_VERSION = '3.7.0';
+const SAM_FRAMEWORK_VERSION = '3.8.0';
 
 /** Where players get S.A.M itself (the framework is a dependency, not a mod). */
 const WORKSHOP_URL = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472';
@@ -28,12 +28,10 @@ const TRAVELS = [
  * thing a returning modder sees, and the point is 'here is what you can do now that you
  * could not before', not a changelog. */
 const WHATS_NEW = [
-  ["Spells with a school and requirements",
-   "A custom spell can now be Sorcery, Mysticism or Thaumaturgy, and can ask for a minimum Charisma, Intelligence or any other stat, or a skill level, before a spellbook of it can be read. The Spell Editor has boxes for the school and for how hard the spell is to learn, can make the spellbook for you, and takes a PNG for the spell's icon."],
-  ["Recruit what you choose",
-   "A race can list monsters it recruits by pressing Use on them, such as rats and spiders, whatever body the race has. They count as your allies, and your Leadership still caps how many you can lead."],
-  ["Clearer weapons and spell pictures",
-   "A mod weapon's on-hit effect now appears in its tooltip. A spell icon path that cannot be found is reported in the log instead of silently falling back to the generic orb, and the picture now shows in the new-spell popup too. In the Class Editor an item can be in the hand and on a hotbar key at once."],
+  ["Walk a player from a script",
+   "sam_hold_input holds one of the game's own controls down for a player, as if the key were held: Move Forward, Turn Left, Use, Attack and ten more. It goes through the same code as the real key, so the player walks with the normal walk animation instead of sliding, turns, and can pick things up with Use. A player on a game controller moves, turns and looks with the stick, so those three work for keyboard and mouse players."],
+  ["Taps, letting go and facing",
+   "sam_press_input taps a control for a few ticks and lets go by itself, sam_release_input lets go of one control or all of them, and sam_set_facing turns a player to face an angle at once, the camera with it. The player's own keys keep working alongside."],
 ];
 
 /** sam-well stat box: big gold number over a small-caps label. */
@@ -83,11 +81,11 @@ export default function Dashboard() {
       {/* --------------------------------------------------- what is new */}
       <Panel title={`New in ${SAM_FRAMEWORK_VERSION}`}>
         <p className="m-0" style={{ color: 'var(--color-parchment)' }}>
-          This one is about spells, recruiting and a few fixes.{' '}
+          This one is for scripts.{' '}
           <strong style={{ color: 'var(--color-gold)' }}>
-            A race that recruits what you choose, spells with a school and real requirements, and clearer weapons and spell pictures.
+            A script can now move a player through the game's own controls: walk, turn, look and press Use.
           </strong>{' '}
-          Nothing here needs a script.
+          Four new functions.
         </p>
         <ul className="mt-3 mb-0 space-y-2" style={{ listStyle: 'none', padding: 0 }}>
           {WHATS_NEW.map(([title, blurb]) => (

@@ -4,7 +4,7 @@
 // Drop this beside your mod's .ts files, or reference it:
 //   /// <reference path="sam.d.ts" />
 //
-// 339 functions, 87 events. Each function's "Multiplayer:" line starts with
+// 343 functions, 87 events. Each function's "Multiplayer:" line starts with
 // its kind (host, owner, screen, read, all, local, any); see docs/multiplayer.md.
 
 declare global {
@@ -1010,6 +1010,13 @@ declare global {
   function sam_hitstop(duration_ms: number): boolean;
 
   /**
+   * Hold one of the game's own actions down for a player, as if its key were held, until sam_release_input. It goes through the same code as the real key, so a player on keyboard and mouse walks with the walk animation, turns with the camera, and Use picks up what the player is looking at (all three tried in the game); footsteps and Attack go through the same code but were only read in it. sam_set_position, sam_move_entity and sam_apply_force only place or shove a player. The actions are the game's Controls names: Move Forward, Move Backward, Move Left, Move Right, Turn Left, Turn Right, Look Up, Look Down, Quick Turn, Use, Attack, Cast Spell, Defend and Sneak. strength is how far an analog action is pushed, which sets the turning speed for Turn Left and Turn Right; a key press is 1, and 0, a negative number or NaN count as 1. The player's own keys keep working alongside. A player on a game controller moves, turns and looks with the stick, so a held Move, Turn or Look action does nothing for them (read in the code); Use, Attack, Cast Spell, Defend, Sneak and Quick Turn work for them too. Otherwise, where the real key does nothing (the game paused, for example) a held one does nothing either. No key needs to be bound: the hold is added to the action itself (read in the code).
+   *
+   * Multiplayer: owner. The state lives on the player's own machine: on the host, a call about a player on another machine (named by player) is carried to that machine and done there, and returns true once it is sent. A player whose game does not run S.A.M is refused with a warning. A client's call is refused with a one-time warning and returns false. Runs on the machine the player plays on, where their buttons are read: the host's call about a joiner is carried there and returns true once it is sent. A player whose game does not run S.A.M is refused with a warning, and so is a call made by a script on a joiner's own machine.
+   */
+  function sam_hold_input(player: number, action: string, strength?: number): boolean;
+
+  /**
    * Show or update a horizontal bar — a custom resource, a charge meter, a boss health track. frac is clamped to 0..1; 0 draws as empty rather than a sliver.
    *
    * Multiplayer: screen. Shows on one player's own screen, picked by the optional last argument player: left out, the player the current event is about, else this machine's own; -1 is every player. On the host, a call for a player on another machine is carried there and returns true once it is sent; a player whose game does not run S.A.M is refused with a warning. A client can show things only on its own screen. Inside an event about a player, leaving the player out shows it to THAT player. A timer callback is not an event: there, with no player, it shows on the host's own screen, so keep the player in a local (local p = e.player) and pass it. Update on change rather than every tick: every call for a remote player is a network message.
@@ -1549,6 +1556,13 @@ declare global {
   function sam_power_entity(uid: number, on: boolean): boolean;
 
   /**
+   * Tap one of the game's own actions for a player: it is held for ticks game ticks (50 to a second), counted from the frame the game first sees it, then let go by itself. Use it for a single Use, Attack or Quick Turn. The same actions as sam_hold_input. Calling it again for the same action restarts the tap.
+   *
+   * Multiplayer: owner. The state lives on the player's own machine: on the host, a call about a player on another machine (named by player) is carried to that machine and done there, and returns true once it is sent. A player whose game does not run S.A.M is refused with a warning. A client's call is refused with a one-time warning and returns false. As sam_hold_input.
+   */
+  function sam_press_input(player: number, action: string, ticks?: number): boolean;
+
+  /**
    * Work out what one creature's melee swing would do to another, dealing nothing. Built from the same three terms the real melee path combines: attack, the target's AC effectiveness, and its AC.
    *
    * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript).
@@ -1617,6 +1631,13 @@ declare global {
    * Multiplayer: all. Changes a table every machine keeps its own copy of: a host call runs on the host and on every S.A.M client, and is replayed to a client that joins later. A client's call is refused with a one-time warning and returns false. Call it on the host or when your mod loads. A host call applies on every S.A.M player's machine, and a player who joins later gets the host's whole table.
    */
   function sam_register_setting(id: string, spec: any): boolean;
+
+  /**
+   * Let go of an action a script holds for a player, or of every action the scripts hold for that player when action is left out. It never touches the player's own keys.
+   *
+   * Multiplayer: owner. The state lives on the player's own machine: on the host, a call about a player on another machine (named by player) is carried to that machine and done there, and returns true once it is sent. A player whose game does not run S.A.M is refused with a warning. A client's call is refused with a one-time warning and returns false. As sam_hold_input.
+   */
+  function sam_release_input(player: number, action?: string): boolean;
 
   /**
    * Remove a class passive effect previously added.
@@ -1834,6 +1855,13 @@ declare global {
    * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. On a player on another machine the new size reaches their own machine if it runs S.A.M; a player whose game does not run S.A.M is refused, because their machine could not be told and they would stick in doorways. A pinned prop's size reaches S.A.M players.
    */
   function sam_set_entity_size(uid: number, size: number, size_y?: number): boolean;
+
+  /**
+   * Turn a player to face an angle at once: the number sam_get_facing gives, 0 east and increasing toward +y, so facing a point is atan2(targetY - myY, targetX - myX). The camera turns with the body. It turns only left and right: hold Look Down to look at the floor. Pair it with sam_hold_input(player, "Move Forward") to walk a player toward something, and with sam_press_input(player, "Use") to pick up or use what the player is looking at.
+   *
+   * Multiplayer: owner. The state lives on the player's own machine: on the host, a call about a player on another machine (named by player) is carried to that machine and done there, and returns true once it is sent. A player whose game does not run S.A.M is refused with a warning. A client's call is refused with a one-time warning and returns false. As sam_hold_input. The player's own machine reports the new facing to everyone as it reports any turn.
+   */
+  function sam_set_facing(player: number, yaw: number): boolean;
 
   /**
    * Singleplayer only. Run the simulation at multiplier times real time, 0.1 to 8. Everything counted in game ticks scales with it (monsters, hunger, effect durations, the run timer, your timers and on_tick); everything on a wall clock does not (rendering, the message feed, sam_hitstop, a screen flash, sam_get_real_time). ticks > 0 makes it temporary: after that many GAME ticks at the new speed it goes back to what it was, which is how a mod does bullet time on a critical hit (ticks = real_seconds * 50 * multiplier, so half a real second at 0.25x is 6). A window opened inside a window still returns to the original speed. Setting the value already set does nothing and fires nothing, so a preset key may call it every frame. 0, NaN and anything outside 0.1-8 are refused and change nothing. Above 1x is best effort: 8x needs every game tick to finish inside 2.5 ms, and a slower machine gets less than it asked for.

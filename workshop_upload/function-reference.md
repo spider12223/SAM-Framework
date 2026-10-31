@@ -1,6 +1,6 @@
 # S.A.M function reference
 
-Every script function the framework exposes: **339 functions** and **87 events**.
+Every script function the framework exposes: **343 functions** and **87 events**.
 All of them work identically in Lua, JavaScript and TypeScript.
 
 This page is generated from the API definition, so it cannot fall behind the code. If a
@@ -16,7 +16,7 @@ the kind, so the line is always what really happens:
 | kind | what it means for your script |
 |---|---|
 | `host` (151) | Runs on the host, where your events and timers already run. A client's call is refused with a one-time warning. The result reaches every player. |
-| `owner` (10) | Changes something that lives on the player's own machine (their backpack, their spells). Call it on the host; S.A.M carries it to that player's machine. |
+| `owner` (14) | Changes something that lives on the player's own machine (their backpack, their spells). Call it on the host; S.A.M carries it to that player's machine. |
 | `screen` (29) | Shows something on one player's screen. Name the player, or leave it out inside an event about a player; -1 means every player. S.A.M carries it to their machine. |
 | `read` (50) | Reads a player. The host can read everyone; a client can read only its own player. |
 | `all` (15) | Changes a table every machine keeps (class and item patches, species resists). A host call runs everywhere and reaches players who join later. |
@@ -40,7 +40,7 @@ For guides and worked examples, see [scripting-reference.md](scripting-reference
 - [Game content](#game-content) (5)
 - [HUD](#hud) (3)
 - [Hooks](#hooks) (2)
-- [Input](#input) (4)
+- [Input](#input) (8)
 - [Inventory](#inventory) (30)
 - [Live patching](#live-patching) (6)
 - [Logging](#logging) (3)
@@ -1057,6 +1057,22 @@ What the player actually has an action bound to — use it to print a correct pr
 
 **Multiplayer:** `read`. The host can read every player; a client can read only its own player (`player`), and asking about another is refused with a one-time warning and returns nil (undefined in JavaScript). On the host, a player on another machine answers with the binding their game reported (nil until it has).
 
+### `sam_hold_input(player, action, [strength])`
+
+Hold one of the game's own actions down for a player, as if its key were held, until sam_release_input. It goes through the same code as the real key, so a player on keyboard and mouse walks with the walk animation, turns with the camera, and Use picks up what the player is looking at (all three tried in the game); footsteps and Attack go through the same code but were only read in it. sam_set_position, sam_move_entity and sam_apply_force only place or shove a player. The actions are the game's Controls names: Move Forward, Move Backward, Move Left, Move Right, Turn Left, Turn Right, Look Up, Look Down, Quick Turn, Use, Attack, Cast Spell, Defend and Sneak. strength is how far an analog action is pushed, which sets the turning speed for Turn Left and Turn Right; a key press is 1, and 0, a negative number or NaN count as 1. The player's own keys keep working alongside. A player on a game controller moves, turns and looks with the stick, so a held Move, Turn or Look action does nothing for them (read in the code); Use, Attack, Cast Spell, Defend, Sneak and Quick Turn work for them too. Otherwise, where the real key does nothing (the game paused, for example) a held one does nothing either. No key needs to be bound: the hold is added to the action itself (read in the code).
+
+A hold lasts until you release it, or until a new run starts: release it, or a player keeps walking into a wall. A held Use, Attack, Cast Spell, Defend, Sneak or Quick Turn also counts as held for sam_is_action_held, and fires on_action_pressed when it goes down and on_action_released when it ends, like the real key. A handler that presses Use when Use is pressed is not called again by its own press (the action is already down; the hold just lasts longer), but one that presses Use when Use is released calls itself again and again.
+
+| argument | type |
+|---|---|
+| `player` | int |
+| `action` | string — one of: `Move Forward`, `Move Backward`, `Move Left`, `Move Right`, `Turn Left`, `Turn Right`, `Look Up`, `Look Down`, `Quick Turn`, `Use`, `Attack`, `Cast Spell`, `Defend`, `Sneak` |
+| `strength` *(optional)* | number (0..1, default 1) |
+
+**Returns:** true if the action is now held (boolean); false, with the reason in the log, for an action that cannot be held or a player whose game does not run S.A.M
+
+**Multiplayer:** `owner`. The state lives on the player's own machine: on the host, a call about a player on another machine (named by `player`) is carried to that machine and done there, and returns true once it is sent. A player whose game does not run S.A.M is refused with a warning. A client's call is refused with a one-time warning and returns false. Runs on the machine the player plays on, where their buttons are read: the host's call about a joiner is carried there and returns true once it is sent. A player whose game does not run S.A.M is refused with a warning, and so is a call made by a script on a joiner's own machine.
+
 ### `sam_is_action_held(player, action)`
 
 Check whether a BOUND action is held. Reads Barony's own binding, so it follows whatever the player rebound it to (and works with mouse buttons, which raw keys can't see).
@@ -1083,6 +1099,20 @@ Check whether a RAW key is currently held. Takes any key name the game itself us
 
 **Multiplayer:** `read`. The host can read every player; a client can read only its own player (`player`), and asking about another is refused with a one-time warning and returns nothing at all -- no value in Lua, `undefined` in JavaScript. Left out, `player` is the player the current event is about, else this machine's own. On the host, a player on another machine reads the keys their game reported: A-Z, 0-9 and F1-F12 only, and false for a player whose game does not run S.A.M.
 
+### `sam_press_input(player, action, [ticks])`
+
+Tap one of the game's own actions for a player: it is held for ticks game ticks (50 to a second), counted from the frame the game first sees it, then let go by itself. Use it for a single Use, Attack or Quick Turn. The same actions as sam_hold_input. Calling it again for the same action restarts the tap.
+
+| argument | type |
+|---|---|
+| `player` | int |
+| `action` | string — one of: `Move Forward`, `Move Backward`, `Move Left`, `Move Right`, `Turn Left`, `Turn Right`, `Look Up`, `Look Down`, `Quick Turn`, `Use`, `Attack`, `Cast Spell`, `Defend`, `Sneak` |
+| `ticks` *(optional)* | int (1..3000, default 3) |
+
+**Returns:** true if the press was started (boolean); false, with the reason in the log, as for sam_hold_input
+
+**Multiplayer:** `owner`. The state lives on the player's own machine: on the host, a call about a player on another machine (named by `player`) is carried to that machine and done there, and returns true once it is sent. A player whose game does not run S.A.M is refused with a warning. A client's call is refused with a one-time warning and returns false. As sam_hold_input.
+
 ### `sam_register_action(id, label, default_key, [default_pad])`
 
 Give your mod its own rebindable row in Settings > Controls > Bindings, under your mod's name. The action's full name is "<namespace>:<id>": that is what on_action_pressed / on_action_released carry in `action`, and what sam_is_action_held and sam_get_action_binding take. `id` is letters, digits, '_', '-' and '.'. `default_key` is the name the Bindings page shows for a key: a letter or digit ("F", "3"), "F1".."F12", "Keypad 0".."Keypad 9" (NOT "KP0"), "Space", "Return", "Tab", "Left Shift", "Left Ctrl", "Left Alt", "Escape", "Backspace", "Up"/"Down"/"Left"/"Right", "Home", "End", "Page Up"/"Page Down", "Insert", "Delete", a punctuation key as its character, "Mouse1".."Mouse15", "MouseWheelUp", "MouseWheelDown", or "[unbound]". `default_pad` is a controller input without the seat prefix: "ButtonA/B/X/Y" (or just "Y"), "ButtonBack", "ButtonStart", "ButtonLeftBumper", "ButtonRightBumper", "ButtonLeftStick", "ButtonRightStick", "LeftTrigger", "RightTrigger", "DpadX+/X-/Y+/Y-", "StickLeftX+".."StickRightY-", or "[unbound]" (the default). They are DEFAULTS: whatever the player already has bound to this action in config.json wins, survives a restart and survives the mod being unloaded, and Restore Defaults puts your default back. Call it at top level: the registry is rebuilt on every load, registering the same id again is a no-op that refreshes the label, and a row registered from an event only exists from that moment.
@@ -1099,6 +1129,32 @@ The game has no conflict check: an action on the same key as a vanilla one (or a
 **Returns:** true if the action exists now (boolean); false, with the reason in the log, for a bad id or a key name the game does not know
 
 **Multiplayer:** `all`. Changes a table every machine keeps its own copy of: a host call runs on the host and on every S.A.M client, and is replayed to a client that joins later. A client's call is refused with a one-time warning and returns false. Call it on the host or when your mod loads. A host call applies on every S.A.M player's machine, and a player who joins later gets the host's whole table.
+
+### `sam_release_input(player, [action])`
+
+Let go of an action a script holds for a player, or of every action the scripts hold for that player when action is left out. It never touches the player's own keys.
+
+| argument | type |
+|---|---|
+| `player` | int |
+| `action` *(optional)* | string — one of: `Move Forward`, `Move Backward`, `Move Left`, `Move Right`, `Turn Left`, `Turn Right`, `Look Up`, `Look Down`, `Quick Turn`, `Use`, `Attack`, `Cast Spell`, `Defend`, `Sneak` |
+
+**Returns:** true when the player plays on that machine, even if nothing was held (boolean); false for a player whose game does not run S.A.M
+
+**Multiplayer:** `owner`. The state lives on the player's own machine: on the host, a call about a player on another machine (named by `player`) is carried to that machine and done there, and returns true once it is sent. A player whose game does not run S.A.M is refused with a warning. A client's call is refused with a one-time warning and returns false. As sam_hold_input.
+
+### `sam_set_facing(player, yaw)`
+
+Turn a player to face an angle at once: the number sam_get_facing gives, 0 east and increasing toward +y, so facing a point is atan2(targetY - myY, targetX - myX). The camera turns with the body. It turns only left and right: hold Look Down to look at the floor. Pair it with sam_hold_input(player, "Move Forward") to walk a player toward something, and with sam_press_input(player, "Use") to pick up or use what the player is looking at.
+
+| argument | type |
+|---|---|
+| `player` | int |
+| `yaw` | number (radians, same as sam_get_facing) |
+
+**Returns:** true if the player now faces that way (boolean); false, with the reason in the log, for a player with no body or an angle that is NaN or beyond a million either way (in Lua, an argument that is not a number at all is an error)
+
+**Multiplayer:** `owner`. The state lives on the player's own machine: on the host, a call about a player on another machine (named by `player`) is carried to that machine and done there, and returns true once it is sent. A player whose game does not run S.A.M is refused with a warning. A client's call is refused with a one-time warning and returns false. As sam_hold_input. The player's own machine reports the new facing to everyone as it reports any turn.
 
 
 ## Inventory

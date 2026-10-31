@@ -15,6 +15,8 @@
 #include "sam_settings.hpp"      // the actions mods registered (sam_register_action), polled by name
 #include "sam_spells.hpp"        // scriptName: a custom spell reports its declared "ns:spell" id
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -820,6 +822,7 @@ namespace
 		s_client = ClientState();
 		s_inGrantedUse = false;
 		s_floorRefused = 0;
+		SAMScriptInput::clear();   // the game ended or a new one is being joined
 	}
 
 	struct Registrar
@@ -1393,6 +1396,7 @@ void resetRun()
 		s_keptDead[p] = KeptDead();
 	}
 	s_client.pendingUse.clear();
+	SAMScriptInput::clear();   // a hold never outlives the run it was made in
 }
 
 // -------------------------------------------------------------------- callouts
@@ -1409,4 +1413,145 @@ void retractCallout(int player, unsigned int key)
 	SAMNet::sendToClient(player, OP_UNPING, w.buf);
 }
 
+}
+
+// ====================================================================== scripted input (3.8.0)
+
+namespace SAMScriptInput
+{
+namespace
+{
+	struct Hold
+	{
+		float strength = 1.f;
+		int ticks = 0;           // 0: until released
+		bool applied = false;    // seen by Input::update at least once
+		Uint32 untilTick = 0;    // set when first applied, for a timed press
+	};
+	// Keyed by Input index (this machine's input for the player) and action name.
+	std::map<std::pair<int, std::string>, Hold> s_holds;
+
+	// The Input this machine reads `player`'s buttons from: in a netgame every query is answered by
+	// Input::inputs[0] (input.cpp forwards any other index there), in splitscreen each seat has its own.
+	// -1 for a player who does not play on this machine.
+	int inputIndexFor(int player)
+	{
+		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->isLocalPlayer() ) { return -1; }
+		return ( multiplayer == SINGLE ) ? player : 0;
+	}
+}
+
+const std::vector<std::string>& actionNames()
+{
+	// Gameplay actions only. The menus, chat, the pause key and the screenshot key are left out: a
+	// script that opened them would be fighting the player for the screen.
+	static const std::vector<std::string> v = {
+		"Move Forward", "Move Backward", "Move Left", "Move Right",
+		"Turn Left", "Turn Right", "Look Up", "Look Down", "Quick Turn",
+		"Use", "Attack", "Cast Spell", "Defend", "Sneak",
+	};
+	return v;
+}
+
+bool hold(int player, const std::string& action, float strength, int ticks, std::string* why)
+{
+	const auto& names = actionNames();
+	if ( std::find(names.begin(), names.end(), action) == names.end() )
+	{
+		if ( why )
+		{
+			*why = "'" + action + "' is not an action a script can hold. Use one of:";
+			for ( const auto& n : names ) { *why += " \"" + n + "\""; }
+		}
+		return false;
+	}
+	const int idx = inputIndexFor(player);
+	if ( idx < 0 )
+	{
+		if ( why ) { *why = "player " + std::to_string(player) + " does not play on this machine."; }
+		return false;
+	}
+	if ( !(strength > 0.f) ) { strength = 1.f; }  // NaN and 0 alike: a plain key press
+	if ( strength > 1.f ) { strength = 1.f; }
+	Hold h;
+	h.strength = strength;
+	h.ticks = ticks > 0 ? ticks : 0;
+	s_holds[std::make_pair(idx, action)] = h;   // a new call restarts a timed press
+	return true;
+}
+
+int release(int player, const std::string& action)
+{
+	const int idx = inputIndexFor(player);
+	if ( idx < 0 ) { return -1; }
+	int n = 0;
+	for ( auto it = s_holds.begin(); it != s_holds.end(); )
+	{
+		if ( it->first.first == idx && (action.empty() || it->first.second == action) )
+		{
+			it = s_holds.erase(it);
+			++n;
+		}
+		else { ++it; }
+	}
+	return n;
+}
+
+bool setFacing(int player, double yaw, std::string* why)
+{
+	if ( inputIndexFor(player) < 0 )
+	{
+		if ( why ) { *why = "player " + std::to_string(player) + " does not play on this machine."; }
+		return false;
+	}
+	Entity* me = players[player]->entity;
+	if ( !me )
+	{
+		if ( why ) { *why = "player " + std::to_string(player) + " has no body right now."; }
+		return false;
+	}
+	if ( !(yaw == yaw) || yaw > 1.0e6 || yaw < -1.0e6 )   // NaN or absurd: refuse rather than spin
+	{
+		if ( why ) { *why = "the angle is not a usable number."; }
+		return false;
+	}
+	const double twoPi = 2.0 * PI;
+	yaw = std::fmod(yaw, twoPi);
+	if ( yaw < 0.0 ) { yaw += twoPi; }
+	me->yaw = yaw;   // the camera follows the body's yaw; in a netgame the owner's machine reports it
+	return true;
+}
+
+bool anyHeld()
+{
+	return !s_holds.empty();
+}
+
+bool heldFor(int inputIndex, const char* binding, float* strength)
+{
+	if ( !binding ) { return false; }
+	auto it = s_holds.find(std::make_pair(inputIndex, std::string(binding)));
+	if ( it == s_holds.end() ) { return false; }
+	Hold& h = it->second;
+	if ( !h.applied )
+	{
+		// A timed press is counted from the frame it first reaches the input, not from the call:
+		// a script runs inside a tick, and the next Input::update can come a tick later, so a
+		// one-tick press counted from the call could end before the game ever saw it.
+		h.applied = true;
+		if ( h.ticks > 0 ) { h.untilTick = ticks + (Uint32)h.ticks; }
+	}
+	else if ( h.ticks > 0 && (Sint32)(ticks - h.untilTick) >= 0 )
+	{
+		s_holds.erase(it);
+		return false;
+	}
+	if ( strength ) { *strength = h.strength; }
+	return true;
+}
+
+void clear()
+{
+	s_holds.clear();
+}
 }

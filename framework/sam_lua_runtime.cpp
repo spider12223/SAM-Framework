@@ -33,6 +33,7 @@
 #include "sam_speed.hpp"  // sam_set_game_speed / sam_get_game_speed: the simulation speed
 #include "sam_loot.hpp"   // P_ITEMS: the loot pool, its tables, the containers and the shops
 #include "sam_settings.hpp"  // sam_register_action / sam_register_setting / sam_get_setting / sam_set_setting / sam_list_settings
+#include "sam_mp_input.hpp"  // SAMScriptInput: sam_hold_input / sam_press_input / sam_release_input / sam_set_facing
 #include "sam_logger.hpp"
 #include "sam_errors.hpp"   // writeFileAtomic
 
@@ -2263,6 +2264,112 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		if ( !b || !b[0] ) { lua_pushnil(Ls); return 1; }
 		lua_pushstring(Ls, b);
 		return 1;
+	}
+
+	// ===== 3.8.0: a script moving a player through the game's own controls (sam_mp_input.cpp) ====
+	//
+	// The game walks, turns and interacts a player from its bound actions. These hold an action down
+	// as if its key were held, so the walk animation, footsteps, turning, Use on whatever the player
+	// looks at and an attack swing all run through the game's own code. A refusal is said once per
+	// reason (SAMNet::warnOnce): these are typically called from on_tick.
+
+	// sam_hold_input(player, action [, strength=1]) -> bool. Until sam_release_input.
+	int lua_sam_hold_input(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const char* actionC = luaL_checkstring(Ls, 2);
+		const double strength = (double)luaL_optnumber(Ls, 3, 1.0);
+#ifdef SAM_LUA_HAVE_BARONY
+		std::string why;
+		if ( !SAMScriptInput::hold(player, actionC ? actionC : "", (float)strength, 0, &why) )
+		{
+			SAMNet::warnOnce("sam_hold_input:" + why, "sam_hold_input refused: " + why);
+			lua_pushboolean(Ls, 0);
+			return 1;
+		}
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)player; (void)actionC; (void)strength;
+		lua_pushboolean(Ls, 0);
+		return 1;
+#endif
+	}
+
+	// sam_press_input(player, action [, ticks=3]) -> bool. A tap: held for `ticks` game ticks
+	// (1 to 3000, 50 to a second), counted from the frame the game first sees it, then let go.
+	int lua_sam_press_input(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const char* actionC = luaL_checkstring(Ls, 2);
+		lua_Integer ticks = luaL_optinteger(Ls, 3, 3);
+		if ( ticks < 1 ) { ticks = 1; }
+		if ( ticks > 3000 ) { ticks = 3000; }
+#ifdef SAM_LUA_HAVE_BARONY
+		std::string why;
+		if ( !SAMScriptInput::hold(player, actionC ? actionC : "", 1.f, (int)ticks, &why) )
+		{
+			SAMNet::warnOnce("sam_press_input:" + why, "sam_press_input refused: " + why);
+			lua_pushboolean(Ls, 0);
+			return 1;
+		}
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)player; (void)actionC;
+		lua_pushboolean(Ls, 0);
+		return 1;
+#endif
+	}
+
+	// sam_release_input(player [, action]) -> bool. Lets go of one held action, or of every action
+	// the scripts hold for the player when `action` is left out. true when the player plays here
+	// (even if nothing was held), false otherwise.
+	int lua_sam_release_input(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const char* actionC = lua_isnoneornil(Ls, 2) ? "" : luaL_checkstring(Ls, 2);
+#ifdef SAM_LUA_HAVE_BARONY
+		const int n = SAMScriptInput::release(player, actionC ? actionC : "");
+		if ( n < 0 )
+		{
+			SAMNet::warnOnce("sam_release_input:" + std::to_string(player),
+				"sam_release_input: player " + std::to_string(player) + " does not play on this machine.");
+		}
+		lua_pushboolean(Ls, n >= 0 ? 1 : 0);
+		return 1;
+#else
+		(void)player; (void)actionC;
+		lua_pushboolean(Ls, 0);
+		return 1;
+#endif
+	}
+
+	// sam_set_facing(player, yaw) -> bool. Turns the player to face `yaw` radians, the number
+	// sam_get_facing gives (0 is east, increasing toward +y).
+	int lua_sam_set_facing(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		const double yaw = (double)luaL_checknumber(Ls, 2);
+#ifdef SAM_LUA_HAVE_BARONY
+		std::string why;
+		if ( !SAMScriptInput::setFacing(player, yaw, &why) )
+		{
+			SAMNet::warnOnce("sam_set_facing:" + why, "sam_set_facing refused: " + why);
+			lua_pushboolean(Ls, 0);
+			return 1;
+		}
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)player; (void)yaw;
+		lua_pushboolean(Ls, 0);
+		return 1;
+#endif
 	}
 
 	// ===== mod actions and mod settings (sam_settings.cpp) ==================================
@@ -10753,6 +10860,10 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		samLuaRegister(L, "sam_get_equipped_item_id", lua_sam_get_equipped_item_id);
 		samLuaRegister(L, "sam_is_defending", lua_sam_is_defending);
 		samLuaRegister(L, "sam_is_action_held", lua_sam_is_action_held);
+		samLuaRegister(L, "sam_hold_input", lua_sam_hold_input);
+		samLuaRegister(L, "sam_press_input", lua_sam_press_input);
+		samLuaRegister(L, "sam_release_input", lua_sam_release_input);
+		samLuaRegister(L, "sam_set_facing", lua_sam_set_facing);
 		samLuaRegister(L, "sam_get_action_binding", lua_sam_get_action_binding);
 		// P_SETTINGS: a mod's own rows in the Bindings page and the General tab (sam_settings.cpp).
 		samLuaRegister(L, "sam_register_action", lua_sam_register_action);

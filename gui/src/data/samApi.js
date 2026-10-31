@@ -111,6 +111,13 @@ export const SPELLS = ["SPELL_FORCEBOLT", "SPELL_MAGICMISSILE", "SPELL_FIREBALL"
  * "Hotbar Up / Select"=Mouse2 (right-click). Names are space/case-sensitive.
  */
 // Plus every mod action registered with sam_register_action, by its full name "<namespace>:<id>".
+// The game actions sam_hold_input / sam_press_input accept (SAMScriptInput::actionNames).
+export const HOLDABLE_ACTIONS = [
+  "Move Forward", "Move Backward", "Move Left", "Move Right",
+  "Turn Left", "Turn Right", "Look Up", "Look Down", "Quick Turn",
+  "Use", "Attack", "Cast Spell", "Defend", "Sneak",
+];
+
 export const ACTIONS = [
   "Attack", "Defend", "Use", "Cast Spell", "Sneak",
   "Hotbar Up / Select", "Hotbar Down / Cancel", "Hotbar Left", "Hotbar Right",
@@ -892,6 +899,27 @@ export const SAM_FUNCTIONS = [
     returns: "the physical input, e.g. \"Mouse3\" (string; nil/undefined if unbound)",
     desc: "What the player actually has an action bound to — use it to print a correct prompt instead of guessing a key.",
     mpNote: "On the host, a player on another machine answers with the binding their game reported (nil until it has)." },
+  { name: "sam_hold_input", category: "Input", mp: "owner", hostOnly: true,
+    params: [{ name: "player", type: "int" }, { name: "action", type: "string", values: HOLDABLE_ACTIONS }, { name: "strength", type: "number (0..1, default 1)", optional: true }],
+    returns: "true if the action is now held (boolean); false, with the reason in the log, for an action that cannot be held or a player whose game does not run S.A.M",
+    desc: "Hold one of the game's own actions down for a player, as if its key were held, until sam_release_input. It goes through the same code as the real key, so a player on keyboard and mouse walks with the walk animation, turns with the camera, and Use picks up what the player is looking at (all three tried in the game); footsteps and Attack go through the same code but were only read in it. sam_set_position, sam_move_entity and sam_apply_force only place or shove a player. The actions are the game's Controls names: Move Forward, Move Backward, Move Left, Move Right, Turn Left, Turn Right, Look Up, Look Down, Quick Turn, Use, Attack, Cast Spell, Defend and Sneak. strength is how far an analog action is pushed, which sets the turning speed for Turn Left and Turn Right; a key press is 1, and 0, a negative number or NaN count as 1. The player's own keys keep working alongside. A player on a game controller moves, turns and looks with the stick, so a held Move, Turn or Look action does nothing for them (read in the code); Use, Attack, Cast Spell, Defend, Sneak and Quick Turn work for them too. Otherwise, where the real key does nothing (the game paused, for example) a held one does nothing either. No key needs to be bound: the hold is added to the action itself (read in the code).",
+    gotcha: "A hold lasts until you release it, or until a new run starts: release it, or a player keeps walking into a wall. A held Use, Attack, Cast Spell, Defend, Sneak or Quick Turn also counts as held for sam_is_action_held, and fires on_action_pressed when it goes down and on_action_released when it ends, like the real key. A handler that presses Use when Use is pressed is not called again by its own press (the action is already down; the hold just lasts longer), but one that presses Use when Use is released calls itself again and again.",
+    mpNote: "Runs on the machine the player plays on, where their buttons are read: the host's call about a joiner is carried there and returns true once it is sent. A player whose game does not run S.A.M is refused with a warning, and so is a call made by a script on a joiner's own machine." },
+  { name: "sam_press_input", category: "Input", mp: "owner", hostOnly: true,
+    params: [{ name: "player", type: "int" }, { name: "action", type: "string", values: HOLDABLE_ACTIONS }, { name: "ticks", type: "int (1..3000, default 3)", optional: true }],
+    returns: "true if the press was started (boolean); false, with the reason in the log, as for sam_hold_input",
+    desc: "Tap one of the game's own actions for a player: it is held for ticks game ticks (50 to a second), counted from the frame the game first sees it, then let go by itself. Use it for a single Use, Attack or Quick Turn. The same actions as sam_hold_input. Calling it again for the same action restarts the tap.",
+    mpNote: "As sam_hold_input." },
+  { name: "sam_release_input", category: "Input", mp: "owner", hostOnly: true,
+    params: [{ name: "player", type: "int" }, { name: "action", type: "string", values: HOLDABLE_ACTIONS, optional: true }],
+    returns: "true when the player plays on that machine, even if nothing was held (boolean); false for a player whose game does not run S.A.M",
+    desc: "Let go of an action a script holds for a player, or of every action the scripts hold for that player when action is left out. It never touches the player's own keys.",
+    mpNote: "As sam_hold_input." },
+  { name: "sam_set_facing", category: "Input", mp: "owner", hostOnly: true,
+    params: [{ name: "player", type: "int" }, { name: "yaw", type: "number (radians, same as sam_get_facing)" }],
+    returns: "true if the player now faces that way (boolean); false, with the reason in the log, for a player with no body or an angle that is NaN or beyond a million either way (in Lua, an argument that is not a number at all is an error)",
+    desc: "Turn a player to face an angle at once: the number sam_get_facing gives, 0 east and increasing toward +y, so facing a point is atan2(targetY - myY, targetX - myX). The camera turns with the body. It turns only left and right: hold Look Down to look at the floor. Pair it with sam_hold_input(player, \"Move Forward\") to walk a player toward something, and with sam_press_input(player, \"Use\") to pick up or use what the player is looking at.",
+    mpNote: "As sam_hold_input. The player's own machine reports the new facing to everyone as it reports any turn." },
   { name: "sam_register_action", category: "Input", mp: "all", hostOnly: true,
     params: [{ name: "id", type: "string" }, { name: "label", type: "string" }, { name: "default_key", type: "string" }, { name: "default_pad", type: "string", optional: true }],
     returns: "true if the action exists now (boolean); false, with the reason in the log, for a bad id or a key name the game does not know",
