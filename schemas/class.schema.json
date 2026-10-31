@@ -759,7 +759,7 @@
             "type": "integer",
             "minimum": 0,
             "default": 0,
-            "description": "Appearance/variant number selecting among model & name variations. For a READABLE_BOOK this is the book index (0-33 in vanilla), choosing which book it is. Use 0 unless a specific variant is needed."
+            "description": "Which look the item has, counting from 0. Many items have several looks (a cloak has 4, so 0 to 3; most hats 2 to 4; a ring 5; a potion up to 8); a number past the last wraps around. For a READABLE_BOOK it is the book index (0-33 in vanilla), choosing which book it is. Leave it at 0 on a spell tome, a spellbook, a spell item, a scroll of mail, an enchanted feather, a scepter, a loot bag and the four robots: there it is game data or has no effect. The Class Editor has a Look picker for the items that have several looks."
           },
           "identified": {
             "type": "boolean",

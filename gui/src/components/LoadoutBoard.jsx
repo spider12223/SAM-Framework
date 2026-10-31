@@ -18,6 +18,7 @@
 import { useState } from 'react';
 import { Panel, Select, NumberInput, ItemPickerModal, PixelIcon, Gem } from '@/components/ui.jsx';
 import { itemIconUrl, SLOT_ICON_FILE } from '@/data/fallbackIcons.js';
+import { looksOf } from '@/data/itemLooks.js';
 import {
   EQUIP_SLOTS, equipSlotOf, itemsForSlot, findSlot,
   BLESSING_MIN, BLESSING_MAX, blessingLabel, STATUSES, newEntry,
@@ -125,9 +126,12 @@ function DetailStrip({ entry, patch, onHotbar, iconFor, onRemove, category }) {
   const word = statusWord(category, entry.status);     // e.g. potion -> "bubbly"
   const bWord = (Number(entry.beatitude) || 0) !== 0 ? `${blessingLabel(entry.beatitude).toLowerCase()} ` : '';
   const isBook = category === 'BOOK';                  // READABLE_BOOK: appearance picks the book
+  const looks = isBook ? 1 : looksOf(entry.type);      // items with several pictures: appearance picks one
+  const look = looks > 1 ? (Number(entry.appearance) || 0) % looks : 0;
+  const lookWord = looks > 1 ? `, look ${look + 1} of ${looks}` : '';
   const plain = isBook
     ? `${bWord}${word} ${entry.type} — "${bookTitle(entry.appearance)}"${entry.identified ? '' : ', unidentified'}`
-    : `${bWord}${word} ${entry.type}${entry.identified ? '' : ', unidentified'}`;
+    : `${bWord}${word} ${entry.type}${lookWord}${entry.identified ? '' : ', unidentified'}`;
   return (
     <div className="sam-well sam-detailstrip">
       <div className="flex items-center gap-2 mb-3">
@@ -159,6 +163,14 @@ function DetailStrip({ entry, patch, onHotbar, iconFor, onRemove, category }) {
           <Select value={String(entry.hotbar_slot)} onChange={(v) => onHotbar(Number(v))}
             options={[{ value: '-1', label: equipped ? 'not on the hotbar' : 'in pack' }, ...Array.from({ length: 10 }, (_, i) => ({ value: String(i), label: `slot ${i === 9 ? 0 : i + 1}` }))]} />
         </div>
+        {looks > 1 && (
+          <div>
+            <div className="sam-label mb-1" style={{ fontSize: '0.72rem' }}
+              title={`Which of this item's ${looks} looks it starts with, shown as its picture (written as "appearance": ${look}).`}>Look</div>
+            <Select value={String(look)} onChange={(v) => patch({ appearance: Number(v) })}
+              options={Array.from({ length: looks }, (_, i) => ({ value: String(i), label: `Look ${i + 1} of ${looks}` }))} />
+          </div>
+        )}
         {isBook && (
           <div style={{ gridColumn: '1 / -1' }}>
             <div className="sam-label mb-1" style={{ fontSize: '0.72rem' }} title="Which readable book this is — the engine picks it by the item's appearance index.">Book / Contents</div>
