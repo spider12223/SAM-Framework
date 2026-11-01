@@ -516,6 +516,21 @@ export default function ClassEditor() {
         {portraitError && <div className="sam-error text-sm mt-1">{portraitError}</div>}
       </Panel>
 
+      {/* ------------------------------------------------------ description */}
+      <Panel title="Description">
+        <textarea
+          className="sam-input"
+          rows={3}
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="A sturdy guardian of the forest."
+          aria-label="Class description"
+        />
+        <div className="mt-1 text-xs" style={{ color: 'var(--color-ink-faint)' }}>
+          Shown on this class's details card when a player is choosing it in character select. Leave it empty for a blank card.
+        </div>
+      </Panel>
+
       {/* --------------------------------------------- character select card */}
       <Panel title="Character Select Card">
         <div className="text-xs mb-3" style={{ color: 'var(--color-ink-dim)' }}>
