@@ -11,7 +11,7 @@ import { Panel, GoldButton } from '@/components/ui.jsx';
 import { NAV_ICONS } from '@/data/navIcons.js';
 
 /** The framework's own version (mods declare their own framework_min_version). */
-const SAM_FRAMEWORK_VERSION = '3.8.0';
+const SAM_FRAMEWORK_VERSION = '3.8.1';
 
 /** Where players get S.A.M itself (the framework is a dependency, not a mod). */
 const WORKSHOP_URL = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472';
@@ -29,10 +29,12 @@ const TRAVELS = [
  * thing a returning modder sees, and the point is 'here is what you can do now that you
  * could not before', not a changelog. */
 const WHATS_NEW = [
-  ["Walk a player from a script",
-   "sam_hold_input holds one of the game's own controls down for a player, as if the key were held: Move Forward, Turn Left, Use, Attack and ten more. It goes through the same code as the real key, so the player walks with the normal walk animation instead of sliding, turns, and can pick things up with Use. A player on a game controller moves, turns and looks with the stick, so those three work for keyboard and mouse players."],
-  ["Taps, letting go and facing",
-   "sam_press_input taps a control for a few ticks and lets go by itself, sam_release_input lets go of one control or all of them, and sam_set_facing turns a player to face an angle at once, the camera with it. The player's own keys keep working alongside."],
+  ["Your race's name on the character sheet",
+   "The race line of the in-game character sheet used to say what the host body is, so a race on the human body read \"Human Landguard\". It now shows the race's own name, and its tooltip shows the race's description."],
+  ["A Description box for classes",
+   "The text the game shows on a class's details card in character select can now be written in the Class Editor. It could only be written in the JSON before."],
+  ["A Look box for items with several looks",
+   "A starting item such as a plain cloak (4 looks) or a ring (5) can now be given a look in the Class Editor's loadout board. It is the \"appearance\" number in the JSON."],
 ];
 
 /** sam-well stat box: big gold number over a small-caps label. */
@@ -83,11 +85,11 @@ export default function Dashboard() {
       {/* --------------------------------------------------- what is new */}
       <Panel title={`New in ${SAM_FRAMEWORK_VERSION}`}>
         <p className="m-0" style={{ color: 'var(--color-parchment)' }}>
-          This one is for scripts.{' '}
+          This one is about names and looks.{' '}
           <strong style={{ color: 'var(--color-gold)' }}>
-            A script can now move a player through the game's own controls: walk, turn, look and press Use.
+            A custom race now has its own name on the character sheet, and the Class Editor has boxes for a class's description and an item's look.
           </strong>{' '}
-          Four new functions.
+          No new script function.
         </p>
         <ul className="mt-1 mb-0" style={{ listStyle: 'none', padding: 0 }}>
           {WHATS_NEW.map(([title, blurb]) => (

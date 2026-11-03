@@ -214,7 +214,7 @@ export default function RaceEditor() {
             <Select value={hostBody} onChange={setHostBody}
               options={HOST_BODIES.map((b) => ({ value: b, label: cap(b) }))} />
           </Field>
-          <Field label="Description" hint="Shown in the picker's info panel.">
+          <Field label="Description" hint="Shown in the picker's info panel and in the tooltip of the race line on the character sheet in game.">
             <textarea className="sam-input" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="A nimble undead wanderer…" />
           </Field>
           <label className="flex items-center gap-2 mt-3 cursor-pointer text-sm" style={{ color: 'var(--color-parchment)' }}>

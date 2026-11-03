@@ -67,10 +67,10 @@ This works for your own custom items too (the Class Editor's loadout board does 
 equipped item).
 
 A starting item can also pick one of its looks with `"appearance"`, counting from 0:
-`{ "type": "CLOAK", "appearance": 2 }` is the third of a cloak's four looks, and a number past the last one
-wraps around. Several vanilla items have more than one look, among them cloaks (4), most hats (2 to 4), rings (5)
+`{ "type": "CLOAK", "appearance": 2 }` is the third of a plain cloak's four looks, and a number past the last one
+wraps around. Several vanilla items have more than one look, among them five of the cloaks (4 each), most hats (2 to 4), rings (5)
 and amulets (6). Leave it out for the first look, and leave it at 0 on a spell tome, a spellbook, a spell item,
-a scepter, a loot bag and the four robots, where the number means something else or does nothing. (unreleased) The Class
+a scepter, a loot bag and the four robots, where the number means something else or does nothing. (new in 3.8.1) The Class
 Editor's loadout board has a Look box for the items that have several looks.
 
 ## 5. items/oakstaff.json

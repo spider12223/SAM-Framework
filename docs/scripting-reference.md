@@ -734,6 +734,19 @@ shopkeepers, mimics, bats, the tinkering bots and holograms are types that can n
 are dropped with a warning. The player's Leadership still caps how many followers they can have. For
 any other recruiting rule, handle `player.on_callout` or an action press yourself and call `sam_make_follower`.
 
+### Races: the name on the character sheet (new in 3.8.1)
+
+A custom race's `name` is shown in the character-select picker, on its info card and on the main-menu
+leaderboards, and since 3.8.1 also on the race line of the in-game character sheet. That line used to print the host body's
+species and, on a human body, a skin tone (a race on the human body read "Human Landguard"). Now, while the
+player is in the race's own body, it prints the race's `name` (seen in game), and, unless the player has
+ticked "disable monster abilities", hovering it shows the race's `description` in place of the host body
+species' stock text (read in the code, not hovered in game). With that box ticked it reads "Guised" and then
+the name, as it does for a vanilla race, but the tooltip keeps the host species' stock text. A polymorphed
+player, or a shapeshifted one without the box ticked, still sees what they are now (read in the code, not
+tried). The hover texts of the Resistance and Regeneration rows still name the host body's species,
+because the numbers in them come from that body. Vanilla races are not changed.
+
 ---
 
 ## Monster traits
