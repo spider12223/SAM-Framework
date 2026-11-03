@@ -11,7 +11,7 @@ import { Panel, GoldButton } from '@/components/ui.jsx';
 import { NAV_ICONS } from '@/data/navIcons.js';
 
 /** The framework's own version (mods declare their own framework_min_version). */
-const SAM_FRAMEWORK_VERSION = '3.8.1';
+const SAM_FRAMEWORK_VERSION = '3.9.0';
 
 /** Where players get S.A.M itself (the framework is a dependency, not a mod). */
 const WORKSHOP_URL = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472';
@@ -29,12 +29,10 @@ const TRAVELS = [
  * thing a returning modder sees, and the point is 'here is what you can do now that you
  * could not before', not a changelog. */
 const WHATS_NEW = [
-  ["Your race's name on the character sheet",
-   "The race line of the in-game character sheet used to say what the host body is, so a race on the human body read \"Human Landguard\". It now shows the race's own name, and its tooltip shows the race's description."],
-  ["A Description box for classes",
-   "The text the game shows on a class's details card in character select can now be written in the Class Editor. It could only be written in the JSON before."],
-  ["A Look box for items with several looks",
-   "A starting item such as a plain cloak (4 looks) or a ring (5) can now be given a look in the Class Editor's loadout board. It is the \"appearance\" number in the JSON."],
+  ["A picture for your race on saved games",
+   "A race can name a small PNG with \"icon\". The saved-game cards on the Continue screen show it in place of the host body's head, and in a co-op game the status bars of the other players are meant to as well. The Race Editor has an Icon path box and an Upload PNG button."],
+  ["A card follows the saved race number",
+   "A saved game remembers a race by a number, handed out by sorting the loaded mods by namespace, so the card shows whichever race holds that number when the Continue screen opens. Load the same set of mods you saved with."],
 ];
 
 /** sam-well stat box: big gold number over a small-caps label. */
@@ -85,11 +83,11 @@ export default function Dashboard() {
       {/* --------------------------------------------------- what is new */}
       <Panel title={`New in ${SAM_FRAMEWORK_VERSION}`}>
         <p className="m-0" style={{ color: 'var(--color-parchment)' }}>
-          This one is about names and looks.{' '}
+          This one is about how a race looks.{' '}
           <strong style={{ color: 'var(--color-gold)' }}>
-            A custom race now has its own name on the character sheet, and the Class Editor has boxes for a class's description and an item's look.
+            A custom race can now have its own small picture on the saved-game cards.
           </strong>{' '}
-          No new script function.
+          One new race field, icon. No new script function.
         </p>
         <ul className="mt-1 mb-0" style={{ listStyle: 'none', padding: 0 }}>
           {WHATS_NEW.map(([title, blurb]) => (

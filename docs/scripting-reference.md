@@ -747,6 +747,30 @@ player, or a shapeshifted one without the box ticked, still sees what they are n
 tried). The hover texts of the Resistance and Regeneration rows still name the host body's species,
 because the numbers in them come from that body. Vanilla races are not changed.
 
+### Races: a picture for saved games and the HUD (new in 3.9.0)
+
+A race can name a small picture of its own with `"icon"`, a PNG of about 32 by 32 pixels written from the
+folder that holds `mod.json`, for example `"icon": "races/frostborn.png"`. The game keeps one table of small
+head pictures for every species, keyed by the model's head, so a custom race used to get the picture of its
+host body (a race on the human body showed a human head). With an `icon`, the saved-game cards on the
+Continue screen use your picture for a character of that race (seen on the Continue screen in the game), and so
+do the status bars the game draws for the other players in a networked co-op game (read in the code, not tried). A path
+the game cannot find, or one that climbs out of the mod folder, is reported in `sam_log.txt` and the body's
+picture is kept. The game looks for the file when the mods load and keeps the picture once it has drawn it, so
+restart the game after changing the picture.
+
+A saved game remembers a race by a number, not a name. S.A.M hands the numbers out by sorting the loaded mods
+by namespace (a mod's dependencies first), so they depend on which mods are loaded, not on how the list is
+arranged: 200 for the first race, 201 for the next, and so on. The card shows the picture of whichever race
+holds that number when the Continue screen opens, or that race's body head if it has no `icon`. With a different
+set of mods loaded than when the game was saved, that is another race's picture or head (seen: a save made as a
+race on the human body showed a skeleton head when another mod's race on the skeleton body held its number).
+Load the same set of mods you saved with.
+
+The picture does not appear anywhere a race has no small picture to replace: the lobby cards, the main-menu
+leaderboards and the character sheet are not changed, and a recruited follower is a monster, not a race, so it keeps its
+species' picture. The Race Editor has an Icon path box and an Upload PNG button.
+
 ---
 
 ## Monster traits

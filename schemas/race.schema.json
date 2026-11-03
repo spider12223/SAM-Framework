@@ -51,6 +51,10 @@
       "type": "string",
       "description": "Short flavour text for the race (shown in the picker's info panel and, from 3.8.1, in the tooltip of the race line on the in-game character sheet)."
     },
+    "icon": {
+      "type": "string",
+      "description": "(From 3.9.0.) Mod-relative path to a small PNG (about 32 by 32 pixels) used as this race's picture on the saved-game cards and, in a co-op game, on the status bars of the other players, in place of the host body's icon, e.g. \"races/frostborn.png\". Write it from the folder that holds mod.json, with no leading slash. A path the game cannot find, or one that climbs out of the mod folder, is reported in sam_log.txt and the body's icon is kept."
+    },
     "stat_modifiers": {
       "type": "object",
       "additionalProperties": false,

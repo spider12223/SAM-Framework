@@ -5,7 +5,7 @@
  * attribute/HP/MP bonuses at character creation. Only the 18 host bodies below have a
  * proper first-person arm, so both views stay correct.
  */
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { validate } from '@/lib/validate.js';
 import { carryUnknown } from '@/lib/editorKeys.js';
 import { useMod } from '@/state/ModContext.jsx';
@@ -37,6 +37,7 @@ const LIMB_SLOTS = [
 ];
 // The two slots that have a second pose: the hand that holds a weapon, and the hand that holds
 // a shield. Everything else is drawn the same whatever the player is carrying.
+const MAX_ICON_BYTES = 256 * 1024; // a race icon is a small picture; anything bigger is a mistake
 const ARM_SLOTS = ['arm_right', 'arm_left'];
 const prettyMonster = (m) => m.split('_').map(cap).join(' ');
 // Creatures no follower can be made of (a boss, a trader, a mimic, a hologram, a bat, a tinkering
@@ -83,6 +84,12 @@ export default function RaceEditor() {
 
   const [name, setName] = useState(editDef?.name ?? '');
   const [description, setDescription] = useState(editDef?.description ?? '');
+  // The race's own small picture (saved-game cards, other players' HUD bars). A PNG uploaded here ships
+  // in the mod zip at the icon path.
+  const [icon, setIcon] = useState(editDef?.icon ?? '');
+  const [iconData, setIconData] = useState('');
+  const [iconError, setIconError] = useState('');
+  const iconFileRef = useRef(null);
   const [hostBody, setHostBody] = useState(editDef?.host_body ?? 'skeleton');
   const [mods, setMods] = useState(() =>
     Object.fromEntries([...ATTRS, 'HP', 'MP'].map((a) => [a, editDef?.stat_modifiers?.[a] ?? 0])));
@@ -132,6 +139,7 @@ export default function RaceEditor() {
   const buildDef = () => {
     const def = { id: raceId, name: name.trim(), host_body: hostBody };
     if (description.trim()) def.description = description.trim();
+    if (icon.trim()) def.icon = icon.trim();
     const sm = {};
     for (const a of [...ATTRS, 'HP', 'MP']) { const v = num(mods[a]); if (v != null && v !== 0) sm[a] = v; }
     if (Object.keys(sm).length) def.stat_modifiers = sm;
@@ -180,12 +188,31 @@ export default function RaceEditor() {
     setStartingSpells((prev) => (prev.includes(sp) ? prev : [...prev, sp]));
   };
 
+  const onIconFile = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > MAX_ICON_BYTES) {
+      setIconError(`That PNG is ${Math.round(file.size / 1024)} KB. A race icon is a small picture; keep it under 256 KB.`);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setIconError('');
+      setIcon((p) => p.trim() || `races/${slugify(name)}.png`);
+      setIconData(String(reader.result ?? ''));
+    };
+    reader.readAsDataURL(file);
+  };
+
   const save = () => {
     setSavedAs('');
     const def = buildDef();
     const res = validate('race', def);
     if (!res.valid) { setErrors(res.errors); return; }
     setErrors([]);
+    // Ship the uploaded PNG as a mod asset at the icon path.
+    if (def.icon && iconData) dispatch({ type: 'setAsset', path: def.icon, dataUrl: iconData });
     dispatch({ type: 'saveRace', def });
     dispatch({ type: 'saveScript', classId: def.id, lang: scriptLang, code: scriptCode, blocks: scriptBlocks });
     setSavedAs(def.id);
@@ -193,7 +220,7 @@ export default function RaceEditor() {
 
   const def = useMemo(buildDef,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [name, description, hostBody, mods, bloodDiet, canOpenTins, vision, sneakVision, startingSpells, allies, enemies, neutral, recruits, limbModels, limbBent, namespace]);
+    [name, description, icon, hostBody, mods, bloodDiet, canOpenTins, vision, sneakVision, startingSpells, allies, enemies, neutral, recruits, limbModels, limbBent, namespace]);
   const preview = useMemo(() => JSON.stringify(def, null, 2), [def]);
   const setMod = (a, v) => setMods((prev) => ({ ...prev, [a]: v }));
 
@@ -217,6 +244,23 @@ export default function RaceEditor() {
           <Field label="Description" hint="Shown in the picker's info panel and in the tooltip of the race line on the character sheet in game.">
             <textarea className="sam-input" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="A nimble undead wanderer…" />
           </Field>
+          <Field
+            label="Icon path (mod-relative)"
+            hint="A small PNG, about 32 by 32 pixels, used as this race's picture on saved-game cards and, in a co-op game, on the status bars of the other players, in place of the host body's head. Write the path from the folder that holds mod.json (races/frostborn.png), with no leading slash and no mods/yourfolder/ in front. If the game cannot find the file it keeps the body's icon and sam_log.txt names the path it looked for. Restart the game after changing the picture."
+          >
+            <TextInput value={icon} onChange={setIcon} placeholder="races/frostborn.png" />
+          </Field>
+          <div className="flex items-center gap-3 mt-2">
+            <GoldButton onClick={() => iconFileRef.current?.click()}>Upload PNG</GoldButton>
+            <input ref={iconFileRef} type="file" accept="image/png" className="hidden" onChange={onIconFile} />
+            {iconData && <img src={iconData} alt="Race icon" style={{ width: 40, height: 40, imageRendering: 'pixelated' }} />}
+            {iconData && (
+              <span className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>
+                PNG loaded. It will export at <span className="sam-mono">{icon.trim() || `races/${slugify(name)}.png`}</span>.
+              </span>
+            )}
+          </div>
+          {iconError && <div className="sam-error text-sm mt-1">{iconError}</div>}
           <label className="flex items-center gap-2 mt-3 cursor-pointer text-sm" style={{ color: 'var(--color-parchment)' }}>
             <input type="checkbox" className="sam-check" checked={bloodDiet} onChange={(e) => setBloodDiet(e.target.checked)} />
             Blood diet (sustains on blood instead of food, like a vampire)

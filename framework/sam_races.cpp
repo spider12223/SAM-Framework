@@ -24,6 +24,7 @@
 #include "magic/magic.hpp" // addSpell
 #include "sam_spells.hpp"  // grant custom "ns:spell" innate race spells
 #include "sam_models.hpp"  // SAMModels::modelIndexForId (resolve a race's limb models)
+#include "sam_items.hpp"   // SAMItems::resolveModImage (a race's icon PNG)
 
 #include <algorithm>
 #include <set>
@@ -200,6 +201,28 @@ void SAMRaces::loadFromManifest(const SAMModManifest& manifest)
 		def.name = getStr("name").empty() ? def.id : getStr("name");
 		def.description = getStr("description");
 		def.modNamespace = manifest.ns;
+
+		// "icon": find the PNG once, here, where a mistake can be reported, the way a spell's icon is.
+		// A wrong path used to be impossible to see: the saved-game card and the HUD bars simply kept
+		// the host body's icon.
+		def.icon = getStr("icon");
+		if ( !def.icon.empty() )
+		{
+			if ( SAMErrors::relPathEscapes(def.icon) )
+			{
+				SAM_WARN(MOD, "Race [" + def.id + "] icon path '" + def.icon + "' escapes the mod folder; "
+					"ignoring it. The host body's icon is used.");
+			}
+			else
+			{
+				def.iconResolved = SAMItems::resolveModImage(manifest.modPath, def.icon, "icon", def.id,
+					"RACES", "races/frostborn.png", "the host body's icon");
+				if ( !def.iconResolved.empty() )
+				{
+					SAM_INFO(MOD, "Race [" + def.id + "] custom icon -> " + def.iconResolved);
+				}
+			}
+		}
 
 		// host_body: the existing monster whose model this race wears. Restricted to
 		// the 18 bodies with a proper first-person arm; anything else falls to HUMAN.
@@ -1111,6 +1134,14 @@ std::string SAMRaces::description(int raceId)
 {
 	auto it = s_byId.find(raceId);
 	return (it != s_byId.end()) ? it->second.description : std::string();
+}
+
+std::string SAMRaces::iconPath(int raceId)
+{
+	// Resolved (and any problem reported) once when the race loaded, so this is a plain read: the HUD
+	// asks for it when a bar's name is refreshed.
+	auto it = s_byId.find(raceId);
+	return (it != s_byId.end()) ? it->second.iconResolved : std::string();
 }
 
 void SAMRaces::applyStats(int raceId, Stat* myStats)

@@ -42,6 +42,10 @@ struct SAMRaceDef
 	std::string modNamespace;   // owning mod namespace
 	std::string name;           // display name (shown in char-select)
 	std::string description;
+	// (3.9.0) Optional "icon": a small mod-relative PNG used as the race's picture on saved-game cards
+	// and on the HUD bars of other players, in place of the host body's icon. Found once at load.
+	std::string icon;
+	std::string iconResolved;   // absolute path of that PNG ("" = none: the host body's icon is used)
 
 	// The existing monster body this race renders as. Stored as a Monster enum
 	// value; restricted at load time to the 18 bodies that have a proper
@@ -235,6 +239,9 @@ public:
 	static std::string displayName(int raceId);
 	// Description for a race id, or "".
 	static std::string description(int raceId);
+	// Absolute, image-loader-ready path of a race's own small picture, or "" when the race has none, the
+	// file was not found, or the id is not a registered custom race (callers then keep the body's icon).
+	static std::string iconPath(int raceId);
 
 	// Apply the race's attribute/HP/MP deltas to a Stat. Called from the tail of
 	// initClassStats, before the unconditional HP/MP clamp. No-op for a non-SAM
