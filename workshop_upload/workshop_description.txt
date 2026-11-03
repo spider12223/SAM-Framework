@@ -8,9 +8,9 @@ Barony was never built to be modded. S.A.M is the layer that makes it modded any
 
 [hr][/hr]
 
-[h1]NEW: SCRIPTS MOVE THE PLAYER[/h1]
+[h1]NEW: YOUR RACE'S NAME IN GAME[/h1]
 
-A script can now [b]hold the player's controls[/b] (Move Forward, Turn Left, Use...) as if a key were held. On keyboard and mouse the player walks with the walk animation, turns, and can pick things up with Use.
+The character sheet now shows a custom race's [b]own name[/b], not its body's. The Class Editor gets [b]Description[/b] and item [b]Look[/b] boxes, and the Mod Builder looks like Barony's menus.
 
 [h1]GAME SPEED, MOD SETTINGS, THE LOOT POOL[/h1]
 
