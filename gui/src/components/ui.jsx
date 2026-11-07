@@ -4,6 +4,7 @@
  * app inherits the reference look from one place.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { searchMatches, enterPick, offerTyped } from '@/lib/searchSelect.js';
 
 /** A framed window opened by a crimson option band, a fleur-de-lis either side of the title. */
 export function Panel({ title, children, className = '', bodyClassName = '' }) {
@@ -159,11 +160,10 @@ export function SearchSelect({ options, value, onPick, placeholder = 'Search…'
   const [open, setOpen] = useState(false);
   const boxRef = useRef(null);
 
-  const matches = useMemo(() => {
-    const q = query.trim().toUpperCase();
-    const list = q ? options.filter((o) => o.toUpperCase().includes(q)) : options;
-    return list.slice(0, maxShown);
-  }, [options, query, maxShown]);
+  const matches = useMemo(() => searchMatches(options, query, maxShown), [options, query, maxShown]);
+  // "Use what I typed" is offered whenever free values are allowed and the text is not an option,
+  // not only when nothing matches: a custom value can be part of an existing option's name.
+  const showTyped = offerTyped(options, query, allowCustom);
 
   useEffect(() => {
     const onDoc = (e) => {
@@ -182,13 +182,10 @@ export function SearchSelect({ options, value, onPick, placeholder = 'Search…'
         onFocus={() => { setOpen(true); setQuery(''); }}
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === 'Enter' && matches.length > 0) {
-            onPick(matches[0]);
-            setOpen(false);
-            e.preventDefault();
-          } else if (e.key === 'Enter' && allowCustom && query.trim()) {
-            // No match, but free-form values are allowed (e.g. custom item names).
-            onPick(query.trim());
+          if (e.key === 'Enter') {
+            // An exact option first, then the first match, then (free values allowed) the typed text.
+            const pick = enterPick(options, matches, query, allowCustom);
+            if (pick !== null) onPick(pick);
             setOpen(false);
             e.preventDefault();
           } else if (e.key === 'Escape') {
@@ -201,19 +198,18 @@ export function SearchSelect({ options, value, onPick, placeholder = 'Search…'
           className="absolute z-20 mt-1 w-full max-h-64 overflow-y-auto sam-well"
           role="listbox"
         >
-          {matches.length === 0 && (
-            allowCustom && query.trim() ? (
-              <div
-                role="option"
-                className="px-3 py-1.5 cursor-pointer text-sm hover:bg-[rgba(226,176,78,0.12)]"
-                style={{ color: 'var(--color-parchment)' }}
-                onMouseDown={() => { onPick(query.trim()); setOpen(false); }}
-              >
-                Use “<span className="sam-mono">{query.trim()}</span>” <span style={{ color: 'var(--color-ink-faint)' }}>(custom)</span>
-              </div>
-            ) : (
-              <div className="px-3 py-2 text-sm" style={{ color: 'var(--color-ink-faint)' }}>No matches</div>
-            )
+          {showTyped && (
+            <div
+              role="option"
+              className="px-3 py-1.5 cursor-pointer text-sm hover:bg-[rgba(226,176,78,0.12)]"
+              style={{ color: 'var(--color-parchment)' }}
+              onMouseDown={() => { onPick(query.trim()); setOpen(false); }}
+            >
+              Use “<span className="sam-mono">{query.trim()}</span>” <span style={{ color: 'var(--color-ink-faint)' }}>(custom)</span>
+            </div>
+          )}
+          {matches.length === 0 && !showTyped && (
+            <div className="px-3 py-2 text-sm" style={{ color: 'var(--color-ink-faint)' }}>No matches</div>
           )}
           {matches.map((o) => (
             <div

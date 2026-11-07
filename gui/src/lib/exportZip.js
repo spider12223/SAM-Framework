@@ -100,7 +100,10 @@ export function buildManifest(meta, paths, audio = {}) {
   // an import/export cycle silently deletes every custom model, breaking monster bodies,
   // custom item models and companions.
   if (Array.isArray(meta.models) && meta.models.length) manifest.models = meta.models;
-  manifest.plugins = [];
+  // Likewise the declared pictures, prefab rooms and plugins (see importZip.js).
+  if (Array.isArray(meta.images) && meta.images.length) manifest.images = meta.images;
+  if (meta.rooms && typeof meta.rooms === 'object' && Object.keys(meta.rooms).length) manifest.rooms = meta.rooms;
+  manifest.plugins = Array.isArray(meta.plugins) ? meta.plugins : [];
   manifest.description = meta.description ?? '';
   return manifest;
 }

@@ -310,10 +310,12 @@ export default function BlockBuilder({ onUseScript, onLiveCode, hasExistingCode,
   const [editing, setEditing] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  useEffect(() => {
-    registerCustom(custom.map((b) => ({ kind: b.kind, entry: toCatalogEntry(b) })));
-    saveBlocks(custom);
-  }, [custom]);
+  // Register the pack BEFORE anything below reads the block catalog. An effect runs after the
+  // first render, so on a fresh page load the generated Lua (and the condition list) were built
+  // without the custom blocks, and "Use this script" handed over a script missing them.
+  // registerCustom only replaces two module-level arrays, so doing it while rendering is safe.
+  useMemo(() => registerCustom(custom.map((b) => ({ kind: b.kind, entry: toCatalogEntry(b) }))), [custom]);
+  useEffect(() => { saveBlocks(custom); }, [custom]);
 
   const conditions = useMemo(() => allConditions(), [custom]);
   const lua = useMemo(() => generateLua({ rules }), [rules, custom]);

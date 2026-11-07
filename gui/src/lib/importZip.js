@@ -108,6 +108,11 @@ export async function parseModZip(file) {
     // declarations (monster bodies, item models, companions). The builder has no editor for
     // these; it just must not lose them.
     models: Array.isArray(manifest.models) ? manifest.models : [],
+    // The same for the other lists the builder has no editor for: dropping them on an
+    // import/export cycle broke a mod's declared pictures (images) and prefab rooms (rooms).
+    images: Array.isArray(manifest.images) ? manifest.images : [],
+    rooms: manifest.rooms && typeof manifest.rooms === 'object' && !Array.isArray(manifest.rooms) ? manifest.rooms : {},
+    plugins: Array.isArray(manifest.plugins) ? manifest.plugins : [],
     framework_max_version: manifest.framework_max_version ?? '',
     barony_min_version: manifest.barony_min_version ?? '',
     barony_max_version: manifest.barony_max_version ?? '',

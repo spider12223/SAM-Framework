@@ -55,13 +55,13 @@ function init(base) {
  */
 const PERSIST_ASSET_BUDGET = 4_000_000;
 
-function persistableAssets(assets) {
+function persistableAssets(assets, budget = PERSIST_ASSET_BUDGET) {
   const entries = Object.entries(assets || {});
   let total = entries.reduce((n, [, v]) => n + String(v).length, 0);
-  if (total <= PERSIST_ASSET_BUDGET) return assets || {};
+  if (total <= budget) return assets || {};
   const kept = { ...assets };
   for (const [k, v] of [...entries].sort((a, b) => String(b[1]).length - String(a[1]).length)) {
-    if (total <= PERSIST_ASSET_BUDGET) break;
+    if (total <= budget) break;
     delete kept[k];
     total -= String(v).length;
   }
@@ -83,17 +83,18 @@ function persist(state) {
     recipes: state.recipes,
     patches: state.patches,
     scripts: state.scripts,
-    assets: persistableAssets(state.assets),
   };
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(durable));
-  } catch {
+  // Big scripts or JSON can still push a save over the quota with the assets inside the budget.
+  // Shrink the asset share step by step instead of dropping every picture and sound at once.
+  for (const budget of [PERSIST_ASSET_BUDGET, 1_000_000, 250_000, 0]) {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...durable, assets: {} }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...durable, assets: persistableAssets(state.assets, budget) }));
+      return;
     } catch {
-      /* give up quietly — export/Test-in-Barony is still the durable output */
+      /* try a smaller asset share */
     }
   }
+  /* give up quietly — export/Test-in-Barony is still the durable output */
 }
 
 export function ModProvider({ children }) {

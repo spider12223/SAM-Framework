@@ -165,7 +165,11 @@ export default function ModBuilder() {
   };
 
   const clone = (def, saveType, collection) => {
-    dispatch({ type: saveType, def: cloneWithNewId(def, new Set(collection.map((x) => x.id))) });
+    const copy = cloneWithNewId(def, new Set(collection.map((x) => x.id)));
+    dispatch({ type: saveType, def: copy });
+    // A class's or race's behaviour script lives under its id, so the copy needs its own.
+    const script = scripts[def.id];
+    if (script) dispatch({ type: 'saveScript', classId: copy.id, lang: script.lang, code: script.code, blocks: script.blocks });
   };
 
   const addDep = () => {

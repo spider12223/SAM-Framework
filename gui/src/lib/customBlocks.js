@@ -57,12 +57,14 @@ const missingList = (names) => names.map((n) => `"${n}"`).join(', ');
  * the real emitted line rather than the raw template (where {x} would trip the parser).
  */
 export function validateBlock(b) {
+  // A pack is user-supplied JSON: a null or a number in its block list is reported, not a crash.
+  if (!b || typeof b !== 'object') return { ok: false, errors: ['This entry is not a block.'] };
   const errors = [];
   if (!b?.label?.trim()) errors.push('Give the block a name.');
   if (!b?.lua?.trim()) errors.push('The Lua template is empty.');
   if (!['condition', 'action'].includes(b?.kind)) errors.push('Pick whether it is a condition or an action.');
 
-  const names = (b.params || []).map((p) => (p.name || '').trim());
+  const names = (b?.params || []).map((p) => (p?.name || '').trim());
   if (names.some((n) => !n)) errors.push('Every parameter needs a name.');
   if (new Set(names).size !== names.length) errors.push('Two parameters share a name.');
   for (const n of names) {
@@ -112,7 +114,8 @@ export function toCatalogEntry(b) {
     negatable: b.kind === 'condition',
     custom: true,
     params: (b.params || []).map((p) => ({
-      name: p.name,
+      // Trimmed like validateBlock trims it: " x" passed validation but then never filled {x}.
+      name: String(p.name ?? '').trim(),
       type: p.type || 'text',
       default: p.default ?? '',
       label: p.label || p.name,
