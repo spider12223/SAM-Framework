@@ -79,13 +79,12 @@ def main():
         problems.append("installer/SAM_Framework_Installer.spec: MISSING")
 
     # Release notes are the thing a human reads first; a missing one means the release
-    # ships with no explanation of what changed. They live in the workflow root next to
-    # the payload, not in the public repo.
-    notes = ROOT.parent / f"release_v{version}/RELEASE_NOTES_v{version}.md"
+    # ships with no explanation of what changed. One file per release, in release-notes/.
+    notes = ROOT / f"release-notes/RELEASE_NOTES_v{version}.md"
     if notes.exists():
-        print(f"  ok  release_v{version}/RELEASE_NOTES_v{version}.md{'':<12} exists")
+        print(f"  ok  {notes.relative_to(ROOT).as_posix():<52} exists")
     else:
-        problems.append(f"release_v{version}/RELEASE_NOTES_v{version}.md: MISSING")
+        problems.append(f"release-notes/RELEASE_NOTES_v{version}.md: MISSING")
 
     if problems:
         print("\nDRIFT:")

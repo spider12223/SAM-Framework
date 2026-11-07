@@ -392,13 +392,17 @@ change has to pass), read **[CONTRIBUTING.md](CONTRIBUTING.md)**.
 ## Repository layout
 
 ```
-framework/     C++ compiled into the patched Barony (logger, loader, classes, items, sync)
-gui/           React + Vite mod-builder web app (deployed to GitHub Pages)
-schemas/       JSON Schema definitions — the source of truth
-docs/          Generated schema reference
-registry/      Public namespace registry (submit a PR to reserve yours)
-model-library/ Bundled generic models
-workshop/      Steam Workshop packaging files
+framework/       C++ compiled into the patched Barony (loader, content registries, Lua and JS runtimes, multiplayer)
+gui/             React + Vite Mod Builder web app (deployed to GitHub Pages)
+schemas/         JSON Schema definitions — the source of truth
+docs/            Guides, the scripting and function references, the generated schema reference
+examples/        Complete example mods, and HelloTest (the smallest self-testing mod)
+assets/          Art and models built into the framework (the Hunter's Workbench)
+tools/           Doc generators, the unattended test runner, the version check, a .vox helper
+installer/       Source of SAM_Framework_Installer.exe
+workshop_upload/ What the Steam Workshop item ships (description, README, sam.d.ts, function reference)
+registry/        Public namespace registry (submit a PR to reserve yours)
+release-notes/   One file per release
 ```
 
 ## License
