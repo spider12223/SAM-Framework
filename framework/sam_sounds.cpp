@@ -466,22 +466,6 @@ std::vector<std::string> SAMSounds::listIds()
 int SAMSounds::count() { return static_cast<int>(s_index.size()); }
 bool SAMSounds::any() { return !s_index.empty(); }
 
-std::string SAMSounds::idAtIndex(int index)
-{
-	if ( index < 0 || index >= (int)s_index.size() ) { return std::string(); }
-	auto it = s_index.begin();
-	std::advance(it, index);
-	return it->first;
-}
-
-int SAMSounds::engineIndexAtIndex(int index)
-{
-	if ( index < 0 || index >= (int)s_index.size() ) { return -1; }
-	auto it = s_index.begin();
-	std::advance(it, index);
-	return it->second;
-}
-
 bool SAMSounds::anyRouting() { return s_anyRouting; }
 bool SAMSounds::anyEntityRouting() { return s_anyEntityRouting; }
 

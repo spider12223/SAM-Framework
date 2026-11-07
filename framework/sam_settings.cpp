@@ -861,13 +861,6 @@ bool stageFromText(const std::string& ns, const std::string& id, const std::stri
 	return true;
 }
 
-double snapSlider(const std::string& ns, const std::string& id, double v)
-{
-	const Setting* s = find(ns, id);
-	if ( !s || s->type != Type::Slider ) { return v; }
-	return snapTo(*s, v);
-}
-
 void stageDefaults()
 {
 	for ( const Setting& s : s_settings ) { stage(s, s.def, Source::Reset); }

@@ -66,8 +66,6 @@ namespace SAMSounds
 
 	int count();
 	bool any();
-	std::string idAtIndex(int index);       // for the /sam_sounds listing
-	int engineIndexAtIndex(int index);
 
 	// ---- the playback seam ------------------------------------------------------------------
 	//

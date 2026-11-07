@@ -16,7 +16,6 @@
 import { VANILLA_SOUNDS } from '@/data/vanillaSounds.js';
 import { VANILLA_MUSIC } from '@/data/vanillaMusic.js';
 
-export const AUDIO_EXTS = ['ogg', 'wav', 'mp3', 'flac'];
 export const AUDIO_EXT_RE = /\.(ogg|wav|mp3|flac)$/i;
 export const AUDIO_ACCEPT = '.ogg,.wav,.mp3,.flac,audio/ogg,audio/wav,audio/x-wav,audio/mpeg,audio/flac,audio/x-flac';
 
@@ -227,7 +226,6 @@ export function normalizeAudioEntry(raw, ns, keys = SOUND_KEYS) {
   return def;
 }
 export const MUSIC_ENTRY_KEYS = MUSIC_KEYS;
-export const SOUND_ENTRY_KEYS = SOUND_KEYS;
 
 /** "sounds/Big Boom!.ogg" -> the id the engine gives a bare audio path ("big_boom_" -- the
  *  engine maps each non-alphanumeric character to "_" and does NOT collapse runs). */

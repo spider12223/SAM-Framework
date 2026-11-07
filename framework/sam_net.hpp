@@ -120,7 +120,6 @@ namespace SAMNet
 	};
 
 	const Contract* contractFor(const std::string& name);
-	const char* kindLabel(Kind k);   // "host", "owner", "screen", "read", "all", "local", "any"
 
 	// ------------------------------------------------------------------ routing
 
@@ -158,7 +157,6 @@ namespace SAMNet
 	// The player the event being dispatched is about (-1 when it is about nobody). A screen
 	// function called with no player inside a handler shows to THAT player, so "when player 2
 	// levels up, show a banner" lands on player 2's screen without the script naming anyone.
-	int contextPlayer();
 	struct ContextPlayerScope
 	{
 		explicit ContextPlayerScope(long long player);

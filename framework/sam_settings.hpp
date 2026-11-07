@@ -241,8 +241,6 @@ namespace SAMSettings
 	// Text equal to what showText recorded stages nothing, and drops an edit staged in between
 	// (the player typed back what the row showed).
 	bool stageFromText(const std::string& ns, const std::string& id, const std::string& text);
-	// A slider's raw position, snapped to the step and clamped into the range.
-	double snapSlider(const std::string& ns, const std::string& id, double v);
 	void stageDefaults();
 	int commitEdit();   // how many values changed
 	// Discard, and any other way out of the window that is not Confirm: the copy is dropped

@@ -26,7 +26,6 @@ export const EQUIP_SLOTS = [
   { id: 'shield',      label: 'Offhand', col: 'bottom' },
 ];
 
-export const EQUIP_SLOT_IDS = EQUIP_SLOTS.map((s) => s.id);
 export const findSlot = (id) => EQUIP_SLOTS.find((s) => s.id === id);
 
 /**

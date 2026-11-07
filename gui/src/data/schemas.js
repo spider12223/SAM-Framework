@@ -34,7 +34,6 @@ export const FRAMEWORK_ITEMS = [
       + 'and bind recipes to it with "kit": "sam:hunters_workbench".',
   },
 ];
-export const FRAMEWORK_ITEM_IDS = FRAMEWORK_ITEMS.map((it) => it.id);
 
 /** The PRO_X skill names (keys of the class schema's skills object). */
 export const SKILLS = Object.keys(classSchema.properties.skills.properties);
@@ -101,9 +100,6 @@ export const ROLL_STATS =
 /** namespace pattern from mod.schema.json (kept as the schema's regex). */
 export const NAMESPACE_PATTERN = new RegExp(modSchema.properties.namespace.pattern);
 
-/** id pattern for classes/items ("namespace:thing"). */
-export const ID_PATTERN = new RegExp(classSchema.properties.id.pattern);
-
 /** Version pattern (MAJOR.MINOR.PATCH). */
 export const VERSION_PATTERN = new RegExp(modSchema.properties.version.pattern);
 
@@ -161,8 +157,6 @@ export const SPELL_PAYLOADS = spellSchema.properties.payload.enum;
 /** How a spell is delivered ('missile' | 'missile_trio' | 'none'). */
 export const SPELL_PROJECTILE_TYPES = spellSchema.properties.projectile_type.enum;
 
-/** Spell id pattern ("namespace:spell"). */
-export const SPELL_ID_PATTERN = new RegExp(spellSchema.properties.id.pattern);
 
 /** Patch operation kinds (edit_field | add_entry | remove_field | multiply_field). */
 export const PATCH_OPS = patchSchema.properties.operations.items.properties.op.enum;

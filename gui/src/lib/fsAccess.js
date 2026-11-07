@@ -59,18 +59,6 @@ async function ensurePermission(handle) {
   return false;
 }
 
-/** True if we already hold a usable (permission-granted) mods-dir handle. */
-export async function hasSavedModsDir() {
-  if (!isFsSupported) return false;
-  try {
-    const handle = await idbGet(KEY);
-    if (!handle) return false;
-    return (await handle.queryPermission({ mode: 'readwrite' })) === 'granted';
-  } catch {
-    return false;
-  }
-}
-
 /**
  * Get the mods-dir handle, prompting the user to pick it if needed.
  * MUST be called from within a click handler (showDirectoryPicker needs a

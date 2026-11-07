@@ -602,21 +602,6 @@ const Contract* contractFor(const std::string& name)
 	return it == index.end() ? nullptr : it->second;
 }
 
-const char* kindLabel(Kind k)
-{
-	switch ( k )
-	{
-		case Kind::Host:   return "host";
-		case Kind::Owner:  return "owner";
-		case Kind::Screen: return "screen";
-		case Kind::Read:   return "read";
-		case Kind::All:    return "all";
-		case Kind::Local:  return "local";
-		case Kind::Any:    return "any";
-	}
-	return "any";
-}
-
 // -------------------------------------------------------------------- routing
 
 bool isRemotePlayer(int player)
@@ -730,7 +715,6 @@ bool inForwardedCall() { return s_forwarded; }
 ForwardScope::ForwardScope() : prev(s_forwarded) { s_forwarded = true; }
 ForwardScope::~ForwardScope() { s_forwarded = prev; }
 
-int contextPlayer() { return s_contextPlayer; }
 ContextPlayerScope::ContextPlayerScope(long long player) : prev(s_contextPlayer)
 {
 	s_contextPlayer = (player >= 0 && player < MAXPLAYERS) ? (int)player : -1;

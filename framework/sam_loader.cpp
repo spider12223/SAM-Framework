@@ -51,8 +51,6 @@
 #include <system_error>
 #endif
 
-bool SAMLoader::loaded = false;
-
 // How many scripts failed in the most recent load(): a parse error, or an error while running
 // the top level, either of which leaves the mod with no handlers. Mods::loadMods() is void and
 // the runtimes only log, so nothing above this file could tell a mod that did not load from one
@@ -309,8 +307,6 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 	SAMJs::releaseTranspiler();
 #endif
 
-	loaded = true;
-
 	if ( mods.empty() )
 	{
 		SAM_INFO("CORE", "S.A.M load complete. No S.A.M mods found (no mod.json in any mounted path).");
@@ -397,22 +393,8 @@ void SAMLoader::unload()
 	SAMJs::shutdown();    // drop the JS/TS behavior VM (+ any transpile runtime)
 #endif
 	SAMLogger::logSessionSummary(); // SESSION SUMMARY block + closing box
-	loaded = false;
 }
 
-bool SAMLoader::isLoaded()
-{
-	return loaded;
-}
-
-bool SAMLoader::isModLoaded(const std::string& namespaceId)
-{
-	for ( const SAMModManifest& m : SAMWorkshop::manifests() )
-	{
-		if ( m.ns == namespaceId ) { return true; }
-	}
-	return false;
-}
 
 const SAMModManifest* SAMLoader::getManifest(const std::string& namespaceId)
 {

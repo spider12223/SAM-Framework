@@ -160,11 +160,6 @@ export function vanillaTarget(path) {
   return VANILLA_TARGETS.find((t) => t.path === path);
 }
 
-/** Ops that are actually safe for a field. Empty = read-only, don't patch it. */
-export function opsForField(field) {
-  return field?.ops ?? [];
-}
-
 /**
  * Fill a path template's <placeholders> with a concrete entry key.
  * "items.<entry>.gold_value" + "iron_sword" -> "items.iron_sword.gold_value"

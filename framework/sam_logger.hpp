@@ -87,9 +87,6 @@ public:
 
 	// ---- structured sections (v0.7.0) -----------------------------------------
 
-	// Print a "── NAME ─────" phase divider. Used for INIT / MOD LOAD / GAMEPLAY.
-	static void beginSection(const std::string& name);
-
 	// Mark the start of mod loading (opens the MOD LOAD section + starts the
 	// load-time clock). Called by the loader before it scans mods.
 	static void beginModLoad();

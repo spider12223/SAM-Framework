@@ -719,13 +719,6 @@ void SAMLogger::debug(const std::string& module, const std::string& message) { l
 /*-------------------------------------------------------------------------------
 	Structured sections.
 -------------------------------------------------------------------------------*/
-void SAMLogger::beginSection(const std::string& name)
-{
-	std::lock_guard<std::mutex> lock(logMutex);
-	samEmitPlain(logFile, "");
-	samEmitPlain(logFile, samDivider(name));
-}
-
 void SAMLogger::beginModLoad()
 {
 	std::lock_guard<std::mutex> lock(logMutex);
