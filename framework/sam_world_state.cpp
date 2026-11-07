@@ -2,6 +2,7 @@
 #include "sam_logger.hpp"
 #include "sam_sync.hpp"   // the mod-set fingerprint this save was made with
 #include "sam_items.hpp"  // saveIdTable: what every custom item id MEANT when this save was written
+#include "sam_races.hpp"  // saveIdTable: and what every custom race number meant
 
 #include <cstring>
 #include <map>
@@ -20,6 +21,8 @@ namespace SAMWorldState
 		// "5000=ns:a;5001=ns:b;..." -- read back by the engine (scores.cpp getSaveGameInfo)
 		// the moment the save file is parsed, before any item is created from it.
 		constexpr const char* kItemIdsKey = "sam_itemids";
+		// "200=ns:a;201=ns:b;..." -- the same, for races; read back by scores.cpp getSaveGameInfo.
+		constexpr const char* kRaceIdsKey = "sam_raceids";
 		std::string s_savedModSet;   // what the save being loaded was made with
 		bool        s_haveSavedModSet = false;
 
@@ -138,6 +141,9 @@ namespace SAMWorldState
 		// renamed) and the items in this save still come back as themselves.
 		const std::string ids = SAMItems::saveIdTable();
 		if ( !ids.empty() ) { out.push_back(std::make_pair(std::string(kItemIdsKey), ids)); }
+		// And what each custom RACE number meant: the character's race is stored as that number.
+		const std::string raceIds = SAMRaces::saveIdTable();
+		if ( !raceIds.empty() ) { out.push_back(std::make_pair(std::string(kRaceIdsKey), raceIds)); }
 
 		for ( const auto& nsEntry : s_data )
 		{
@@ -168,6 +174,7 @@ namespace SAMWorldState
 			return true;
 		}
 		if ( key == kItemIdsKey ) { return true; } // consumed earlier, at file-read time
+		if ( key == kRaceIdsKey ) { return true; } // likewise
 		const size_t plen = strlen(kPrefix);
 		if ( key.compare(0, plen, kPrefix) != 0 ) { return false; }
 		const size_t sep = key.find(':', plen);

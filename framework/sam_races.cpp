@@ -1100,6 +1100,51 @@ int SAMRaces::raceIdForKey(uint32_t key)
 	return ( it != s_byKey.end() ) ? it->second : -1;
 }
 
+std::string SAMRaces::saveIdTable()
+{
+	std::string out;
+	for ( const auto& kv : s_byId )
+	{
+		if ( kv.second.id.empty() ) { continue; }
+		if ( !out.empty() ) { out += ';'; }
+		out += std::to_string(kv.first) + "=" + kv.second.id;
+	}
+	return out;
+}
+
+bool SAMRaces::remapSavedRaceIds(const std::string& savedTable,
+	std::map<int, int>& oldToNew, std::map<int, std::string>& unresolved)
+{
+	oldToNew.clear();
+	unresolved.clear();
+	if ( savedTable.empty() ) { return false; }
+	// Same guard, for the same reason, as SAMItems::remapSavedItemIds: the registry only exists while a
+	// mod set is MOUNTED, and getSaveGameInfo also runs for the main menu's save-slot list after S.A.M
+	// has unloaded. Judging then would call every race "removed".
+	if ( SAMWorkshop::manifests().empty() ) { return false; }
+	size_t start = 0;
+	while ( start < savedTable.size() )
+	{
+		size_t end = savedTable.find(';', start);
+		if ( end == std::string::npos ) { end = savedTable.size(); }
+		const std::string entry = savedTable.substr(start, end - start);
+		const size_t eq = entry.find('=');
+		if ( eq != std::string::npos && eq > 0 )
+		{
+			const int savedId = std::atoi(entry.substr(0, eq).c_str());
+			const std::string name = entry.substr(eq + 1);
+			if ( savedId >= SAM_RACE_ID_BASE && !name.empty() )
+			{
+				const int now = raceIdForIdString(name);
+				if ( now >= 0 ) { oldToNew[savedId] = now; }
+				else { unresolved[savedId] = name; }
+			}
+		}
+		start = end + 1;
+	}
+	return true;
+}
+
 std::string SAMRaces::canonicalName(int raceId)
 {
 	if ( raceId >= SAM_RACE_ID_BASE )

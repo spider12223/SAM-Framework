@@ -228,6 +228,25 @@ public:
 	// signal to leave whatever the caller already had alone rather than guess.
 	static int raceIdForKey(uint32_t key);
 
+	// ---- saved games ------------------------------------------------------------------
+	//
+	// A saved game stores a custom race as its runtime NUMBER (200, 201, ...), and the numbers are
+	// handed out per mod SET: add a mod whose namespace sorts earlier and every later race moves, so a
+	// save made as one race came back as another. Every save now also records what each number MEANT
+	// ("sam_raceids" in the save's additional_data, written by SAMWorldState::collect), the same way
+	// custom items are recorded ("sam_itemids").
+	//
+	//   saveIdTable()        -> "200=ns:a;201=ns:b" for every registered race ("" with none).
+	//   remapSavedRaceIds()  -> for such a table, savedNumber -> the number the same race id has now
+	//                           (oldToNew), and savedNumber -> "ns:race" for a race whose mod is not
+	//                           loaded (unresolved). Returns false, with both maps empty, when there is
+	//                           nothing to judge: no table (a save from before this existed, or a vanilla
+	//                           one), or no mods mounted (the registry is empty on the way back to the
+	//                           main menu, and an empty registry means "not ready", not "all removed").
+	static std::string saveIdTable();
+	static bool remapSavedRaceIds(const std::string& savedTable,
+		std::map<int, int>& oldToNew, std::map<int, std::string>& unresolved);
+
 	// --- application into the running game (defined only in the game build) ---
 	// The Monster body a race renders as. For a registered SAM race -> its host
 	// monster; for anything else -> HUMAN. This is the single mapping the engine's
