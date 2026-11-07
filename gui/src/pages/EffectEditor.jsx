@@ -32,7 +32,9 @@ export default function EffectEditor() {
   const [name, setName] = useState(editDef?.name ?? '');
   const [tooltip, setTooltip] = useState(editDef?.tooltip ?? '');
   const [icon, setIcon] = useState(editDef?.icon ?? '');
-  const [duration, setDuration] = useState(editDef?.duration_ticks ?? 500);
+  // 500 is only the starting value for a NEW effect. A saved effect without duration_ticks means
+  // "the caller supplies the duration" (schema default 0); reopening it must not invent 500.
+  const [duration, setDuration] = useState(editDef ? (editDef.duration_ticks ?? 0) : 500);
   const [mods, setMods] = useState(() =>
     Object.fromEntries(ATTRS.map((a) => [a, editDef?.stat_modifiers?.[a] ?? 0])));
   const [speedMult, setSpeedMult] = useState(editDef?.move_speed_mult ?? 1);

@@ -15,6 +15,7 @@ import { ALL_HEADS, APPEARANCE_RACES, headLabel } from '@/data/characterHeads.js
 import CharacterBox from '@/components/CharacterBox.jsx';
 import { validate } from '@/lib/validate.js';
 import { carryUnknown } from '@/lib/editorKeys.js';
+import { assetPath } from '@/lib/assetPath.js';
 import { checkBalance } from '@/lib/balance.js';
 import { useMod } from '@/state/ModContext.jsx';
 import ScriptEditor from '@/components/ScriptEditor.jsx';
@@ -232,10 +233,15 @@ export default function ClassEditor() {
   // opening a hand-written class here and exporting silently deleted them.
   const [statBars, setStatBars] = useState(() =>
     draft?.statBars ?? Object.fromEntries(CORE_ATTRIBUTES.map((k) => [k, editDef?.ratings?.stats?.[k] ?? ''])));
+  // Read the two star lines the way the engine does (sam_classes.cpp): with "complexity" present the
+  // names mean what they say; without it, an "attack" key marks the old scheme, where attack was the
+  // Survival line and survival was the Complexity line; a lone "survival" sets Survival only.
+  const savedDifficulty = editDef?.ratings?.difficulty ?? {};
+  const oldStarScheme = savedDifficulty.complexity === undefined && savedDifficulty.attack !== undefined;
   const [survivalStars, setSurvivalStars] = useState(
-    draft?.survivalStars ?? editDef?.ratings?.difficulty?.survival ?? editDef?.ratings?.difficulty?.attack ?? '');
+    draft?.survivalStars ?? (oldStarScheme ? savedDifficulty.attack : savedDifficulty.survival) ?? '');
   const [complexityStars, setComplexityStars] = useState(
-    draft?.complexityStars ?? editDef?.ratings?.difficulty?.complexity ?? editDef?.ratings?.difficulty?.survival ?? '');
+    draft?.complexityStars ?? (oldStarScheme ? savedDifficulty.survival : savedDifficulty.complexity) ?? '');
   const [portraitError, setPortraitError] = useState('');
   const [scriptLang, setScriptLang] = useState(draft?.scriptLang ?? existingScript?.lang ?? 'lua');
   const [scriptCode, setScriptCode] = useState(draft?.scriptCode ?? existingScript?.code ?? '');
@@ -245,6 +251,7 @@ export default function ClassEditor() {
   const [errors, setErrors] = useState([]);
   const [savedAs, setSavedAs] = useState('');
   const portraitRef = useRef(null);
+  const portraitSelRef = useRef(null);
 
   // Consume the edit handoff so a later fresh visit starts blank.
   useEffect(() => {
@@ -260,7 +267,10 @@ export default function ClassEditor() {
       mpRegenBase, mpRegenMult, mpRegenScaling, looks, surviveShift, bodyModel, gold, portrait, portraitSel, statBars, survivalStars, complexityStars, scriptLang, scriptCode, scriptBlocks };
     try { localStorage.setItem(DRAFT_KEY, JSON.stringify(d)); }
     catch { // a very large portrait can blow the quota — keep the rest, drop the image bytes
-      try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ ...d, portrait: { path: portrait.path, dataUrl: '' } })); } catch { /* give up quietly */ }
+      try {
+        localStorage.setItem(DRAFT_KEY, JSON.stringify({ ...d,
+          portrait: { path: portrait.path, dataUrl: '' }, portraitSel: { path: portraitSel.path, dataUrl: '' } }));
+      } catch { /* give up quietly */ }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [name, description, attrs, offsets, skills, items, spells, growth, hpMpGrowth,
@@ -269,8 +279,13 @@ export default function ClassEditor() {
   const namespace = meta.namespace || 'mymod';
   const classId = `${namespace}:${slugify(name)}`;
   const defaultPortraitPath = `portraits/${slugify(name)}.png`;
+  const defaultPortraitSelPath = `portraits/${slugify(name)}_on.png`;
+  // Where each PNG ships, or '' when none does. Used by the JSON, the save, and the notes under Upload.
+  const portraitPath = assetPath(portrait.path, Boolean(portrait.dataUrl), defaultPortraitPath);
+  const portraitSelPath = assetPath(portraitSel.path, Boolean(portraitSel.dataUrl), defaultPortraitSelPath);
 
-  const onPortraitFile = (e) => {
+  // One upload handler for both pictures: the portrait and its selected (hovered) twin.
+  const pngUploader = (setPicture, fallback) => (e) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
@@ -281,10 +296,12 @@ export default function ClassEditor() {
     const reader = new FileReader();
     reader.onload = () => {
       setPortraitError('');
-      setPortrait((p) => ({ path: p.path || defaultPortraitPath, dataUrl: String(reader.result ?? '') }));
+      setPicture((p) => ({ path: assetPath(p.path, true, fallback), dataUrl: String(reader.result ?? '') }));
     };
     reader.readAsDataURL(file);
   };
+  const onPortraitFile = pngUploader(setPortrait, defaultPortraitPath);
+  const onPortraitSelFile = pngUploader(setPortraitSel, defaultPortraitSelPath);
 
   // Called by the spell picker, and by the custom-spell shortcuts below it. The pattern
   // check still matters: the picker's allowCustom lets you type a "namespace:spell" id,
@@ -395,8 +412,8 @@ export default function ClassEditor() {
       if (surviveShift) def.appearance.survive_shapeshift = true;
     }
     if (gold > 0) def.gold = gold;
-    if (portrait.path.trim()) def.portrait = portrait.path.trim();
-    if (portraitSel.path.trim()) def.portrait_selected = portraitSel.path.trim();
+    if (portraitPath) def.portrait = portraitPath;
+    if (portraitSelPath) def.portrait_selected = portraitSelPath;
     const bars = {};
     for (const k of CORE_ATTRIBUTES) { if (statBars[k]) bars[k] = statBars[k]; }
     const diff = {};
@@ -421,9 +438,12 @@ export default function ClassEditor() {
       return;
     }
     setErrors([]);
-    // Ship the uploaded PNG as a mod asset at the portrait path.
-    if (portrait.path.trim() && portrait.dataUrl) {
-      dispatch({ type: 'setAsset', path: portrait.path.trim(), dataUrl: portrait.dataUrl });
+    // Ship the uploaded PNGs as mod assets at their paths.
+    if (portraitPath && portrait.dataUrl) {
+      dispatch({ type: 'setAsset', path: portraitPath, dataUrl: portrait.dataUrl });
+    }
+    if (portraitSelPath && portraitSel.dataUrl) {
+      dispatch({ type: 'setAsset', path: portraitSelPath, dataUrl: portraitSel.dataUrl });
     }
     dispatch({ type: 'saveClass', def });
     dispatch({ type: 'saveScript', classId: def.id, lang: scriptLang, code: scriptCode, blocks: scriptBlocks });
@@ -495,7 +515,10 @@ export default function ClassEditor() {
               placeholder={defaultPortraitPath}
             />
           </Field>
-          <div />
+          <div>
+            <GoldButton onClick={() => portraitSelRef.current?.click()}>Upload PNG</GoldButton>
+            <input ref={portraitSelRef} type="file" accept="image/png" className="hidden" onChange={onPortraitSelFile} />
+          </div>
           <Field
             label="Selected icon path (optional)"
             hint="Vanilla classes ship two icons: a dim one and a bright one shown while the class is selected or hovered. Add a second PNG here to match that. Leave empty and your one portrait is used in every state."
@@ -503,14 +526,20 @@ export default function ClassEditor() {
             <TextInput
               value={portraitSel.path}
               onChange={(v) => setPortraitSel((p) => ({ ...p, path: v }))}
-              placeholder={`portraits/${slugify(name)}_on.png`}
+              placeholder={defaultPortraitSelPath}
             />
           </Field>
         </div>
         {portrait.dataUrl && (
           <div className="mt-2 text-xs" style={{ color: 'var(--color-ink-faint)' }}>
-            PNG loaded — it will export at <span className="sam-mono">{portrait.path || defaultPortraitPath}</span>.
+            PNG loaded — it will export at <span className="sam-mono">{portraitPath}</span>.
             <button type="button" className="ml-2 underline" style={{ color: 'var(--color-ruby)' }} onClick={() => setPortrait((p) => ({ ...p, dataUrl: '' }))}>clear image</button>
+          </div>
+        )}
+        {portraitSel.dataUrl && (
+          <div className="mt-2 text-xs" style={{ color: 'var(--color-ink-faint)' }}>
+            Selected-icon PNG loaded — it will export at <span className="sam-mono">{portraitSelPath}</span>.
+            <button type="button" className="ml-2 underline" style={{ color: 'var(--color-ruby)' }} onClick={() => setPortraitSel((p) => ({ ...p, dataUrl: '' }))}>clear image</button>
           </div>
         )}
         {portraitError && <div className="sam-error text-sm mt-1">{portraitError}</div>}

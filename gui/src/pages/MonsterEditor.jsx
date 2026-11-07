@@ -58,16 +58,26 @@ function numericMap(obj) {
   return out;
 }
 
+/** An item row's type as the JSON wants it: one name, or (written "a, b") a list for a random pick. */
+function entryType(e) {
+  const names = String(e.type ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  return names.length > 1 ? names : (names[0] ?? '');
+}
+const hasType = (e) => entryType(e) !== '';
+
 /** Turn an editor item row into a clean itemEntry (drops empty fields). */
 function cleanEntry(e) {
   const o = {};
-  if (e.type && e.type.trim()) o.type = e.type.trim();
+  if (hasType(e)) o.type = entryType(e);
   if (e.status) o.status = e.status;
   if (e.count !== '' && e.count != null) o.count = e.count;
   if (e.beatitude !== '' && e.beatitude != null) o.beatitude = e.beatitude;
   if (e.spawn_percent_chance !== '' && e.spawn_percent_chance != null) o.spawn_percent_chance = e.spawn_percent_chance;
   if (e.drop_percent_chance !== '' && e.drop_percent_chance != null) o.drop_percent_chance = e.drop_percent_chance;
   if (e.slot_weighted_chance !== '' && e.slot_weighted_chance != null) o.slot_weighted_chance = e.slot_weighted_chance;
+  // No control for these two; carried so a save does not drop them.
+  if (e.appearance !== undefined) o.appearance = e.appearance;
+  if (e.identified !== undefined) o.identified = e.identified;
   return o;
 }
 
@@ -149,7 +159,8 @@ export default function MonsterEditor() {
   const [openedDef] = useState(() => editDef ?? null);
   const entryFrom = (o, slot) => ({
     ...blankEntry(slot ?? o.slot ?? ''),
-    type: o.type ?? '', status: o.status ?? '',
+    type: Array.isArray(o.type) ? o.type.join(', ') : (o.type ?? ''), status: o.status ?? '',
+    appearance: o.appearance, identified: o.identified,
     count: o.count ?? '', beatitude: o.beatitude ?? '',
     spawn_percent_chance: o.spawn_percent_chance ?? '',
     drop_percent_chance: o.drop_percent_chance ?? '',
@@ -251,18 +262,22 @@ export default function MonsterEditor() {
         if (bodyOffset[k] !== '') off[k] = Number(bodyOffset[k]);
       }
       if (Object.keys(off).length) body.offset = off;
+      // No control for the cast and death animations; carried so a save does not drop them.
+      for (const k of ['cast', 'death']) {
+        if (openedDef?.body?.[k] !== undefined) body[k] = openedDef.body[k];
+      }
       def.body = body;
     }
 
     const equipped = {};
     for (const slot of MONSTER_EQUIP_SLOTS) {
-      const entries = equip.filter((e) => e.slot === slot && e.type.trim()).map(cleanEntry);
+      const entries = equip.filter((e) => e.slot === slot && hasType(e)).map(cleanEntry);
       if (entries.length === 1) equipped[slot] = entries[0];
       else if (entries.length > 1) equipped[slot] = entries; // weighted array
     }
     if (Object.keys(equipped).length) def.equipped_items = equipped;
 
-    const inv = inventory.filter((e) => e.type.trim()).map(cleanEntry);
+    const inv = inventory.filter(hasType).map(cleanEntry);
     if (inv.length) def.inventory_items = inv;
 
     const fv = {};

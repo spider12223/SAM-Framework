@@ -9,6 +9,7 @@ import { SPELL_PAYLOADS, SPELL_PROJECTILE_TYPES, ITEM_TYPES } from '@/data/schem
 import { EFFECTS } from '@/data/samApi.js';
 import { validate } from '@/lib/validate.js';
 import { carryUnknown } from '@/lib/editorKeys.js';
+import { assetPath } from '@/lib/assetPath.js';
 import { checkOnHitEffect, describeOnHitEffect } from '@/lib/spellEffectRef.js';
 import { useMod } from '@/state/ModContext.jsx';
 import { Panel, Field, TextInput, NumberInput, GoldButton, ErrorList, SavedNote, Gem } from '@/components/ui.jsx';
@@ -89,6 +90,8 @@ export default function SpellEditor() {
 
   const namespace = meta.namespace || 'mymod';
   const spellId = `${namespace}:${slugify(name)}`;
+  // Where the icon PNG ships, or '' when none does. Used by the JSON, the save, and the note under Upload.
+  const iconPath = assetPath(icon, Boolean(iconData), `spells/${slugify(name)}.png`);
 
   const num = (v) => (v === '' || v == null ? undefined : Number(v));
 
@@ -104,7 +107,7 @@ export default function SpellEditor() {
     if (onHitEffect.trim()) def.on_hit_effect = onHitEffect.trim();
     if (num(onHitDuration) != null) def.on_hit_duration = num(onHitDuration);
     if (num(onHitChance) != null) def.on_hit_chance = num(onHitChance);
-    if (icon.trim()) def.icon = icon.trim();
+    if (iconPath) def.icon = iconPath;
     if (startingSpell) def.starting_spell = true;
     if (school !== 'sorcery') def.school = school;
     if (num(difficulty) != null && num(difficulty) > 0) def.difficulty = num(difficulty);
@@ -153,7 +156,7 @@ export default function SpellEditor() {
     const reader = new FileReader();
     reader.onload = () => {
       setIconError('');
-      setIcon((p) => p.trim() || `spells/${slugify(name)}.png`);
+      setIcon((p) => assetPath(p, true, `spells/${slugify(name)}.png`));
       setIconData(String(reader.result ?? ''));
     };
     reader.readAsDataURL(file);
@@ -181,7 +184,7 @@ export default function SpellEditor() {
 
   const def = useMemo(buildDef,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [name, description, manaCost, projectile, payload, damageMin, damageMax, range, speed, onHitEffect, onHitDuration, onHitChance, icon, startingSpell, school, difficulty, reqStats, reqSkills, namespace]);
+    [name, description, manaCost, projectile, payload, damageMin, damageMax, range, speed, onHitEffect, onHitDuration, onHitChance, icon, iconData, startingSpell, school, difficulty, reqStats, reqSkills, namespace]);
   const preview = useMemo(() => JSON.stringify(def, null, 2), [def]);
 
   // The mod's own effects, by the exact id the game looks up. The text box accepts anything, so
@@ -262,7 +265,7 @@ export default function SpellEditor() {
             {iconData && <img src={iconData} alt="Spell icon" style={{ width: 40, height: 40, imageRendering: 'pixelated' }} />}
             {iconData && (
               <span className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>
-                PNG loaded. It will export at <span className="sam-mono">{icon.trim() || `spells/${slugify(name)}.png`}</span>.
+                PNG loaded. It will export at <span className="sam-mono">{iconPath}</span>.
               </span>
             )}
           </div>

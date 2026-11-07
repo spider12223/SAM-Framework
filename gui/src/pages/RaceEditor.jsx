@@ -8,7 +8,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { validate } from '@/lib/validate.js';
 import { carryUnknown } from '@/lib/editorKeys.js';
-import { raceIconPath } from '@/lib/raceIcon.js';
+import { assetPath } from '@/lib/assetPath.js';
 import { useMod } from '@/state/ModContext.jsx';
 import { Panel, Field, TextInput, NumberInput, Select, SearchSelect, GoldButton, ErrorList, SavedNote, PixelIcon } from '@/components/ui.jsx';
 import ScriptEditor from '@/components/ScriptEditor.jsx';
@@ -106,7 +106,9 @@ export default function RaceEditor() {
   // A limb is either a bare model reference or an object carrying a transform and, for the two
   // arms, the bent pose. Read both forms, and keep whatever else the object held so reopening a
   // race in the editor cannot quietly drop a scale or an offset it does not show.
-  const limbRaw = (k) => editDef?.limb_models?.[k];
+  // From openedDef, not editDef: editDef is null after the first render (see openedDef above), and
+  // reading it here dropped a limb's scale and offset on the first change.
+  const limbRaw = (k) => openedDef?.limb_models?.[k];
   const limbModelOf = (k) => { const v = limbRaw(k); return typeof v === 'string' ? v : (v?.model ?? ''); };
   const [limbModels, setLimbModels] = useState(() =>
     Object.fromEntries(LIMB_SLOTS.map(([k]) => [k, limbModelOf(k)])));
@@ -136,7 +138,7 @@ export default function RaceEditor() {
   const namespace = meta.namespace || 'mymod';
   const raceId = `${namespace}:${slugify(name)}`;
   // Where the icon PNG ships, or '' when none does. Used by the JSON, the save, and the note under Upload.
-  const iconPath = raceIconPath(icon, Boolean(iconData), slugify(name));
+  const iconPath = assetPath(icon, Boolean(iconData), `races/${slugify(name)}.png`);
   const num = (v) => (v === '' || v == null ? undefined : Number(v));
 
   const buildDef = () => {
@@ -202,7 +204,7 @@ export default function RaceEditor() {
     const reader = new FileReader();
     reader.onload = () => {
       setIconError('');
-      setIcon((p) => raceIconPath(p, true, slugify(name)));
+      setIcon((p) => assetPath(p, true, `races/${slugify(name)}.png`));
       setIconData(String(reader.result ?? ''));
     };
     reader.readAsDataURL(file);
