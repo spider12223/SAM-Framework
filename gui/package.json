@@ -10,7 +10,7 @@
     "prebuild": "node scripts/sync-schemas.mjs",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --import ./test/alias-loader.mjs test/codegen.test.mjs && node --import ./test/alias-loader.mjs test/spellEffectRef.test.mjs && node --import ./test/alias-loader.mjs test/itemLooks.test.mjs"
+    "test": "node --import ./test/alias-loader.mjs test/codegen.test.mjs && node --import ./test/alias-loader.mjs test/spellEffectRef.test.mjs && node --import ./test/alias-loader.mjs test/itemLooks.test.mjs && node --import ./test/alias-loader.mjs test/raceIcon.test.mjs"
   },
   "dependencies": {
     "@fontsource/barlow": "^5.3.0",

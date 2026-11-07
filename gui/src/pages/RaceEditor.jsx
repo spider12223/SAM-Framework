@@ -8,6 +8,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { validate } from '@/lib/validate.js';
 import { carryUnknown } from '@/lib/editorKeys.js';
+import { raceIconPath } from '@/lib/raceIcon.js';
 import { useMod } from '@/state/ModContext.jsx';
 import { Panel, Field, TextInput, NumberInput, Select, SearchSelect, GoldButton, ErrorList, SavedNote, PixelIcon } from '@/components/ui.jsx';
 import ScriptEditor from '@/components/ScriptEditor.jsx';
@@ -134,12 +135,14 @@ export default function RaceEditor() {
 
   const namespace = meta.namespace || 'mymod';
   const raceId = `${namespace}:${slugify(name)}`;
+  // Where the icon PNG ships, or '' when none does. Used by the JSON, the save, and the note under Upload.
+  const iconPath = raceIconPath(icon, Boolean(iconData), slugify(name));
   const num = (v) => (v === '' || v == null ? undefined : Number(v));
 
   const buildDef = () => {
     const def = { id: raceId, name: name.trim(), host_body: hostBody };
     if (description.trim()) def.description = description.trim();
-    if (icon.trim()) def.icon = icon.trim();
+    if (iconPath) def.icon = iconPath;
     const sm = {};
     for (const a of [...ATTRS, 'HP', 'MP']) { const v = num(mods[a]); if (v != null && v !== 0) sm[a] = v; }
     if (Object.keys(sm).length) def.stat_modifiers = sm;
@@ -199,7 +202,7 @@ export default function RaceEditor() {
     const reader = new FileReader();
     reader.onload = () => {
       setIconError('');
-      setIcon((p) => p.trim() || `races/${slugify(name)}.png`);
+      setIcon((p) => raceIconPath(p, true, slugify(name)));
       setIconData(String(reader.result ?? ''));
     };
     reader.readAsDataURL(file);
@@ -220,7 +223,7 @@ export default function RaceEditor() {
 
   const def = useMemo(buildDef,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [name, description, icon, hostBody, mods, bloodDiet, canOpenTins, vision, sneakVision, startingSpells, allies, enemies, neutral, recruits, limbModels, limbBent, namespace]);
+    [name, description, icon, iconData, hostBody, mods, bloodDiet, canOpenTins, vision, sneakVision, startingSpells, allies, enemies, neutral, recruits, limbModels, limbBent, namespace]);
   const preview = useMemo(() => JSON.stringify(def, null, 2), [def]);
   const setMod = (a, v) => setMods((prev) => ({ ...prev, [a]: v }));
 
@@ -256,7 +259,7 @@ export default function RaceEditor() {
             {iconData && <img src={iconData} alt="Race icon" style={{ width: 40, height: 40, imageRendering: 'pixelated' }} />}
             {iconData && (
               <span className="text-xs" style={{ color: 'var(--color-ink-faint)' }}>
-                PNG loaded. It will export at <span className="sam-mono">{icon.trim() || `races/${slugify(name)}.png`}</span>.
+                PNG loaded. It will export at <span className="sam-mono">{iconPath}</span>.
               </span>
             )}
           </div>
