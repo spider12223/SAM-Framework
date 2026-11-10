@@ -857,14 +857,14 @@ Read which way a player is looking. 0 = +x (east), increasing toward +y — so t
 
 ### `sam_get_limb(uid, part)`
 
-One body part of a player, or of a creature the game can put a helmet on (a human, goblin, skeleton, gnome, kobold and the like), as the game left it this tick: the model the game put on it (sprite, and model when that is a mod's own .vox), whether the game hid it (visible), where it is, how it is turned, the point it is drawn from (focal) and its scale. A mod can check where a worn or held item really sits, or line an effect up with a hand or the head. Read-only.
+One body part of a player, or of a creature the game can put a helmet on (a human, goblin, skeleton, gnome, kobold and the like), as the game left it this tick: the model the game put on it (sprite, and model when that is a mod's own .vox), whether the game hid it (visible), where it is, how it is turned, the point it is drawn from (focal) and its scale. A mod can check where a worn or held item really sits, or line an effect up with a hand or the head. On a player, extra_1 to extra_13 (from 3.9.1) are their race's extra_limbs, in the order the race lists them. Read-only.
 
-nil for every other creature (a rat, a slime, a ghoul, even a bugbear with its sword and shield), for a player in rat or spider form, and for a part not built yet in its first tick. On a creature with a custom body, or a part a script gave a model with sam_set_model, what is drawn on screen is not what this reports: the custom model is drawn instead, and visible only says the game did not hide the part. Rotations are radians. pitch on a worn part follows its owner's.
+nil for every other creature (a rat, a slime, a ghoul, even a bugbear with its sword and shield), for a player in rat or spider form, and for a part not built yet in its first tick. On a creature with a custom body, or a part a script gave a model with sam_set_model, what is drawn on screen is not what this reports: the custom model is drawn instead, and visible only says the game did not hide the part. Rotations are radians. pitch on a worn part follows its owner's. extra_1 to extra_13 are nil on a creature, for a slot the player's race does not fill, and while the player is not in the race's own body.
 
 | argument | type |
 |---|---|
 | `uid` | int |
-| `part` | string — one of: `torso`, `right_leg`, `left_leg`, `right_arm`, `left_arm`, `weapon`, `shield`, `cloak`, `helmet`, `mask` |
+| `part` | string — one of: `torso`, `right_leg`, `left_leg`, `right_arm`, `left_arm`, `weapon`, `shield`, `cloak`, `helmet`, `mask`, `extra_1`, `extra_2`, `extra_3`, `extra_4`, `extra_5`, `extra_6`, `extra_7`, `extra_8`, `extra_9`, `extra_10`, `extra_11`, `extra_12`, `extra_13` |
 
 **Returns:** a table/object with sprite, model, visible, x, y, z, yaw, pitch, roll, focalx, focaly, focalz, scalex, scaley, scalez, or nil
 

@@ -759,17 +759,40 @@ the game cannot find, or one that climbs out of the mod folder, is reported in `
 picture is kept. The game looks for the file when the mods load and keeps the picture once it has drawn it, so
 restart the game after changing the picture.
 
-A saved game remembers a race by a number, not a name. S.A.M hands the numbers out by sorting the loaded mods
-by namespace (a mod's dependencies first), so they depend on which mods are loaded, not on how the list is
-arranged: 200 for the first race, 201 for the next, and so on. The card shows the picture of whichever race
-holds that number when the Continue screen opens, or that race's body head if it has no `icon`. With a different
-set of mods loaded than when the game was saved, that is another race's picture or head (seen: a save made as a
-race on the human body showed a skeleton head when another mod's race on the skeleton body held its number).
-Load the same set of mods you saved with.
+A saved game stores a race as a number. S.A.M hands the numbers out by sorting the loaded mods by namespace (a
+mod's dependencies first): 200 for the first race, 201 for the next, and so on, so adding or removing a race mod
+can move them. In 3.9.0 a save made as one race could then come back as another, on its Continue card and in the
+game (seen: a save made as a race on the human body showed a skeleton head when another mod's race on the
+skeleton body held its number). From 3.9.1 a save made with race mods loaded also records which race each number meant, and when the save
+is read, for its Continue card and when it is loaded, the number is pointed back at the race with that id. A race
+whose mod is not loaded comes back as a human, with a line in `sam_log.txt`, and stays a human if the game is
+saved again without that mod. This only happens while a set of mods is loaded: with no mods loaded the save is
+left as it is. A save written by 3.9.0 or earlier has no such record and is still read by number, so load the same
+set of mods you saved with.
 
 The picture does not appear anywhere a race has no small picture to replace: the lobby cards, the main-menu
 leaderboards and the character sheet are not changed, and a recruited follower is a monster, not a race, so it keeps its
 species' picture. The Race Editor has an Icon path box and an Upload PNG button.
+
+
+### Races: a tail that swings side to side (new in 3.9.1)
+
+An extra limb's `"sway"` makes it swing as the player moves. `true` (or `"tilt"`) is the motion of the
+salamander's tail in the base game: it tilts the limb up and down with a slight twist, which reads as a swish
+only on a model built like that tail; on a tail modelled any other way it swings on an odd plane. `"side"`
+swings it left and right instead, turning it about the spot it is placed at (where it attaches, moved by its
+`offset`). Either way it swings faster while
+the player moves and slowly while they stand still.
+
+```json
+"extra_limbs": [
+  { "model": "models/catfolk/tail.vox", "attach": "body", "offset": { "forward": -1.5 }, "sway": "side" }
+]
+```
+
+A script can read an extra limb with `sam_get_limb(uid, "extra_1")`, up to `extra_13`, in the order the race
+lists them. It answers nil on a creature, for a slot the race does not fill, and while the player is not in
+the race's own body.
 
 ---
 

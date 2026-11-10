@@ -483,7 +483,22 @@ void SAMRaces::loadFromManifest(const SAMModManifest& manifest)
 				lim.yawOffsetDeg = rd("yaw_offset", 0.0);
 				lim.scale = rd("scale", 1.0);
 				if ( lim.scale <= 0.0 ) { lim.scale = 1.0; }
-				if ( el.contains("sway") && el["sway"].is_boolean() ) { lim.sway = el["sway"].get<bool>(); }
+				if ( el.contains("sway") )
+				{
+					const auto& sw = el["sway"];
+					const std::string swayName = sw.is_string() ? sw.get<std::string>() : std::string();
+					if ( sw.is_boolean() )
+					{
+						lim.sway = sw.get<bool>() ? SAMRaceDef::SAMExtraLimb::SwayTilt : SAMRaceDef::SAMExtraLimb::SwayNone;
+					}
+					else if ( swayName == "tilt" ) { lim.sway = SAMRaceDef::SAMExtraLimb::SwayTilt; }
+					else if ( swayName == "side" ) { lim.sway = SAMRaceDef::SAMExtraLimb::SwaySide; }
+					else
+					{
+						SAM_WARN(MOD, "Race [" + def.id + "] extra limb sway must be true, false, \"tilt\" or"
+							" \"side\"; this limb does not sway.");
+					}
+				}
 				def.extraLimbs.push_back(lim);
 			}
 		}

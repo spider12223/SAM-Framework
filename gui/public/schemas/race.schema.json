@@ -710,8 +710,19 @@
             "exclusiveMinimum": 0
           },
           "sway": {
-            "type": "boolean",
-            "description": "Swing it as the player moves, the way the salamander's tail does. Good for tails, wrong for horns."
+            "oneOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "tilt",
+                  "side"
+                ]
+              }
+            ],
+            "description": "Swing it as the player moves. true or \"tilt\": the salamander tail's motion, up and down with a slight twist, which reads as a swish only on a model built like that tail. \"side\" (from 3.9.1): left and right, turning about the limb's placed position (its attach point moved by its offset). Good for tails, wrong for horns."
           }
         }
       }

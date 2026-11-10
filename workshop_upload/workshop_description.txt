@@ -8,9 +8,9 @@ Barony was never built to be modded. S.A.M is the layer that makes it modded any
 
 [hr][/hr]
 
-[h1]NEW: A PICTURE FOR YOUR RACE[/h1]
+[h1]NEW: TAILS THAT SWING SIDEWAYS[/h1]
 
-A custom race can name its [b]own small picture[/b]. The saved-game cards show it in place of its body's head. The Race Editor has an [b]Icon path[/b] box and an [b]Upload PNG[/b] button.
+An extra limb can say [b]"sway": "side"[/b] to swing left and right. Saves made with 3.9.1 remember [b]which race[/b] a character is, so adding or removing other race mods no longer swaps it for another.
 
 [h1]GAME SPEED, MOD SETTINGS, THE LOOT POOL[/h1]
 

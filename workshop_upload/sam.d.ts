@@ -611,7 +611,7 @@ declare global {
   function sam_get_light_at(x: number, y: number, player?: number): number | undefined;
 
   /**
-   * One body part of a player, or of a creature the game can put a helmet on (a human, goblin, skeleton, gnome, kobold and the like), as the game left it this tick: the model the game put on it (sprite, and model when that is a mod's own .vox), whether the game hid it (visible), where it is, how it is turned, the point it is drawn from (focal) and its scale. A mod can check where a worn or held item really sits, or line an effect up with a hand or the head. Read-only.
+   * One body part of a player, or of a creature the game can put a helmet on (a human, goblin, skeleton, gnome, kobold and the like), as the game left it this tick: the model the game put on it (sprite, and model when that is a mod's own .vox), whether the game hid it (visible), where it is, how it is turned, the point it is drawn from (focal) and its scale. A mod can check where a worn or held item really sits, or line an effect up with a hand or the head. On a player, extra_1 to extra_13 (from 3.9.1) are their race's extra_limbs, in the order the race lists them. Read-only.
    *
    * Multiplayer: any. The same answer on every machine; safe to call anywhere, including a client's on_packet handler. Reads this machine's own copy of the entity, which on a client is interpolated between the host's updates and can lag it by a fraction of a second. Two machines can therefore answer slightly differently at the same moment: decide anything that depends on the exact number on the host and send the verdict with sam_send_packet, rather than working it out inside on_packet.
    */

@@ -11,7 +11,7 @@ import { Panel, GoldButton } from '@/components/ui.jsx';
 import { NAV_ICONS } from '@/data/navIcons.js';
 
 /** The framework's own version (mods declare their own framework_min_version). */
-const SAM_FRAMEWORK_VERSION = '3.9.0';
+const SAM_FRAMEWORK_VERSION = '3.9.1';
 
 /** Where players get S.A.M itself (the framework is a dependency, not a mod). */
 const WORKSHOP_URL = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472';
@@ -29,10 +29,12 @@ const TRAVELS = [
  * thing a returning modder sees, and the point is 'here is what you can do now that you
  * could not before', not a changelog. */
 const WHATS_NEW = [
-  ["A picture for your race on saved games",
-   "A race can name a small PNG with \"icon\". The saved-game cards on the Continue screen show it in place of the host body's head, and in a co-op game the status bars of the other players are meant to as well. The Race Editor has an Icon path box and an Upload PNG button."],
-  ["A card follows the saved race number",
-   "A saved game remembers a race by a number, handed out by sorting the loaded mods by namespace, so the card shows whichever race holds that number when the Continue screen opens. Load the same set of mods you saved with."],
+  ["A tail that swings side to side",
+   "An extra limb can say \"sway\": \"side\" to swing left and right. \"sway\": true keeps the salamander tail's up-and-down tilt, which only looks right on a tail built like the salamander's."],
+  ["Saves remember which race a character is",
+   "A save now records which race each race number meant, so adding or removing another race mod no longer brings a character back as a different race."],
+  ["A round of Mod Builder fixes",
+   "The Monster Editor no longer crashes on an item with a random pick, the Monster, Race and Class editors keep more of the fields they have no box for, and an imported mod keeps its pictures and rooms when you export it again."],
 ];
 
 /** sam-well stat box: big gold number over a small-caps label. */
@@ -83,11 +85,11 @@ export default function Dashboard() {
       {/* --------------------------------------------------- what is new */}
       <Panel title={`New in ${SAM_FRAMEWORK_VERSION}`}>
         <p className="m-0" style={{ color: 'var(--color-parchment)' }}>
-          This one is about how a race looks.{' '}
+          A small release.{' '}
           <strong style={{ color: 'var(--color-gold)' }}>
-            A custom race can now have its own small picture on the saved-game cards.
+            An extra limb can swing side to side, and a saved game remembers which race a character is.
           </strong>{' '}
-          One new race field, icon. No new script function.
+          No new script function.
         </p>
         <ul className="mt-1 mb-0" style={{ listStyle: 'none', padding: 0 }}>
           {WHATS_NEW.map(([title, blurb]) => (

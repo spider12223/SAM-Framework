@@ -11581,13 +11581,22 @@ namespace SAMLua
 		};
 		int limb = -1;
 		for ( const auto& kp : kParts ) { if ( part == kp.name ) { limb = kp.limb; break; } }
-		if ( limb < 0 )
+		// "extra_1" to "extra_13": a player's race's extra_limbs, in the order the race lists them.
+		// actPlayer hangs them on the child slots 16 to 28 it otherwise leaves unused.
+		int extra = 0;
+		if ( limb < 0 && part.size() > 6 && part.compare(0, 6, "extra_") == 0
+			&& part.find_first_not_of("0123456789", 6) == std::string::npos && part.size() <= 8 )
+		{
+			const int n = std::atoi(part.c_str() + 6);
+			if ( n >= 1 && n <= 13 ) { extra = n; }
+		}
+		if ( limb < 0 && extra == 0 )
 		{
 			static std::set<std::string> warned;
 			if ( warned.insert(part).second )
 			{
 				SAM_WARN("SAM", "sam_get_limb: unknown part '" + partIn + "'. Valid: torso, right_leg, left_leg, "
-					"right_arm, left_arm, weapon, shield, cloak, helmet, mask.");
+					"right_arm, left_arm, weapon, shield, cloak, helmet, mask, and extra_1 to extra_13 on a player.");
 			}
 			return false;
 		}
@@ -11604,7 +11613,19 @@ namespace SAMLua
 			// as not humanoid. Answer nil, as for a rat creature.
 			const Stat* st = owner->getStats();
 			if ( !st || st->type == RAT || st->type == SPIDER ) { return false; }
-			index = limb - 1;
+			if ( extra )
+			{
+				// nil for a slot the race does not fill, or while the player is not in the race's
+				// own body (actPlayer only draws extra limbs then).
+				const auto* limbs = SAMRaces::extraLimbsFor(st->playerRace);
+				if ( !limbs || extra > (int)limbs->size()
+					|| (int)st->type != SAMRaces::hostMonsterForRace(st->playerRace) ) { return false; }
+			}
+			index = extra ? (15 + extra) : (limb - 1);
+		}
+		else if ( extra )
+		{
+			return false; // only a player's race has extra limbs
 		}
 		else if ( owner->behavior == &actMonster )
 		{

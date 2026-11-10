@@ -150,7 +150,11 @@ struct SAMRaceDef
 		double focalX = 0.0, focalY = 0.0, focalZ = 0.0;
 		double pitch = 0.0, roll = 0.0, yawOffsetDeg = 0.0;
 		double scale = 1.0;
-		bool sway = false;        // the SALAMANDER-style ping-pong used by tails
+		// "sway": how the limb swings as the player moves. Tilt is the SALAMANDER tail's own
+		// ping-pong (up and down with a slight twist; also what "sway": true means). Side swings
+		// it left and right, which a tail built any other way than the salamander's needs.
+		enum Sway { SwayNone = 0, SwayTilt = 1, SwaySide = 2 };
+		int sway = SwayNone;
 	};
 	// At most 13: children indices 16..28 are the slots the engine leaves unused.
 	std::vector<SAMExtraLimb> extraLimbs;
