@@ -27,6 +27,7 @@
 #include "sam_items.hpp"   // SAMItems::resolveModImage (a race's icon PNG)
 
 #include <algorithm>
+#include <cmath>
 #include <set>
 #include <fstream>
 #include <sstream>
@@ -499,6 +500,21 @@ void SAMRaces::loadFromManifest(const SAMModManifest& manifest)
 							" \"side\"; this limb does not sway.");
 					}
 				}
+				if ( el.contains("root") )
+				{
+					using L = SAMRaceDef::SAMExtraLimb;
+					static const std::map<std::string, int> kRoots = {
+						{ "top", L::RootTop }, { "bottom", L::RootBottom }, { "front", L::RootFront },
+						{ "back", L::RootBack }, { "left", L::RootLeft }, { "right", L::RootRight } };
+					const auto& rt = el["root"];
+					const auto it = rt.is_string() ? kRoots.find(rt.get<std::string>()) : kRoots.end();
+					if ( it != kRoots.end() ) { lim.root = it->second; }
+					else
+					{
+						SAM_WARN(MOD, "Race [" + def.id + "] extra limb root must be \"top\", \"bottom\", \"front\","
+							" \"back\", \"left\" or \"right\"; this limb turns about its middle.");
+					}
+				}
 				def.extraLimbs.push_back(lim);
 			}
 		}
@@ -828,6 +844,160 @@ const SAMRaceDef::LimbXform* SAMRaces::limbXformFor(int raceId, int limbType)
 	auto xit = it->second.limbXform.find(limbType);
 	if ( xit == it->second.limbXform.end() || !xit->second.any ) { return nullptr; }
 	return &xit->second;
+}
+
+namespace
+{
+	// The box around a model's FILLED voxels, in the engine's model units (one voxel = 1, centred the
+	// way files.cpp builds the mesh: x and y run from v - size/2 to v - size/2 + 1, z from
+	// v - size/2 - 1 to v - size/2). A .vox canvas is often bigger than what is drawn in it, so the
+	// canvas edge is not where the tail ends. Cached per model; a remount that swaps the model at an
+	// index swaps the voxel_t too, so the pointer is part of the key.
+	struct SAMFilledBox { const voxel_t* model = nullptr; double lo[3] = { 0, 0, 0 }, hi[3] = { 0, 0, 0 }; };
+
+	const SAMFilledBox& samFilledBox(int modelIdx)
+	{
+		static std::map<int, SAMFilledBox> cache;
+		static const SAMFilledBox kEmpty;
+		if ( modelIdx < 0 || (Uint32)modelIdx >= nummodels || !models || !models[modelIdx] ) { return kEmpty; }
+		const voxel_t* m = models[modelIdx];
+		SAMFilledBox& box = cache[modelIdx];
+		if ( box.model == m ) { return box; }
+		box = SAMFilledBox();
+		box.model = m;
+		if ( !m->data || m->sizex <= 0 || m->sizey <= 0 || m->sizez <= 0 ) { return box; }
+		int lo[3] = { m->sizex, m->sizey, m->sizez }, hi[3] = { -1, -1, -1 };
+		for ( int x = 0; x < m->sizex; ++x )
+			for ( int y = 0; y < m->sizey; ++y )
+				for ( int z = 0; z < m->sizez; ++z )
+				{
+					if ( m->data[z + y * m->sizez + x * m->sizey * m->sizez] == 255 ) { continue; }   // 255 = empty
+					const int v[3] = { x, y, z };
+					for ( int a = 0; a < 3; ++a ) { lo[a] = std::min(lo[a], v[a]); hi[a] = std::max(hi[a], v[a]); }
+				}
+		if ( hi[0] < 0 ) { return box; }   // nothing drawn at all
+		box.lo[0] = lo[0] - m->sizex / 2.0;     box.hi[0] = hi[0] + 1 - m->sizex / 2.0;
+		box.lo[1] = lo[1] - m->sizey / 2.0;     box.hi[1] = hi[1] + 1 - m->sizey / 2.0;
+		box.lo[2] = lo[2] - m->sizez / 2.0 - 1; box.hi[2] = hi[2] - m->sizez / 2.0;
+		return box;
+	}
+
+	// 3x3 rotations in the renderer's GL frame (x = east, y = up, z = south), right-handed, the
+	// way rotate_mat in opengl.cpp builds them. glDrawVoxel turns a model by
+	// Ry(-yaw) * Rz(-pitch) * Rx(roll), then moves it by focal, then scales it.
+	struct M3 { double m[3][3]; };
+	M3 mul(const M3& a, const M3& b)
+	{
+		M3 r{};
+		for ( int i = 0; i < 3; ++i )
+			for ( int j = 0; j < 3; ++j )
+				r.m[i][j] = a.m[i][0] * b.m[0][j] + a.m[i][1] * b.m[1][j] + a.m[i][2] * b.m[2][j];
+		return r;
+	}
+	M3 rotY(double t) { const double c = cos(t), s = sin(t); return M3{ { { c, 0, s }, { 0, 1, 0 }, { -s, 0, c } } }; }
+	M3 rotZ(double t) { const double c = cos(t), s = sin(t); return M3{ { { c, -s, 0 }, { s, c, 0 }, { 0, 0, 1 } } }; }
+	M3 rotX(double t) { const double c = cos(t), s = sin(t); return M3{ { { 1, 0, 0 }, { 0, c, -s }, { 0, s, c } } }; }
+	M3 rotAxis(const double ax[3], double t)
+	{
+		const double c = cos(t), s = sin(t), k = 1.0 - c;
+		const double x = ax[0], y = ax[1], z = ax[2];
+		return M3{ { { c + k * x * x, k * x * y - s * z, k * x * z + s * y },
+		             { k * x * y + s * z, c + k * y * y, k * y * z - s * x },
+		             { k * x * z - s * y, k * y * z + s * x, c + k * z * z } } };
+	}
+	// The angle equal to `a` (mod 2 pi) nearest `near`, so a limb's yaw or roll does not jump a
+	// full turn between frames.
+	double nearAngle(double a, double near)
+	{
+		const double twoPi = 2.0 * PI;
+		return a + twoPi * std::round((near - a) / twoPi);
+	}
+}
+
+void SAMRaces::extraLimbFocal(const SAMRaceDef::SAMExtraLimb& lim, double& fx, double& fy, double& fz,
+	double& mx, double& my, double& mz)
+{
+	fx = lim.focalX; fy = lim.focalY; fz = lim.focalZ;
+	mx = my = mz = 0.0;
+	const bool noFocal = ( fx == 0.0 && fy == 0.0 && fz == 0.0 );
+	// No root and no focal: the limb turns about its own middle, as it always has, and the
+	// middle stays reported as on the turning point so "side" turns it exactly as 3.9.1 did.
+	if ( lim.root == SAMRaceDef::SAMExtraLimb::RootNone && noFocal ) { return; }
+	const SAMFilledBox& box = samFilledBox(lim.modelIdx);
+	// Where model point q is drawn, from the turning point, in the limb's frame: focal + q * scale / 2
+	// (a model unit is half a world unit, and the scale is applied after the focal).
+	const double half = lim.scale / 2.0;
+	double c[3] = { 0.0, 0.0, 0.0 };   // the middle of the filled voxels, model units
+	if ( box.model ) { for ( int a = 0; a < 3; ++a ) { c[a] = (box.lo[a] + box.hi[a]) / 2.0; } }
+	if ( lim.root != SAMRaceDef::SAMExtraLimb::RootNone && box.model )
+	{
+		// The point of the model that must sit on the turning point: the middle of the named face.
+		// Model axes: x forward, y right, z down (files.cpp builds the mesh as (x, -z, y) in GL).
+		double p[3] = { c[0], c[1], c[2] };
+		using L = SAMRaceDef::SAMExtraLimb;
+		switch ( lim.root )
+		{
+			case L::RootFront:  p[0] = box.hi[0]; break;
+			case L::RootBack:   p[0] = box.lo[0]; break;
+			case L::RootRight:  p[1] = box.hi[1]; break;
+			case L::RootLeft:   p[1] = box.lo[1]; break;
+			case L::RootTop:    p[2] = box.lo[2]; break;
+			case L::RootBottom: p[2] = box.hi[2]; break;
+			default: break;
+		}
+		fx -= p[0] * half; fy -= p[1] * half; fz -= p[2] * half;
+	}
+	// The line a "side" swing works from: turning point to the middle of what is drawn. The
+	// model's own origin can sit off that line (files.cpp shifts z by a voxel), and a swing worked
+	// out from it would dip as it went.
+	mx = fx + c[0] * half; my = fy + c[1] * half; mz = fz + c[2] * half;
+}
+
+void SAMRaces::swingSide(double bodyYaw, double mx, double my, double mz, double angle,
+	double& yaw, double& pitch, double& roll)
+{
+	// The middle in GL, the way glDrawVoxel moves a model by focal: (x, -z, y).
+	const double f[3] = { mx, -mz, my };
+	const double fLen = sqrt(f[0] * f[0] + f[1] * f[1] + f[2] * f[2]);
+	if ( fLen < 1e-3 )
+	{
+		// The model's middle is on the turning point: turning about the upright line is all a
+		// swing can do, and it is exactly what 3.9.1 did.
+		yaw += angle;
+		return;
+	}
+	const M3 turned = mul(mul(rotY(-yaw), rotZ(-pitch)), rotX(roll));
+	double d[3];   // from the turning point to the model's middle, in the world
+	for ( int i = 0; i < 3; ++i ) { d[i] = turned.m[i][0] * f[0] + turned.m[i][1] * f[1] + turned.m[i][2] * f[2]; }
+	const double side[3] = { -sin(bodyYaw), 0.0, cos(bodyYaw) };   // the player's right, in GL
+	double ax[3] = { d[1] * side[2] - d[2] * side[1], d[2] * side[0] - d[0] * side[2], d[0] * side[1] - d[1] * side[0] };
+	double axLen = sqrt(ax[0] * ax[0] + ax[1] * ax[1] + ax[2] * ax[2]);
+	if ( axLen < 1e-3 * fLen )
+	{
+		// It points straight out to the side, where "left and right" is along its own length.
+		// Turn it about the upright line, which at least moves its far end.
+		ax[0] = 0.0; ax[1] = 1.0; ax[2] = 0.0; axLen = 1.0;
+	}
+	for ( int i = 0; i < 3; ++i ) { ax[i] /= axLen; }
+	const M3 r = mul(rotAxis(ax, angle), turned);
+
+	// Back into the renderer's angles: r = Ry(A) * Rz(B) * Rx(C), and A = -yaw, B = -pitch, C = roll.
+	const double sB = std::max(-1.0, std::min(1.0, r.m[1][0]));
+	const double B = asin(sB);
+	double A, C;
+	if ( cos(B) > 1e-6 )
+	{
+		A = atan2(-r.m[2][0], r.m[0][0]);
+		C = atan2(-r.m[1][2], r.m[1][1]);
+	}
+	else
+	{
+		A = atan2(r.m[0][2], r.m[2][2]);
+		C = 0.0;
+	}
+	yaw = nearAngle(-A, yaw);
+	pitch = -B;
+	roll = nearAngle(C, roll);
 }
 
 int SAMRaces::limbBentModelFor(int raceId, int limbType)

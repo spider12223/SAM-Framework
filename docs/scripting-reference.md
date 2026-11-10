@@ -780,19 +780,54 @@ species' picture. The Race Editor has an Icon path box and an Upload PNG button.
 An extra limb's `"sway"` makes it swing as the player moves. `true` (or `"tilt"`) is the motion of the
 salamander's tail in the base game: it tilts the limb up and down with a slight twist, which reads as a swish
 only on a model built like that tail; on a tail modelled any other way it swings on an odd plane. `"side"`
-swings it left and right instead, turning it about the spot it is placed at (where it attaches, moved by its
-`offset`). Either way it swings faster while
-the player moves and slowly while they stand still.
+swings its far end to the player's left and right instead, about the point the limb turns about. Either way it
+swings faster while the player moves and slowly while they stand still.
+
+A limb turns about the point it is placed at: its attach point, moved by its `offset`. Unless you say otherwise
+the model's own middle sits on that point, so a limb placed with only an `offset` turns about its middle, and a
+tail on `"side"` spins in place. Give it a `root` (next section) so it turns about the end that joins the body.
 
 ```json
 "extra_limbs": [
-  { "model": "models/catfolk/tail.vox", "attach": "body", "offset": { "forward": -1.5 }, "sway": "side" }
+  { "model": "models/catfolk/tail.vox", "attach": "torso", "offset": { "forward": -1 }, "root": "top", "sway": "side" }
 ]
 ```
 
 A script can read an extra limb with `sam_get_limb(uid, "extra_1")`, up to `extra_13`, in the order the race
 lists them. It answers nil on a creature, for a slot the race does not fill, and while the player is not in
 the race's own body.
+
+### Races: a limb that turns about its root (new in 3.10.0)
+
+`"root"` names the end of the model that joins the body: `"top"`, `"bottom"`, `"front"`, `"back"`, `"left"` or
+`"right"`. S.A.M takes the box around the model's filled voxels (empty space left around the model in the .vox does
+not count), finds the middle of that side of it, and puts that point where the limb is placed. The limb then turns about that end, for its `pitch`,
+`roll` and `yaw_offset` and for its sway.
+
+`"attach": "torso"` puts that point at the chest limb's own position and follows the chest as it moves; move it
+with `offset`. In an extra limb's `offset`, `"up"` moves the limb DOWN: a positive number lowers it.
+
+- A tail that hangs from the torso: `"top"`. With `"sway": "side"` it swings like a pendulum, the tip moving
+  left and right.
+- A tail that stands up behind the back: `"bottom"`. The same swing, upside down.
+- A tail that sticks out behind: `"front"`. `"side"` swings it left and right; with no `pitch` it stays level, and a
+  pitched tail swings in a plane tilted by that pitch.
+- A limb that points straight out to the player's side has no left and right to swing in: `"side"` turns it about
+  the upright line.
+
+Top and bottom are as you see the model in game. Front, back, left and right are the model's own, so if
+`yaw_offset` turns the model they turn with it.
+
+`"side"` works out which way to swing from where the model's middle lies from the point it turns about, so it
+also changed in 3.10.0 for a limb given a `focal` by hand: in 3.9.1 a limb hanging below that point turned about the
+upright line and swivelled; now it swings like a pendulum.
+
+`focal` still works, and with a root it is added on top, as a nudge. It moves the model away from the point it
+turns about, in the limb's own directions: x forward, y right, z down, in world units (a voxel is half a unit).
+The schema used to call it "the point the limb rotates around", which had it backwards.
+
+A misspelled root is reported in `sam_log.txt` and not applied. S.A.M older than 3.10.0 ignores `root`,
+and the limb turns about its middle.
 
 ---
 

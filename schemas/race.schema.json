@@ -675,14 +675,15 @@
                 "type": "number"
               },
               "up": {
-                "type": "number"
+                "type": "number",
+                "description": "A positive number moves the limb DOWN: the engine's height runs downward, and an extra limb's offset uses it as it is."
               }
             }
           },
           "focal": {
             "type": "object",
             "additionalProperties": false,
-            "description": "The point the limb rotates around, in its own frame.",
+            "description": "Moves the model away from the point it turns about, in the limb's own directions: x forward, y right, z DOWN, in world units (a voxel is half a unit). The limb turns about where it is placed (its attach point moved by its offset); with no focal or root that is the model's own middle, so a tail turns about its middle. Prefer \"root\", which works the numbers out from the model. With a root, focal is added on top as a nudge.",
             "properties": {
               "x": {
                 "type": "number"
@@ -694,6 +695,18 @@
                 "type": "number"
               }
             }
+          },
+          "root": {
+            "type": "string",
+            "enum": [
+              "top",
+              "bottom",
+              "front",
+              "back",
+              "left",
+              "right"
+            ],
+            "description": "(from 3.10.0) Which end of the model joins the body: the middle of that side of the box around the model's filled voxels (empty space in the .vox does not count) is put where the limb is placed, so it turns and sways about that end instead of its own middle. A tail that hangs from the torso is \"top\", one that stands up is \"bottom\", one that sticks out behind is \"front\". Top and bottom are as you see the model in game; front, back, left and right are the model's own, so they turn with yaw_offset."
           },
           "pitch": {
             "type": "number"
@@ -722,7 +735,7 @@
                 ]
               }
             ],
-            "description": "Swing it as the player moves. true or \"tilt\": the salamander tail's motion, up and down with a slight twist, which reads as a swish only on a model built like that tail. \"side\" (from 3.9.1): left and right, turning about the limb's placed position (its attach point moved by its offset). Good for tails, wrong for horns."
+            "description": "Swing it as the player moves. true or \"tilt\": the salamander tail's motion, up and down with a slight twist, which reads as a swish only on a model built like that tail. \"side\" (from 3.9.1): the far end swings to the player's left and right about the point the limb turns about. Give the limb a \"root\" so that point is the end that joins the body; without root or focal it is the model's middle, and the limb only turns in place. From 3.10.0, with a root or focal, a limb that hangs down or stands up now swings like a pendulum, and one that sticks out behind swings side to side. Good for tails, wrong for horns."
           }
         }
       }

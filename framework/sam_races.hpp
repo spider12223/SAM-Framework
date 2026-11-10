@@ -155,6 +155,11 @@ struct SAMRaceDef
 		// it left and right, which a tail built any other way than the salamander's needs.
 		enum Sway { SwayNone = 0, SwayTilt = 1, SwaySide = 2 };
 		int sway = SwayNone;
+		// "root" (from 3.10.0): which end of the model joins the body. The middle of that face of
+		// the model's filled voxels is put on the attach point, so the limb turns (and swings)
+		// about it instead of about its own middle. "focal" still applies on top, as a nudge.
+		enum Root { RootNone = 0, RootTop, RootBottom, RootFront, RootBack, RootLeft, RootRight };
+		int root = RootNone;
 	};
 	// At most 13: children indices 16..28 are the slots the engine leaves unused.
 	std::vector<SAMExtraLimb> extraLimbs;
@@ -327,6 +332,24 @@ public:
 	// The transform for one limb, or nullptr when this race declares none. Read every frame
 	// by the player limb loop.
 	static const SAMRaceDef::LimbXform* limbXformFor(int raceId, int limbType);
+
+	// The focal an extra limb is drawn with: its "root" (the middle of that face of the model's
+	// filled voxels, scaled, put on the turning point) plus its own "focal". Focal is in the limb's
+	// own frame, x forward, y right, z down, world units, applied after the turn and before the
+	// scale (opengl.cpp glDrawVoxel), so the turning point is the entity's position.
+	// mx/my/mz: where the middle of the model's filled voxels then sits, from the turning point,
+	// in the same frame; all zero for a limb with neither root nor focal (it turns about its middle).
+	static void extraLimbFocal(const SAMRaceDef::SAMExtraLimb& lim, double& fx, double& fy, double& fz,
+		double& mx, double& my, double& mz);
+
+	// "sway": "side": swing the limb by `angle` radians so its far end moves to the player's left
+	// and right, about the turning point. The line it swings about is at right angles to both the
+	// player's side and the line from the turning point to the drawn middle (mx, my, mz): upright
+	// for a limb that sticks out behind, front to back for one that hangs down or stands up. When
+	// the middle IS the turning point it only turns about the upright line, as 3.9.1 did.
+	// yaw/pitch/roll are the limb's Euler angles in and out.
+	static void swingSide(double bodyYaw, double mx, double my, double mz, double angle,
+		double& yaw, double& pitch, double& roll);
 
 	// First-person models for this race, or -1 to leave the host body's alone. Local only:
 	// the HUD arm and casting hands are never networked.

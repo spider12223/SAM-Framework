@@ -11,7 +11,7 @@ import { Panel, GoldButton } from '@/components/ui.jsx';
 import { NAV_ICONS } from '@/data/navIcons.js';
 
 /** The framework's own version (mods declare their own framework_min_version). */
-const SAM_FRAMEWORK_VERSION = '3.9.1';
+const SAM_FRAMEWORK_VERSION = '3.10.0';
 
 /** Where players get S.A.M itself (the framework is a dependency, not a mod). */
 const WORKSHOP_URL = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472';
@@ -29,12 +29,10 @@ const TRAVELS = [
  * thing a returning modder sees, and the point is 'here is what you can do now that you
  * could not before', not a changelog. */
 const WHATS_NEW = [
-  ["A tail that swings side to side",
-   "An extra limb can say \"sway\": \"side\" to swing left and right. \"sway\": true keeps the salamander tail's up-and-down tilt, which only looks right on a tail built like the salamander's."],
-  ["Saves remember which race a character is",
-   "A save now records which race each race number meant, so adding or removing another race mod no longer brings a character back as a different race."],
-  ["A round of Mod Builder fixes",
-   "The Monster Editor no longer crashes on an item with a random pick, the Monster, Race and Class editors keep more of the fields they have no box for, and an imported mod keeps its pictures and rooms when you export it again."],
+  ["A tail that swings from its root",
+   "An extra limb can say \"root\": \"top\" (or bottom, front, back, left, right) to turn about the end that joins the body instead of its own middle. S.A.M finds that end in the model for you."],
+  ["\"side\" swings a hanging tail like a pendulum",
+   "With a root, \"sway\": \"side\" moves the tip left and right for a tail that hangs down, stands up or sticks out behind: a hanging tail now swings instead of twisting in place."],
 ];
 
 /** sam-well stat box: big gold number over a small-caps label. */
@@ -87,9 +85,9 @@ export default function Dashboard() {
         <p className="m-0" style={{ color: 'var(--color-parchment)' }}>
           A small release.{' '}
           <strong style={{ color: 'var(--color-gold)' }}>
-            An extra limb can swing side to side, and a saved game remembers which race a character is.
+            A tail can swing from the end that joins the body.
           </strong>{' '}
-          No new script function.
+          One new race field, no new script function.
         </p>
         <ul className="mt-1 mb-0" style={{ listStyle: 'none', padding: 0 }}>
           {WHATS_NEW.map(([title, blurb]) => (
