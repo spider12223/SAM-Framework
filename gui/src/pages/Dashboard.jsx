@@ -11,7 +11,7 @@ import { Panel, GoldButton } from '@/components/ui.jsx';
 import { NAV_ICONS } from '@/data/navIcons.js';
 
 /** The framework's own version (mods declare their own framework_min_version). */
-const SAM_FRAMEWORK_VERSION = '3.10.0';
+const SAM_FRAMEWORK_VERSION = '3.10.1';
 
 /** Where players get S.A.M itself (the framework is a dependency, not a mod). */
 const WORKSHOP_URL = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472';
@@ -29,8 +29,10 @@ const TRAVELS = [
  * thing a returning modder sees, and the point is 'here is what you can do now that you
  * could not before', not a changelog. */
 const WHATS_NEW = [
-  ["A tail that swings from its root",
-   "An extra limb can say \"root\": \"top\" (or bottom, front, back, left, right) to turn about the end that joins the body instead of its own middle. S.A.M finds that end in the model for you."],
+  ["A root finds the part that meets the body",
+   "\"root\": \"top\" (or bottom, front, back, left, right) now uses the average position of the voxels on that side's outermost layer, so a tail that joins the body at one corner turns about that corner, not the middle of its width."],
+  ["A tail that swings from its root (3.10.0)",
+   "An extra limb can say \"root\" to turn about the end that joins the body instead of its own middle. S.A.M finds that end in the model for you."],
   ["\"side\" swings a hanging tail like a pendulum",
    "With a root, \"sway\": \"side\" moves the tip left and right for a tail that hangs down, stands up or sticks out behind: a hanging tail now swings instead of twisting in place."],
 ];
@@ -85,9 +87,9 @@ export default function Dashboard() {
         <p className="m-0" style={{ color: 'var(--color-parchment)' }}>
           A small release.{' '}
           <strong style={{ color: 'var(--color-gold)' }}>
-            A tail can swing from the end that joins the body.
+            A tail's root now lands on the part that meets the body.
           </strong>{' '}
-          One new race field, no new script function.
+          A fix to 3.10.0's root, no new field or script function.
         </p>
         <ul className="mt-1 mb-0" style={{ listStyle: 'none', padding: 0 }}>
           {WHATS_NEW.map(([title, blurb]) => (

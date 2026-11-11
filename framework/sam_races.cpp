@@ -853,7 +853,15 @@ namespace
 	// v - size/2 - 1 to v - size/2). A .vox canvas is often bigger than what is drawn in it, so the
 	// canvas edge is not where the tail ends. Cached per model; a remount that swaps the model at an
 	// index swaps the voxel_t too, so the pointer is part of the key.
-	struct SAMFilledBox { const voxel_t* model = nullptr; double lo[3] = { 0, 0, 0 }, hi[3] = { 0, 0, 0 }; };
+	// face[root - 1]: for each side a "root" can name (top, bottom, front, back, left, right), the
+	// average position of the voxels on that outermost layer, on the box edge. A tail joins the body through
+	// whatever part of it reaches furthest that way, which is not always the middle of its width.
+	struct SAMFilledBox
+	{
+		const voxel_t* model = nullptr;
+		double lo[3] = { 0, 0, 0 }, hi[3] = { 0, 0, 0 };
+		double face[6][3] = {};
+	};
 
 	const SAMFilledBox& samFilledBox(int modelIdx)
 	{
@@ -879,6 +887,33 @@ namespace
 		box.lo[0] = lo[0] - m->sizex / 2.0;     box.hi[0] = hi[0] + 1 - m->sizex / 2.0;
 		box.lo[1] = lo[1] - m->sizey / 2.0;     box.hi[1] = hi[1] + 1 - m->sizey / 2.0;
 		box.lo[2] = lo[2] - m->sizez / 2.0 - 1; box.hi[2] = hi[2] - m->sizez / 2.0;
+
+		// Root order: top (z = lo, z runs down), bottom, front (x = hi), back, left (y = lo), right.
+		const int axisOf[6] = { 2, 2, 0, 0, 1, 1 };
+		const int layer[6] = { lo[2], hi[2], hi[0], lo[0], lo[1], hi[1] };
+		const double edge[6] = { box.lo[2], box.hi[2], box.hi[0], box.lo[0], box.lo[1], box.hi[1] };
+		double sum[6][3] = {};
+		int count[6] = {};
+		for ( int x = lo[0]; x <= hi[0]; ++x )
+			for ( int y = lo[1]; y <= hi[1]; ++y )
+				for ( int z = lo[2]; z <= hi[2]; ++z )
+				{
+					if ( m->data[z + y * m->sizez + x * m->sizey * m->sizez] == 255 ) { continue; }
+					const int v[3] = { x, y, z };
+					// The voxel's middle in model units (z cells are shifted down by one, as above).
+					const double mid[3] = { x - m->sizex / 2.0 + 0.5, y - m->sizey / 2.0 + 0.5, z - m->sizez / 2.0 - 0.5 };
+					for ( int f = 0; f < 6; ++f )
+					{
+						if ( v[axisOf[f]] != layer[f] ) { continue; }
+						for ( int a = 0; a < 3; ++a ) { sum[f][a] += mid[a]; }
+						++count[f];
+					}
+				}
+		for ( int f = 0; f < 6; ++f )
+		{
+			for ( int a = 0; a < 3; ++a ) { box.face[f][a] = count[f] ? sum[f][a] / count[f] : (box.lo[a] + box.hi[a]) / 2.0; }
+			box.face[f][axisOf[f]] = edge[f];
+		}
 		return box;
 	}
 
@@ -931,20 +966,10 @@ void SAMRaces::extraLimbFocal(const SAMRaceDef::SAMExtraLimb& lim, double& fx, d
 	if ( box.model ) { for ( int a = 0; a < 3; ++a ) { c[a] = (box.lo[a] + box.hi[a]) / 2.0; } }
 	if ( lim.root != SAMRaceDef::SAMExtraLimb::RootNone && box.model )
 	{
-		// The point of the model that must sit on the turning point: the middle of the named face.
-		// Model axes: x forward, y right, z down (files.cpp builds the mesh as (x, -z, y) in GL).
-		double p[3] = { c[0], c[1], c[2] };
-		using L = SAMRaceDef::SAMExtraLimb;
-		switch ( lim.root )
-		{
-			case L::RootFront:  p[0] = box.hi[0]; break;
-			case L::RootBack:   p[0] = box.lo[0]; break;
-			case L::RootRight:  p[1] = box.hi[1]; break;
-			case L::RootLeft:   p[1] = box.lo[1]; break;
-			case L::RootTop:    p[2] = box.lo[2]; break;
-			case L::RootBottom: p[2] = box.hi[2]; break;
-			default: break;
-		}
+		// The point of the model that must sit on the turning point: the average position of the voxels on the
+		// named side's outermost layer. Model axes: x forward, y right, z down (files.cpp builds the
+		// mesh as (x, -z, y) in GL).
+		const double* p = box.face[lim.root - 1];
 		fx -= p[0] * half; fy -= p[1] * half; fz -= p[2] * half;
 	}
 	// The line a "side" swing works from: turning point to the middle of what is drawn. The

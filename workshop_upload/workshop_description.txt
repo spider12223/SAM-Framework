@@ -10,7 +10,7 @@ Barony was never built to be modded. S.A.M is the layer that makes it modded any
 
 [h1]NEW: TAILS THAT SWING FROM THE ROOT[/h1]
 
-An extra limb can say [b]"root": "top"[/b] to turn about the end that joins the body. With [b]"sway": "side"[/b], a hanging tail then swings like a pendulum instead of twisting.
+An extra limb can say [b]"root": "top"[/b] to turn about the part that joins the body, even if that is one corner. With [b]"sway": "side"[/b], a hanging tail then swings like a pendulum instead of twisting.
 
 [h1]GAME SPEED, MOD SETTINGS, THE LOOT POOL[/h1]
 

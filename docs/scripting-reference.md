@@ -800,8 +800,10 @@ the race's own body.
 ### Races: a limb that turns about its root (new in 3.10.0)
 
 `"root"` names the end of the model that joins the body: `"top"`, `"bottom"`, `"front"`, `"back"`, `"left"` or
-`"right"`. S.A.M takes the box around the model's filled voxels (empty space left around the model in the .vox does
-not count), finds the middle of that side of it, and puts that point where the limb is placed. The limb then turns about that end, for its `pitch`,
+`"right"`. S.A.M takes the voxels on that side's outermost layer (empty space left around the model in the .vox does
+not count), finds their average position, and puts that point where the limb is placed. So a tail whose top layer is
+only the bit that meets the body turns about that bit, not about the middle of its width. (From 3.10.1; in
+3.10.0 root used the middle of the whole side.) The limb then turns about that end, for its `pitch`,
 `roll` and `yaw_offset` and for its sway.
 
 `"attach": "torso"` puts that point at the chest limb's own position and follows the chest as it moves; move it

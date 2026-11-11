@@ -155,8 +155,8 @@ struct SAMRaceDef
 		// it left and right, which a tail built any other way than the salamander's needs.
 		enum Sway { SwayNone = 0, SwayTilt = 1, SwaySide = 2 };
 		int sway = SwayNone;
-		// "root" (from 3.10.0): which end of the model joins the body. The middle of that face of
-		// the model's filled voxels is put on the attach point, so the limb turns (and swings)
+		// "root" (from 3.10.0): which end of the model joins the body. The average of the voxels on that
+		// outermost layer is put on the attach point, so the limb turns (and swings)
 		// about it instead of about its own middle. "focal" still applies on top, as a nudge.
 		enum Root { RootNone = 0, RootTop, RootBottom, RootFront, RootBack, RootLeft, RootRight };
 		int root = RootNone;
