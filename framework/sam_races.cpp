@@ -25,9 +25,12 @@
 #include "sam_spells.hpp"  // grant custom "ns:spell" innate race spells
 #include "sam_models.hpp"  // SAMModels::modelIndexForId (resolve a race's limb models)
 #include "sam_items.hpp"   // SAMItems::resolveModImage (a race's icon PNG)
+#include "files.hpp"       // openDataFile (models.txt, for the compendium pages)
+#include "ui/GameUI.hpp"   // camelCaseString (monster names on the compendium pages)
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <set>
 #include <fstream>
 #include <sstream>
@@ -745,6 +748,14 @@ void SAMRaces::resolveLimbModels()
 					"a humanoid, so torso/arm/leg models are ignored. Only 'head' applies on this "
 					"host body. Use a humanoid host_body if you need the limbs.");
 			}
+			// The extra limbs live in the same loop, so they are never drawn on these two either.
+			if ( !def.extraLimbs.empty() && (def.hostMonster == RAT || def.hostMonster == SPIDER) )
+			{
+				SAM_WARN(MOD, "Race [" + def.id + "] declares extra_limbs, but a rat/spider player is "
+					"drawn as one model with no limbs, so they are not drawn on this host body unless "
+					"the player ticks \"disable monster abilities\". Use a humanoid host_body if you "
+					"need them.");
+			}
 		}
 
 		for ( const LimbSlot& slot : kLimbSlots )
@@ -1418,4 +1429,319 @@ void SAMRaces::applyStats(int raceId, Stat* myStats)
 	myStats->HP += d.hp;   myStats->MAXHP += d.hp;
 	myStats->MP += d.mp;   myStats->MAXMP += d.mp;
 	// The caller's unconditional std::max(1, ...) clamp runs right after this.
+}
+
+// ---- compendium pages (from 3.11.0) ---------------------------------------------------------
+
+namespace
+{
+	// Every page key starts with this, so no page can take a game page's key and the engine can tell
+	// them apart (a race id is not checked for a namespace, so "goblin" would otherwise be possible).
+	const char* const kCompendiumKeyPrefix = "sam:";
+	// The heading the pages sit under in the compendium's own order; the game writes its headings
+	// with the same four spaces ("    BEASTFOLK").
+	const char* const kCompendiumHeading = "    CUSTOM RACES";
+
+	// Which model numbers are things a creature wears or holds (weapons, armour, hats, cloaks,
+	// quivers) rather than parts of its body. models.txt lists every base-game model's file by its
+	// number, and all of those live under models/items/.
+	std::vector<bool> compendiumItemModels()
+	{
+		std::vector<bool> out;
+		const char* const list = "models/models.txt";
+		if ( !PHYSFS_getRealDir(list) ) { return out; }
+		std::string path = PHYSFS_getRealDir(list);
+		path.append(PHYSFS_getDirSeparator()).append(list);
+		File* fp = openDataFile(path.c_str(), "rb");
+		if ( !fp ) { return out; }
+		char name[PATH_MAX];
+		while ( !fp->eof() )
+		{
+			fp->gets2(name, PATH_MAX);
+			out.push_back(strncmp(name, "models/items/", 13) == 0);
+		}
+		FileIO::close(fp);
+		return out;
+	}
+
+	std::string monsterDisplayName(int type)
+	{
+		if ( type < 0 || type >= NUMMONSTERS ) { return std::string(); }
+		std::string s = getMonsterLocalizedName((Monster)type);
+		camelCaseString(s);
+		return s;
+	}
+
+	std::string monsterList(const std::vector<int>& types)
+	{
+		std::string out;
+		for ( int t : types )
+		{
+			const std::string n = monsterDisplayName(t);
+			if ( n.empty() ) { continue; }
+			if ( !out.empty() ) { out += ", "; }
+			out += n;
+		}
+		return out;
+	}
+
+	// A starting spell's name as the game shows it, from the same two places applySpells looks.
+	std::string spellDisplayName(const std::string& sp)
+	{
+		std::string lower = sp;
+		for ( char& c : lower ) { c = (char)std::tolower((unsigned char)c); }
+		for ( const auto& kv : ItemTooltips.spellItems )
+		{
+			if ( kv.second.internalName == lower ) { return kv.second.name; }
+		}
+		if ( const SAMSpellDef* s = SAMSpells::getSpellByName(sp) )
+		{
+			if ( !s->name.empty() ) { return s->name; }
+		}
+		return sp;
+	}
+
+	// What a race changes, a line each: the page's ABILITIES list. The page turns a '-' that starts a
+	// line into the game's bullet, and wraps a line too long for it.
+	std::vector<std::string> compendiumLines(const SAMRaceDef& d)
+	{
+		auto tiles = [](int n) { n = std::abs(n); return std::to_string(n) + (n == 1 ? " tile" : " tiles"); };
+		std::vector<std::string> lines;
+		lines.push_back("- " + monsterDisplayName(d.hostMonster) + " body");
+		std::string stats;
+		const std::pair<const char*, int> deltas[] = { { "STR", d.str }, { "DEX", d.dex }, { "CON", d.con },
+			{ "INT", d.intel }, { "PER", d.per }, { "CHR", d.chr }, { "HP", d.hp }, { "MP", d.mp } };
+		for ( const auto& p : deltas )
+		{
+			if ( p.second == 0 ) { continue; }
+			if ( !stats.empty() ) { stats += ", "; }
+			stats += std::string(p.second > 0 ? "+" : "") + std::to_string(p.second) + " " + p.first;
+		}
+		if ( !stats.empty() ) { lines.push_back("- " + stats); }
+		if ( d.vision != 0 )
+		{
+			lines.push_back("- Sees " + tiles(d.vision) + (d.vision > 0 ? " further" : " less far") + " in the dark");
+		}
+		if ( d.sneakVision != 0 )
+		{
+			lines.push_back("- Sees " + tiles(d.sneakVision) + (d.sneakVision > 0 ? " further" : " less far")
+				+ " sneaking without a light");
+		}
+		if ( d.bloodDiet ) { lines.push_back("- Drinks blood instead of eating"); }
+		if ( d.canOpenTins ) { lines.push_back("- Opens tins without a tin opener"); }
+		if ( !d.startingSpells.empty() )
+		{
+			std::string names;
+			for ( const std::string& sp : d.startingSpells )
+			{
+				if ( !names.empty() ) { names += ", "; }
+				names += spellDisplayName(sp);
+			}
+			lines.push_back("- Knows " + names);
+		}
+		if ( !d.recruits.empty() ) { lines.push_back("- Recruits " + monsterList(d.recruits)); }
+		if ( !d.allies.empty() ) { lines.push_back("- Allies: " + monsterList(d.allies)); }
+		if ( !d.enemies.empty() ) { lines.push_back("- Enemies: " + monsterList(d.enemies)); }
+		if ( !d.neutral.empty() ) { lines.push_back("- Neutral: " + monsterList(d.neutral)); }
+		return lines;
+	}
+
+	// The race's model for its page, into `out`: the host body's compendium pose wearing the least
+	// armour on its body, minus whatever it wears or holds past its six body parts, with the race's own
+	// head, limbs and extra limbs put on the way the player limb loop puts them on (actplayer.cpp),
+	// standing still. Returns the pose's name, or "" when the host body has none.
+	std::string buildCompendiumModel(int raceId, const SAMRaceDef& d, const std::string& hostEntry,
+		const std::vector<bool>& itemModel, Compendium_t::ObjectLimbs_t& out, int& ownParts, int& extras)
+	{
+		ownParts = 0;
+		extras = 0;
+		out.entities.clear();
+		auto isItem = [&](int s) { return s >= 0 && s < (int)itemModel.size() && itemModel[s]; };
+		const auto host = CompendiumEntries.monsters.find(hostEntry);
+		if ( host == CompendiumEntries.monsters.end() ) { return std::string(); }
+
+		const Compendium_t::ObjectLimbs_t* pose = nullptr;
+		std::string poseName;
+		int leastArmour = 1 << 30;
+		for ( const std::string& name : host->second.models )
+		{
+			auto f = CompendiumEntries.compendiumObjectLimbs.find(name);
+			if ( f == CompendiumEntries.compendiumObjectLimbs.end() || f->second.entities.empty() ) { continue; }
+			int armour = 0;
+			for ( size_t i = 1; i < 6 && i < f->second.entities.size(); ++i )
+			{
+				if ( isItem(f->second.entities[i].sprite) ) { ++armour; }
+			}
+			if ( armour < leastArmour ) { leastArmour = armour; pose = &f->second; poseName = name; }
+		}
+		if ( !pose ) { return std::string(); }
+
+		out.baseCamera = pose->baseCamera;
+		out.currentCamera = pose->baseCamera;
+		// A pose lists the body first (the head), then torso, right leg, left leg, right arm, left arm,
+		// then what it wears or holds and any parts of its own (wings, fronds, a tail). With the race's
+		// abilities on, the game draws a rat or spider player as one model, with no limbs and no extra
+		// limbs (actplayer.cpp: the limb loop is under isHumanoid), so those two keep their pose as it is
+		// and get nothing added. The race's head would replace that whole one model in game, which a
+		// pose of parts cannot show.
+		const bool creatureBody = d.hostMonster == SPIDER || d.hostMonster == RAT;
+		const bool humanoid = !creatureBody && pose->entities.size() >= 6;
+		static const int kLimbFor[6] = { -1, LIMB_HUMANOID_TORSO, LIMB_HUMANOID_RIGHTLEG, LIMB_HUMANOID_LEFTLEG,
+			LIMB_HUMANOID_RIGHTARM, LIMB_HUMANOID_LEFTARM };
+		out.entities.reserve(pose->entities.size() + d.extraLimbs.size());
+		for ( size_t i = 0; i < pose->entities.size(); ++i )
+		{
+			const Entity& src = pose->entities[i];
+			if ( i >= 6 && isItem(src.sprite) ) { continue; }   // a weapon, shield, hat, cloak or quiver
+			out.entities.push_back(Entity(-1, 0, nullptr, nullptr));
+			Entity& e = out.entities.back();
+			e.x = src.x; e.y = src.y; e.z = src.z;
+			e.focalx = src.focalx; e.focaly = src.focaly; e.focalz = src.focalz;
+			e.yaw = src.yaw; e.pitch = src.pitch; e.roll = src.roll;
+			e.scalex = src.scalex; e.scaley = src.scaley; e.scalez = src.scalez;
+			e.sprite = src.sprite;
+			if ( !humanoid || i > 5 ) { continue; }
+			const int model = ( i == 0 ) ? SAMRaces::headModelFor(raceId) : SAMRaces::limbModelFor(raceId, kLimbFor[i]);
+			if ( model >= 0 ) { e.sprite = model; ++ownParts; }
+			if ( i == 0 ) { continue; }
+			if ( const SAMRaceDef::LimbXform* xf = SAMRaces::limbXformFor(raceId, kLimbFor[i]) )
+			{
+				// The player limb loop's transform, in the same order (actplayer.cpp).
+				e.scalex = e.scaley = e.scalez = (real_t)xf->scale;
+				e.focalx += xf->offX;
+				e.focaly += xf->offY;
+				e.focalz += xf->offZ;
+				e.pitch += xf->pitch;
+				e.roll += xf->roll;
+			}
+		}
+
+		// Extra limbs, as the default case of the player limb loop places them: on the body (the
+		// head's own position), turning with the head's pitch for "head", or on the torso; then moved
+		// by the offsets in the body's facing. No sway: the page's model stands still.
+		const real_t bodyX = out.entities[0].x, bodyY = out.entities[0].y, bodyZ = out.entities[0].z;
+		const real_t bodyYaw = out.entities[0].yaw, bodyPitch = out.entities[0].pitch;
+		const real_t torsoX = humanoid ? out.entities[1].x : bodyX;
+		const real_t torsoY = humanoid ? out.entities[1].y : bodyY;
+		const real_t torsoZ = humanoid ? out.entities[1].z : bodyZ;
+		for ( const SAMRaceDef::SAMExtraLimb& lim : d.extraLimbs )
+		{
+			if ( lim.modelIdx < 0 || creatureBody ) { continue; }
+			out.entities.push_back(Entity(-1, 0, nullptr, nullptr));
+			Entity& e = out.entities.back();
+			e.sprite = lim.modelIdx;
+			e.scalex = e.scaley = e.scalez = (real_t)lim.scale;
+			double fx = 0.0, fy = 0.0, fz = 0.0, mx = 0.0, my = 0.0, mz = 0.0;
+			SAMRaces::extraLimbFocal(lim, fx, fy, fz, mx, my, mz);
+			e.focalx = (real_t)fx;
+			e.focaly = (real_t)fy;
+			e.focalz = (real_t)fz;
+			e.yaw = bodyYaw + (real_t)(lim.yawOffsetDeg * PI / 180.0);
+			e.pitch = (real_t)lim.pitch;
+			e.roll = (real_t)lim.roll;
+			e.x = bodyX; e.y = bodyY; e.z = bodyZ;
+			if ( lim.attach == "torso" && humanoid ) { e.x = torsoX; e.y = torsoY; e.z = torsoZ; }
+			else if ( lim.attach == "head" ) { e.pitch = bodyPitch + (real_t)lim.pitch; }
+			e.x += lim.offSide * cos(bodyYaw + PI / 2) + lim.offFwd * cos(bodyYaw);
+			e.y += lim.offSide * sin(bodyYaw + PI / 2) + lim.offFwd * sin(bodyYaw);
+			e.z += lim.offUp;
+			++extras;
+		}
+		return poseName;
+	}
+}
+
+bool SAMRaces::isCompendiumPage(const std::string& key)
+{
+	return key.compare(0, strlen(kCompendiumKeyPrefix), kCompendiumKeyPrefix) == 0;
+}
+
+void SAMRaces::addCompendiumPages(bool arachnophobia)
+{
+	using Pages = Compendium_t::CompendiumMonsters_t;
+
+	// Out with what the last call added: the races may have changed since, and the game's own
+	// reloads leave the models and unlocks of old pages behind.
+	for ( auto& list : Pages::contents_unfiltered )
+	{
+		auto& v = list.second;
+		v.erase(std::remove_if(v.begin(), v.end(), [](const std::pair<std::string, std::string>& e) {
+			return isCompendiumPage(e.first) || (e.first == "-" && e.second == kCompendiumHeading);
+		}), v.end());
+	}
+	auto dropPages = [](auto& table) {
+		for ( auto it = table.begin(); it != table.end(); )
+		{
+			if ( isCompendiumPage(it->first) ) { it = table.erase(it); }
+			else { ++it; }
+		}
+	};
+	dropPages(CompendiumEntries.monsters);
+	dropPages(Pages::contentsMap);
+	dropPages(Pages::unlocks);
+	dropPages(CompendiumEntries.compendiumObjectLimbs);
+	if ( s_byId.empty() ) { return; }
+
+	const std::vector<bool> itemModel = compendiumItemModels();
+	auto& byKind = Pages::contents_unfiltered["default"];
+	auto alpha = Pages::contents_unfiltered.find("alphabetical");
+	byKind.push_back(std::make_pair(std::string("-"), std::string(kCompendiumHeading)));
+	for ( const auto& kv : s_byId )
+	{
+		const SAMRaceDef& d = kv.second;
+		const std::string key = kCompendiumKeyPrefix + d.id;
+		std::string title = d.name.empty() ? d.id : d.name;
+		for ( char& c : title ) { c = (char)std::toupper((unsigned char)c); }   // the game's entries are upper case
+		byKind.push_back(std::make_pair(key, title));
+		if ( alpha != Pages::contents_unfiltered.end() )
+		{
+			auto& v = alpha->second;
+			auto at = std::find_if(v.begin(), v.end(), [&](const std::pair<std::string, std::string>& e) {
+				return e.first != "-" && e.second > title;
+			});
+			v.insert(at, std::make_pair(key, title));
+		}
+		Pages::contentsMap[key] = title;
+		Pages::unlocks[key] = Compendium_t::UNLOCKED_VISITED;   // nothing to find or pay for: it is the player's own race
+
+		Pages::Monster_t page;
+		page.monsterType = d.hostMonster;   // the damage row reads the host body's table, as the race's players do
+		page.species = Pages::SPECIES_NONE;
+		page.resistances.fill(0);
+		// The game's own page for the host body, whose pose, kind and resistance marks the race's page
+		// takes; with the arachnophobia filter on, the spider's is the crab's.
+		const std::string hostEntry = ( d.hostMonster == SPIDER && arachnophobia ) ? std::string("crab")
+			: std::string(monstertypename[d.hostMonster]);
+		const auto host = CompendiumEntries.monsters.find(hostEntry);
+		if ( host != CompendiumEntries.monsters.end() )
+		{
+			page.species = host->second.species;
+			page.resistances = host->second.resistances;
+		}
+		{
+			// The description a line per '\n' as written; the page wraps a line too long for it.
+			std::istringstream in(d.description);
+			std::string line;
+			while ( std::getline(in, line) ) { page.blurb.push_back(line); }
+		}
+		page.abilities = compendiumLines(d);
+
+		int own = 0, extras = 0;
+		Compendium_t::ObjectLimbs_t& model = CompendiumEntries.compendiumObjectLimbs[key];
+		const std::string pose = buildCompendiumModel(kv.first, d, hostEntry, itemModel, model, own, extras);
+		if ( pose.empty() )
+		{
+			CompendiumEntries.compendiumObjectLimbs.erase(key);
+			SAM_WARN(MOD, "Race [" + d.id + "]: the compendium has no picture of a " + d.hostBodyName
+				+ " body to dress, so its compendium page has no model.");
+		}
+		else
+		{
+			page.models.push_back(key);
+			SAM_INFO(MOD, "Compendium page for race [" + d.id + "]: " + d.hostBodyName + " body (pose " + pose + "), "
+				+ std::to_string((int)model.entities.size() - extras) + " parts, " + std::to_string(own)
+				+ " of them the race's own, " + std::to_string(extras) + " extra limb(s).");
+		}
+		CompendiumEntries.monsters[key] = page;
+	}
 }

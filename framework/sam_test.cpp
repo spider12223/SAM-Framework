@@ -22,6 +22,8 @@
 #include "player.hpp"      // players[]
 #include "stat.hpp"        // stats[0]: -samtestrace puts the race on
 #include "sam_races.hpp"   // -samtestrace: the race registry
+#include "sam_models.hpp"  // idForModelIndex: names a mod's model in the compendium log
+#include "files.hpp"       // openDataFile: models.txt names the game's models in that log
 #include <algorithm>       // std::max
 
 #include <cstdio>
@@ -112,6 +114,85 @@ namespace
 		// settings and frees its own memory on the way out. A test that leaks or crashes on
 		// shutdown should look different from one that does not.
 		mainloop = 0;
+	}
+
+	// What the custom races' compendium pages hold, for a mod's log check: where each sits in the two
+	// lists, its unlock state, body, text, and every part of its model, named by file (models.txt) so a
+	// check can say WHICH part sits in which slot without knowing a single model number.
+	void logCompendiumPages()
+	{
+		using Pages = Compendium_t::CompendiumMonsters_t;
+		std::vector<std::string> files;
+		if ( const char* dir = PHYSFS_getRealDir("models/models.txt") )
+		{
+			const std::string path = std::string(dir) + PHYSFS_getDirSeparator() + "models/models.txt";
+			if ( File* fp = openDataFile(path.c_str(), "rb") )
+			{
+				char name[PATH_MAX];
+				while ( !fp->eof() )
+				{
+					fp->gets2(name, PATH_MAX);
+					std::string s = name;
+					while ( !s.empty() && (s.back() == '\r' || s.back() == '\n') ) { s.pop_back(); }
+					const std::size_t slash = s.find_last_of('/');
+					files.push_back(slash == std::string::npos ? s : s.substr(slash + 1));
+				}
+				FileIO::close(fp);
+			}
+		}
+		auto modelName = [&](int sprite) {
+			if ( sprite >= 0 && sprite < (int)files.size() ) { return files[sprite]; }
+			const std::string id = SAMModels::idForModelIndex(sprite);
+			return id.empty() ? std::to_string(sprite) : id;
+		};
+		auto num = [](real_t v) { char b[16]; snprintf(b, sizeof(b), "%.2f", (double)v); return std::string(b); };
+
+		for ( const char* order : { "default", "alphabetical" } )
+		{
+			const auto& v = Pages::contents_unfiltered[order];
+			int headings = 0, pages = 0;
+			std::string where;
+			for ( std::size_t i = 0; i < v.size(); ++i )
+			{
+				if ( v[i].first == "-" && v[i].second.find("CUSTOM RACES") != std::string::npos ) { ++headings; }
+				if ( !SAMRaces::isCompendiumPage(v[i].first) ) { continue; }
+				++pages;
+				where += " '" + v[i].second + "' after '" + (i > 0 ? v[i - 1].second : std::string()) + "';";
+			}
+			SAM_INFO(MOD, std::string("Compendium ") + order + " list: " + std::to_string(headings) + " custom race heading(s), "
+				+ std::to_string(pages) + " race page(s):" + where + " " + std::to_string((int)v.size()) + " entries in all.");
+		}
+		for ( const auto& entry : Pages::contents_unfiltered["default"] )
+		{
+			if ( !SAMRaces::isCompendiumPage(entry.first) ) { continue; }
+			const auto page = CompendiumEntries.monsters.find(entry.first);
+			if ( page == CompendiumEntries.monsters.end() ) { SAM_INFO(MOD, "Compendium page " + entry.first + ": MISSING"); continue; }
+			const auto& p = page->second;
+			std::string blurb, lines, resist;
+			for ( const auto& s : p.blurb ) { blurb += (blurb.empty() ? "" : " / ") + s; }
+			for ( const auto& s : p.abilities ) { lines += (lines.empty() ? "" : " | ") + s; }
+			for ( int r : p.resistances ) { resist += std::to_string(r) + " "; }
+			const auto unlock = Pages::unlocks.find(entry.first);
+			SAM_INFO(MOD, "Compendium page " + entry.first + ": unlock "
+				+ ( unlock == Pages::unlocks.end() ? std::string("none") : std::to_string((int)unlock->second) )
+				+ ", body " + monstertypename[p.monsterType] + ", resist " + resist + "|| blurb: " + blurb
+				+ " || lines: " + lines);
+			const auto model = CompendiumEntries.compendiumObjectLimbs.find(entry.first);
+			if ( model == CompendiumEntries.compendiumObjectLimbs.end() || model->second.entities.empty() )
+			{
+				SAM_INFO(MOD, "Compendium model " + entry.first + ": none");
+				continue;
+			}
+			const Entity& body = model->second.entities[0];
+			std::string parts;
+			int i = 0;
+			for ( const Entity& e : model->second.entities )
+			{
+				parts += " " + std::to_string(i++) + ":" + modelName(e.sprite) + "@(" + num(e.x - body.x) + "," + num(e.y - body.y)
+					+ "," + num(e.z) + ")f(" + num(e.focalx) + "," + num(e.focaly) + "," + num(e.focalz) + ")s" + num(e.scalex);
+			}
+			SAM_INFO(MOD, "Compendium model " + entry.first + ":" + parts);
+		}
 	}
 }
 
@@ -242,6 +323,26 @@ bool loadMods()
 		stats[0]->OLDHP = stats[0]->HP;
 		SAMRaces::applySpells(0);
 		SAM_INFO(MOD, "Playing as race " + s_race + " (id " + std::to_string(id) + ").");
+	}
+
+	// A custom race's compendium page is built when the compendium opens, which a run with nobody at
+	// the keyboard never does. Build the pages here instead: once as a player with the arachnophobia
+	// filter on (its own log lines name the pose each page used), then twice without it (the second
+	// call must replace the first, not add to it), and write down what they hold for a mod's log
+	// check. The Denizens completion figure is taken on both sides: the pages must not move it.
+	if ( SAMRaces::any() )
+	{
+		Compendium_t::updateLorePointCounts();
+		const int before = Compendium_t::CompendiumMonsters_t::completionPercent;
+		SAM_INFO(MOD, "Compendium pages, built as with the arachnophobia filter on:");
+		SAMRaces::addCompendiumPages(true);
+		SAM_INFO(MOD, "Compendium pages, built twice with the filter off:");
+		SAMRaces::addCompendiumPages(false);
+		SAMRaces::addCompendiumPages(false);
+		Compendium_t::updateLorePointCounts();
+		SAM_INFO(MOD, "Compendium pages built for this run: Denizens " + std::to_string(before) + "% complete before them, "
+			+ std::to_string(Compendium_t::CompendiumMonsters_t::completionPercent) + "% after.");
+		logCompendiumPages();
 	}
 	return true;
 }

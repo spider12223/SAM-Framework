@@ -8,9 +8,9 @@ Barony was never built to be modded. S.A.M is the layer that makes it modded any
 
 [hr][/hr]
 
-[h1]NEW: TAILS THAT SWING FROM THE ROOT[/h1]
+[h1]NEW: CUSTOM RACES IN THE COMPENDIUM[/h1]
 
-An extra limb can say [b]"root": "top"[/b] to turn about the part that joins the body, even if that is one corner. With [b]"sway": "side"[/b], a hanging tail then swings like a pendulum instead of twisting.
+Every custom race now has a page in the Dungeon Compendium, made from its race file and body: name, description, what it changes, and the body wearing the race's head, limbs and extra limbs (not on rats or spiders).
 
 [h1]GAME SPEED, MOD SETTINGS, THE LOOT POOL[/h1]
 

@@ -271,6 +271,22 @@ public:
 	// file was not found, or the id is not a registered custom race (callers then keep the body's icon).
 	static std::string iconPath(int raceId);
 
+	// --- compendium (from 3.11.0) ------------------------------------------------------
+	// A page for every registered race in the compendium's Denizens list: under its own heading
+	// after the game's entries, and in place in the A-Z order. Called each time the compendium
+	// opens, so the pages always match the races loaded now: it takes out the pages it added last
+	// time, then adds one per race. A page holds the race's name and description, its host body's
+	// damage row, a line for each thing the race changes, and a model: the host body's own
+	// compendium pose with its weapons and hats taken off and the race's head, limbs and extra
+	// limbs put on. Pages are always unlocked and read, and never count towards completion or
+	// reach the player's compendium save (the engine asks isCompendiumPage at both places).
+	// arachnophobia: the player's arachnophobia filter is on, so a spider body is drawn from the
+	// game's crab pose, as the game's own spider page is.
+	static void addCompendiumPages(bool arachnophobia);
+	// True for a key one of those pages uses: a race's "namespace:race" id. The game's own
+	// compendium keys never contain ':'.
+	static bool isCompendiumPage(const std::string& key);
+
 	// Apply the race's attribute/HP/MP deltas to a Stat. Called from the tail of
 	// initClassStats, before the unconditional HP/MP clamp. No-op for a non-SAM
 	// race id or an unregistered id.

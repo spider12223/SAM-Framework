@@ -831,6 +831,37 @@ The schema used to call it "the point the limb rotates around", which had it bac
 A misspelled root is reported in `sam_log.txt` and not applied. S.A.M older than 3.10.0 ignores `root`,
 and the limb turns about its middle.
 
+### Races: a page in the compendium (new in 3.11.0)
+
+Every custom race gets a page in the Dungeon Compendium's Denizens list. With the list in its own order the pages
+come last, under a CUSTOM RACES heading; sorted A to Z, each one sits in its place among the game's names. Nothing
+new goes in the race file: the page is made from what is already there, each time the compendium opens, from the
+races loaded at that moment.
+
+- The title is the race's `name` in capitals. The left page shows its `description`, a line for each line break
+  (`\n`), with a line too long for the box wrapped. The box was made for the game's own texts, which are about six
+  short lines.
+- The model is the host body as the compendium already shows it, in the pose with the least armour on its body,
+  with its weapons, shields, hats, cloaks and quivers taken off. Then the race's own `limb_models` (with their
+  `scale`, `offset`, `pitch` and `roll`) and its `extra_limbs` are put on where the game puts them on a player. It
+  stands still: `sway` does not move it. A limb the race does not replace keeps the pose's own, which can be a
+  booted leg or a gloved arm. With the race's abilities on ("disable monster abilities" unticked), the game draws
+  a player on a rat or spider body as one model, with no limbs and no extra limbs, so on those two bodies the page
+  shows the game's own picture of the body (for a spider, its crab when the arachnophobia filter is on) and adds
+  nothing to it, not even the race's `head`. `sam_log.txt` now also warns about `extra_limbs` on those two bodies,
+  as it already did about body limbs.
+- The right page reads PLAYABLE and the body's kind, for example PLAYABLE HUMANOID. The HP, AC and other ranges are
+  the game's figures for a monster you fight, so a race page shows a dash. The damage row is the host body's,
+  because a player of the race takes damage as that body does (as a human, with "disable monster abilities" ticked).
+- ABILITIES lists what the race changes: its body, its stat changes, `vision`, `sneak_vision`, `blood_diet`,
+  `can_open_tins`, `starting_spells`, `recruits`, `allies`, `enemies` and `neutral`. INVENTORY shows a dash. There
+  is no RECORDS box: the game counts kills by monster type, so they would be the host body's.
+- A race page is always unlocked, costs no lore points, counts for nothing in the completion figures and is never
+  written into the game's compendium save, so taking the mod out leaves that save as it was.
+
+`sam_log.txt` has a line for each page as it is made, naming the pose it used and how many parts are the race's own.
+S.A.M 3.10.1 and older show no race pages.
+
 ---
 
 ## Monster traits

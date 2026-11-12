@@ -21,7 +21,7 @@
     },
     "name": {
       "type": "string",
-      "description": "Display name shown in the character-select race picker, on its info card, on the main-menu leaderboards and (from 3.8.1) on the race line of the in-game character sheet, e.g. \"Frostborn\"."
+      "description": "Display name shown in the character-select race picker, on its info card, on the main-menu leaderboards, (from 3.8.1) on the race line of the in-game character sheet and (from 3.11.0) as the title of the race's page in the compendium, e.g. \"Frostborn\"."
     },
     "host_body": {
       "type": "string",
@@ -49,7 +49,7 @@
     },
     "description": {
       "type": "string",
-      "description": "Short flavour text for the race (shown in the picker's info panel and, from 3.8.1, in the tooltip of the race line on the in-game character sheet)."
+      "description": "Short flavour text for the race (shown in the picker's info panel and, from 3.8.1, in the tooltip of the race line on the in-game character sheet, and (from 3.11.0) on the race's page in the compendium, a line for each line break)."
     },
     "icon": {
       "type": "string",
