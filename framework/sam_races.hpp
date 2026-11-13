@@ -42,6 +42,9 @@ struct SAMRaceDef
 	std::string modNamespace;   // owning mod namespace
 	std::string name;           // display name (shown in char-select)
 	std::string description;
+	// (from 3.12.0) Optional "lore": the compendium page's text, in place of description, which stays in
+	// the picker and the character sheet.
+	std::string lore;
 	// (3.9.0) Optional "icon": a small mod-relative PNG used as the race's picture on saved-game cards
 	// and on the HUD bars of other players, in place of the host body's icon. Found once at load.
 	std::string icon;

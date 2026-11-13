@@ -85,6 +85,8 @@ export default function RaceEditor() {
 
   const [name, setName] = useState(editDef?.name ?? '');
   const [description, setDescription] = useState(editDef?.description ?? '');
+  // The compendium page's text, when it should not be the description (a perks list reads oddly there).
+  const [lore, setLore] = useState(editDef?.lore ?? '');
   // The race's own small picture (saved-game cards, other players' HUD bars). A PNG uploaded here ships
   // in the mod zip at the icon path.
   const [icon, setIcon] = useState(editDef?.icon ?? '');
@@ -144,6 +146,7 @@ export default function RaceEditor() {
   const buildDef = () => {
     const def = { id: raceId, name: name.trim(), host_body: hostBody };
     if (description.trim()) def.description = description.trim();
+    if (lore.trim()) def.lore = lore.trim();
     if (iconPath) def.icon = iconPath;
     const sm = {};
     for (const a of [...ATTRS, 'HP', 'MP']) { const v = num(mods[a]); if (v != null && v !== 0) sm[a] = v; }
@@ -225,7 +228,7 @@ export default function RaceEditor() {
 
   const def = useMemo(buildDef,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [name, description, icon, iconData, hostBody, mods, bloodDiet, canOpenTins, vision, sneakVision, startingSpells, allies, enemies, neutral, recruits, limbModels, limbBent, namespace]);
+    [name, description, lore, icon, iconData, hostBody, mods, bloodDiet, canOpenTins, vision, sneakVision, startingSpells, allies, enemies, neutral, recruits, limbModels, limbBent, namespace]);
   const preview = useMemo(() => JSON.stringify(def, null, 2), [def]);
   const setMod = (a, v) => setMods((prev) => ({ ...prev, [a]: v }));
 
@@ -248,6 +251,9 @@ export default function RaceEditor() {
           </Field>
           <Field label="Description" hint="Shown in the picker's info panel and in the tooltip of the race line on the character sheet in game.">
             <textarea className="sam-input" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="A nimble undead wanderer…" />
+          </Field>
+          <Field label="Compendium text" hint="Shown in the box under the model on this race's page in the Dungeon Compendium, in place of the description. Leave it empty to show the description there. A new line starts a new line, and a long line is wrapped; the box fits about six short lines.">
+            <textarea className="sam-input" rows={3} value={lore} onChange={(e) => setLore(e.target.value)} placeholder="Territorial and aloof by nature…" />
           </Field>
           <Field
             label="Icon path (mod-relative)"

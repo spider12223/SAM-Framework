@@ -8,9 +8,9 @@ Barony was never built to be modded. S.A.M is the layer that makes it modded any
 
 [hr][/hr]
 
-[h1]NEW: CUSTOM RACES IN THE COMPENDIUM[/h1]
+[h1]NEW: A RACE'S STORY IN THE COMPENDIUM[/h1]
 
-Every custom race now has a page in the Dungeon Compendium, made from its race file and body: name, description, what it changes, and the body wearing the race's head, limbs and extra limbs (not on rats or spiders).
+Every custom race has a page in the Dungeon Compendium. Now a race can say [b]"lore"[/b] for the text under its model, and its own arms hang down instead of taking the picture's grip.
 
 [h1]GAME SPEED, MOD SETTINGS, THE LOOT POOL[/h1]
 

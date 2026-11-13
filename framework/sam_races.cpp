@@ -204,6 +204,7 @@ void SAMRaces::loadFromManifest(const SAMModManifest& manifest)
 
 		def.name = getStr("name").empty() ? def.id : getStr("name");
 		def.description = getStr("description");
+		def.lore = getStr("lore");
 		def.modNamespace = manifest.ns;
 
 		// "icon": find the PNG once, here, where a mistake can be reported, the way a spell's icon is.
@@ -1442,12 +1443,19 @@ namespace
 	// with the same four spaces ("    BEASTFOLK").
 	const char* const kCompendiumHeading = "    CUSTOM RACES";
 
-	// Which model numbers are things a creature wears or holds (weapons, armour, hats, cloaks,
-	// quivers) rather than parts of its body. models.txt lists every base-game model's file by its
-	// number, and all of those live under models/items/.
-	std::vector<bool> compendiumItemModels()
+	// What models.txt says about each base-game model number: whether it is a thing a creature wears or
+	// holds (weapons, armour, hats, cloaks, quivers all live under models/items/) rather than part of its
+	// body, and whether it is a bent arm, the model the game draws for an arm that holds something (every
+	// one has "bent" in its file name: FemaleArmBentRight, GoblinArmLeftBent, gnome_rightarmbent, ...).
+	struct ModelKinds
 	{
-		std::vector<bool> out;
+		std::vector<bool> item, bent;
+		bool isItem(int s) const { return s >= 0 && s < (int)item.size() && item[s]; }
+		bool isBent(int s) const { return s >= 0 && s < (int)bent.size() && bent[s]; }
+	};
+	ModelKinds compendiumModelKinds()
+	{
+		ModelKinds out;
 		const char* const list = "models/models.txt";
 		if ( !PHYSFS_getRealDir(list) ) { return out; }
 		std::string path = PHYSFS_getRealDir(list);
@@ -1458,10 +1466,67 @@ namespace
 		while ( !fp->eof() )
 		{
 			fp->gets2(name, PATH_MAX);
-			out.push_back(strncmp(name, "models/items/", 13) == 0);
+			std::string file = name;
+			for ( char& c : file ) { c = (char)std::tolower((unsigned char)c); }
+			const std::size_t slash = file.find_last_of('/');
+			out.item.push_back(file.compare(0, 13, "models/items/") == 0);
+			out.bent.push_back(file.find("bent", slash == std::string::npos ? 0 : slash) != std::string::npos);
 		}
 		FileIO::close(fp);
 		return out;
+	}
+
+	// Where the game puts a player's body part (1 torso ... 5 left arm), relative to the body, when it holds
+	// this model under this head (actplayer.cpp: the body's limbs.txt turning point, an arm's bend, then
+	// Entity::setHumanoidLimbOffset, which moves and nudges the part per body, per model and per head; it is
+	// run here on a stand-in body and part, built the way the game builds its own compendium poses).
+	// holding: an arm that holds something is bent and turns about a point further forward and higher; an
+	// empty one hangs. The right arm's sideways nudges are the left arm's mirrored.
+	struct Placement { real_t x = 0, y = 0, z = 0, fx = 0, fy = 0, fz = 0; };
+	Placement gamePlacement(int host, std::size_t part, int model, int head, bool holding, real_t bodyYaw)
+	{
+		static const int kLimbType[6] = { -1, LIMB_HUMANOID_TORSO, LIMB_HUMANOID_RIGHTLEG, LIMB_HUMANOID_LEFTLEG,
+			LIMB_HUMANOID_RIGHTARM, LIMB_HUMANOID_LEFTARM };
+		Entity body(-1, 0, nullptr, nullptr);
+		body.sprite = head;
+		body.yaw = bodyYaw;
+		Entity limb(-1, 0, nullptr, nullptr);
+		limb.sprite = model;
+		limb.focalx = limbs[host][part][0];
+		limb.focaly = limbs[host][part][1];
+		limb.focalz = limbs[host][part][2];
+		if ( part >= 4 )
+		{
+			const real_t s = ( part == 4 ) ? 1.0 : -1.0;
+			if ( holding )
+			{
+				if ( host == AUTOMATON ) { limb.focalx += 1.5; limb.focaly += 0.25 * s; limb.focalz -= 1.0; }
+				else if ( host == MYCONID || host == SALAMANDER ) { limb.focalx += 0.75; limb.focaly += 0.25 * s; limb.focalz -= 0.75; }
+				else if ( host == GREMLIN || host == GNOME ) { limb.focalx += 1.0; limb.focaly += 0.25 * s; limb.focalz -= 0.75; }
+				else if ( host != INCUBUS && host != SUCCUBUS ) { limb.focalx += 0.75; limb.focalz -= 0.75; }
+			}
+			else if ( host == INCUBUS || host == SUCCUBUS ) { limb.focalx -= 0.25; limb.focaly -= 0.25 * s; }
+			else if ( host == DRYAD )
+			{
+				limb.focaly -= 0.25 * s;
+				if ( model == (part == 4 ? 1966 : 1965) || model == (part == 4 ? 1970 : 1969) ) { limb.focaly += 0.25 * s; }
+			}
+			else if ( host == MYCONID && model == (part == 4 ? 2000 : 1999) ) { limb.focaly += 0.25 * s; }
+		}
+		body.setHumanoidLimbOffset(&limb, (Monster)host, kLimbType[part]);
+		Placement p;
+		p.x = limb.x; p.y = limb.y; p.z = limb.z;
+		p.fx = limb.focalx; p.fy = limb.focaly; p.fz = limb.focalz;
+		return p;
+	}
+
+	// The head is the player entity itself, turned about the body's limbs.txt line 0 (actplayer.cpp); only
+	// three of the game's own heads move it further, and a troll's moves for every head.
+	real_t headFocalTweak(int host, int head)
+	{
+		if ( host == GOATMAN && head == 768 ) { return -0.25; }
+		if ( (host == DRYAD && (head == 1992 || head == 1993)) || (host == MYCONID && head == 1998) ) { return 0.5; }
+		return 0.0;
 	}
 
 	std::string monsterDisplayName(int type)
@@ -1551,12 +1616,12 @@ namespace
 	// head, limbs and extra limbs put on the way the player limb loop puts them on (actplayer.cpp),
 	// standing still. Returns the pose's name, or "" when the host body has none.
 	std::string buildCompendiumModel(int raceId, const SAMRaceDef& d, const std::string& hostEntry,
-		const std::vector<bool>& itemModel, Compendium_t::ObjectLimbs_t& out, int& ownParts, int& extras)
+		const ModelKinds& kinds, Compendium_t::ObjectLimbs_t& out, int& ownParts, int& extras)
 	{
 		ownParts = 0;
 		extras = 0;
 		out.entities.clear();
-		auto isItem = [&](int s) { return s >= 0 && s < (int)itemModel.size() && itemModel[s]; };
+		auto isItem = [&](int s) { return kinds.isItem(s); };
 		const auto host = CompendiumEntries.monsters.find(hostEntry);
 		if ( host == CompendiumEntries.monsters.end() ) { return std::string(); }
 
@@ -1589,6 +1654,7 @@ namespace
 		static const int kLimbFor[6] = { -1, LIMB_HUMANOID_TORSO, LIMB_HUMANOID_RIGHTLEG, LIMB_HUMANOID_LEFTLEG,
 			LIMB_HUMANOID_RIGHTARM, LIMB_HUMANOID_LEFTARM };
 		out.entities.reserve(pose->entities.size() + d.extraLimbs.size());
+		bool replaced[6] = { false, false, false, false, false, false };
 		for ( size_t i = 0; i < pose->entities.size(); ++i )
 		{
 			const Entity& src = pose->entities[i];
@@ -1602,17 +1668,48 @@ namespace
 			e.sprite = src.sprite;
 			if ( !humanoid || i > 5 ) { continue; }
 			const int model = ( i == 0 ) ? SAMRaces::headModelFor(raceId) : SAMRaces::limbModelFor(raceId, kLimbFor[i]);
-			if ( model >= 0 ) { e.sprite = model; ++ownParts; }
-			if ( i == 0 ) { continue; }
-			if ( const SAMRaceDef::LimbXform* xf = SAMRaces::limbXformFor(raceId, kLimbFor[i]) )
+			if ( model >= 0 ) { e.sprite = model; replaced[i] = true; ++ownParts; }
+		}
+
+		if ( humanoid )
+		{
+			// A pose's numbers are the monster's own placement of the models it wears, which the game's player
+			// code mostly shares: but not for every model. A bent arm, holding something, turns about a point
+			// 0.75 further forward and higher than a hanging one, a gremlin turns a torso that is not its own
+			// about another point, and so on. So a part moves only by what the game would move it for its new
+			// model (or the new head), and a race's own arm holds nothing, so it hangs, unturned.
+			const int poseHead = pose->entities[0].sprite;
+			const int pageHead = out.entities[0].sprite;
+			const real_t bodyYaw = out.entities[0].yaw;
+			out.entities[0].focalz += headFocalTweak(d.hostMonster, pageHead) - headFocalTweak(d.hostMonster, poseHead);
+			for ( size_t i = 1; i <= 5; ++i )
 			{
-				// The player limb loop's transform, in the same order (actplayer.cpp).
-				e.scalex = e.scaley = e.scalez = (real_t)xf->scale;
-				e.focalx += xf->offX;
-				e.focaly += xf->offY;
-				e.focalz += xf->offZ;
-				e.pitch += xf->pitch;
-				e.roll += xf->roll;
+				Entity& e = out.entities[i];
+				const int poseModel = pose->entities[i].sprite;
+				if ( replaced[i] || pageHead != poseHead )
+				{
+					const bool arm = i >= 4;
+					const bool poseHolding = arm && kinds.isBent(poseModel);
+					const Placement was = gamePlacement(d.hostMonster, i, poseModel, poseHead, poseHolding, bodyYaw);
+					const Placement now = gamePlacement(d.hostMonster, i, e.sprite, pageHead, poseHolding && !replaced[i], bodyYaw);
+					e.x += now.x - was.x;
+					e.y += now.y - was.y;
+					e.z += now.z - was.z;
+					e.focalx += now.fx - was.fx;
+					e.focaly += now.fy - was.fy;
+					e.focalz += now.fz - was.fz;
+					if ( arm && replaced[i] ) { e.yaw = bodyYaw; e.pitch = 0.0; e.roll = 0.0; }
+				}
+				if ( const SAMRaceDef::LimbXform* xf = SAMRaces::limbXformFor(raceId, kLimbFor[i]) )
+				{
+					// The player limb loop's own transform, applied last, as there (actplayer.cpp).
+					e.scalex = e.scaley = e.scalez = (real_t)xf->scale;
+					e.focalx += xf->offX;
+					e.focaly += xf->offY;
+					e.focalz += xf->offZ;
+					e.pitch += xf->pitch;
+					e.roll += xf->roll;
+				}
 			}
 		}
 
@@ -1682,7 +1779,7 @@ void SAMRaces::addCompendiumPages(bool arachnophobia)
 	dropPages(CompendiumEntries.compendiumObjectLimbs);
 	if ( s_byId.empty() ) { return; }
 
-	const std::vector<bool> itemModel = compendiumItemModels();
+	const ModelKinds kinds = compendiumModelKinds();
 	auto& byKind = Pages::contents_unfiltered["default"];
 	auto alpha = Pages::contents_unfiltered.find("alphabetical");
 	byKind.push_back(std::make_pair(std::string("-"), std::string(kCompendiumHeading)));
@@ -1719,8 +1816,9 @@ void SAMRaces::addCompendiumPages(bool arachnophobia)
 			page.resistances = host->second.resistances;
 		}
 		{
-			// The description a line per '\n' as written; the page wraps a line too long for it.
-			std::istringstream in(d.description);
+			// The race's lore, or else its description, a line per '\n' as written; the page wraps a line
+			// too long for it.
+			std::istringstream in(d.lore.empty() ? d.description : d.lore);
 			std::string line;
 			while ( std::getline(in, line) ) { page.blurb.push_back(line); }
 		}
@@ -1728,7 +1826,7 @@ void SAMRaces::addCompendiumPages(bool arachnophobia)
 
 		int own = 0, extras = 0;
 		Compendium_t::ObjectLimbs_t& model = CompendiumEntries.compendiumObjectLimbs[key];
-		const std::string pose = buildCompendiumModel(kv.first, d, hostEntry, itemModel, model, own, extras);
+		const std::string pose = buildCompendiumModel(kv.first, d, hostEntry, kinds, model, own, extras);
 		if ( pose.empty() )
 		{
 			CompendiumEntries.compendiumObjectLimbs.erase(key);

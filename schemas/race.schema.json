@@ -49,7 +49,11 @@
     },
     "description": {
       "type": "string",
-      "description": "Short flavour text for the race (shown in the picker's info panel and, from 3.8.1, in the tooltip of the race line on the in-game character sheet, and (from 3.11.0) on the race's page in the compendium, a line for each line break)."
+      "description": "Short flavour text for the race (shown in the picker's info panel and, from 3.8.1, in the tooltip of the race line on the in-game character sheet, and (from 3.11.0) on the race's page in the compendium, a line for each line break, unless the race has lore)."
+    },
+    "lore": {
+      "type": "string",
+      "description": "(from 3.12.0) Text for the box under the model on this race's page in the Dungeon Compendium, in place of description, which stays in the character-select picker and the character sheet's tooltip. Each line break (\\n) starts a new line, and a line too long for the box is wrapped. The box was made for the game's own texts, which are about six short lines. Leave it out to show description there."
     },
     "icon": {
       "type": "string",

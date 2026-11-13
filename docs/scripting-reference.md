@@ -840,7 +840,12 @@ races loaded at that moment.
 
 - The title is the race's `name` in capitals. The left page shows its `description`, a line for each line break
   (`\n`), with a line too long for the box wrapped. The box was made for the game's own texts, which are about six
-  short lines.
+  short lines. From 3.12.0 a race with `"lore"` shows that instead, so the picker can keep a list of what the race
+  does while the compendium tells its story:
+
+  ```json
+  "lore": "Territorial and aloof by nature, catfolk live in small clans that do not welcome outsiders."
+  ```
 - The model is the host body as the compendium already shows it, in the pose with the least armour on its body,
   with its weapons, shields, hats, cloaks and quivers taken off. Then the race's own `limb_models` (with their
   `scale`, `offset`, `pitch` and `roll`) and its `extra_limbs` are put on where the game puts them on a player. It
@@ -850,6 +855,12 @@ races loaded at that moment.
   shows the game's own picture of the body (for a spider, its crab when the arachnophobia filter is on) and adds
   nothing to it, not even the race's `head`. `sam_log.txt` now also warns about `extra_limbs` on those two bodies,
   as it already did about body limbs.
+- (From 3.12.0.) A part the race replaces moves by as much as the game moves that model on a player of that body,
+  and the race's own arms hang, holding nothing. In 3.11.0 they kept the pose's numbers, so an arm put where the
+  pose holds something bent sat out of place, as on a human body, whose pose holds both arms bent; a torso the
+  game treats as not the body's own (on a gremlin or insectoid) or legs that are not a salamander's own feet sat
+  where the body's own would. One case is not followed: under a torso that is not a gremlin's own, the game sets
+  the gremlin's legs 0.2 higher, and the page does not, because that depends on another part.
 - The right page reads PLAYABLE and the body's kind, for example PLAYABLE HUMANOID. The HP, AC and other ranges are
   the game's figures for a monster you fight, so a race page shows a dash. The damage row is the host body's,
   because a player of the race takes damage as that body does (as a human, with "disable monster abilities" ticked).

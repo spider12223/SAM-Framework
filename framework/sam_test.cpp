@@ -189,7 +189,8 @@ namespace
 			for ( const Entity& e : model->second.entities )
 			{
 				parts += " " + std::to_string(i++) + ":" + modelName(e.sprite) + "@(" + num(e.x - body.x) + "," + num(e.y - body.y)
-					+ "," + num(e.z) + ")f(" + num(e.focalx) + "," + num(e.focaly) + "," + num(e.focalz) + ")s" + num(e.scalex);
+					+ "," + num(e.z) + ")f(" + num(e.focalx) + "," + num(e.focaly) + "," + num(e.focalz) + ")s" + num(e.scalex)
+					+ "r(" + num(e.yaw - body.yaw) + "," + num(e.pitch) + "," + num(e.roll) + ")";
 			}
 			SAM_INFO(MOD, "Compendium model " + entry.first + ":" + parts);
 		}
