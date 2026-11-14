@@ -156,7 +156,7 @@
     "can_open_tins": {
       "type": "boolean",
       "default": false,
-      "description": "If true, this race eats a tin without a tin opener, as a Goatman or an Automaton does (a race on either of those bodies already can). Like theirs, it covers eating; the alchemy table still wants an opener. Ignored when the player turns race abilities off at character creation."
+      "description": "If true, this race opens a tin without a tin opener. It eats one, as a Goatman or an Automaton does (a race on either of those bodies already can eat one), and (from 3.12.1) it puts one in at the cooking screen of a cauldron or frying pan, where the game's own Goatman and Automaton still need an opener. Ignored when the player turns race abilities off at character creation."
     },
     "starting_spells": {
       "type": "array",

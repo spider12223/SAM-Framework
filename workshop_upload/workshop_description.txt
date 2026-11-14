@@ -8,9 +8,9 @@ Barony was never built to be modded. S.A.M is the layer that makes it modded any
 
 [hr][/hr]
 
-[h1]NEW: A RACE'S STORY IN THE COMPENDIUM[/h1]
+[h1]NEW: TINS AT THE COOKING SCREEN[/h1]
 
-Every custom race has a page in the Dungeon Compendium. Now a race can say [b]"lore"[/b] for the text under its model, and its own arms hang down instead of taking the picture's grip.
+A race with [b]"can_open_tins"[/b] can now put a tin into the cooking screen of a cauldron or frying pan without a tin opener, not only eat one. Races also have compendium pages, with [b]"lore"[/b] for the text.
 
 [h1]GAME SPEED, MOD SETTINGS, THE LOOT POOL[/h1]
 

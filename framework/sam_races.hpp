@@ -108,7 +108,8 @@ struct SAMRaceDef
 
 	// (v3.3.0) Optional "can_open_tins": eat a tin without a tin opener, as a Goatman or an
 	// Automaton does (the engine checks those two bodies, so a race on either already can). Like
-	// theirs, it covers eating; the alchemy table still wants an opener.
+	// theirs, it covers eating; and (from 3.12.1) it also opens a tin at the cooking screen of a cauldron or frying
+	// pan (interface.cpp), where the game's own two still need an opener.
 	bool canOpenTins = false;
 
 	// Optional "limb_models": this race's OWN body, one model per limb, instead of the

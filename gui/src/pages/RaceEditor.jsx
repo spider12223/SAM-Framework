@@ -278,7 +278,7 @@ export default function RaceEditor() {
           </label>
           <label className="flex items-center gap-2 mt-2 cursor-pointer text-sm" style={{ color: 'var(--color-parchment)' }}>
             <input type="checkbox" className="sam-check" checked={canOpenTins} onChange={(e) => setCanOpenTins(e.target.checked)} />
-            Opens tins without a tin opener (like a goatman or automaton)
+            Opens tins without a tin opener, to eat and at the cooking screen (the game's own goatman and automaton only eat them)
           </label>
           <div className="grid grid-cols-2 gap-3 mt-3">
             <Field label="Vision" hint="Extra tiles of sight in the dark, always, added on top of Perception's own light bonus. -4 to 6; 0 = normal.">
