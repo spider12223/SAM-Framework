@@ -4,6 +4,6 @@
   "name": "Party Test",
   "author": "S.A.M Framework",
   "version": "1.0.0",
-  "framework_min_version": "3.8.0",
+  "framework_min_version": "3.13.0",
   "description": "An unattended test of party members (sam_party_*), the carry_on option and the in-game half of the lobby functions: spawns three party members, reads and changes them, kills them (one comes back, one has respawn off, one is kept dead by a handler), takes the stairs with sam_travel_to_level, and checks who came back. Run it with tools/run_mod_test.sh PartyTest."
 }
