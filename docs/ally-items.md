@@ -137,9 +137,8 @@ game that uses it.
 Run: the engine-level checks (real framework code against the real game code, a check for each
 feature) for the reasons, the identity rule, curses, species rules, the veto, both directions of
 a transfer on the host's own player, and every ticket outcome including the remote-player
-protocol against a faked channel. `examples/ItemMoveTest` is written to check the same in a
-running game.
+protocol against a faked channel. On a Windows build, `examples/ItemMoveTest` passes in a running
+game (56 checks), and fails on the shipped 3.7.0 exe, which has none of these calls.
 
-Not run: a Windows build; `examples/ItemMoveTest` in a running game; anything online with two
-machines; whether other players see an ally's new helmet after the ally is relinked or the game
+Not run: anything online with two machines; whether other players see an ally's new helmet after the ally is relinked or the game
 is saved and loaded (read in the code, not watched).
