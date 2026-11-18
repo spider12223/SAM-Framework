@@ -4,10 +4,10 @@
 --
 -- What it does, and what would be different if the code were broken:
 --   1. reads sam_party_choices and the character-screen rule;
---   2. spawns Alpha (respawns), Bravo (respawn off) and Charlie (a handler keeps it dead);
+--   2. spawns Ash (respawns), Birch (respawn off) and Cedar (a handler keeps it dead);
 --   3. reads and changes them, and checks the refusals leave nothing behind;
---   4. kills all three: only Alpha should be waiting to come back;
---   5. takes the stairs, and checks that Alpha, and only Alpha, rejoined beside player 0.
+--   4. kills all three: only Ash should be waiting to come back;
+--   5. takes the stairs, and checks that Ash, and only Ash, rejoined beside player 0.
 -- Not here: the party carrying the run on after every player falls. That ends the run, so it is
 -- played by hand (solo and online) rather than from a test that must finish.
 -- The lobby half (cards, links, the 'SAML' exchange) needs a lobby, so it is checked by hand;
@@ -22,7 +22,7 @@ end
 local actionAdded = sam_lobby_add_slot_action("probe", "+ Probe")
 
 local spawned, died = {}, {}
-local alpha, bravo, charlie
+local ash, birch, cedar
 local phase, ticksLeft = nil, nil
 
 local function count(t) local n = 0 for _ in pairs(t) do n = n + 1 end return n end
@@ -54,33 +54,33 @@ local function firstFloor()
 	check("a leader who is not here is refused", sam_party_spawn(3, { name = "Nobody" }) == nil)
 	check("the refusals made nobody", count(ours(sam_party_list())) == 0, count(ours(sam_party_list())))
 
-	alpha = sam_party_spawn(0, { name = "Alpha", race = "human", class = "warrior", sex = "female", appearance = 3, tag = "partytest:a" })
-	bravo = sam_party_spawn(0, { name = "Bravo", race = "goblin", class = "wizard", respawn = false })
-	charlie = sam_party_spawn(0, { name = "Charlie", class = "healer", tag = "partytest:c" })
-	check("three party members spawn", alpha and bravo and charlie, tostring(alpha) .. " " .. tostring(bravo) .. " " .. tostring(charlie))
+	ash = sam_party_spawn(0, { name = "Ash", race = "human", class = "warrior", sex = "female", appearance = 3, tag = "partytest:a" })
+	birch = sam_party_spawn(0, { name = "Birch", race = "goblin", class = "wizard", respawn = false })
+	cedar = sam_party_spawn(0, { name = "Cedar", class = "healer", tag = "partytest:c" })
+	check("three party members spawn", ash and birch and cedar, tostring(ash) .. " " .. tostring(birch) .. " " .. tostring(cedar))
 	check("party.on_member_spawned fired for each", count(spawned) == 3, count(spawned))
-	check("as fresh spawns", spawned.Alpha and spawned.Alpha.respawned == 0)
+	check("as fresh spawns", spawned.Ash and spawned.Ash.respawned == 0)
 
-	check("a party member is a member", sam_party_is_member(alpha) == true)
+	check("a party member is a member", sam_party_is_member(ash) == true)
 	check("a player is not", sam_party_is_member(sam_get_player_uid(0)) == false)
-	local a = sam_party_get_info(alpha) or {}
-	check("info has its name, class and race", a.name == "Alpha" and a.class == "warrior" and a.race == "human", tostring(a.name) .. " " .. tostring(a.class) .. " " .. tostring(a.race))
+	local a = sam_party_get_info(ash) or {}
+	check("info has its name, class and race", a.name == "Ash" and a.class == "warrior" and a.race == "human", tostring(a.name) .. " " .. tostring(a.class) .. " " .. tostring(a.race))
 	check("its look and sex", a.appearance == 3 and a.sex == "female", tostring(a.appearance) .. " " .. tostring(a.sex))
 	check("its leader, tag and mod", a.leader == 0 and a.tag == "partytest:a" and a.mod == "partytest", tostring(a.leader) .. " " .. tostring(a.tag) .. " " .. tostring(a.mod))
 	check("and is alive at level 1 or more", (a.hp or 0) > 0 and (a.level or 0) >= 1, tostring(a.hp) .. " hp, level " .. tostring(a.level))
-	local b = sam_party_get_info(bravo) or {}
+	local b = sam_party_get_info(birch) or {}
 	check("the default tag is the namespace", b.tag == "partytest", b.tag)
 	check("respawn = false is kept", b.respawn == false, b.respawn)
-	local items = sam_get_container_items(alpha) or {}
+	local items = sam_get_container_items(ash) or {}
 	check("a warrior carries its kit's food", #items >= 2, #items .. " items")
 
-	check("carrying the run on is off unless asked for", (sam_party_get_info(alpha) or {}).carry_on == false and b.carry_on == false, tostring(a.carry_on) .. " " .. tostring(b.carry_on))
-	check("a carry_on that is not true or false is refused", sam_party_set_options(bravo, { carry_on = "yes" }) == false)
-	check("and changed nothing", (sam_party_get_info(bravo) or {}).carry_on == false)
-	check("carry_on can be turned on while a player stands", sam_party_set_options(bravo, { carry_on = true }) == true and (sam_party_get_info(bravo) or {}).carry_on == true)
-	check("and off again", sam_party_set_options(bravo, { carry_on = false }) == true and (sam_party_get_info(bravo) or {}).carry_on == false)
-	check("options change", sam_party_set_options(bravo, { wait_at_exit = false }) == true)
-	check("and read back", (sam_party_get_info(bravo) or {}).wait_at_exit == false)
+	check("carrying the run on is off unless asked for", (sam_party_get_info(ash) or {}).carry_on == false and b.carry_on == false, tostring(a.carry_on) .. " " .. tostring(b.carry_on))
+	check("a carry_on that is not true or false is refused", sam_party_set_options(birch, { carry_on = "yes" }) == false)
+	check("and changed nothing", (sam_party_get_info(birch) or {}).carry_on == false)
+	check("carry_on can be turned on while a player stands", sam_party_set_options(birch, { carry_on = true }) == true and (sam_party_get_info(birch) or {}).carry_on == true)
+	check("and off again", sam_party_set_options(birch, { carry_on = false }) == true and (sam_party_get_info(birch) or {}).carry_on == false)
+	check("options change", sam_party_set_options(birch, { wait_at_exit = false }) == true)
+	check("and read back", (sam_party_get_info(birch) or {}).wait_at_exit == false)
 	check("a player takes no options", sam_party_set_options(sam_get_player_uid(0), { respawn = true }) == false)
 	check("all three are listed", count(ours(sam_party_list())) == 3, count(ours(sam_party_list())))
 
@@ -90,16 +90,16 @@ local function firstFloor()
 	check("slot 0 reads as a player", s0 and s0.state == "player", s0 and s0.state)
 	check("slot 9 is nothing", sam_lobby_get_slot(9) == nil)
 
-	sam_kill_monster(alpha)
-	sam_kill_monster(bravo)
-	sam_kill_monster(charlie)
+	sam_kill_monster(ash)
+	sam_kill_monster(birch)
+	sam_kill_monster(cedar)
 end
 
 local function afterDeaths()
 	check("party.on_member_died fired for all three", count(died) == 3, count(died))
-	check("Alpha would come back, Bravo would not", died.Alpha and died.Alpha.will_respawn == 1 and died.Bravo and died.Bravo.will_respawn == 0)
+	check("Ash would come back, Birch would not", died.Ash and died.Ash.will_respawn == 1 and died.Birch and died.Birch.will_respawn == 0)
 	local fallen = sam_party_fallen()
-	check("only Alpha is waiting to come back", #fallen == 1 and fallen[1].name == "Alpha", #fallen)
+	check("only Ash is waiting to come back", #fallen == 1 and fallen[1].name == "Ash", #fallen)
 	check("nobody is left on this floor", count(ours(sam_party_list())) == 0, count(ours(sam_party_list())))
 	spawned = {}
 	sam_travel_to_level(1)
@@ -107,9 +107,9 @@ end
 
 local function secondFloor()
 	local here = ours(sam_party_list())
-	check("Alpha rejoined on the next floor", here.Alpha ~= nil and count(here) == 1, count(here))
-	check("as a respawn, beside player 0", spawned.Alpha and spawned.Alpha.respawned == 1 and spawned.Alpha.leader == 0)
-	check("still a warrior", here.Alpha and here.Alpha.class == "warrior")
+	check("Ash rejoined on the next floor", here.Ash ~= nil and count(here) == 1, count(here))
+	check("as a respawn, beside player 0", spawned.Ash and spawned.Ash.respawned == 1 and spawned.Ash.leader == 0)
+	check("still a warrior", here.Ash and here.Ash.class == "warrior")
 	check("and nobody is waiting any more", #sam_party_fallen() == 0, #sam_party_fallen())
 	sam_log(string.format("PARTY RESULT: %d passed, %d FAILED", pass, fail))
 	sam_test_done(pass, fail)
@@ -124,7 +124,7 @@ function on_event(e)
 		spawned[e.member_name] = { respawned = e.respawned, leader = e.leader }
 	elseif e.name == "party.on_member_died" and e.mod == "partytest" then
 		died[e.member_name] = { will_respawn = e.will_respawn }
-		if e.tag == "partytest:c" then return false end   -- Charlie stays dead
+		if e.tag == "partytest:c" then return false end   -- Cedar stays dead
 	end
 end
 
