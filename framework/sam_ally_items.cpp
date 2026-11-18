@@ -68,6 +68,17 @@ namespace
 		return false;
 	}
 
+	// A worn item by uid. Equipping takes the item out of the pocket list, so a search there misses it.
+	Item* findWorn(Stat* s, std::uint32_t uid)
+	{
+		for ( const char* name : SLOT_NAMES )
+		{
+			Item* it = *slotPointer(s, name);
+			if ( it && it->uid == uid ) { return it; }
+		}
+		return nullptr;
+	}
+
 	// The monster behind a uid with the stats to go with it, or nullptr.
 	Entity* monsterOf(std::uint32_t uid, Stat** statsOut)
 	{
@@ -324,6 +335,7 @@ namespace
 		{
 			item = findIn(give ? &stats[player]->inventory : &as->inventory, itemUid);
 		}
+		if ( !item && !give && findWorn(as, itemUid) ) { return refuse("equipped", "It is wearing that."); }
 		if ( !item ) { return refuse("unknown_item", give ? "You do not have that." : "It is not carrying that."); }
 		if ( give && (remote ? SAMMpInventory::isEquipped(player, item) : itemIsEquipped(item, player)) )
 		{
@@ -597,7 +609,7 @@ namespace SAMAllyItems
 			if ( t.remote ? !remotePlayer(t.player) : !localPlayer(t.player) ) { fail(o, "player_gone"); return; }
 			if ( t.remote && !SAMNet::peerHasSam(t.player) ) { fail(o, "stock_peer"); return; }
 			Item* item = findIn(t.give ? &stats[t.player]->inventory : &as->inventory, t.itemUid);
-			if ( !item ) { fail(o, "item_gone"); return; }
+			if ( !item ) { fail(o, !t.give && findWorn(as, t.itemUid) ? "equipped" : "item_gone"); return; }
 			if ( t.give ? itemIsEquipped(item, t.player) : isWorn(as, item) ) { fail(o, "equipped"); return; }
 			if ( t.count > item->count || t.count <= 0 ) { fail(o, "bad_count"); return; }
 			const bool whole = t.count == item->count;
