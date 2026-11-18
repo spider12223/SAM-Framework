@@ -38,7 +38,7 @@ local function backpackItem(uid)
 end
 local function backpackHelm(beatitude)
 	for _, it in ipairs(sam_get_inventory(0) or {}) do
-		if it.name == "IRON_HELM" and not it.equipped and it.beatitude == beatitude then return it end
+		if it.name == "iron_helm" and not it.equipped and it.beatitude == beatitude then return it end
 	end
 	return nil
 end
@@ -67,7 +67,7 @@ local function setup()
 	local inv = sam_monster_get_inventory(human)
 	check("a follower's inventory has pockets and worn", inv and type(inv.pockets) == "table" and type(inv.worn) == "table")
 	check("a fresh human wears no helmet", inv and inv.worn.helmet == nil)
-	check("a wild monster's inventory is nil", sam_monster_get_inventory(wild) == nil)
+	check("a player is not a monster: nil", sam_monster_get_inventory(sam_get_player_uid(0)) == nil)
 
 	local r = sam_monster_can_equip(wild, "IRON_HELM", "helmet")
 	check("can_equip on a wild monster: no_ally", r and r.ok == false and r.reason == "no_ally", r and r.reason)
