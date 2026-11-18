@@ -99,6 +99,10 @@ extern "C" {
 #	include "sam_spells.hpp"  // custom-spell registry (sam_grant_spell)
 #	include "sam_models.hpp"  // v1.4.0: SAMModels::modelIndexForId (companion custom .vox)
 #	include "sam_net.hpp"     // multiplayer contracts + the channel that carries a call to its player
+#	include "sam_value.hpp"   // P_PARTY: a table argument read once, in C++, for both runtimes
+#	include "sam_party.hpp"   // party members: sam_party_*
+#	include "sam_ally_items.hpp"   // gear on allies: sam_monster_*, sam_give_item_to_ally
+#	include "sam_lobby.hpp"   // lobby cards: sam_lobby_*
 #	include "sam_mp_inventory.hpp" // remote players' backpacks and spells, as the host mirrors them
 #	include "sam_mp_entities.hpp" // multiplayer: script-made entities, pinned props, terrain, gibs
 #	include "sam_mp_input.hpp" // keys, bound actions and client-raised events in multiplayer
@@ -2606,6 +2610,419 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		}
 #endif
 		return 1;
+	}
+
+	// =====================================================================================
+	// P_PARTY: party members and lobby cards (sam_party.cpp, sam_lobby.cpp).
+	//
+	// Every table these take or give goes through SamValue (sam_value.hpp): the argument is
+	// encoded with samLuaEncode, parsed once in C++, and an answer comes back through
+	// samLuaDecode. The JS twins do exactly the same with samJsEncode / samJsDecode, so the two
+	// runtimes read the same keys with the same defaults because neither reads any.
+	// =====================================================================================
+#ifdef SAM_LUA_HAVE_BARONY
+	bool samLuaToValue(lua_State* Ls, int idx, SamValue& out, std::string& err)
+	{
+		SAMNet::Writer w;
+		if ( !samLuaEncode(Ls, idx, w, 0, err) ) { return false; }
+		if ( !SamValue::decode(w.buf, out) ) { err = "a value that could not be read back"; return false; }
+		return true;
+	}
+
+	int samLuaPushValue(lua_State* Ls, const SamValue& v)
+	{
+		const std::string bytes = v.encode();
+		SAMNet::Reader r(bytes);
+		if ( !samLuaDecode(Ls, r, 0) ) { lua_pushnil(Ls); }
+		return 1;
+	}
+#endif
+
+	// sam_party_spawn(leader, spec) -> uid | nil. spec: { name, race, class, sex, appearance,
+	// tag, wait_at_exit, respawn, grow_like_class, carry_on, pickup }.
+	int lua_sam_party_spawn(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int leader = (int)luaL_checkinteger(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		SamValue spec;
+		std::string why;
+		if ( !lua_istable(Ls, 2) ) { SAM_WARN("LUA", "sam_party_spawn: the second argument must be a table { name, race, class, ... }."); lua_pushnil(Ls); return 1; }
+		if ( !samLuaToValue(Ls, 2, spec, why) ) { SAM_WARN("LUA", "sam_party_spawn: the spec holds " + why + "."); lua_pushnil(Ls); return 1; }
+		const std::uint32_t uid = SAMParty::spawn(leader, spec, &why, g_currentNs);
+		if ( !uid ) { SAM_WARN("LUA", "sam_party_spawn refused: " + why); lua_pushnil(Ls); return 1; }
+		lua_pushinteger(Ls, (lua_Integer)uid);
+		return 1;
+#else
+		(void)leader;
+		lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_party_is_member(uid) -> bool.
+	int lua_sam_party_is_member(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const lua_Integer uid = luaL_checkinteger(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		lua_pushboolean(Ls, (uid > 0 && SAMParty::isMemberUid((std::uint32_t)uid)) ? 1 : 0);
+#else
+		(void)uid;
+		lua_pushboolean(Ls, 0);
+#endif
+		return 1;
+	}
+
+	// sam_get_follower_leader(uid) -> player index (0..3) | nil.
+	int lua_sam_get_follower_leader(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const lua_Integer uid = luaL_checkinteger(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		const int leader = (uid > 0 && uid <= 0xFFFFFFFFLL) ? SAMAllyItems::leaderOf((std::uint32_t)uid) : -1;
+		if ( leader < 0 ) { lua_pushnil(Ls); return 1; }
+		lua_pushinteger(Ls, leader);
+		return 1;
+#else
+		(void)uid;
+		lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_monster_get_inventory(uid) -> { pockets = [item...], worn = { slot = item } } | nil.
+	int lua_sam_monster_get_inventory(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const lua_Integer uid = luaL_checkinteger(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( uid <= 0 || uid > 0xFFFFFFFFLL ) { lua_pushnil(Ls); return 1; }
+		return samLuaPushValue(Ls, SAMAllyItems::getInventory((std::uint32_t)uid));
+#else
+		(void)uid;
+		lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// An item argument that is a uid or a type: a number, a name ("IRON_HELM", "ns:item"), or nothing.
+	SamValue samLuaItemArg(lua_State* Ls, int idx)
+	{
+		if ( lua_type(Ls, idx) == LUA_TSTRING ) { return SamValue::string(lua_tostring(Ls, idx)); }
+		if ( lua_type(Ls, idx) == LUA_TNUMBER )
+		{
+			if ( lua_isinteger(Ls, idx) ) { return SamValue::integer((long long)lua_tointeger(Ls, idx)); }
+			return SamValue::number((double)lua_tonumber(Ls, idx));
+		}
+		return SamValue::nil();
+	}
+
+	// sam_monster_can_equip(uid, item, slot) -> { ok, reason, text }.
+	int lua_sam_monster_can_equip(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const lua_Integer uid = luaL_checkinteger(Ls, 1);
+		const SamValue item = samLuaItemArg(Ls, 2);
+		const char* slot = luaL_checkstring(Ls, 3);
+#ifdef SAM_LUA_HAVE_BARONY
+		const std::uint32_t id = (uid > 0 && uid <= 0xFFFFFFFFLL) ? (std::uint32_t)uid : 0;
+		return samLuaPushValue(Ls, SAMAllyItems::toValue(SAMAllyItems::canEquip(id, item, slot)));
+#else
+		(void)uid; (void)item; (void)slot;
+		lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_monster_equip_item(uid, slot, item_uid) -> { ok, reason, text }.
+	int lua_sam_monster_equip_item(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const lua_Integer uid = luaL_checkinteger(Ls, 1);
+		const char* slot = luaL_checkstring(Ls, 2);
+		const lua_Integer itemUid = luaL_checkinteger(Ls, 3);
+#ifdef SAM_LUA_HAVE_BARONY
+		const std::uint32_t id = (uid > 0 && uid <= 0xFFFFFFFFLL) ? (std::uint32_t)uid : 0;
+		const std::uint32_t item = (itemUid > 0 && itemUid <= 0xFFFFFFFFLL) ? (std::uint32_t)itemUid : 0;
+		return samLuaPushValue(Ls, SAMAllyItems::toValue(SAMAllyItems::equipItem(id, slot, item)));
+#else
+		(void)uid; (void)slot; (void)itemUid;
+		lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_monster_unequip_to_inventory(uid, slot) -> { ok, reason, text }.
+	int lua_sam_monster_unequip_to_inventory(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const lua_Integer uid = luaL_checkinteger(Ls, 1);
+		const char* slot = luaL_checkstring(Ls, 2);
+#ifdef SAM_LUA_HAVE_BARONY
+		const std::uint32_t id = (uid > 0 && uid <= 0xFFFFFFFFLL) ? (std::uint32_t)uid : 0;
+		return samLuaPushValue(Ls, SAMAllyItems::toValue(SAMAllyItems::unequipToInventory(id, slot)));
+#else
+		(void)uid; (void)slot;
+		lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_give_item_to_ally(player, uid, item_uid, [count]) -> { ok, reason, text, ticket }.
+	int lua_sam_give_item_to_ally(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const lua_Integer player = luaL_checkinteger(Ls, 1);
+		const lua_Integer uid = luaL_checkinteger(Ls, 2);
+		const lua_Integer itemUid = luaL_checkinteger(Ls, 3);
+		// nil is the whole stack; a number (or numeric string) is read as an integer, like JS; anything
+		// else is bad_count, the same answer JS gives.
+		bool countOk = true;
+		lua_Integer count = 0;
+		if ( !lua_isnoneornil(Ls, 4) )
+		{
+			if ( lua_isnumber(Ls, 4) ) { count = (lua_Integer)lua_tonumber(Ls, 4); }
+			else { countOk = false; }
+		}
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( !countOk ) { return samLuaPushValue(Ls, SAMAllyItems::toValue(SAMAllyItems::Result{false, "bad_count", "That is not a number.", 0})); }
+		const std::uint32_t id = (uid > 0 && uid <= 0xFFFFFFFFLL) ? (std::uint32_t)uid : 0;
+		const std::uint32_t item = (itemUid > 0 && itemUid <= 0xFFFFFFFFLL) ? (std::uint32_t)itemUid : 0;
+		return samLuaPushValue(Ls, SAMAllyItems::toValue(SAMAllyItems::giveItem((int)player, id, item, (count < -1 || count > 0x7FFF) ? -1 : (int)count)));
+#else
+		(void)player; (void)uid; (void)itemUid; (void)count; (void)countOk;
+		lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_take_item_from_ally(player, uid, item_uid, [count]) -> { ok, reason, text, ticket }.
+	int lua_sam_take_item_from_ally(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const lua_Integer player = luaL_checkinteger(Ls, 1);
+		const lua_Integer uid = luaL_checkinteger(Ls, 2);
+		const lua_Integer itemUid = luaL_checkinteger(Ls, 3);
+		// nil is the whole stack; a number (or numeric string) is read as an integer, like JS; anything
+		// else is bad_count, the same answer JS gives.
+		bool countOk = true;
+		lua_Integer count = 0;
+		if ( !lua_isnoneornil(Ls, 4) )
+		{
+			if ( lua_isnumber(Ls, 4) ) { count = (lua_Integer)lua_tonumber(Ls, 4); }
+			else { countOk = false; }
+		}
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( !countOk ) { return samLuaPushValue(Ls, SAMAllyItems::toValue(SAMAllyItems::Result{false, "bad_count", "That is not a number.", 0})); }
+		const std::uint32_t id = (uid > 0 && uid <= 0xFFFFFFFFLL) ? (std::uint32_t)uid : 0;
+		const std::uint32_t item = (itemUid > 0 && itemUid <= 0xFFFFFFFFLL) ? (std::uint32_t)itemUid : 0;
+		return samLuaPushValue(Ls, SAMAllyItems::toValue(SAMAllyItems::takeItem((int)player, id, item, (count < -1 || count > 0x7FFF) ? -1 : (int)count)));
+#else
+		(void)player; (void)uid; (void)itemUid; (void)count; (void)countOk;
+		lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_party_get_info(uid) -> table | nil.
+	int lua_sam_party_get_info(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const lua_Integer uid = luaL_checkinteger(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		if ( uid <= 0 ) { lua_pushnil(Ls); return 1; }
+		return samLuaPushValue(Ls, SAMParty::info((std::uint32_t)uid));
+#else
+		(void)uid;
+		lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_party_set_options(uid, { wait_at_exit, respawn, grow_like_class, carry_on, tag }) -> bool.
+	int lua_sam_party_set_options(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const lua_Integer uid = luaL_checkinteger(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		SamValue options;
+		std::string why;
+		if ( !lua_istable(Ls, 2) ) { SAM_WARN("LUA", "sam_party_set_options: the second argument must be a table."); lua_pushboolean(Ls, 0); return 1; }
+		if ( !samLuaToValue(Ls, 2, options, why) ) { SAM_WARN("LUA", "sam_party_set_options: the options hold " + why + "."); lua_pushboolean(Ls, 0); return 1; }
+		if ( uid <= 0 || !SAMParty::setOptions((std::uint32_t)uid, options, &why) )
+		{
+			SAM_WARN("LUA", "sam_party_set_options refused: " + (why.empty() ? std::string("not a party member") : why));
+			lua_pushboolean(Ls, 0);
+			return 1;
+		}
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)uid;
+		lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_party_list() -> array of sam_party_get_info tables, every living member on this floor.
+	int lua_sam_party_list(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_LUA_HAVE_BARONY
+		return samLuaPushValue(Ls, SAMParty::list());
+#else
+		lua_newtable(Ls); return 1;
+#endif
+	}
+
+	// sam_party_fallen() -> array of { name, class, race, tag, mod, leader }.
+	int lua_sam_party_fallen(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_LUA_HAVE_BARONY
+		return samLuaPushValue(Ls, SAMParty::fallen());
+#else
+		lua_newtable(Ls); return 1;
+#endif
+	}
+
+	// sam_party_set_difficulty_count(n) -> bool.
+	int lua_sam_party_set_difficulty_count(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const lua_Integer n = luaL_checkinteger(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		std::string why;
+		if ( n < -1000 || n > 1000 || !SAMParty::setDifficultyCount((int)n, &why) )
+		{
+			SAM_WARN("LUA", "sam_party_set_difficulty_count refused: " + (why.empty() ? std::string("out of range") : why));
+			lua_pushboolean(Ls, 0);
+			return 1;
+		}
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)n;
+		lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_party_choices() -> { classes = { { id, name, number } }, races = { ... }, appearances }.
+	int lua_sam_party_choices(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_LUA_HAVE_BARONY
+		return samLuaPushValue(Ls, SAMParty::choices());
+#else
+		lua_pushnil(Ls); return 1;
+#endif
+	}
+
+	// sam_party_choice_allowed(race, class) -> bool.
+	int lua_sam_party_choice_allowed(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* race = luaL_checkstring(Ls, 1);
+		const char* cls = luaL_checkstring(Ls, 2);
+#ifdef SAM_LUA_HAVE_BARONY
+		const int r = SAMParty::choiceAllowed(race ? race : "", cls ? cls : "");
+		if ( r < 0 )
+		{
+			SAMNet::warnOnce(std::string("party_choice:") + (race ? race : "") + "/" + (cls ? cls : ""),
+				"sam_party_choice_allowed: '" + std::string(race ? race : "") + "' / '" + std::string(cls ? cls : "") + "' is not a race and class this game has; answering false.");
+		}
+		lua_pushboolean(Ls, r == 1 ? 1 : 0);
+#else
+		(void)race; (void)cls;
+		lua_pushboolean(Ls, 0);
+#endif
+		return 1;
+	}
+
+	// sam_party_random_name([sex]) -> string. "male", "female", or left out for either.
+	int lua_sam_party_random_name(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* sex = luaL_optstring(Ls, 1, "");
+#ifdef SAM_LUA_HAVE_BARONY
+		const std::string n = SAMParty::randomName(sex ? sex : "");
+		lua_pushlstring(Ls, n.data(), n.size());
+#else
+		(void)sex;
+		lua_pushnil(Ls);
+#endif
+		return 1;
+	}
+
+	// sam_lobby_add_slot_action(id, label) -> bool. Top level: every machine registers it.
+	int lua_sam_lobby_add_slot_action(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const char* id = luaL_checkstring(Ls, 1);
+		const char* label = luaL_checkstring(Ls, 2);
+#ifdef SAM_LUA_HAVE_BARONY
+		std::string why;
+		if ( !SAMLobby::addSlotAction(g_currentNs, id ? id : "", label ? label : "", &why) )
+		{
+			SAM_WARN("LUA", "sam_lobby_add_slot_action refused: " + why);
+			lua_pushboolean(Ls, 0);
+			return 1;
+		}
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)id; (void)label;
+		lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_lobby_set_card(slot, { title, edit_title, rows = { ... } }) -> bool.
+	int lua_sam_lobby_set_card(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int slot = (int)luaL_checkinteger(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		SamValue card;
+		std::string why;
+		if ( !lua_istable(Ls, 2) ) { SAM_WARN("LUA", "sam_lobby_set_card: the second argument must be a table { title, rows }."); lua_pushboolean(Ls, 0); return 1; }
+		if ( !samLuaToValue(Ls, 2, card, why) ) { SAM_WARN("LUA", "sam_lobby_set_card: the card holds " + why + "."); lua_pushboolean(Ls, 0); return 1; }
+		if ( !SAMLobby::setCard(g_currentNs, slot, card, &why) )
+		{
+			SAM_WARN("LUA", "sam_lobby_set_card refused: " + why);
+			lua_pushboolean(Ls, 0);
+			return 1;
+		}
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)slot;
+		lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_lobby_clear_card(slot) -> bool.
+	int lua_sam_lobby_clear_card(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int slot = (int)luaL_checkinteger(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		std::string why;
+		if ( !SAMLobby::clearCard(g_currentNs, slot, &why) )
+		{
+			SAM_WARN("LUA", "sam_lobby_clear_card refused: " + why);
+			lua_pushboolean(Ls, 0);
+			return 1;
+		}
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)slot;
+		lua_pushboolean(Ls, 0); return 1;
+#endif
+	}
+
+	// sam_lobby_get_slot(slot) -> { state, name | mod, title } | nil.
+	int lua_sam_lobby_get_slot(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int slot = (int)luaL_checkinteger(Ls, 1);
+#ifdef SAM_LUA_HAVE_BARONY
+		return samLuaPushValue(Ls, SAMLobby::slotInfo(slot));
+#else
+		(void)slot;
+		lua_pushnil(Ls); return 1;
+#endif
 	}
 
 	int lua_sam_get_inventory_count(lua_State* Ls)
@@ -10871,6 +11288,28 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		samLuaRegister(L, "sam_get_setting", lua_sam_get_setting);
 		samLuaRegister(L, "sam_set_setting", lua_sam_set_setting);
 		samLuaRegister(L, "sam_list_settings", lua_sam_list_settings);
+		// P_PARTY: party members and lobby cards (sam_party.cpp, sam_lobby.cpp).
+		samLuaRegister(L, "sam_party_spawn", lua_sam_party_spawn);
+		samLuaRegister(L, "sam_party_is_member", lua_sam_party_is_member);
+		samLuaRegister(L, "sam_get_follower_leader", lua_sam_get_follower_leader);
+		samLuaRegister(L, "sam_monster_get_inventory", lua_sam_monster_get_inventory);
+		samLuaRegister(L, "sam_monster_can_equip", lua_sam_monster_can_equip);
+		samLuaRegister(L, "sam_monster_equip_item", lua_sam_monster_equip_item);
+		samLuaRegister(L, "sam_monster_unequip_to_inventory", lua_sam_monster_unequip_to_inventory);
+		samLuaRegister(L, "sam_give_item_to_ally", lua_sam_give_item_to_ally);
+		samLuaRegister(L, "sam_take_item_from_ally", lua_sam_take_item_from_ally);
+		samLuaRegister(L, "sam_party_get_info", lua_sam_party_get_info);
+		samLuaRegister(L, "sam_party_set_options", lua_sam_party_set_options);
+		samLuaRegister(L, "sam_party_list", lua_sam_party_list);
+		samLuaRegister(L, "sam_party_fallen", lua_sam_party_fallen);
+		samLuaRegister(L, "sam_party_set_difficulty_count", lua_sam_party_set_difficulty_count);
+		samLuaRegister(L, "sam_party_choices", lua_sam_party_choices);
+		samLuaRegister(L, "sam_party_choice_allowed", lua_sam_party_choice_allowed);
+		samLuaRegister(L, "sam_party_random_name", lua_sam_party_random_name);
+		samLuaRegister(L, "sam_lobby_add_slot_action", lua_sam_lobby_add_slot_action);
+		samLuaRegister(L, "sam_lobby_set_card", lua_sam_lobby_set_card);
+		samLuaRegister(L, "sam_lobby_clear_card", lua_sam_lobby_clear_card);
+		samLuaRegister(L, "sam_lobby_get_slot", lua_sam_lobby_get_slot);
 		samLuaRegister(L, "sam_get_inventory_count", lua_sam_get_inventory_count);
 		samLuaRegister(L, "sam_has_effect", lua_sam_has_effect);
 		samLuaRegister(L, "sam_get_class", lua_sam_get_class);

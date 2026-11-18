@@ -333,6 +333,17 @@ persisted; shape the loot pool with six tables and nine generation events instea
 
 **[docs/mod-settings.md](docs/mod-settings.md)** · **[docs/loot-and-shops.md](docs/loot-and-shops.md)** · **[docs/game-speed.md](docs/game-speed.md)**
 
+## Party members, lobby cards, and a party that carries the run
+
+A mod can put a creature in the party the way a player is (a class's kit and growth, waited for at
+exits, back next floor if it falls), add links and cards of its own to empty player slots in the
+lobby, and, while a party member still stands, keep the run going after every player is down.
+`examples/PartyTest` runs it in a real game, and companion mods are the obvious use. (unreleased)
+
+**[docs/party-and-lobby.md](docs/party-and-lobby.md)**
+
+**[docs/ally-items.md](docs/ally-items.md)** (unreleased): read what an ally carries and wears, dress it, and move items between a player and it. `examples/ItemMoveTest` runs it in a real game.
+
 ## Testing a mod without playing it
 
 `barony.exe -samtest=YourMod` loads the mod, starts a game, lets it run its own checks and exits

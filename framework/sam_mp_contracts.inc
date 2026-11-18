@@ -158,6 +158,14 @@ SAM_MP(sam_patch_monster,                 Host,   None,      0, False)
 SAM_MP(sam_remove_class_passive,          All,    None,      0, False)
 SAM_MP(sam_unpatch_class,                 All,    None,      0, False)
 
+// ---- Lobby
+// Cards are the host's (the host draws them and sends them on); an action is registered by
+// every machine at top level, like sam_register_action; a slot is read from this machine's copy.
+SAM_MP(sam_lobby_add_slot_action,         All,    None,      0, False)
+SAM_MP(sam_lobby_clear_card,              Host,   None,      0, False)
+SAM_MP(sam_lobby_get_slot,                Local,  None,      0, Nil)
+SAM_MP(sam_lobby_set_card,                Host,   None,      0, False)
+
 // ---- Logging
 SAM_MP(sam_log,                           Local,  None,      0, None)
 SAM_MP(sam_message,                       Host,   None,      0, False)
@@ -239,6 +247,30 @@ SAM_MP(sam_ui_list_row_height,            Screen, OptPlayer, 4, False)
 SAM_MP(sam_ui_open,                       Screen, OptPlayer, 8, False)
 SAM_MP(sam_ui_panel_style,                Screen, OptPlayer, 5, False)
 SAM_MP(sam_ui_text_size,                  Any,    None,      0, Nil)
+
+// ---- Party
+// Party members are monsters, and monsters are the host's. The choices are this machine's own
+// (its DLC and unlocks), and a random name is a lobby cosmetic drawn from local_rng.
+SAM_MP(sam_party_choice_allowed,          Local,  None,      0, None)
+SAM_MP(sam_party_choices,                 Local,  None,      0, Nil)
+SAM_MP(sam_party_fallen,                  Host,   None,      0, Empty)
+SAM_MP(sam_party_get_info,                Host,   None,      0, Nil)
+SAM_MP(sam_party_is_member,               Host,   None,      0, None)
+SAM_MP(sam_party_list,                    Host,   None,      0, Empty)
+SAM_MP(sam_party_random_name,             Local,  None,      0, Nil)
+SAM_MP(sam_party_set_difficulty_count,    Host,   None,      0, False)
+SAM_MP(sam_party_set_options,             Host,   None,      0, False)
+SAM_MP(sam_party_spawn,                   Host,   None,      0, Nil)
+
+// ---- Ally items (unreleased)
+// Monsters and their pockets are the host's, so every call here is the host's.
+SAM_MP(sam_get_follower_leader,           Host,   None,      0, None)
+SAM_MP(sam_give_item_to_ally,             Host,   None,      0, Nil)
+SAM_MP(sam_monster_can_equip,             Host,   None,      0, Nil)
+SAM_MP(sam_monster_equip_item,            Host,   None,      0, Nil)
+SAM_MP(sam_monster_get_inventory,         Host,   None,      0, Nil)
+SAM_MP(sam_monster_unequip_to_inventory,  Host,   None,      0, Nil)
+SAM_MP(sam_take_item_from_ally,           Host,   None,      0, Nil)
 
 // ---- Persistence
 SAM_MP(sam_delete_data,                   Local,  None,      0, False)

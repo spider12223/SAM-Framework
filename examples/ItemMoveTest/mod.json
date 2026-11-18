@@ -1,0 +1,9 @@
+{
+  "$schema": "https://spider12223.github.io/SAM-Framework/schemas/mod.schema.json",
+  "namespace": "itemmovetest",
+  "name": "Item Move Test",
+  "author": "S.A.M Framework",
+  "version": "1.0.0",
+  "framework_min_version": "3.13.0",
+  "description": "An unattended test of gear on allies (sam_monster_get_inventory, sam_monster_can_equip, sam_monster_equip_item, sam_monster_unequip_to_inventory, sam_give_item_to_ally, sam_take_item_from_ally): makes a human and a kobold follow player 0, hands items over, dresses and undresses them, vetoes one equip from a handler, and checks that the same item (the same uid) is what moved. Run it with tools/run_mod_test.sh ItemMoveTest."
+}

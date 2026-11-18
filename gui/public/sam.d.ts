@@ -4,7 +4,7 @@
 // Drop this beside your mod's .ts files, or reference it:
 //   /// <reference path="sam.d.ts" />
 //
-// 343 functions, 87 events. Each function's "Multiplayer:" line starts with
+// 364 functions, 96 events. Each function's "Multiplayer:" line starts with
 // its kind (host, owner, screen, read, all, local, any); see docs/multiplayer.md.
 
 declare global {
@@ -310,7 +310,7 @@ declare global {
   function sam_get_class(player: number): string | undefined;
 
   /**
-   * What is inside a chest, or what a creature is carrying.
+   * What is inside a chest, or what a creature is carrying. For a creature, sam_monster_get_inventory also tells worn gear from pockets and gives each item's uid.
    *
    * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript).
    */
@@ -455,6 +455,13 @@ declare global {
    * Multiplayer: any. The same answer on every machine; safe to call anywhere, including a client's on_packet handler.
    */
   function sam_get_floor(): number;
+
+  /**
+   * Whose follower a creature is. Works for any ally the player's side owns, not only party members: a recruited monster, a party member, a summon that follows. A wild monster, a player and a uid that is nothing all answer nil/undefined.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nothing at all -- no value in Lua, undefined in JavaScript. Host only, like the monsters themselves.
+   */
+  function sam_get_follower_leader(uid: number): number | undefined;
 
   /**
    * How filling a food is. Takes an item TYPE rather than a uid, so you can price food your mod has not spawned yet. Vanilla foods only: the engine's table has no entry for custom items, so your own food answers 0.
@@ -947,6 +954,13 @@ declare global {
   function sam_gib(entity_uid: number, sprite?: number): boolean;
 
   /**
+   * Hands an item from a player's backpack to an ally that follows them. count is how many (leave it out, or 0, for the whole stack). The whole stack moves as the same item, with the same uid; a part makes a new item for the part and the player keeps the rest under the old uid. Nothing moves until the next game tick, so the call is safe from inside any event handler.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Host only, like the monsters themselves.
+   */
+  function sam_give_item_to_ally(player: number, uid: number, item_uid: number, count?: number): any;
+
+  /**
    * Add gold to a player (clamped to >= 0), syncing the client HUD.
    *
    * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
@@ -1339,6 +1353,34 @@ declare global {
   function sam_load_data(key: string): any;
 
   /**
+   * Put a link on every empty player slot of the host's lobby, like "+ Add Companion". Pressing it fires lobby.on_slot_action with your namespace as mod, this id as action and the slot. Call it at top level, beside sam_register_action. Registering the same id again changes its label.
+   *
+   * Multiplayer: all. Changes a table every machine keeps its own copy of: a host call runs on the host and on every S.A.M client, and is replayed to a client that joins later. A client's call is refused with a one-time warning and returns false. Every machine registers it as the mod loads; only the host draws the links, because only the host can claim a slot.
+   */
+  function sam_lobby_add_slot_action(id: string, label: string): boolean;
+
+  /**
+   * Give a slot back: your card goes, the slot unlocks, and it shows what an empty slot shows again, links included.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
+   */
+  function sam_lobby_clear_card(slot: number): boolean;
+
+  /**
+   * What a lobby slot holds right now: a player (with the name shown for them), a mod's card, nothing (open: a mod may claim it), or nothing that can be used (closed by the player-count setting, or a saved game's lobby). Use it to offer "follows: <player>" choices on a card.
+   *
+   * Multiplayer: local. Answers for the machine running the script. Per machine: a client knows the cards the host sent it.
+   */
+  function sam_lobby_get_slot(slot: number): any;
+
+  /**
+   * Claim an empty player slot and show your own card in it, or redraw a card you already show there. The slot is locked while you hold it, so nobody can join into it. The host's card has its controls: a cycle row draws < and > (input "prev" / "next"), a buttons row draws its buttons (input "click"), and every press fires lobby.on_card_input with the control's id. Redraw by calling this again with the new card; nothing about the card is kept but what you send.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. A S.A.M player in the lobby sees the card read-only and follows every change; a player on a stock game sees a locked slot.
+   */
+  function sam_lobby_set_card(slot: number, card: any): boolean;
+
+  /**
    * The player index THIS machine controls.
    *
    * Multiplayer: local. Answers for the machine running the script.
@@ -1409,6 +1451,13 @@ declare global {
   function sam_monster_attack(uid: number): boolean;
 
   /**
+   * Asks whether an ally may wear an item in a slot, and changes nothing. The checks run in the order the reasons are listed: the creature must be a monster that follows a player, the slot must exist, the item must exist, it must belong in that slot, the ally's body must allow it (a kobold wears no helmet, an insectoid no gloves), the item in the slot must not be cursed, and last item.on_before_monster_equip gives mods the final say. An item given as a number is read as the uid of an item in the ally's pockets or in a player's backpack when there is one, and as an item type otherwise.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Host only, like the monsters themselves.
+   */
+  function sam_monster_can_equip(uid: number, item: number, slot: string): any;
+
+  /**
    * Whether a creature's AI knows how to use a kind of item. Only five species have that behaviour at all: goblins, humans, goatmen, automatons and shadows. Everything else answers false, including custom races, even though sam_monster_equip will happily put the item in their hand. It runs on the host, because it reads the monster's stats.
    *
    * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nothing at all -- no value in Lua, undefined in JavaScript.
@@ -1437,11 +1486,25 @@ declare global {
   function sam_monster_equip(uid: number, slot: string, item: string, beatitude?: number, status?: number, count?: number): boolean;
 
   /**
+   * Puts an item from an ally's pockets on it. It runs the checks sam_monster_can_equip runs, then moves the SAME item (its uid stays) into the slot; what was worn there goes back to the pockets, never to the floor. Nothing is lost on a refusal.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Host only, like the monsters themselves.
+   */
+  function sam_monster_equip_item(uid: number, slot: string, item_uid: number): any;
+
+  /**
    * Turn a monster to look at a tile. Aims at the tile centre. Pair it with sam_monster_charge to aim a charge.
    *
    * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
    */
   function sam_monster_face(uid: number, tileX: number, tileY: number): boolean;
+
+  /**
+   * What a monster carries in its pockets and what it wears, with the uid of each item. An item a slot points to is listed under worn only, and its equipped is true. Unlike sam_get_container_items it tells worn gear from pocket gear, and the uids work with the other ally item functions.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Host only, like the monsters themselves.
+   */
+  function sam_monster_get_inventory(uid: number): any;
 
   /**
    * The monster counterpart of sam_has_effect — e.g. react when a monster you just hit is POISONED. Pass a monster UID (from a monster event or sam_get_nearby_entities).
@@ -1472,6 +1535,13 @@ declare global {
   function sam_monster_unequip(uid: number, slot: string): boolean;
 
   /**
+   * Takes what an ally wears in a slot back into its pockets (the same item, the same uid). A cursed item will not come off, and a full set of pockets keeps it on. Barony counts an ally's pockets as full at 9 items (5 for an automaton), the numbers its own pick-up code uses, and refuses one more once the list holds one beyond that.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Host only, like the monsters themselves.
+   */
+  function sam_monster_unequip_to_inventory(uid: number, slot: string): any;
+
+  /**
    * Nudge an entity by a relative distance, sliding along whatever it runs into rather than stopping dead or passing through. The answer is the distance it MANAGED, so 0 means something is right there and 0.3 out of a requested 2 means it hit a corner: a plain true or false would have hidden the difference. Distances are in tiles, like every other spatial call here, and a long move is walked in short steps so it cannot skip over a wall: the engine's collision test only looks at where you land, not at the path, so a single two-tile step used to step clean over a one-tile wall and report the whole distance as clear. A ground item or gold bag is woken, so it settles exactly like a dropped item (drops to the floor, falls into a pit, floats on water), in singleplayer too. Use sam_set_position to teleport, or sam_apply_force to shove.
    *
    * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). On a connected player it really moves them: their own machine applies the move through its own collision, and the returned distance is what the host computed. A player whose game does not run S.A.M is corrected with the engine's own position packet, which can occasionally be lost. A ground item or gold bag moves for every player. Moving a prop Barony never updates on a client (a gate, a torch) reaches players who run S.A.M; a player without S.A.M keeps seeing the old spot, and the log says so once.
@@ -1484,6 +1554,76 @@ declare global {
    * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
    */
   function sam_obituary(killer_uid: number, victim_uid: number, from_spell?: boolean): boolean;
+
+  /**
+   * The character screen's own rule for this machine: DLC ownership, and the race unlocks that gate some classes. A S.A.M custom race or class carries no gate of its own, so it is always allowed.
+   *
+   * Multiplayer: local. Answers for the machine running the script. Per machine, like the character screen: ownership is the host's when the host asks.
+   */
+  function sam_party_choice_allowed(race: string, class_: string): boolean | undefined;
+
+  /**
+   * The classes and races this game can give a party member, vanilla first and then every S.A.M custom class and race that is loaded, with the id sam_party_spawn takes, the name to show, and the engine's number. Fetch it once (a lobby is a good time) rather than every frame.
+   *
+   * Multiplayer: local. Answers for the machine running the script. Per machine: a class from a DLC this machine does not own is still listed; ask sam_party_choice_allowed.
+   */
+  function sam_party_choices(): any;
+
+  /**
+   * The party members who died with respawn on and will rejoin beside their leaders when the party reaches the next floor. One that has nowhere to stand there waits another floor.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns an empty table (an empty array in JavaScript).
+   */
+  function sam_party_fallen(): any;
+
+  /**
+   * Everything about one party member: class and race as the ids sam_party_spawn takes (and their numbers), the player it follows (still that player while they are down; -1 only for a member that has lost its leader entirely), the tag you gave it, the mod that made it, and its options.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript).
+   */
+  function sam_party_get_info(uid: number): any;
+
+  /**
+   * Whether a creature is a party member. Cheap: one integer test on its stats.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nothing at all -- no value in Lua, undefined in JavaScript.
+   */
+  function sam_party_is_member(uid: number): boolean | undefined;
+
+  /**
+   * Every living party member on the current floor, whichever mod made it. Filter on mod or tag for your own.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns an empty table (an empty array in JavaScript).
+   */
+  function sam_party_list(): any;
+
+  /**
+   * A name from the game's own player-name lists, the ones the character screen's random button draws from.
+   *
+   * Multiplayer: local. Answers for the machine running the script.
+   */
+  function sam_party_random_name(sex?: string): string;
+
+  /**
+   * How many party members the next run counts as players when it builds floors: monster numbers, the hunger rate and the Devil's shadows follow it, exactly as they follow connected players. Set it in the lobby (the host reads it when the run starts, and again for a restart in place); it goes back to 0 every time a lobby opens. The connected players plus the count are capped at 4.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. The host decides at the start of the run and the number travels with the game's own start packet, so every S.A.M machine builds the same floors.
+   */
+  function sam_party_set_difficulty_count(count: number): boolean;
+
+  /**
+   * Change a party member's options after it exists. Only the keys you give change. Turning respawn off makes its next death final; turning wait_at_exit off lets the party leave without it; turning carry_on on or off changes whether the run can go on while it stands.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
+   */
+  function sam_party_set_options(uid: number, options: any): boolean;
+
+  /**
+   * Make a party member beside a player. It starts from the same baseline stats a player does and takes its class's stats (a S.A.M custom class's through the same hook a player's go through) and its class's starting kit, equipped where a player would wear it. It levels up through the class's growth rather than a monster's roll, does not count against its leader's follower limit, stays on the players' side when its leader dies, and crosses floors as a follower does. With wait_at_exit, every exit waits for it (party.on_waiting_at_exit); with respawn, it comes back beside its leader on the next floor after it dies (party.on_member_died). party.on_member_spawned fires once it exists. With carry_on (off unless you ask), the run does not end when every player is down while this member stands: the fallen wait as ghosts, the member takes the party to the next exit, and the run ends when no carry_on member is left standing.
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Party members are monsters, so every machine sees them the way it sees any ally the host spawned.
+   */
+  function sam_party_spawn(leader: number, spec: any): number | undefined;
 
   /**
    * Override a class's STARTING stats/skills (patch = { STR, DEX, ..., MAXHP, skills = {...} }). Reverts on unload. Tables are read the same way in Lua and JavaScript: keys are case-insensitive, number fields take only numbers and text fields only strings.
@@ -2221,6 +2361,13 @@ declare global {
   function sam_stop_sound(sound: string): number;
 
   /**
+   * Takes an item out of an ally's pockets into a player's backpack. Barony's own pick-up places it, and it may join a stack there, so item.on_ally_transfer_done tells you the uid it ended up under (new_item_uid). Something the ally wears has to come off first (sam_monster_unequip_to_inventory).
+   *
+   * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Host only, like the monsters themselves.
+   */
+  function sam_take_item_from_ally(player: number, uid: number, item_uid: number, count?: number): any;
+
+  /**
    * End an unattended test run started with barony.exe -samtest=YourMod. Writes the verdict to sam_log.txt and quits the game, setting the process exit code to 0 when failed is 0 and 1 otherwise, so a script can run your mod's tests and read the answer without anyone playing.
    *
    * Multiplayer: local. Answers for the machine running the script.
@@ -2421,6 +2568,18 @@ declare global {
     | "game.on_level_entered"
     /** Fires the simulation speed really changes: a sam_set_game_speed or /sam_gamespeed that set a different value, a temporary window ending, and the reset to 1x when a run ends or a new one starts. Multiplayer: Fires on the host, in singleplayer. */
     | "game.on_speed_changed"
+    /** Fires an item moved between a player and an ally, the tick after sam_give_item_to_ally or sam_take_item_from_ally accepted it. Multiplayer: Fires on the host. */
+    | "item.on_ally_transfer_done"
+    /** Fires a transfer that a call accepted could not be finished. Multiplayer: Fires on the host. */
+    | "item.on_ally_transfer_failed"
+    /** Fires an ally is about to be allowed to wear an item: sam_monster_can_equip and sam_monster_equip_item ask, after every built-in check has passed. Multiplayer: Fires on the host, each time one of those calls reaches this point. */
+    | "item.on_before_monster_equip"
+    /** Fires the host pressed a control on a card a mod shows in a lobby slot. Multiplayer: Fires on the host. */
+    | "lobby.on_card_input"
+    /** Fires the lobby screen has been built, before anyone presses anything. Multiplayer: Fires on the host, and in a local lobby. A client's lobby fires nothing: it asks the host for the cards instead. */
+    | "lobby.on_lobby_opened"
+    /** Fires the host pressed one of a mod's links on an empty player slot. Multiplayer: Fires on the host. */
+    | "lobby.on_slot_action"
     /** Fires the value one of a mod's settings holds really changes: the player pressed Confirm in Settings (source "ui"), pressed Restore Defaults and then Confirm ("reset"), or a script called sam_set_setting ("script"). Multiplayer: Fires on the machine whose setting changed. */
     | "mod.on_setting_changed"
     /** Fires a BOUND action goes down — e.g. the player presses whatever they have "Use" mapped to. Multiplayer: Fires on the host (and in singleplayer), for every player: each local seat, and each joiner's buttons as their game reports them. A joiner whose game does not run S.A.M produces none. */
@@ -2449,6 +2608,12 @@ declare global {
     | "on_projectile_hit"
     /** Fires every game tick (50/sec), for every script that defines on_tick(event). Multiplayer: Fires on the host only (and in singleplayer). A client gets no tick: update HUD and panels when something changes and pass the player, because every call for a remote player is a network message. */
     | "on_tick"
+    /** Fires a party member has died, before its gear drops. Multiplayer: Fires on the host, for every party member, whichever mod made it: check e.mod or e.tag. */
+    | "party.on_member_died"
+    /** Fires a party member has been made by sam_party_spawn, or a fallen one has come back beside its leader on a new floor. Multiplayer: Fires on the host, once per member it makes or brings back. */
+    | "party.on_member_spawned"
+    /** Fires a player tried an exit that is waiting for a party member: one set to wait_at_exit is alive on this floor and more than 4 tiles from it. Multiplayer: Fires on the host, for the player who tried the exit, on every kind of exit (ladders and every portal). */
+    | "party.on_waiting_at_exit"
     /** Fires a player starts an attack swing (any weapon). Multiplayer: Fires on the host, for every player. */
     | "player.on_attack_start"
     /** Fires a dead player becomes a ghost. Multiplayer: Fires on the host, for every player. */
@@ -2483,7 +2648,7 @@ declare global {
     | "player.on_equip"
     /** Fires the party takes a ladder to a new floor. Multiplayer: Fires on the host, once for every connected player when the party takes a ladder; initiator is the player who climbed. */
     | "player.on_floor_change"
-    /** Fires a player's game-over window opens on their own machine. Multiplayer: Fires on the dying player's own machine (a client's own game for a client) when that player's game-over window opens. In co-op that can be a death while others still live (survived tells you), not only the end of the run. The host never sees a remote player's. */
+    /** Fires a player's game-over window opens on their own machine. Multiplayer: Fires on the dying player's own machine (a client's own game for a client) when that player's game-over window opens. In co-op that can be a death while others still live (survived tells you), not only the end of the run. While a party member with carry_on carries the run on after every player is down, the Dismiss window does not fire it; the final window, when the party is wiped, does. The host never sees a remote player's. */
     | "player.on_game_over"
     /** Fires a player picks up gold. Multiplayer: Fires on the host, for every player. */
     | "player.on_gold_collected"

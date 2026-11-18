@@ -27,6 +27,7 @@
 #include "sam_images.hpp" // mod-supplied pictures (overlay + HUD art)
 #include "sam_ui.hpp"     // interactive mod panels, closed on (un)load
 #include "sam_settings.hpp" // mod actions and mod settings, cleared on (un)load
+#include "sam_lobby.hpp"    // mod slot actions and lobby cards, cleared on (un)load
 #endif   // the framework's built-in Hunter's Workbench
 #include "sam_monster_patches.hpp" // v0.7.0 F5 monster stat overrides — both builds
 #ifndef EDITOR
@@ -92,6 +93,7 @@ void SAMLoader::load(const std::vector<std::pair<std::string, std::string>>& mou
 	SAMCamera::clear(); // hand every camera back to the engine
 	SAMRules::clear();  // drop stat modifiers, effect immunities and the XP curve
 	SAMSettings::clear(); // drop mod actions and mod settings; the player's keys stay in config.json and the values stay in each mod's file
+	SAMLobby::clear();    // give every lobby slot back and forget the slot actions; the mods re-register theirs
 	SAMHud::clearAll(); // a mod's HUD must never outlive the mod that drew it
 	SAMImages::clear(); // drop the image registry + every live overlay
 	SAMUi::closeAll();  // a panel must never outlive the mod that opened it
@@ -359,6 +361,7 @@ void SAMLoader::unload()
 	SAMCamera::clear();        // hand every camera back to the engine
 	SAMRules::clear();         // drop stat modifiers, effect immunities and the XP curve
 	SAMSettings::clear();      // drop mod actions and mod settings (files and config.json untouched)
+	SAMLobby::clear();         // give every lobby slot back and forget the slot actions
 #endif
 	SAMMonsterPatch::clear();  // reverts sam_patch_monster overrides (F5)
 	// Rooms are NOT optional to clear. The registry holds ABSOLUTE paths, so unmounting the

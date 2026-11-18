@@ -94,6 +94,10 @@ extern "C" {
 #	include "sam_world_state.hpp" // per-character mod state carried in the savegame
 #	include "sam_workshop.hpp" // SAMModManifest (sam_get_mods)
 #	include "sam_net.hpp"     // multiplayer contracts + the channel that carries a call to its player
+#	include "sam_value.hpp"   // P_PARTY: a table argument read once, in C++, for both runtimes
+#	include "sam_party.hpp"   // party members: sam_party_*
+#	include "sam_ally_items.hpp"   // gear on allies: sam_monster_*, sam_give_item_to_ally
+#	include "sam_lobby.hpp"   // lobby cards: sam_lobby_*
 #	include "sam_mp_inventory.hpp" // remote players' backpacks and spells, as the host mirrors them
 #	include "sam_mp_entities.hpp" // multiplayer: script-made entities, pinned props, terrain, gibs
 #	include "sam_mp_input.hpp" // keys, bound actions and client-raised events in multiplayer
@@ -6690,6 +6694,414 @@ namespace
 		return arr;
 	}
 
+	// =====================================================================================
+	// P_PARTY: party members and lobby cards. JS twins of the Lua bindings: the same SamValue
+	// path (samJsEncode in, samJsDecode out), so a key reads the same in both languages.
+	// =====================================================================================
+#ifdef SAM_JS_HAVE_BARONY
+	bool samJsToValue(JSContext* ctx, JSValueConst v, SamValue& out, std::string& err)
+	{
+		SAMNet::Writer w;
+		if ( !samJsEncode(ctx, v, w, 0, err) ) { return false; }
+		if ( !SamValue::decode(w.buf, out) ) { err = "a value that could not be read back"; return false; }
+		return true;
+	}
+
+	JSValue samJsFromValue(JSContext* ctx, const SamValue& v)
+	{
+		const std::string bytes = v.encode();
+		SAMNet::Reader r(bytes);
+		bool ok = true;
+		JSValue out = samJsDecode(ctx, r, 0, ok);
+		if ( !ok ) { JS_FreeValue(ctx, out); return JS_UNDEFINED; }
+		return out;
+	}
+#endif
+
+	// sam_party_spawn(leader, spec) -> uid | undefined.
+	JSValue js_sam_party_spawn(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t leader = -1;
+		if ( !samJsReqI32(ctx, argc, argv, 0, &leader, "sam_party_spawn") ) { return JS_UNDEFINED; }
+#ifdef SAM_JS_HAVE_BARONY
+		SamValue spec;
+		std::string why;
+		if ( !samHasArg(argc, argv, 1) || !JS_IsObject(argv[1]) || JS_IsArray(argv[1]) ) { SAM_WARN("JS", "sam_party_spawn: the second argument must be an object { name, race, class, ... }."); return JS_UNDEFINED; }
+		if ( !samJsToValue(ctx, argv[1], spec, why) ) { SAM_WARN("JS", "sam_party_spawn: the spec holds " + why + "."); return JS_UNDEFINED; }
+		const std::uint32_t uid = SAMParty::spawn((int)leader, spec, &why, g_currentNs);
+		if ( !uid ) { SAM_WARN("JS", "sam_party_spawn refused: " + why); return JS_UNDEFINED; }
+		return JS_NewInt64(ctx, (int64_t)uid);
+#else
+		return JS_UNDEFINED;
+#endif
+	}
+
+	// sam_party_is_member(uid) -> bool.
+	JSValue js_sam_party_is_member(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_party_is_member") ) { return JS_FALSE; }
+#ifdef SAM_JS_HAVE_BARONY
+		return JS_NewBool(ctx, uid > 0 && uid <= 0xFFFFFFFFLL && SAMParty::isMemberUid((std::uint32_t)uid));
+#else
+		return JS_FALSE;
+#endif
+	}
+
+	// sam_get_follower_leader(uid) -> number | undefined.
+	JSValue js_sam_get_follower_leader(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_get_follower_leader") ) { return JS_UNDEFINED; }
+#ifdef SAM_JS_HAVE_BARONY
+		const int leader = (uid > 0 && uid <= 0xFFFFFFFFLL) ? SAMAllyItems::leaderOf((std::uint32_t)uid) : -1;
+		if ( leader < 0 ) { return JS_UNDEFINED; }
+		return JS_NewInt32(ctx, leader);
+#else
+		return JS_UNDEFINED;
+#endif
+	}
+
+	// sam_monster_get_inventory(uid) -> object | undefined.
+	JSValue js_sam_monster_get_inventory(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_monster_get_inventory") ) { return JS_UNDEFINED; }
+#ifdef SAM_JS_HAVE_BARONY
+		if ( uid <= 0 || uid > 0xFFFFFFFFLL ) { return JS_UNDEFINED; }
+		const SamValue inv = SAMAllyItems::getInventory((std::uint32_t)uid);
+		if ( inv.isNil() ) { return JS_UNDEFINED; }
+		return samJsFromValue(ctx, inv);
+#else
+		return JS_UNDEFINED;
+#endif
+	}
+
+	// An item argument that is a uid or a type: a number, a name ("IRON_HELM", "ns:item"), or nothing
+	// (undefined and null both read as nothing, like nil in Lua).
+	SamValue samJsItemArg(JSContext* ctx, int argc, JSValueConst* argv, int i)
+	{
+		if ( !samHasArg(argc, argv, i) ) { return SamValue::nil(); }
+		if ( JS_IsString(argv[i]) )
+		{
+			const char* c = JS_ToCString(ctx, argv[i]);
+			SamValue v = SamValue::string(c ? c : "");
+			if ( c ) { JS_FreeCString(ctx, c); }
+			return v;
+		}
+		if ( JS_IsNumber(argv[i]) )
+		{
+			double d = 0;
+			JS_ToFloat64(ctx, &d, argv[i]);
+			if ( d == (double)(long long)d ) { return SamValue::integer((long long)d); }
+			return SamValue::number(d);
+		}
+		return SamValue::nil();
+	}
+
+	// sam_monster_can_equip(uid, item, slot) -> { ok, reason, text } | undefined.
+	JSValue js_sam_monster_can_equip(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0;
+		std::string slot;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_monster_can_equip") ) { return JS_UNDEFINED; }
+		if ( !samJsReqStr(ctx, argc, argv, 2, "sam_monster_can_equip", &slot) ) { return JS_UNDEFINED; }
+#ifdef SAM_JS_HAVE_BARONY
+		const SamValue item = samJsItemArg(ctx, argc, argv, 1);
+		const std::uint32_t id = (uid > 0 && uid <= 0xFFFFFFFFLL) ? (std::uint32_t)uid : 0;
+		return samJsFromValue(ctx, SAMAllyItems::toValue(SAMAllyItems::canEquip(id, item, slot)));
+#else
+		return JS_UNDEFINED;
+#endif
+	}
+
+	// sam_monster_equip_item(uid, slot, item_uid) -> { ok, reason, text } | undefined.
+	JSValue js_sam_monster_equip_item(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0, itemUid = 0;
+		std::string slot;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_monster_equip_item") ) { return JS_UNDEFINED; }
+		if ( !samJsReqStr(ctx, argc, argv, 1, "sam_monster_equip_item", &slot) ) { return JS_UNDEFINED; }
+		if ( !samJsReqI32Wide(ctx, argc, argv, 2, &itemUid, "sam_monster_equip_item") ) { return JS_UNDEFINED; }
+#ifdef SAM_JS_HAVE_BARONY
+		const std::uint32_t id = (uid > 0 && uid <= 0xFFFFFFFFLL) ? (std::uint32_t)uid : 0;
+		const std::uint32_t item = (itemUid > 0 && itemUid <= 0xFFFFFFFFLL) ? (std::uint32_t)itemUid : 0;
+		return samJsFromValue(ctx, SAMAllyItems::toValue(SAMAllyItems::equipItem(id, slot, item)));
+#else
+		return JS_UNDEFINED;
+#endif
+	}
+
+	// sam_monster_unequip_to_inventory(uid, slot) -> { ok, reason, text } | undefined.
+	JSValue js_sam_monster_unequip_to_inventory(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0;
+		std::string slot;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_monster_unequip_to_inventory") ) { return JS_UNDEFINED; }
+		if ( !samJsReqStr(ctx, argc, argv, 1, "sam_monster_unequip_to_inventory", &slot) ) { return JS_UNDEFINED; }
+#ifdef SAM_JS_HAVE_BARONY
+		const std::uint32_t id = (uid > 0 && uid <= 0xFFFFFFFFLL) ? (std::uint32_t)uid : 0;
+		return samJsFromValue(ctx, SAMAllyItems::toValue(SAMAllyItems::unequipToInventory(id, slot)));
+#else
+		return JS_UNDEFINED;
+#endif
+	}
+
+	// sam_give_item_to_ally(player, uid, item_uid, [count]) -> { ok, reason, text, ticket } | undefined.
+	JSValue js_sam_give_item_to_ally(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t player = 0, uid = 0, itemUid = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &player, "sam_give_item_to_ally") ) { return JS_UNDEFINED; }
+		if ( !samJsReqI32Wide(ctx, argc, argv, 1, &uid, "sam_give_item_to_ally") ) { return JS_UNDEFINED; }
+		if ( !samJsReqI32Wide(ctx, argc, argv, 2, &itemUid, "sam_give_item_to_ally") ) { return JS_UNDEFINED; }
+#ifdef SAM_JS_HAVE_BARONY
+		// undefined and null mean "the whole stack", like a missing count in Lua. A count that is
+		// there but is not a number is refused rather than read as the whole stack.
+		int64_t count = 0;
+		if ( samHasArg(argc, argv, 3) )
+		{
+			double d = 0.0;
+			if ( !samJsNum(ctx, argv[3], &d) ) { return samJsFromValue(ctx, SAMAllyItems::toValue(SAMAllyItems::Result{false, "bad_count", "That is not a number.", 0})); }
+			count = (int64_t)d;
+		}
+		const std::uint32_t id = (uid > 0 && uid <= 0xFFFFFFFFLL) ? (std::uint32_t)uid : 0;
+		const std::uint32_t item = (itemUid > 0 && itemUid <= 0xFFFFFFFFLL) ? (std::uint32_t)itemUid : 0;
+		return samJsFromValue(ctx, SAMAllyItems::toValue(SAMAllyItems::giveItem((int)player, id, item, (count < -1 || count > 0x7FFF) ? -1 : (int)count)));
+#else
+		return JS_UNDEFINED;
+#endif
+	}
+
+	// sam_take_item_from_ally(player, uid, item_uid, [count]) -> { ok, reason, text, ticket } | undefined.
+	JSValue js_sam_take_item_from_ally(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t player = 0, uid = 0, itemUid = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &player, "sam_take_item_from_ally") ) { return JS_UNDEFINED; }
+		if ( !samJsReqI32Wide(ctx, argc, argv, 1, &uid, "sam_take_item_from_ally") ) { return JS_UNDEFINED; }
+		if ( !samJsReqI32Wide(ctx, argc, argv, 2, &itemUid, "sam_take_item_from_ally") ) { return JS_UNDEFINED; }
+#ifdef SAM_JS_HAVE_BARONY
+		// undefined and null mean "the whole stack", like a missing count in Lua. A count that is
+		// there but is not a number is refused rather than read as the whole stack.
+		int64_t count = 0;
+		if ( samHasArg(argc, argv, 3) )
+		{
+			double d = 0.0;
+			if ( !samJsNum(ctx, argv[3], &d) ) { return samJsFromValue(ctx, SAMAllyItems::toValue(SAMAllyItems::Result{false, "bad_count", "That is not a number.", 0})); }
+			count = (int64_t)d;
+		}
+		const std::uint32_t id = (uid > 0 && uid <= 0xFFFFFFFFLL) ? (std::uint32_t)uid : 0;
+		const std::uint32_t item = (itemUid > 0 && itemUid <= 0xFFFFFFFFLL) ? (std::uint32_t)itemUid : 0;
+		return samJsFromValue(ctx, SAMAllyItems::toValue(SAMAllyItems::takeItem((int)player, id, item, (count < -1 || count > 0x7FFF) ? -1 : (int)count)));
+#else
+		return JS_UNDEFINED;
+#endif
+	}
+
+	// sam_party_get_info(uid) -> object | undefined.
+	JSValue js_sam_party_get_info(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_party_get_info") ) { return JS_UNDEFINED; }
+#ifdef SAM_JS_HAVE_BARONY
+		if ( uid <= 0 || uid > 0xFFFFFFFFLL ) { return JS_UNDEFINED; }
+		return samJsFromValue(ctx, SAMParty::info((std::uint32_t)uid));
+#else
+		return JS_UNDEFINED;
+#endif
+	}
+
+	// sam_party_set_options(uid, { wait_at_exit, respawn, grow_like_class, carry_on, tag }) -> bool.
+	JSValue js_sam_party_set_options(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int64_t uid = 0;
+		if ( !samJsReqI32Wide(ctx, argc, argv, 0, &uid, "sam_party_set_options") ) { return JS_FALSE; }
+#ifdef SAM_JS_HAVE_BARONY
+		SamValue options;
+		std::string why;
+		if ( !samHasArg(argc, argv, 1) || !JS_IsObject(argv[1]) || JS_IsArray(argv[1]) ) { SAM_WARN("JS", "sam_party_set_options: the second argument must be an object."); return JS_FALSE; }
+		if ( !samJsToValue(ctx, argv[1], options, why) ) { SAM_WARN("JS", "sam_party_set_options: the options hold " + why + "."); return JS_FALSE; }
+		if ( uid <= 0 || uid > 0xFFFFFFFFLL || !SAMParty::setOptions((std::uint32_t)uid, options, &why) )
+		{
+			SAM_WARN("JS", "sam_party_set_options refused: " + (why.empty() ? std::string("not a party member") : why));
+			return JS_FALSE;
+		}
+		return JS_TRUE;
+#else
+		return JS_FALSE;
+#endif
+	}
+
+	// sam_party_list() -> array.
+	JSValue js_sam_party_list(JSContext* ctx, JSValueConst /*this_val*/, int /*argc*/, JSValueConst* /*argv*/)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_JS_HAVE_BARONY
+		return samJsFromValue(ctx, SAMParty::list());
+#else
+		return JS_NewArray(ctx);
+#endif
+	}
+
+	// sam_party_fallen() -> array.
+	JSValue js_sam_party_fallen(JSContext* ctx, JSValueConst /*this_val*/, int /*argc*/, JSValueConst* /*argv*/)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_JS_HAVE_BARONY
+		return samJsFromValue(ctx, SAMParty::fallen());
+#else
+		return JS_NewArray(ctx);
+#endif
+	}
+
+	// sam_party_set_difficulty_count(n) -> bool.
+	JSValue js_sam_party_set_difficulty_count(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t n = 0;
+		if ( !samJsReqI32(ctx, argc, argv, 0, &n, "sam_party_set_difficulty_count") ) { return JS_FALSE; }
+#ifdef SAM_JS_HAVE_BARONY
+		std::string why;
+		if ( !SAMParty::setDifficultyCount((int)n, &why) )
+		{
+			SAM_WARN("JS", "sam_party_set_difficulty_count refused: " + why);
+			return JS_FALSE;
+		}
+		return JS_TRUE;
+#else
+		return JS_FALSE;
+#endif
+	}
+
+	// sam_party_choices() -> object.
+	JSValue js_sam_party_choices(JSContext* ctx, JSValueConst /*this_val*/, int /*argc*/, JSValueConst* /*argv*/)
+	{
+		SAMLogger::noteApiCall();
+#ifdef SAM_JS_HAVE_BARONY
+		return samJsFromValue(ctx, SAMParty::choices());
+#else
+		return JS_UNDEFINED;
+#endif
+	}
+
+	// sam_party_choice_allowed(race, class) -> bool.
+	JSValue js_sam_party_choice_allowed(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		std::string race, cls;
+		if ( !samJsReqStr(ctx, argc, argv, 0, "sam_party_choice_allowed", &race) ) { return JS_FALSE; }
+		if ( !samJsReqStr(ctx, argc, argv, 1, "sam_party_choice_allowed", &cls) ) { return JS_FALSE; }
+#ifdef SAM_JS_HAVE_BARONY
+		const int r = SAMParty::choiceAllowed(race, cls);
+		if ( r < 0 )
+		{
+			SAMNet::warnOnce("party_choice:" + race + "/" + cls,
+				"sam_party_choice_allowed: '" + race + "' / '" + cls + "' is not a race and class this game has; answering false.");
+		}
+		return JS_NewBool(ctx, r == 1);
+#else
+		return JS_FALSE;
+#endif
+	}
+
+	// sam_party_random_name([sex]) -> string.
+	JSValue js_sam_party_random_name(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		std::string sex;
+		if ( samHasArg(argc, argv, 0) && !samJsReqStr(ctx, argc, argv, 0, "sam_party_random_name", &sex) ) { return JS_UNDEFINED; }
+#ifdef SAM_JS_HAVE_BARONY
+		const std::string n = SAMParty::randomName(sex);
+		return JS_NewStringLen(ctx, n.data(), n.size());
+#else
+		return JS_UNDEFINED;
+#endif
+	}
+
+	// sam_lobby_add_slot_action(id, label) -> bool.
+	JSValue js_sam_lobby_add_slot_action(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		std::string id, label;
+		if ( !samJsReqStr(ctx, argc, argv, 0, "sam_lobby_add_slot_action", &id) ) { return JS_FALSE; }
+		if ( !samJsReqStr(ctx, argc, argv, 1, "sam_lobby_add_slot_action", &label) ) { return JS_FALSE; }
+#ifdef SAM_JS_HAVE_BARONY
+		std::string why;
+		if ( !SAMLobby::addSlotAction(g_currentNs, id, label, &why) )
+		{
+			SAM_WARN("JS", "sam_lobby_add_slot_action refused: " + why);
+			return JS_FALSE;
+		}
+		return JS_TRUE;
+#else
+		return JS_FALSE;
+#endif
+	}
+
+	// sam_lobby_set_card(slot, { title, edit_title, rows }) -> bool.
+	JSValue js_sam_lobby_set_card(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t slot = -1;
+		if ( !samJsReqI32(ctx, argc, argv, 0, &slot, "sam_lobby_set_card") ) { return JS_FALSE; }
+#ifdef SAM_JS_HAVE_BARONY
+		SamValue card;
+		std::string why;
+		if ( !samHasArg(argc, argv, 1) || !JS_IsObject(argv[1]) || JS_IsArray(argv[1]) ) { SAM_WARN("JS", "sam_lobby_set_card: the second argument must be an object { title, rows }."); return JS_FALSE; }
+		if ( !samJsToValue(ctx, argv[1], card, why) ) { SAM_WARN("JS", "sam_lobby_set_card: the card holds " + why + "."); return JS_FALSE; }
+		if ( !SAMLobby::setCard(g_currentNs, (int)slot, card, &why) )
+		{
+			SAM_WARN("JS", "sam_lobby_set_card refused: " + why);
+			return JS_FALSE;
+		}
+		return JS_TRUE;
+#else
+		return JS_FALSE;
+#endif
+	}
+
+	// sam_lobby_clear_card(slot) -> bool.
+	JSValue js_sam_lobby_clear_card(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t slot = -1;
+		if ( !samJsReqI32(ctx, argc, argv, 0, &slot, "sam_lobby_clear_card") ) { return JS_FALSE; }
+#ifdef SAM_JS_HAVE_BARONY
+		std::string why;
+		if ( !SAMLobby::clearCard(g_currentNs, (int)slot, &why) )
+		{
+			SAM_WARN("JS", "sam_lobby_clear_card refused: " + why);
+			return JS_FALSE;
+		}
+		return JS_TRUE;
+#else
+		return JS_FALSE;
+#endif
+	}
+
+	// sam_lobby_get_slot(slot) -> object | undefined.
+	JSValue js_sam_lobby_get_slot(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t slot = -1;
+		if ( !samJsReqI32(ctx, argc, argv, 0, &slot, "sam_lobby_get_slot") ) { return JS_UNDEFINED; }
+#ifdef SAM_JS_HAVE_BARONY
+		return samJsFromValue(ctx, SAMLobby::slotInfo((int)slot));
+#else
+		return JS_UNDEFINED;
+#endif
+	}
+
 	JSValue js_sam_patch_class(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
@@ -8970,6 +9382,28 @@ namespace
 		samJsRegister(ctx, g, "sam_get_setting", js_sam_get_setting, 1);
 		samJsRegister(ctx, g, "sam_set_setting", js_sam_set_setting, 2);
 		samJsRegister(ctx, g, "sam_list_settings", js_sam_list_settings, 0);
+		// P_PARTY: party members and lobby cards (sam_party.cpp, sam_lobby.cpp).
+		samJsRegister(ctx, g, "sam_party_spawn", js_sam_party_spawn, 2);
+		samJsRegister(ctx, g, "sam_party_is_member", js_sam_party_is_member, 1);
+		samJsRegister(ctx, g, "sam_get_follower_leader", js_sam_get_follower_leader, 1);
+		samJsRegister(ctx, g, "sam_monster_get_inventory", js_sam_monster_get_inventory, 1);
+		samJsRegister(ctx, g, "sam_monster_can_equip", js_sam_monster_can_equip, 3);
+		samJsRegister(ctx, g, "sam_monster_equip_item", js_sam_monster_equip_item, 3);
+		samJsRegister(ctx, g, "sam_monster_unequip_to_inventory", js_sam_monster_unequip_to_inventory, 2);
+		samJsRegister(ctx, g, "sam_give_item_to_ally", js_sam_give_item_to_ally, 4);
+		samJsRegister(ctx, g, "sam_take_item_from_ally", js_sam_take_item_from_ally, 4);
+		samJsRegister(ctx, g, "sam_party_get_info", js_sam_party_get_info, 1);
+		samJsRegister(ctx, g, "sam_party_set_options", js_sam_party_set_options, 2);
+		samJsRegister(ctx, g, "sam_party_list", js_sam_party_list, 0);
+		samJsRegister(ctx, g, "sam_party_fallen", js_sam_party_fallen, 0);
+		samJsRegister(ctx, g, "sam_party_set_difficulty_count", js_sam_party_set_difficulty_count, 1);
+		samJsRegister(ctx, g, "sam_party_choices", js_sam_party_choices, 0);
+		samJsRegister(ctx, g, "sam_party_choice_allowed", js_sam_party_choice_allowed, 2);
+		samJsRegister(ctx, g, "sam_party_random_name", js_sam_party_random_name, 1);
+		samJsRegister(ctx, g, "sam_lobby_add_slot_action", js_sam_lobby_add_slot_action, 2);
+		samJsRegister(ctx, g, "sam_lobby_set_card", js_sam_lobby_set_card, 2);
+		samJsRegister(ctx, g, "sam_lobby_clear_card", js_sam_lobby_clear_card, 1);
+		samJsRegister(ctx, g, "sam_lobby_get_slot", js_sam_lobby_get_slot, 1);
 		samJsRegister(ctx, g, "sam_get_inventory_count", js_sam_get_inventory_count, 2);
 		samJsRegister(ctx, g, "sam_has_effect", js_sam_has_effect, 2);
 		samJsRegister(ctx, g, "sam_get_class", js_sam_get_class, 1);
