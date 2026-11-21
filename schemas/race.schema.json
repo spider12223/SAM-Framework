@@ -21,7 +21,7 @@
     },
     "name": {
       "type": "string",
-      "description": "Display name shown in the character-select race picker, on its info card, on the main-menu leaderboards, (from 3.8.1) on the race line of the in-game character sheet and (from 3.11.0) as the title of the race's page in the compendium, e.g. \"Frostborn\"."
+      "description": "Display name shown in the character-select race picker, on its info card, on the main-menu leaderboards, (from 3.8.1) on the race line of the in-game character sheet and (from 3.11.0) as the title of the race's page in the compendium and (from 3.12.2) wherever the game calls the player by kind: what a human or shopkeeper says on turning on them (\"Foul Frostborn! En Guarde!\"), the Wanted tooltip and the line another player reads on examining them, e.g. \"Frostborn\"."
     },
     "host_body": {
       "type": "string",

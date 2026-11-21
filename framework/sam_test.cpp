@@ -195,6 +195,35 @@ namespace
 			SAM_INFO(MOD, "Compendium model " + entry.first + ":" + parts);
 		}
 	}
+
+	// What the game's taunts call player 1: getMonsterLocalizedName given the player's stats, the call the
+	// taunt sites make. In the race's own body as it is now, then with its abilities off, polymorphed,
+	// shapeshifted, as another body and as a vanilla race, each put back before the next.
+	void logTauntNames()
+	{
+		Stat& s = *stats[0];
+		const Monster host = (Monster)SAMRaces::hostMonsterForRace(s.playerRace);
+		const Monster other = host == GOBLIN ? HUMAN : GOBLIN;
+		auto said = [&](Monster m) { return "'" + getMonsterLocalizedName(m, &s) + "'"; };
+		std::string line = "own body " + said(host);
+		const Uint32 appearance = s.stat_appearance;
+		s.stat_appearance = 1;
+		line += ", abilities off " + said(host);
+		s.stat_appearance = appearance;
+		for ( const int eff : { EFF_POLYMORPH, EFF_SHAPESHIFT } )
+		{
+			const Uint8 was = s.getEffectActive(eff);
+			s.setEffectValueUnsafe(eff, 1);
+			line += (eff == EFF_POLYMORPH ? ", polymorphed " : ", shapeshifted ") + said(host);
+			s.setEffectValueUnsafe(eff, was);
+		}
+		line += std::string(", as a ") + monstertypename[other] + " " + said(other);
+		const Sint32 race = s.playerRace;
+		s.playerRace = RACE_HUMAN;
+		line += ", as the vanilla human race " + said(host);
+		s.playerRace = race;
+		SAM_INFO(MOD, "Taunt name for player 1: " + line + ".");
+	}
 }
 
 bool parseArg(const char* arg)
@@ -324,6 +353,7 @@ bool loadMods()
 		stats[0]->OLDHP = stats[0]->HP;
 		SAMRaces::applySpells(0);
 		SAM_INFO(MOD, "Playing as race " + s_race + " (id " + std::to_string(id) + ").");
+		logTauntNames();
 	}
 
 	// A custom race's compendium page is built when the compendium opens, which a run with nobody at

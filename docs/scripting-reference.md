@@ -747,6 +747,28 @@ player, or a shapeshifted one without the box ticked, still sees what they are n
 tried). The hover texts of the Resistance and Regeneration rows still name the host body's species,
 because the numbers in them come from that body. Vanilla races are not changed.
 
+### Races: what the game calls the player (new in 3.12.2)
+
+When a human or a shopkeeper turns on a player, it says so in a speech bubble that also goes to the message
+log: "Foul human! En Guarde!", "Thou art mine, vile goblin!", "Begone from my shop, filthy goblin!". The last
+word was the host body's species, so a race on the human body was called a human. Now a player of a custom race
+is called by the race's `name`, as it is written ("Foul Catfolk! En Guarde!"), while the player is in the race's
+own body. A few more lines name the race the same way: what a human or shopkeeper says when the player talks to
+it after it has turned on them, the Wanted status tooltip ("an enemy of the Merchant's Guild for your human
+crimes"), examining another player in a co-op game ("You see a human named Bob."), and the rare line a follower
+says about a player it attacks. In multiplayer the host
+writes the speech bubbles and sends them as written; the tooltip and the examine line are written on the
+player's own machine, from its own copy of the mod.
+
+Nothing changes while the player has ticked "disable monster abilities" or is polymorphed or shapeshifted: the
+game's own word is used, as it is for a vanilla race (with the box ticked, a taunt calls a vanilla race a human
+too). Vanilla races are not changed.
+
+Seen in the game's log with a test race on the human body, for a human and a shopkeeper turning on the player
+(`tests/TauntTest`). The box, polymorph and shapeshift cases were checked by asking the naming function directly with
+them set on the player, not by playing them. Talking to one that has already turned, the Wanted tooltip, the examine
+line, a follower's line, a race on any other body, and multiplayer were read in the code, not tried.
+
 ### Races: a picture for saved games and the HUD (new in 3.9.0)
 
 A race can name a small picture of its own with `"icon"`, a PNG of about 32 by 32 pixels written from the

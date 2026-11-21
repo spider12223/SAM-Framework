@@ -1411,6 +1411,19 @@ std::string SAMRaces::iconPath(int raceId)
 	return (it != s_byId.end()) ? it->second.iconResolved : std::string();
 }
 
+std::string SAMRaces::speciesNameFor(const Stat& stats, int creature)
+{
+	// The shopkeeper check's test (actmonster.cpp): abilities off make the player a human to the game, as
+	// they do for a vanilla race, and a shapeshift or polymorph can leave `type` equal to the host body.
+	if ( stats.playerRace < SAM_RACE_ID_BASE || stats.stat_appearance != 0
+		|| stats.getEffectActive(EFF_SHAPESHIFT) || stats.getEffectActive(EFF_POLYMORPH) )
+	{
+		return std::string();
+	}
+	auto it = s_byId.find(stats.playerRace);
+	return (it != s_byId.end() && it->second.hostMonster == creature) ? it->second.name : std::string();
+}
+
 void SAMRaces::applyStats(int raceId, Stat* myStats)
 {
 	if ( !myStats || raceId < SAM_RACE_ID_BASE ) { return; }

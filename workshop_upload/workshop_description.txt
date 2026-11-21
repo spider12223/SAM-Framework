@@ -8,9 +8,9 @@ Barony was never built to be modded. S.A.M is the layer that makes it modded any
 
 [hr][/hr]
 
-[h1]NEW: TINS AT THE COOKING SCREEN[/h1]
+[h1]NEW: ENEMIES CALL YOUR RACE BY ITS NAME[/h1]
 
-A race with [b]"can_open_tins"[/b] can now put a tin into the cooking screen of a cauldron or frying pan without a tin opener, not only eat one. Races also have compendium pages, with [b]"lore"[/b] for the text.
+A human or shopkeeper who turns on a player of a custom race now calls them by the race's [b]"name"[/b]: "Foul Catfolk! En Guarde!", not "Foul human!". Races can also open tins at the cooking screen.
 
 [h1]GAME SPEED, MOD SETTINGS, THE LOOT POOL[/h1]
 

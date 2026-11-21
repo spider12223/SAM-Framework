@@ -11,7 +11,7 @@ import { Panel, GoldButton } from '@/components/ui.jsx';
 import { NAV_ICONS } from '@/data/navIcons.js';
 
 /** The framework's own version (mods declare their own framework_min_version). */
-const SAM_FRAMEWORK_VERSION = '3.12.1';
+const SAM_FRAMEWORK_VERSION = '3.12.2';
 
 /** Where players get S.A.M itself (the framework is a dependency, not a mod). */
 const WORKSHOP_URL = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472';
@@ -29,12 +29,12 @@ const TRAVELS = [
  * thing a returning modder sees, and the point is 'here is what you can do now that you
  * could not before', not a changelog. */
 const WHATS_NEW = [
-  ["Tins at the cooking screen",
+  ["Enemies call your race by its name",
+   "A human or shopkeeper who turns on a player of your race now calls them by the race's \"name\" (\"Foul Catfolk! En Guarde!\"), not by the body it is built on. The Wanted tooltip and the line another player reads on examining them use it too. With \"disable monster abilities\" ticked, or while polymorphed or shapeshifted, the game's own word stays."],
+  ["Tins at the cooking screen (3.12.1)",
    "With \"can_open_tins\", a race now puts a tin in at the cooking screen of a cauldron or frying pan without a tin opener, not only eats one. The game's own Goatman and Automaton keep the game's rule there: they still need an opener."],
   ["A race's story on its compendium page (3.12.0)",
    "A race can say \"lore\" for the box under its model on its compendium page, so the character-select picker keeps its list of what the race does while the compendium tells its story. The Race Editor has a Compendium text box for it."],
-  ["A race's own limbs sit right on its page (3.12.0)",
-   "A race's own arms now hang down, holding nothing. In 3.11.0 they took the grip of the arms in the body's picture and sat out of place. Its own torso or legs also move as the game moves them on that body, except a gremlin's legs under a torso that is not its own, which sit 0.2 lower than in game."],
 ];
 
 /** sam-well stat box: big gold number over a small-caps label. */
@@ -86,7 +86,7 @@ export default function Dashboard() {
       <Panel title={`New in ${SAM_FRAMEWORK_VERSION}`}>
         <p className="m-0" style={{ color: 'var(--color-parchment)' }}>
           <strong style={{ color: 'var(--color-gold)' }}>
-            A race that opens tins can now use them at the cooking screen too.
+            Enemies now call a player of your race by the race's own name.
           </strong>{' '}
           A small release: no new field or script function.
         </p>

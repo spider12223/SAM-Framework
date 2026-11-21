@@ -274,6 +274,14 @@ public:
 	// Absolute, image-loader-ready path of a race's own small picture, or "" when the race has none, the
 	// file was not found, or the id is not a registered custom race (callers then keep the body's icon).
 	static std::string iconPath(int raceId);
+	// (from 3.12.2) What the game's own lines call this player instead of its body's species word: the
+	// race's name when `stats` is a player of a custom race in that race's own body (`creature` is the
+	// race's host body), with its abilities on and neither shapeshifted nor polymorphed. "" otherwise,
+	// and the caller keeps the game's word. Asked by getMonsterLocalizedName when the caller passes the
+	// stats: the taunts of a human or shopkeeper who turns on a player ("Foul Catfolk! En Guarde!"), a
+	// follower's line on spotting an enemy, the Wanted tooltip, and examining a player ("You see a Catfolk
+	// named Bob.").
+	static std::string speciesNameFor(const Stat& stats, int creature);
 
 	// --- compendium (from 3.11.0) ------------------------------------------------------
 	// A page for every registered race in the compendium's Denizens list: under its own heading
