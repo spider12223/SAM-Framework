@@ -1737,6 +1737,30 @@ namespace
 #endif
 	}
 
+	// sam_stop_momentum(player [, ticks=0]) -> bool (from 3.13.0). See the Lua twin.
+	JSValue js_sam_stop_momentum(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
+	{
+		SAMLogger::noteApiCall();
+		int32_t player = -1;
+		if ( !samJsReqI32(ctx, argc, argv, 0, &player, "sam_stop_momentum") ) { return JS_FALSE; }
+		int32_t ticks = 0;
+		if ( samHasArg(argc, argv, 1) && JS_ToInt32(ctx, &ticks, argv[1]) < 0 ) { ticks = 0; }
+		if ( ticks < 0 ) { ticks = 0; }
+		if ( ticks > 3000 ) { ticks = 3000; }
+#ifdef SAM_JS_HAVE_BARONY
+		std::string why;
+		if ( !SAMScriptInput::stopMomentum(player, (int)ticks, &why) )
+		{
+			SAMNet::warnOnce("sam_stop_momentum:" + why, "sam_stop_momentum refused: " + why);
+			return JS_FALSE;
+		}
+		return JS_TRUE;
+#else
+		(void)player;
+		return JS_FALSE;
+#endif
+	}
+
 	JSValue js_sam_get_inventory_count(JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv)
 	{
 		SAMLogger::noteApiCall();
@@ -8963,6 +8987,7 @@ namespace
 		samJsRegister(ctx, g, "sam_press_input", js_sam_press_input, 3);
 		samJsRegister(ctx, g, "sam_release_input", js_sam_release_input, 2);
 		samJsRegister(ctx, g, "sam_set_facing", js_sam_set_facing, 2);
+		samJsRegister(ctx, g, "sam_stop_momentum", js_sam_stop_momentum, 2);
 		samJsRegister(ctx, g, "sam_get_action_binding", js_sam_get_action_binding, 2);
 		// P_SETTINGS: a mod's own rows in the Bindings page and the General tab (sam_settings.cpp).
 		samJsRegister(ctx, g, "sam_register_action", js_sam_register_action, 4);

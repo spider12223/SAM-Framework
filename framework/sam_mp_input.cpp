@@ -1439,6 +1439,32 @@ namespace
 		if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->isLocalPlayer() ) { return -1; }
 		return ( multiplayer == SINGLE ) ? player : 0;
 	}
+
+	// sam_stop_momentum: how many more ticks each player on this machine is held still, counted in ticks
+	// their body actually moves in (a pause, which stops the world but not the tick clock, uses none of
+	// them), the last tick counted, and the body the hold was set on (a death or a new floor ends it).
+	int s_stopLeft[MAXPLAYERS] = {};
+	Uint32 s_stopTick[MAXPLAYERS] = {};
+	Uint32 s_stopUid[MAXPLAYERS] = {};
+	bool s_anyStop = false;
+
+	void refreshAnyStop()
+	{
+		s_anyStop = false;
+		for ( int i = 0; i < MAXPLAYERS; ++i ) { s_anyStop = s_anyStop || s_stopLeft[i] > 0; }
+	}
+
+	// Everything that carries a player along from one frame to the next (actplayer.cpp
+	// handlePlayerMovement): the walking velocity, forward and sideways alike, which drag only wears
+	// down; the push a heavy crossbow's recoil gives (playerStrafeVelocity), which loses just 5% a tick;
+	// and a knockback.
+	void zeroMomentum(Entity* e)
+	{
+		e->vel_x = 0.0;
+		e->vel_y = 0.0;
+		e->playerStrafeVelocity = 0.0;
+		e->monsterKnockbackVelocity = 0.0;
+	}
 }
 
 const std::vector<std::string>& actionNames()
@@ -1522,6 +1548,50 @@ bool setFacing(int player, double yaw, std::string* why)
 	return true;
 }
 
+bool stopMomentum(int player, int forTicks, std::string* why)
+{
+	if ( inputIndexFor(player) < 0 )
+	{
+		if ( why ) { *why = "player " + std::to_string(player) + " does not play on this machine."; }
+		return false;
+	}
+	Entity* me = players[player]->entity;
+	if ( !me )
+	{
+		if ( why ) { *why = "player " + std::to_string(player) + " has no body right now."; }
+		return false;
+	}
+	zeroMomentum(me);
+	s_stopLeft[player] = std::max(0, std::min(3000, forTicks));
+	s_stopTick[player] = ticks;
+	s_stopUid[player] = (Uint32)me->getUID();
+	refreshAnyStop();
+	return true;
+}
+
+void holdMomentum(Entity* my, int player)
+{
+	if ( !s_anyStop || !my || player < 0 || player >= MAXPLAYERS || s_stopLeft[player] <= 0 ) { return; }
+	if ( (Uint32)my->getUID() != s_stopUid[player] )
+	{
+		s_stopLeft[player] = 0;   // a new body: the player died and came back, or took the stairs
+		refreshAnyStop();
+		return;
+	}
+	if ( ticks != s_stopTick[player] )
+	{
+		// One count per game tick however often this runs in it, and none for ticks the body did not move in.
+		s_stopTick[player] = ticks;
+		if ( --s_stopLeft[player] < 0 )
+		{
+			s_stopLeft[player] = 0;
+			refreshAnyStop();
+			return;
+		}
+	}
+	zeroMomentum(my);
+}
+
 bool anyHeld()
 {
 	return !s_holds.empty();
@@ -1553,5 +1623,7 @@ bool heldFor(int inputIndex, const char* binding, float* strength)
 void clear()
 {
 	s_holds.clear();
+	for ( int i = 0; i < MAXPLAYERS; ++i ) { s_stopLeft[i] = 0; }
+	s_anyStop = false;
 }
 }

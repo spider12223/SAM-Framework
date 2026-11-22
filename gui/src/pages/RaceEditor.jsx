@@ -73,7 +73,7 @@ function slugify(name) {
 }
 
 export default function RaceEditor() {
-  const { meta, races, spells: modSpells, scripts, editing, dispatch } = useMod();
+  const { meta, races, spells: modSpells, sounds: modSounds, scripts, editing, dispatch } = useMod();
   const editDef = editing?.kind === 'race' ? races.find((r) => r.id === editing.id) : null;
 
   // The def as it was when this page opened. `editDef` is derived from `editing`, and the
@@ -102,6 +102,9 @@ export default function RaceEditor() {
   const [vision, setVision] = useState(editDef?.vision ?? 0);
   const [sneakVision, setSneakVision] = useState(editDef?.sneak_vision ?? 0);
   const [startingSpells, setStartingSpells] = useState(editDef?.starting_spells ?? []);
+  // Sound ids this race says on a Use that hits nothing, in place of its host body's noise.
+  const [emoteSounds, setEmoteSounds] = useState(editDef?.emote_sounds ?? []);
+  const [emoteError, setEmoteError] = useState('');
   // Declared allegiance. Empty is not "no allies" — it means "inherit the host body's
   // relations", which is why neither list is written to the JSON when it is empty.
   const [allies, setAllies] = useState(editDef?.allies ?? []);
@@ -157,6 +160,7 @@ export default function RaceEditor() {
     if (vis) def.vision = vis;
     if (sneakVis) def.sneak_vision = sneakVis;
     if (startingSpells.length) def.starting_spells = startingSpells;
+    if (emoteSounds.length) def.emote_sounds = emoteSounds;
     const lm = {};
     for (const [k] of LIMB_SLOTS) {
       const v = (limbModels[k] ?? '').trim();
@@ -196,6 +200,19 @@ export default function RaceEditor() {
     setStartingSpells((prev) => (prev.includes(sp) ? prev : [...prev, sp]));
   };
 
+  // A sound id: one of this mod's own by bare name ("purr"), or any mod's as "namespace:name".
+  const addEmoteSound = (raw) => {
+    const input = String(raw ?? '').trim().toLowerCase();   // sound ids match without case in game
+    if (!input) return;
+    if (!/^([a-z0-9_]+:)?[a-z0-9_]+$/.test(input)) {   // race.schema.json's pattern
+      setEmoteError('Use a sound name ("purr") or "namespace:name": letters, digits and _ only.');
+      return;
+    }
+    setEmoteError('');
+    setEmoteSounds((prev) => (prev.includes(input) ? prev : [...prev, input]));
+  };
+  const modSoundIds = (modSounds ?? []).map((s) => s?.id).filter(Boolean);
+
   const onIconFile = (e) => {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -228,7 +245,7 @@ export default function RaceEditor() {
 
   const def = useMemo(buildDef,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [name, description, lore, icon, iconData, hostBody, mods, bloodDiet, canOpenTins, vision, sneakVision, startingSpells, allies, enemies, neutral, recruits, limbModels, limbBent, namespace]);
+    [name, description, lore, icon, iconData, hostBody, mods, bloodDiet, canOpenTins, vision, sneakVision, startingSpells, emoteSounds, allies, enemies, neutral, recruits, limbModels, limbBent, namespace]);
   const preview = useMemo(() => JSON.stringify(def, null, 2), [def]);
   const setMod = (a, v) => setMods((prev) => ({ ...prev, [a]: v }));
 
@@ -452,6 +469,29 @@ export default function RaceEditor() {
                     onClick={() => addSpell(sp.id)} title={`add ${sp.id}`}>{sp.name}</button>
                 ))}
               </div>
+            </div>
+          )}
+        </Panel>
+
+        <Panel title="Emote Sounds">
+          <div className="text-xs mb-3" style={{ color: 'var(--color-ink-dim)' }}>
+            What this race says when its player presses Use on nothing, in place of its body&apos;s noise
+            (a salamander growls, a dryad creaks, a human says nothing). One plays at random, at most once
+            every five seconds, and the other players hear one too. Not with &quot;disable monster
+            abilities&quot; ticked, or while polymorphed or shapeshifted. A name no mod has is silent.
+          </div>
+          <Chips items={emoteSounds}
+            onRemove={(s) => setEmoteSounds((p) => p.filter((x) => x !== s))}
+            empty="None: the body's own noise." />
+          <SearchSelect
+            options={modSoundIds.filter((s) => !emoteSounds.includes(s))}
+            onPick={addEmoteSound}
+            placeholder="Your sounds… (or type mymod:sound)"
+            allowCustom />
+          {emoteError && <div className="sam-error text-sm mt-1">{emoteError}</div>}
+          {modSoundIds.length === 0 && (
+            <div className="text-xs mt-2" style={{ color: 'var(--color-ink-faint)' }}>
+              Add a sound in the Sound Editor first, then pick it here.
             </div>
           )}
         </Panel>

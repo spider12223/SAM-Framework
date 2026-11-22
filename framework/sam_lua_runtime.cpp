@@ -2372,6 +2372,33 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 #endif
 	}
 
+	// sam_stop_momentum(player [, ticks=0]) -> bool (from 3.13.0). Clears the player's walking momentum,
+	// a heavy crossbow's recoil and any knockback on the machine that moves them, and keeps them clear
+	// for `ticks` more game ticks (0..3000).
+	int lua_sam_stop_momentum(lua_State* Ls)
+	{
+		SAMLogger::noteApiCall();
+		const int player = (int)luaL_checkinteger(Ls, 1);
+		lua_Integer ticks = luaL_optinteger(Ls, 2, 0);
+		if ( ticks < 0 ) { ticks = 0; }
+		if ( ticks > 3000 ) { ticks = 3000; }
+#ifdef SAM_LUA_HAVE_BARONY
+		std::string why;
+		if ( !SAMScriptInput::stopMomentum(player, (int)ticks, &why) )
+		{
+			SAMNet::warnOnce("sam_stop_momentum:" + why, "sam_stop_momentum refused: " + why);
+			lua_pushboolean(Ls, 0);
+			return 1;
+		}
+		lua_pushboolean(Ls, 1);
+		return 1;
+#else
+		(void)player; (void)ticks;
+		lua_pushboolean(Ls, 0);
+		return 1;
+#endif
+	}
+
 	// ===== mod actions and mod settings (sam_settings.cpp) ==================================
 	//
 	// A mod's own rows in the game's Settings screens. The namespace is the calling mod's
@@ -10864,6 +10891,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		samLuaRegister(L, "sam_press_input", lua_sam_press_input);
 		samLuaRegister(L, "sam_release_input", lua_sam_release_input);
 		samLuaRegister(L, "sam_set_facing", lua_sam_set_facing);
+		samLuaRegister(L, "sam_stop_momentum", lua_sam_stop_momentum);
 		samLuaRegister(L, "sam_get_action_binding", lua_sam_get_action_binding);
 		// P_SETTINGS: a mod's own rows in the Bindings page and the General tab (sam_settings.cpp).
 		samLuaRegister(L, "sam_register_action", lua_sam_register_action);

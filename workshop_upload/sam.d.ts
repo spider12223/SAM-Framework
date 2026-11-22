@@ -4,7 +4,7 @@
 // Drop this beside your mod's .ts files, or reference it:
 //   /// <reference path="sam.d.ts" />
 //
-// 343 functions, 87 events. Each function's "Multiplayer:" line starts with
+// 344 functions, 87 events. Each function's "Multiplayer:" line starts with
 // its kind (host, owner, screen, read, all, local, any); see docs/multiplayer.md.
 
 declare global {
@@ -2205,6 +2205,13 @@ declare global {
    * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Damage, collisions and the hit event are decided on the host, and every player sees the shot fly smoothly between network updates (it used to stand still between them).
    */
   function sam_spawn_projectile(tile_x: number, tile_y: number, angle: number, speed: number, damage?: number, lifetime?: number, model?: string, owner?: number): number | undefined;
+
+  /**
+   * Stop a player dead. Their walking momentum, forward and sideways alike, the push a heavy crossbow's recoil gives and any knockback are cleared at once, so they do not slide on after the keys are let go. sam_set_move_speed only scales new steps: momentum already built up keeps sliding until the game's drag wears it off. With ticks (50 to a second) the player is kept stopped for that many game ticks after the call, so held movement keys move them nowhere in that window; a new call replaces the window, and 0 ends one early. Scripts can still move them: sam_move_entity keeps its collision checks and sam_set_position still places them. Call it right before a scripted leap so leftover walking cannot push the player off its path.
+   *
+   * Multiplayer: owner. The state lives on the player's own machine: on the host, a call about a player on another machine (named by player) is carried to that machine and done there, and returns true once it is sent. A player whose game does not run S.A.M is refused with a warning. A client's call is refused with a one-time warning and returns false. As sam_hold_input: it runs on the machine the player plays on, where their movement is worked out, so the host's call about a joiner is carried there and returns true once it is sent. A player whose game does not run S.A.M is refused with a warning.
+   */
+  function sam_stop_momentum(player: number, ticks?: number): boolean;
 
   /**
    * Hand the music back. The game crossfades to whatever it would have been playing.

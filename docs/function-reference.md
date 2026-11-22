@@ -1,6 +1,6 @@
 # S.A.M function reference
 
-Every script function the framework exposes: **343 functions** and **87 events**.
+Every script function the framework exposes: **344 functions** and **87 events**.
 All of them work identically in Lua, JavaScript and TypeScript.
 
 This page is generated from the API definition, so it cannot fall behind the code. If a
@@ -16,7 +16,7 @@ the kind, so the line is always what really happens:
 | kind | what it means for your script |
 |---|---|
 | `host` (151) | Runs on the host, where your events and timers already run. A client's call is refused with a one-time warning. The result reaches every player. |
-| `owner` (14) | Changes something that lives on the player's own machine (their backpack, their spells). Call it on the host; S.A.M carries it to that player's machine. |
+| `owner` (15) | Changes something that lives on the player's own machine (their backpack, their spells). Call it on the host; S.A.M carries it to that player's machine. |
 | `screen` (29) | Shows something on one player's screen. Name the player, or leave it out inside an event about a player; -1 means every player. S.A.M carries it to their machine. |
 | `read` (50) | Reads a player. The host can read everyone; a client can read only its own player. |
 | `all` (15) | Changes a table every machine keeps (class and item patches, species resists). A host call runs everywhere and reaches players who join later. |
@@ -40,7 +40,7 @@ For guides and worked examples, see [scripting-reference.md](scripting-reference
 - [Game content](#game-content) (5)
 - [HUD](#hud) (3)
 - [Hooks](#hooks) (2)
-- [Input](#input) (8)
+- [Input](#input) (9)
 - [Inventory](#inventory) (30)
 - [Live patching](#live-patching) (6)
 - [Logging](#logging) (3)
@@ -1155,6 +1155,21 @@ Turn a player to face an angle at once: the number sam_get_facing gives, 0 east 
 **Returns:** true if the player now faces that way (boolean); false, with the reason in the log, for a player with no body or an angle that is NaN or beyond a million either way (in Lua, an argument that is not a number at all is an error)
 
 **Multiplayer:** `owner`. The state lives on the player's own machine: on the host, a call about a player on another machine (named by `player`) is carried to that machine and done there, and returns true once it is sent. A player whose game does not run S.A.M is refused with a warning. A client's call is refused with a one-time warning and returns false. As sam_hold_input. The player's own machine reports the new facing to everyone as it reports any turn.
+
+### `sam_stop_momentum(player, [ticks])`
+
+Stop a player dead. Their walking momentum, forward and sideways alike, the push a heavy crossbow's recoil gives and any knockback are cleared at once, so they do not slide on after the keys are let go. sam_set_move_speed only scales new steps: momentum already built up keeps sliding until the game's drag wears it off. With ticks (50 to a second) the player is kept stopped for that many game ticks after the call, so held movement keys move them nowhere in that window; a new call replaces the window, and 0 ends one early. Scripts can still move them: sam_move_entity keeps its collision checks and sam_set_position still places them. Call it right before a scripted leap so leftover walking cannot push the player off its path.
+
+During a hold everything that pushes the player is cancelled with the walking: sam_apply_force, a knockback and the game's own dash move them nowhere, and a shove made just before the stop in the same tick is wiped too, so a leap during a hold must use sam_move_entity. The player can still turn, attack, cast and use things, and anything that places them directly (sam_move_entity, sam_set_position, a teleport) still does. Tried in the game: walking forward, sam_apply_force and sam_move_entity; the dash, a knockback from a hit, sam_set_position and a teleport were read in the code. The ticks are counted on the player's own machine, in ticks the game actually runs (a pause uses none of them), and a hold ends early if the player dies or takes the stairs.
+
+| argument | type |
+|---|---|
+| `player` | int |
+| `ticks` *(optional)* | int (0..3000, default 0) |
+
+**Returns:** true if the player was stopped (boolean); false, with the reason in the log, for a player with no body right now or one whose game does not run S.A.M
+
+**Multiplayer:** `owner`. The state lives on the player's own machine: on the host, a call about a player on another machine (named by `player`) is carried to that machine and done there, and returns true once it is sent. A player whose game does not run S.A.M is refused with a warning. A client's call is refused with a one-time warning and returns false. As sam_hold_input: it runs on the machine the player plays on, where their movement is worked out, so the host's call about a joiner is carried there and returns true once it is sent. A player whose game does not run S.A.M is refused with a warning.
 
 
 ## Inventory

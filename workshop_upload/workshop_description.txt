@@ -8,9 +8,9 @@ Barony was never built to be modded. S.A.M is the layer that makes it modded any
 
 [hr][/hr]
 
-[h1]NEW: ENEMIES CALL YOUR RACE BY ITS NAME[/h1]
+[h1]NEW: YOUR RACE'S OWN NOISE, AND STOPPING DEAD[/h1]
 
-A human or shopkeeper who turns on a player of a custom race now calls them by the race's [b]"name"[/b]: "Foul Catfolk! En Guarde!", not "Foul human!". Races can also open tins at the cooking screen.
+A race can list [b]"emote_sounds"[/b] to play on a Use at empty air, not its body's noise. [b]sam_stop_momentum[/b] stops leftover walking, and the installer now scrolls.
 
 [h1]GAME SPEED, MOD SETTINGS, THE LOOT POOL[/h1]
 
@@ -78,7 +78,7 @@ Build a class, item, monster, spell or effect with dropdowns and sliders, watch 
 
 JSON says what your content [i]is[/i]. A script says what it [i]does[/i]. Drop a .lua, .js or .ts file next to any JSON and it loads automatically. TypeScript is compiled for you.
 
-[b]87 events[/b] to react to, and now to change. [b]343 functions[/b] to act with: grant items and gold, read and set stats, apply effects, cast spells, deal or change damage, teleport, spawn monsters, run your own per frame logic, open windows, timers, saved data, screen effects, and live patching that reverts when your mod unloads.
+[b]87 events[/b] to react to, and now to change. [b]344 functions[/b] to act with: grant items and gold, read and set stats, apply effects, cast spells, deal or change damage, teleport, spawn monsters, run your own per frame logic, open windows, timers, saved data, screen effects, and live patching that reverts when your mod unloads.
 
 S.A.M looks for just two function names in your script: [b]on_event(event)[/b] and [b]on_tick(event)[/b].
 

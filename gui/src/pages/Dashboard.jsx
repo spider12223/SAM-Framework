@@ -11,7 +11,7 @@ import { Panel, GoldButton } from '@/components/ui.jsx';
 import { NAV_ICONS } from '@/data/navIcons.js';
 
 /** The framework's own version (mods declare their own framework_min_version). */
-const SAM_FRAMEWORK_VERSION = '3.12.2';
+const SAM_FRAMEWORK_VERSION = '3.13.0';
 
 /** Where players get S.A.M itself (the framework is a dependency, not a mod). */
 const WORKSHOP_URL = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472';
@@ -29,12 +29,14 @@ const TRAVELS = [
  * thing a returning modder sees, and the point is 'here is what you can do now that you
  * could not before', not a changelog. */
 const WHATS_NEW = [
-  ["Enemies call your race by its name",
-   "A human or shopkeeper who turns on a player of your race now calls them by the race's \"name\" (\"Foul Catfolk! En Guarde!\"), not by the body it is built on. The Wanted tooltip and the line another player reads on examining them use it too. With \"disable monster abilities\" ticked, or while polymorphed or shapeshifted, the game's own word stays."],
-  ["Tins at the cooking screen (3.12.1)",
-   "With \"can_open_tins\", a race now puts a tin in at the cooking screen of a cauldron or frying pan without a tin opener, not only eats one. The game's own Goatman and Automaton keep the game's rule there: they still need an opener."],
-  ["A race's story on its compendium page (3.12.0)",
-   "A race can say \"lore\" for the box under its model on its compendium page, so the character-select picker keeps its list of what the race does while the compendium tells its story. The Race Editor has a Compendium text box for it."],
+  ["A noise of your race's own",
+   "A race can list \"emote_sounds\", such as [\"purr\", \"hiss\"]: when its player presses Use on nothing, one of them plays instead of the body's noise (a salamander growls, a human says nothing). The game's five-second wait still applies, and in multiplayer the other players hear one too (read in the code, not yet tried). The Race Editor has an Emote Sounds panel for it."],
+  ["Stop a player dead",
+   "sam_stop_momentum(player, ticks) clears a player's leftover walking, recoil and knockback at once, and with ticks holds them still while sam_move_entity still moves them along its collision checks: a leap or a dash no longer drifts off its path."],
+  ["The installer scrolls",
+   "On a short display the installer's \"Please Read First\" box was cut off with no way to reach it. Its first screen now scrolls, and Install and Close stay on screen."],
+  ["Enemies call your race by its name (3.12.2)",
+   "A human or shopkeeper who turns on a player of your race calls them by the race's \"name\" (\"Foul Catfolk! En Guarde!\"), not by the body it is built on."],
 ];
 
 /** sam-well stat box: big gold number over a small-caps label. */
@@ -86,9 +88,9 @@ export default function Dashboard() {
       <Panel title={`New in ${SAM_FRAMEWORK_VERSION}`}>
         <p className="m-0" style={{ color: 'var(--color-parchment)' }}>
           <strong style={{ color: 'var(--color-gold)' }}>
-            Enemies now call a player of your race by the race's own name.
+            A race can have its own noise, and a script can stop a player dead.
           </strong>{' '}
-          A small release: no new field or script function.
+          One new race field and one new script function.
         </p>
         <ul className="mt-1 mb-0" style={{ listStyle: 'none', padding: 0 }}>
           {WHATS_NEW.map(([title, blurb]) => (

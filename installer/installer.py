@@ -584,6 +584,12 @@ class Installer(tk.Tk):
         display. Called after each screen is built, because the screens differ in height and
         show_plan() is re-entered by browse() and by the failure screen's Back button."""
         self.update_idletasks()
+        canvas = getattr(self, "_scroll_canvas", None)
+        if canvas is not None and canvas.winfo_exists():
+            # Ask for ALL of the scrolled content, so a screen that fits shows it whole; the cap
+            # below then shrinks the canvas, and its scrollbar takes over, instead of cutting off.
+            canvas.configure(height=self._scroll_inner.winfo_reqheight())
+            self.update_idletasks()
         want = self.winfo_reqheight()
         cap = self.winfo_screenheight() - 80          # leave room for the taskbar
         self.geometry("600x%d" % max(420, min(want, cap)))
@@ -610,6 +616,55 @@ class Installer(tk.Tk):
     def _clear(self):
         for w in self.content.winfo_children():
             w.destroy()
+        self._scroll_canvas = None
+        self._scroll_inner = None
+        self.unbind_all("<MouseWheel>")
+
+    def _scroll_area(self):
+        """A frame for a screen's panels that scrolls when the screen is taller than the window.
+
+        The window grows to fit its content but stops at the display's height, and the plan
+        screen is taller than a 768-pixel laptop display, more so with Windows display scaling.
+        Packed straight into the window, the panels at the bottom were cut off with no way to
+        reach them: a player could not read "Please Read First". Pack the action buttons BEFORE
+        calling this, outside it, so they stay on screen however the panels scroll."""
+        holder = tk.Frame(self.content, bg=STONE)
+        holder.pack(fill="both", expand=True)
+        canvas = tk.Canvas(holder, bg=STONE, highlightthickness=0, bd=0)
+        bar = tk.Scrollbar(holder, orient="vertical", command=canvas.yview)
+        inner = tk.Frame(canvas, bg=STONE)
+        window = canvas.create_window((0, 0), window=inner, anchor="nw")
+        canvas.configure(yscrollcommand=bar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+
+        def refresh(_event=None):
+            canvas.configure(scrollregion=(0, 0, inner.winfo_reqwidth(), inner.winfo_reqheight()))
+            # The bar only when there is something to scroll to.
+            overflow = inner.winfo_reqheight() > canvas.winfo_height() > 1
+            if overflow and not bar.winfo_ismapped():
+                bar.pack(side="right", fill="y", before=canvas)
+            elif not overflow and bar.winfo_ismapped():
+                bar.pack_forget()
+                canvas.yview_moveto(0)
+
+        def resized(event):
+            canvas.itemconfigure(window, width=event.width)
+            refresh()
+
+        def wheel(event):
+            if bar.winfo_ismapped() and event.delta:
+                canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
+
+        inner.bind("<Configure>", refresh)
+        canvas.bind("<Configure>", resized)
+        # The wheel scrolls this area wherever the pointer is: it is the only thing on the screen that
+        # scrolls. Bound for the whole window, because binding it on <Enter> and dropping it on <Leave>
+        # dropped it the moment the pointer went over a panel (Tk tells a frame the pointer LEFT it when
+        # it moves onto one of its children). _clear() takes it off with the screen.
+        self.bind_all("<MouseWheel>", wheel)
+        self._scroll_canvas = canvas
+        self._scroll_inner = inner
+        return inner
 
     # ----- reusable widgets ------------------------------------------------- #
     def _panel(self, parent, title=None):
@@ -665,9 +720,11 @@ class Installer(tk.Tk):
         # Reserving their space up front means they survive no matter how tall the rest gets.
         actions = tk.Frame(self.content, bg=STONE)
         actions.pack(side="bottom", fill="x")
+        # Everything else scrolls when the display is too short to show it all.
+        body = self._scroll_area()
 
         # --- Barony location panel ---
-        loc_outer, loc = self._panel(self.content, "Barony Location")
+        loc_outer, loc = self._panel(body, "Barony Location")
         loc_outer.pack(fill="x", pady=(4, 10))
 
         if self.barony_path:
@@ -694,7 +751,7 @@ class Installer(tk.Tk):
         self._gold_button(loc, "Browse…", self.browse).pack(anchor="w", pady=(10, 0))
 
         # --- what will happen panel ---
-        plan_outer, plan = self._panel(self.content, "What This Installer Will Do")
+        plan_outer, plan = self._panel(body, "What This Installer Will Do")
         plan_outer.pack(fill="x", pady=(0, 10))
         steps = [
             "Back up your original  barony.exe  →  barony_vanilla.exe",
@@ -715,7 +772,7 @@ class Installer(tk.Tk):
         # credentials, which are not public. So crossplay with Epic Games Store players is
         # gone while S.A.M is installed. A user reported this on the Workshop as a mystery
         # breakage because nothing anywhere told them. Say it BEFORE they click Install.
-        warn_outer, warn = self._panel(self.content, "Please Read First")
+        warn_outer, warn = self._panel(body, "Please Read First")
         warn_outer.pack(fill="x", pady=(0, 10))
         tk.Label(warn,
                  text=("While S.A.M is installed you lose three things: crossplay with Epic "
@@ -746,7 +803,7 @@ class Installer(tk.Tk):
                          bg=WOOD, fg=AMBER, font=(FONT_FAMILY, 9),
                          wraplength=510, justify="left").pack(anchor="w", pady=(8, 0))
 
-        tk.Label(self.content,
+        tk.Label(body,
                  text="Nothing is deleted. To return to vanilla anytime, delete barony.exe "
                       "and rename barony_vanilla.exe back to barony.exe.",
                  bg=STONE, fg=GOLD_DIM, font=(FONT_FAMILY, 9),

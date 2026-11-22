@@ -112,6 +112,12 @@ struct SAMRaceDef
 	// pan (interface.cpp), where the game's own two still need an opener.
 	bool canOpenTins = false;
 
+	// (from 3.13.0) Optional "emote_sounds": what this race says when its player presses Use on nothing,
+	// in place of its host body's noise (the human body makes none). Sound ids, stored qualified: a
+	// bare name in the JSON is the race's own mod's ("purr" = "<namespace>:purr"). One is picked at
+	// random each time, and one of that sound's files at random.
+	std::vector<std::string> emoteSounds;
+
 	// Optional "limb_models": this race's OWN body, one model per limb, instead of the
 	// host body's. host_body still decides the skeleton -- the limb offsets, the
 	// animation, which slots exist -- and these decide what is drawn in each slot.
@@ -282,6 +288,17 @@ public:
 	// follower's line on spotting an enemy, the Wanted tooltip, and examining a player ("You see a Catfolk
 	// named Bob.").
 	static std::string speciesNameFor(const Stat& stats, int creature);
+	// (from 3.13.0) The engine sound slot for this player's noise on a Use that hits nothing: one of the
+	// race's "emote_sounds" when `stats` is a player of a custom race in its own form (the rule above, the
+	// body being stats.type); 0, meaning no noise, when the race lists sounds but none of them can play; -1
+	// otherwise, and the body's own noise stands. Asked on the player's own machine (collision.cpp
+	// entityClicked), which alone decides whether there is a noise at all.
+	static int emoteSound(const Stat& stats);
+	// One of the race's "emote_sounds", at random, without the form test; -1 for a race without any, or when
+	// the one picked cannot play. The host and every other player pick from the race this way when the
+	// emitting machine says a race made its noise (net.cpp EMOT and SNEL): a mod's sound slot number is not
+	// the same on every machine, so each machine plays a pick of its own.
+	static int emoteSoundForRace(int raceId);
 
 	// --- compendium (from 3.11.0) ------------------------------------------------------
 	// A page for every registered race in the compendium's Denizens list: under its own heading

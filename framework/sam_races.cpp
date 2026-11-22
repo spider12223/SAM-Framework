@@ -27,6 +27,8 @@
 #include "sam_items.hpp"   // SAMItems::resolveModImage (a race's icon PNG)
 #include "files.hpp"       // openDataFile (models.txt, for the compendium pages)
 #include "ui/GameUI.hpp"   // camelCaseString (monster names on the compendium pages)
+#include "sam_sounds.hpp"  // soundIndexForId: a race's "emote_sounds"
+#include "prng.hpp"        // local_rng: which of a race's emote sounds plays
 
 #include <algorithm>
 #include <cmath>
@@ -587,6 +589,24 @@ void SAMRaces::loadFromManifest(const SAMModManifest& manifest)
 			else { ++it; }
 		}
 		def.canOpenTins = getBool("can_open_tins", false);
+		if ( j.contains("emote_sounds") )
+		{
+			if ( !j["emote_sounds"].is_array() )
+			{
+				SAM_WARN(MOD, "Race '" + def.id + "': \"emote_sounds\" must be a list of sound ids, e.g. [\"purr\", \"hiss\"]"
+					" -- ignored.");
+			}
+			else
+			{
+				for ( const json& e : j["emote_sounds"] )
+				{
+					if ( !e.is_string() || e.get<std::string>().empty() ) { continue; }
+					std::string sound = e.get<std::string>();
+					if ( sound.find(':') == std::string::npos ) { sound = def.modNamespace + ":" + sound; }
+					def.emoteSounds.push_back(sound);
+				}
+			}
+		}
 		if ( j.contains("starting_spells") && j["starting_spells"].is_array() )
 		{
 			for ( const json& e : j["starting_spells"] )
@@ -1411,17 +1431,56 @@ std::string SAMRaces::iconPath(int raceId)
 	return (it != s_byId.end()) ? it->second.iconResolved : std::string();
 }
 
-std::string SAMRaces::speciesNameFor(const Stat& stats, int creature)
+// A player of a registered custom race in the race's own form: in its own body (`creature`), its
+// abilities on and neither shapeshifted nor polymorphed. Null otherwise. The shopkeeper check's test
+// (actmonster.cpp): abilities off make the player a human to the game, as they do for a vanilla race,
+// and a shapeshift or polymorph can leave `type` equal to the host body.
+static const SAMRaceDef* samRaceInOwnForm(const Stat& stats, int creature)
 {
-	// The shopkeeper check's test (actmonster.cpp): abilities off make the player a human to the game, as
-	// they do for a vanilla race, and a shapeshift or polymorph can leave `type` equal to the host body.
 	if ( stats.playerRace < SAM_RACE_ID_BASE || stats.stat_appearance != 0
 		|| stats.getEffectActive(EFF_SHAPESHIFT) || stats.getEffectActive(EFF_POLYMORPH) )
 	{
-		return std::string();
+		return nullptr;
 	}
 	auto it = s_byId.find(stats.playerRace);
-	return (it != s_byId.end() && it->second.hostMonster == creature) ? it->second.name : std::string();
+	return (it != s_byId.end() && it->second.hostMonster == creature) ? &it->second : nullptr;
+}
+
+std::string SAMRaces::speciesNameFor(const Stat& stats, int creature)
+{
+	const SAMRaceDef* d = samRaceInOwnForm(stats, creature);
+	return d ? d->name : std::string();
+}
+
+int SAMRaces::emoteSound(const Stat& stats)
+{
+	const SAMRaceDef* d = samRaceInOwnForm(stats, (int)stats.type);
+	if ( !d || d->emoteSounds.empty() ) { return -1; }
+	// A race that names its own sounds never falls back to its body's noise: a pick no loaded mod can play
+	// is 0, which the engine's emote code reads as "no noise" (a goblin-bodied race with a typo would
+	// otherwise grunt like a goblin half the time).
+	const int slot = emoteSoundForRace(stats.playerRace);
+	return slot >= 0 ? slot : 0;
+}
+
+int SAMRaces::emoteSoundForRace(int raceId)
+{
+	auto it = s_byId.find(raceId);
+	if ( it == s_byId.end() || it->second.emoteSounds.empty() ) { return -1; }
+	const std::vector<std::string>& sounds = it->second.emoteSounds;
+	const std::string& id = sounds[sounds.size() == 1 ? 0 : (size_t)local_rng.uniform(0, (int)sounds.size() - 1)];
+	const int slot = SAMSounds::soundIndexForId(id);
+	if ( slot < 0 )
+	{
+		// Once per sound: a player can press Use on nothing every five seconds for a whole run.
+		static std::set<std::string> warned;
+		if ( warned.insert(id).second )
+		{
+			SAM_WARN(MOD, "Race '" + it->second.id + "' lists \"" + id + "\" under emote_sounds, but no loaded mod"
+				" registers that sound (or none of its files loaded) -- that noise is silent.");
+		}
+	}
+	return slot;
 }
 
 void SAMRaces::applyStats(int raceId, Stat* myStats)

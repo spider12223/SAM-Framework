@@ -108,6 +108,10 @@ An item works the same way, for whoever holds or wears it:
 { "id": "mymod:iron_boots",    "sounds": { "LeatherSteps": "clank" } }
 ```
 
+A custom race can say its own sounds when its player presses Use on nothing, where the game plays its
+body's noise (from 3.13.0): `"emote_sounds": ["purr", "hiss"]` in the race file. See "Races: a noise of
+their own" in the [scripting reference](scripting-reference.md).
+
 ## Music
 
 ### Replace a track

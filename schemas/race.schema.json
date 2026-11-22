@@ -158,6 +158,14 @@
       "default": false,
       "description": "If true, this race opens a tin without a tin opener. It eats one, as a Goatman or an Automaton does (a race on either of those bodies already can eat one), and (from 3.12.1) it puts one in at the cooking screen of a cauldron or frying pan, where the game's own Goatman and Automaton still need an opener. Ignored when the player turns race abilities off at character creation."
     },
+    "emote_sounds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^([a-z0-9_]+:)?[a-z0-9_]+$"
+      },
+      "description": "(from 3.13.0) What this race says when its player presses Use on nothing, in place of its host body's noise (a salamander growls, a dryad creaks, the human body says nothing). Sound ids: a bare name is one of your own (\"purr\" = \"<namespace>:purr\"), \"namespace:name\" any mod's. One plays at random, at most once every five seconds on every body, and in multiplayer the other players hear one too, picked on their own machine (read in the code). A race that lists sounds never makes its body's noise: an id no loaded mod registers is silent. Only in the race's own body: with \"disable monster abilities\" ticked, or while polymorphed or shapeshifted, the game's own noise stays."
+    },
     "starting_spells": {
       "type": "array",
       "items": {

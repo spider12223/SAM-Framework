@@ -456,6 +456,49 @@ end
 * In multiplayer each of these runs on the machine the player plays on, where their buttons are read; the
   host's call about a joiner is carried there. A call made by a script on a joiner's own machine is refused.
 
+### Stopping a player dead (new in 3.13.0)
+
+`sam_stop_momentum(player [, ticks])` clears a player's momentum: their walking, forward and sideways alike,
+the push a heavy crossbow's recoil gives, and any knockback. `sam_set_move_speed` only scales new steps, so a
+player who lets go of the keys slides on until the game's drag wears the momentum off (about a fifth of a tile
+in the 12 ticks after letting go, in the test). With `ticks` (50 to a second) the player is kept stopped for that
+long, so held movement keys move them nowhere. A new call replaces the hold, and a call without `ticks` ends
+one early. The ticks are the game's own (a pause uses none of them), and a hold ends early if the player dies
+or takes the stairs. Scripts can still move a stopped player: `sam_move_entity` keeps its collision checks and
+`sam_set_position` still places them. Everything that PUSHES the player is cancelled with the walking, though:
+during a hold `sam_apply_force`, a knockback and the game's own dash move them nowhere, and a shove made just
+before the stop in the same tick is wiped too. So a leap during a hold moves the player with `sam_move_entity`,
+as below. The player can still turn, attack, cast and use things.
+
+A leap that carries the player two tiles forward over half a second, with no leftover walking to push them
+off its path:
+
+```lua
+local leap
+function on_event(e)
+  if e.name == "on_action_pressed" and e.action == "mymod:leap" then
+    local f = sam_get_facing(e.player)   -- nil if the player has no body right now
+    if not f then return end
+    sam_stop_momentum(e.player, 25)      -- held still for 25 ticks, half a second
+    leap = { who = e.player, dx = math.cos(f) * 2 / 25, dy = math.sin(f) * 2 / 25, left = 25 }
+  end
+end
+
+function on_tick(e)
+  if not leap then return end
+  sam_move_entity(sam_get_player_uid(leap.who), leap.dx, leap.dy)   -- slides along walls, never through
+  leap.left = leap.left - 1
+  if leap.left == 0 then leap = nil end
+end
+```
+
+Like the functions above, it runs on the machine the player plays on, where their movement is worked out: the
+host's call about a joiner is carried there. Seen in the game in singleplayer (`tests/MomentumTest`, with a
+JavaScript twin): the stop after walking forward, the hold and when it ends, `sam_move_entity` during a hold, and
+shoves with `sam_apply_force`. Walking sideways, the recoil of a heavy crossbow, a knockback from a hit, the game's
+own dash and `sam_set_position` during a hold, a new call with ticks replacing a hold, a death or a floor change
+during a hold, a pause, and multiplayer were read in the code, not tried.
+
 ## Every event
 
 Fields vary per event; `sam_log(e.name)` inside your handler and read the log if unsure.
@@ -768,6 +811,33 @@ Seen in the game's log with a test race on the human body, for a human and a sho
 (`tests/TauntTest`). The box, polymorph and shapeshift cases were checked by asking the naming function directly with
 them set on the player, not by playing them. Talking to one that has already turned, the Wanted tooltip, the examine
 line, a follower's line, a race on any other body, and multiplayer were read in the code, not tried.
+
+### Races: a noise of their own (new in 3.13.0)
+
+When a player presses Use on nothing, the game plays a noise picked by the body: a salamander growls, a dryad
+creaks, a goblin grunts, and the human body says nothing. A race can say its own with `"emote_sounds"`, a list
+of sound ids, a bare name being one of your own (`"purr"` is `"<namespace>:purr"`):
+
+```json
+{ "id": "mymod:catfolk", "name": "Catfolk", "host_body": "human", "emote_sounds": ["purr", "hiss"] }
+```
+
+The sounds are declared like any other, for example in mod.json:
+`"sounds": [{ "id": "purr", "file": ["sounds/purr1.ogg", "sounds/purr2.ogg"] }, { "id": "hiss", "file": "sounds/hiss.ogg" }]`.
+One of the listed sounds plays at random, and one of its files at random, at most once every five seconds
+(on every body: the skeleton's own noise can repeat every second, a race's sound cannot). The other players
+hear one too, picked on their own machine, so two players may hear different ones; the game's setting that
+mutes other players' monster noises treats it exactly as it treats the game's own (read in the code). Only in
+the race's own body: with "disable monster abilities" ticked, or while polymorphed or shapeshifted, the game's
+own noise stays. A race that lists sounds never makes its body's noise: a sound id no loaded mod registers is
+silent, with one line in `sam_log.txt`.
+
+Seen in the game (`tests/EmoteTest`, three races): on the human body a Use on nothing played one of its two
+sounds, a second Use at once played nothing, and one after the wait played again; on the skeleton body the
+race's sound did not repeat after a second and a half; and on the goblin body a race whose only sound no mod
+registers was silent (the engine's answer, logged; the goblin's own noise cannot be heard by a test). The
+abilities-off, polymorph and shapeshift cases were checked by asking the engine directly with them set, not
+played. Multiplayer was read in the code, not tried.
 
 ### Races: a picture for saved games and the HUD (new in 3.9.0)
 

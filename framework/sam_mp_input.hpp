@@ -45,6 +45,7 @@
 #include <vector>
 
 class Item;
+class Entity;
 
 namespace SAMMpInput
 {
@@ -256,11 +257,23 @@ namespace SAMScriptInput
 	// the reason in *why, for a player not here or one with no body.
 	bool setFacing(int player, double yaw, std::string* why);
 
+	// (from 3.13.0) sam_stop_momentum. Stop `player` (on this machine) dead: the walking velocity, a heavy
+	// crossbow's recoil and any knockback are cleared now, and kept clear for the next `ticks` game ticks the
+	// body moves in (0..3000, 50 to a second; 0 = only now; a pause does not count), so held movement keys,
+	// a shove (sam_apply_force) and the game's dash move nobody in that window. Moves that place the body
+	// directly (sam_move_entity, sam_set_position) still apply. A new call replaces the window, so 0 ends one
+	// early, and a new body (a death, a new floor) ends it too. false, with the reason in *why, for a player
+	// not here or one with no body.
+	bool stopMomentum(int player, int ticks, std::string* why);
+	// Engine side, the end of Player::PlayerMovement_t::handlePlayerMovement on the player's own machine:
+	// clear the momentum again while a stop holds. One bool test when nobody is stopped.
+	void holdMomentum(Entity* my, int player);
+
 	// Engine side, Input::update, for every binding every frame. anyHeld() is false whenever no
 	// script holds anything, which is always the case without a mod.
 	bool anyHeld();
 	bool heldFor(int inputIndex, const char* binding, float* strength);
 
-	// Every hold ends (a new run, the end of a game, the scripts reloading).
+	// Every hold ends, and every stop (a new run, the end of a game, the scripts reloading).
 	void clear();
 }

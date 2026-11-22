@@ -115,6 +115,7 @@ SAM_MP(sam_hold_input,                    Owner,  Player,    1, False)
 SAM_MP(sam_press_input,                   Owner,  Player,    1, False)
 SAM_MP(sam_release_input,                 Owner,  Player,    1, False)
 SAM_MP(sam_set_facing,                    Owner,  Player,    1, False)
+SAM_MP(sam_stop_momentum,                 Owner,  Player,    1, False)
 SAM_MP(sam_is_key_held,                   Read,   Player,    2, None)
 SAM_MP(sam_register_action,               All,    None,      0, False)
 

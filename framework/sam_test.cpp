@@ -24,6 +24,7 @@
 #include "sam_races.hpp"   // -samtestrace: the race registry
 #include "sam_models.hpp"  // idForModelIndex: names a mod's model in the compendium log
 #include "files.hpp"       // openDataFile: models.txt names the game's models in that log
+#include "sam_sounds.hpp"  // idForEngineIndex: names a race's emote sound in the log
 #include <algorithm>       // std::max
 
 #include <cstdio>
@@ -224,6 +225,40 @@ namespace
 		s.playerRace = race;
 		SAM_INFO(MOD, "Taunt name for player 1: " + line + ".");
 	}
+
+	// (from 3.13.0) The noise player 1 makes on a Use that hits nothing: SAMRaces::emoteSound, what
+	// collision.cpp asks. In the race's own body as it is, then with its abilities off, polymorphed,
+	// shapeshifted and in another body, each put back before the next. "none" = the body's own noise,
+	// "silent" = no noise at all (the race lists sounds, but the one picked cannot play).
+	void logEmoteSounds()
+	{
+		Stat& s = *stats[0];
+		const Monster type = s.type;
+		const Monster host = (Monster)SAMRaces::hostMonsterForRace(s.playerRace);
+		auto said = [&]() {
+			const int slot = SAMRaces::emoteSound(s);
+			if ( slot < 0 ) { return std::string("none"); }
+			if ( slot == 0 ) { return std::string("silent"); }
+			return "'" + SAMSounds::idForEngineIndex(slot) + "'";
+		};
+		s.type = host;
+		std::string line = "own form " + said();
+		const Uint32 appearance = s.stat_appearance;
+		s.stat_appearance = 1;
+		line += ", abilities off " + said();
+		s.stat_appearance = appearance;
+		for ( const int eff : { EFF_POLYMORPH, EFF_SHAPESHIFT } )
+		{
+			const Uint8 was = s.getEffectActive(eff);
+			s.setEffectValueUnsafe(eff, 1);
+			line += (eff == EFF_POLYMORPH ? ", polymorphed " : ", shapeshifted ") + said();
+			s.setEffectValueUnsafe(eff, was);
+		}
+		s.type = host == GOBLIN ? HUMAN : GOBLIN;
+		line += ", in another body " + said();
+		s.type = type;
+		SAM_INFO(MOD, "Emote sound for player 1: " + line + ".");
+	}
 }
 
 bool parseArg(const char* arg)
@@ -354,6 +389,7 @@ bool loadMods()
 		SAMRaces::applySpells(0);
 		SAM_INFO(MOD, "Playing as race " + s_race + " (id " + std::to_string(id) + ").");
 		logTauntNames();
+		logEmoteSounds();
 	}
 
 	// A custom race's compendium page is built when the compendium opens, which a run with nobody at
