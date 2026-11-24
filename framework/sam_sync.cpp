@@ -428,6 +428,11 @@ void SAMSync::requestFingerprint()
 	SAM_DEBUG(MOD, "Requested mod fingerprint from host.");
 }
 
+bool SAMSync::hostShownSam()
+{
+	return multiplayer == CLIENT && s_haveHostFingerprint;
+}
+
 bool SAMSync::hasMismatch()
 {
 	return s_haveHostFingerprint && s_mismatch;

@@ -208,6 +208,7 @@ namespace SAMNet
 		constexpr std::uint8_t EntityFirst = 56;     // 56..71  entities and world    (sam_mp_entities)
 		constexpr std::uint8_t RulesFirst = 72;      // 72..87  player state, rules   (sam_rules and friends)
 		constexpr std::uint8_t EventFirst = 88;      // 88..103 engine events a client raises (sam_mp_input)
+		constexpr std::uint8_t PartyFirst = 104;     // 104..119 party members and the party carrying on (sam_party: host->client offsets 0 carry, 1 members; sam_ally_items: host->client offset 2 give request, client->host offset 0 give reply)
 	}
 	constexpr std::uint16_t PROTOCOL = 1;
 

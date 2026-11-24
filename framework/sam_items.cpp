@@ -2178,6 +2178,8 @@ namespace
 	}
 }
 
+void SAMItems::forgetItemPointer(const Item* it) { samForgetItemPointer(it); }
+
 bool SAMItems::queueDestroy(uint32_t itemUid, int owner)
 {
 	Item* it = uidToItem((Uint32)itemUid);
