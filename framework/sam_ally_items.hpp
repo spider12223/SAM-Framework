@@ -2,7 +2,7 @@
 
 	S.A.M Framework (Support All Mods)
 	File: sam_ally_items.hpp
-	Desc: gear on allies (unreleased). Read what a monster carries and wears, ask whether an
+	Desc: gear on allies (new in 3.14.0). Read what a monster carries and wears, ask whether an
 	      item may be worn, and move the SAME item between a player's backpack, an ally's
 	      pockets and its worn slots. See docs/ally-items.md.
 
@@ -71,11 +71,13 @@ namespace SAMAllyItems
 	// ---- moving between a player and an ally (a player who plays on this machine)
 
 	// Hand an item from `player`'s backpack to one of their allies / take one out of its pockets.
-	// `count` 0 is the whole stack. ok means ACCEPTED: the outcome always arrives as
+	// `count` 0 is the whole stack. ok means ACCEPTED: the outcome arrives as
 	// item.on_ally_transfer_done or item.on_ally_transfer_failed (both carry the ticket), never
-	// from the call itself, so a mod has one code path. Nothing moves until the next tick().
+	// from the call itself, so a mod has one code path; a run that ends first takes its waiting
+	// transfers with it, with no event. Nothing moves until the next tick().
 	// Refused at the call: no_ally, not_owner, unknown_item, equipped, cursed, busy, pockets_full,
-	// backpack_full, bad_count, stock_peer (a player whose game does not run S.A.M.).
+	// backpack_full (a player on this machine only), bad_count, stock_peer (a player whose game does
+	// not run S.A.M.). A remote give whose player's game does not answer in 5 seconds fails no_answer.
 	Result giveItem(int player, std::uint32_t allyUid, std::uint32_t itemUid, int count);
 	Result takeItem(int player, std::uint32_t allyUid, std::uint32_t itemUid, int count);
 

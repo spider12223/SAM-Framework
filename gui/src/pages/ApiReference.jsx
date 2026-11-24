@@ -37,7 +37,10 @@ export default function ApiReference() {
   const byCategory = useMemo(() => {
     const groups = {};
     for (const f of fns) (groups[f.category] ??= []).push(f);
-    return CATEGORY_ORDER.filter((c) => groups[c]).map((c) => [c, groups[c]]);
+    // The listed ones first, then every other category by name: a category missing from the
+    // list used to take its functions off the page (191 of 365).
+    const rest = Object.keys(groups).filter((c) => !CATEGORY_ORDER.includes(c)).sort();
+    return [...CATEGORY_ORDER.filter((c) => groups[c]), ...rest].map((c) => [c, groups[c]]);
   }, [fns]);
 
   return (

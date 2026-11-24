@@ -87,6 +87,13 @@ namespace
 
 	// Exit uid -> how many times a player has tried it with someone missing. Forgotten every floor.
 	std::map<Uint32, int> g_exitTries;
+	// Exit uid -> when the players started trying it (and their last try). A member that cannot get
+	// there (behind a door, across water, told to stay) must not hold the players forever when no
+	// mod gives up for it, so a try this long into a wait goes anyway; Barony brings every follower
+	// to the next floor regardless. A try this long after the one before starts a new wait.
+	struct ExitWait { Uint32 since = 0; Uint32 last = 0; };
+	std::map<Uint32, ExitWait> g_exitSince;
+	constexpr Uint32 EXIT_WAIT_TICKS = TICKS_PER_SECOND * 20;
 
 	void say(std::string* why, const std::string& text)
 	{
@@ -414,10 +421,14 @@ namespace
 		return n;
 	}
 
+	// An exit a member may take the party through: never a secret one (a secret ladder has
+	// LADDER_SECRET_ENTRANCE, skill[3], set; a secret portal has portalNotSecret, the same skill, clear).
 	bool isExit(Entity* e)
 	{
-		return e && !e->flags[INVISIBLE]
-			&& (e->behavior == &actLadder || e->behavior == &actPortal || e->behavior == &actMidGamePortal || e->behavior == &actCustomPortal);
+		if ( !e || e->flags[INVISIBLE] ) { return false; }
+		if ( e->behavior == &actLadder ) { return e->skill[3] == 0; }
+		if ( e->behavior == &actPortal || e->behavior == &actCustomPortal ) { return e->portalNotSecret != 0; }
+		return e->behavior == &actMidGamePortal;
 	}
 
 	// ---- every player down: carry on, or the end ---------------------------------------
@@ -431,6 +442,29 @@ namespace
 	bool g_wiped = false;                    // host: the last member fell after the players
 	bool g_carried = false;                  // host: every player was down while a carry_on member stood
 	Uint32 g_goneTicks = 0;                  // host: how long that has been over with nobody declared it
+	bool g_warnedStock = false;              // host: this run's log already says why it cannot carry on
+
+	// A player whose game does not run S.A.M gets its own vanilla game over and cannot follow a
+	// run that goes on, so online, carrying on needs S.A.M on every machine. Every decision about
+	// carrying on asks this, so the host and what it tells the clients never disagree.
+	bool stockPeerHere()
+	{
+		for ( int p = 1; multiplayer == SERVER && p < MAXPLAYERS; ++p )
+		{
+			if ( client_disconnected[p] || SAMNet::peerHasSam(p) ) { continue; }
+			if ( !g_warnedStock && membersStanding(nullptr) > 0 )
+			{
+				g_warnedStock = true;
+				SAM_WARN(MOD, "A party member with carry_on stands, but player " + std::to_string(p)
+					+ "'s game does not run S.A.M, so this run ends with the last player, as in vanilla.");
+			}
+			return true;
+		}
+		return false;
+	}
+
+	// A carry_on member stands and every machine can follow a run that goes on.
+	bool canCarry() { return membersStanding(nullptr) > 0 && !stockPeerHere(); }
 	std::map<std::uint32_t, std::uint32_t> g_heading;   // host: member uid -> the exit it is walking to
 	std::map<Uint32, Uint32> g_carryWait;   // host: exit uid -> tick a carrying member first waited there
 	constexpr Uint32 CARRY_WAIT_TICKS = TICKS_PER_SECOND * 20;   // then it goes without the stragglers
@@ -499,8 +533,9 @@ namespace
 	{
 		if ( g_wiped || anyPlayerStanding() || membersStanding(dying) > 0 ) { return; }
 		// Only a run a carry_on member was carrying ends here; without one, the last player's own
-		// death has already done what a vanilla game over does.
+		// death has already done what a vanilla game over does (with a stock player in the game too).
 		if ( !g_carried && !(dying && (SAMParty::flags(dying->getStats()) & SAMParty::FLAG_CARRY_ON)) ) { return; }
+		if ( stockPeerHere() ) { return; }
 		g_wiped = true;
 		g_carried = false;
 		samPartyWiped();
@@ -514,9 +549,9 @@ namespace
 	// stands either (it sees their health), so it does not lag its own player's fall by a message.
 	std::uint8_t hostCarryState()
 	{
-		if ( anyPlayerStanding() ) { g_wiped = false; return membersStanding(nullptr) > 0 ? CARRY_ON : CARRY_NONE; }   // a floor later, or a restart
+		if ( anyPlayerStanding() ) { g_wiped = false; return canCarry() ? CARRY_ON : CARRY_NONE; }   // a floor later, or a restart
 		if ( g_wiped ) { return CARRY_WIPED; }
-		return membersStanding(nullptr) > 0 ? CARRY_ON : CARRY_NONE;
+		return canCarry() ? CARRY_ON : CARRY_NONE;
 	}
 
 	void sendCarry(int c, std::uint8_t state)
@@ -558,6 +593,7 @@ namespace
 		g_wiped = false;
 		g_carried = false;
 		g_goneTicks = 0;
+		g_warnedStock = false;
 		g_carryWait.clear();
 		g_netMembers.clear();
 		g_sentMembers.clear();
@@ -934,9 +970,10 @@ namespace SAMParty
 		const int raceNum = resolveRace(&r);
 		const int classNum = resolveClass(&c);
 		if ( raceNum < 0 || classNum < 0 ) { return -1; }
-		// A S.A.M race or class carries no DLC or unlock of its own (menu.cpp's custom-race arm
-		// returns VALID_OK_CHARACTER the same way).
-		if ( raceNum >= SAM_RACE_ID_BASE || classNum >= SAM_CLASS_ID_BASE ) { return 1; }
+		// A S.A.M class carries no DLC or unlock of its own. A S.A.M race does not either, but the
+		// vanilla class it is paired with still does: isCharacterValidFromDLC checks the class
+		// first and only then lets the custom race through, as the character screen does.
+		if ( classNum >= SAM_CLASS_ID_BASE ) { return 1; }
 		const int player = (clientnum >= 0 && clientnum < MAXPLAYERS && stats[clientnum]) ? clientnum : -1;
 		if ( player < 0 ) { return 1; }
 		return isCharacterValidFromDLC(player, classNum, raceNum, 0) == VALID_OK_CHARACTER ? 1 : 0;
@@ -1047,6 +1084,7 @@ namespace SAMParty
 	void respawnFallen()
 	{
 		g_exitTries.clear();
+		g_exitSince.clear();
 		g_heading.clear();
 		g_carryWait.clear();
 		if ( multiplayer == CLIENT ) { return; }
@@ -1112,7 +1150,17 @@ namespace SAMParty
 			return true;   // the stragglers still come along (followers always change floor with the party)
 		}
 
-		const int attempt = ++g_exitTries[exitEntity->getUID()];
+		const Uint32 exitUid = exitEntity->getUID();
+		ExitWait& wait = g_exitSince[exitUid];
+		if ( wait.last == 0 || ticks - wait.last >= EXIT_WAIT_TICKS ) { wait.since = ticks; }
+		wait.last = ticks;
+		if ( ticks - wait.since >= EXIT_WAIT_TICKS )
+		{
+			g_exitTries.erase(exitUid);
+			g_exitSince.erase(exitUid);
+			return true;   // waited long enough: the stragglers still come along as followers
+		}
+		const int attempt = ++g_exitTries[exitUid];
 		Stat* first = stragglers.front()->getStats();
 		const std::string message = (stragglers.size() == 1 && first)
 			? std::string("Waiting for ") + first->name + " to reach the exit..."
@@ -1123,7 +1171,8 @@ namespace SAMParty
 			.i("attempt", attempt).s("message", message);
 		if ( !e.fire() )
 		{
-			g_exitTries.erase(exitEntity->getUID());
+			g_exitTries.erase(exitUid);
+			g_exitSince.erase(exitUid);
 			return true;   // a mod let the party go without them
 		}
 		const int exitX = (int)(exitEntity->x / 16);
@@ -1137,12 +1186,46 @@ namespace SAMParty
 		return false;
 	}
 
+	// A member whose leader left the game follows a player still in it, once a second. Barony takes
+	// only a connected player's followers to the next floor, so it would stay behind (and hold
+	// every exit it is set to wait at).
+	void rehomeOrphans()
+	{
+		if ( multiplayer != SERVER || ticks % TICKS_PER_SECOND != 0 || !map.creatures ) { return; }
+		for ( node_t* node = map.creatures->first; node; node = node->next )
+		{
+			Entity* e = (Entity*)node->element;
+			if ( !isMember(e) ) { continue; }
+			Stat* s = e->getStats();
+			if ( !s || s->HP <= 0 ) { continue; }
+			Entity* l = s->leader_uid ? uidToEntity(s->leader_uid) : nullptr;
+			if ( l && l->behavior == &actPlayer ) { continue; }   // follows a player in the game
+			// No living leader: one who is down keeps it (it comes back beside them). A slot that is
+			// empty, or that someone new sits in alive, means its player left.
+			const int lead = leaderOf(e, s);
+			const bool slotHere = lead >= 0 && lead < MAXPLAYERS && !client_disconnected[lead];
+			if ( slotHere && !(players[lead] && players[lead]->entity) ) { continue; }
+			// The player in its slot when there is one, otherwise the first player here.
+			for ( int k = -1; k < MAXPLAYERS; ++k )
+			{
+				const int p = k < 0 ? lead : k;
+				if ( p < 0 || p >= MAXPLAYERS || client_disconnected[p] || !players[p] || !players[p]->entity ) { continue; }
+				if ( bindToLeader(*players[p]->entity, *e, *s) )
+				{
+					messagePlayer(p, MESSAGE_HINT, "%s now follows you.", s->name);
+				}
+				break;
+			}
+		}
+	}
+
 	void tick()
 	{
 		if ( multiplayer == CLIENT ) { return; }
+		rehomeOrphans();
 		if ( anyPlayerStanding() ) { g_carried = false; g_wiped = false; g_goneTicks = 0; return; }   // a floor later, or a restart
 		if ( g_wiped ) { return; }
-		if ( membersStanding(nullptr) > 0 ) { g_carried = true; g_goneTicks = 0; return; }
+		if ( canCarry() ) { g_carried = true; g_goneTicks = 0; return; }
 		if ( !g_carried ) { return; }
 		// The members that carried the run are gone and none of them died on the way (a mod
 		// removed them, or they were swept off the floor). Wait a moment in case a floor change is
@@ -1154,7 +1237,7 @@ namespace SAMParty
 	{
 		if ( multiplayer == CLIENT ) { return g_netCarry == CARRY_ON && !anyPlayerStanding(); }   // the host's word, and no player of ours up
 		if ( anyPlayerStanding() || g_wiped ) { return false; }
-		return membersStanding(nullptr) > 0;
+		return canCarry();
 	}
 
 	int exitUser(Entity* exitEntity)
@@ -1301,5 +1384,6 @@ namespace SAMParty
 		for ( Fallen& fl : g_fallen ) { delete fl.stats; }
 		g_fallen.clear();
 		g_exitTries.clear();
+		g_exitSince.clear();
 	}
 }

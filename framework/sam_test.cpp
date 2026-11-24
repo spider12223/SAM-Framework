@@ -25,6 +25,10 @@
 #include "sam_models.hpp"  // idForModelIndex: names a mod's model in the compendium log
 #include "files.hpp"       // openDataFile: models.txt names the game's models in that log
 #include "sam_sounds.hpp"  // idForEngineIndex: names a race's emote sound in the log
+#include "sam_ally_items.hpp" // -samtestprobe=allygive: a player's half of a give to an ally
+#include "sam_net.hpp"     // SAMNet::Writer: that half's request, as the host would send it
+#include "sam_items.hpp"   // SAMItems::destroyNow: the probe takes its leftovers away again
+#include "items.hpp"       // newItem, uidToItem
 #include <algorithm>       // std::max
 
 #include <cstdio>
@@ -50,6 +54,9 @@ namespace
 	int s_timeout = 180;
 	int s_floor = 0;
 	Uint32 s_lastDescend = 0;
+	// (from 3.14.0) -samtestprobe=<name>: one engine-level check run once the game has begun.
+	std::string s_probe;
+	bool s_probed = false;
 
 	// 0 every check passed, 1 something failed, 2 nothing ever finished, 3 the mods would
 	// not load. Starts at 2: a run that dies without reaching done() has not passed, and
@@ -226,6 +233,34 @@ namespace
 		SAM_INFO(MOD, "Taunt name for player 1: " + line + ".");
 	}
 
+	// (from 3.14.0) The player's half of a give to an ally from another machine
+	// (SAMAllyItems::onGiveRequest), run on player 0 as if the host had asked, in singleplayer,
+	// where the answer goes nowhere. The item must be off the player AT ONCE, before the answer
+	// is read: it used to go a tick later, through the destroy queue, and in that tick it could
+	// still be dropped or put on and end up in two places. A whole stack, then part of one.
+	void probeAllyGive()
+	{
+		Item* gem = newItem(GEM_RUBY, EXCELLENT, 0, 1, 0, true, &stats[0]->inventory);
+		Item* apples = newItem(FOOD_APPLE, EXCELLENT, 0, 5, 0, true, &stats[0]->inventory);
+		if ( !gem || !apples ) { SAM_WARN(MOD, "Ally give probe: could not make the items."); return; }
+		const Uint32 gemUid = gem->uid, appleUid = apples->uid;
+		auto ask = [](Uint32 ticket, Uint32 uid, int count) {
+			SAMNet::Writer w;
+			w.u32(ticket);
+			w.u32(uid);
+			w.u16((std::uint16_t)count);
+			SAMAllyItems::onGiveRequest(w.buf);
+		};
+		ask(9001, gemUid, 1);
+		const bool gemGone = uidToItem(gemUid) == nullptr;
+		ask(9002, appleUid, 2);
+		Item* left = uidToItem(appleUid);
+		const int applesLeft = left ? (int)left->count : -1;
+		if ( left ) { SAMItems::destroyNow(left, 0); }
+		SAM_INFO(MOD, std::string("Ally give probe: whole stack ") + (gemGone ? "gone at once" : "still there")
+			+ ", part of a stack " + std::to_string(applesLeft) + " of 5 left at once.");
+	}
+
 	// (from 3.13.0) The noise player 1 makes on a Use that hits nothing: SAMRaces::emoteSound, what
 	// collision.cpp asks. In the race's own body as it is, then with its abilities off, polymorphed,
 	// shapeshifted and in another body, each put back before the next. "none" = the body's own noise,
@@ -295,6 +330,11 @@ bool parseArg(const char* arg)
 	if ( const char* v = valueOf(arg, "-samtestfloor=") )
 	{
 		s_floor = std::atoi(v);
+		return true;
+	}
+	if ( const char* v = valueOf(arg, "-samtestprobe=") )
+	{
+		s_probe = v;
 		return true;
 	}
 	return false;
@@ -424,6 +464,12 @@ void tick()
 		return;
 	}
 	driveToFloor();
+	if ( !s_probed && !s_probe.empty() && !intro && !loading && players[0] && players[0]->entity && stats[0] )
+	{
+		s_probed = true;
+		if ( s_probe == "allygive" ) { probeAllyGive(); }
+		else { SAM_WARN(MOD, "No test probe is called '" + s_probe + "'."); }
+	}
 	if ( s_timeout <= 0 ) { return; }
 	// The watchdog is a wall-clock promise ("nobody at the keyboard: stop it in N real
 	// seconds"), so it is measured in real milliseconds, not in `ticks`. A test that runs

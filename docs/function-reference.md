@@ -1648,7 +1648,7 @@ An empty slot shows the first two actions registered across all loaded mods. Lin
 | argument | type |
 |---|---|
 | `id` | string (letters, digits, _ . -; up to 32) |
-| `label` | string (up to 40 characters) |
+| `label` | string (up to 40 bytes) |
 
 **Returns:** true when the action exists (boolean); false for a bad id or label, or when four actions are already registered
 
@@ -1668,7 +1668,7 @@ Give a slot back: your card goes, the slot unlocks, and it shows what an empty s
 
 ### `sam_lobby_get_slot(slot)`
 
-What a lobby slot holds right now: a player (with the name shown for them), a mod's card, nothing (open: a mod may claim it), or nothing that can be used (closed by the player-count setting, or a saved game's lobby). Use it to offer "follows: <player>" choices on a card.
+What a lobby slot holds right now: a player (with the name shown for them), a mod's card, nothing (open: no player is there, and the host may claim it while a lobby is open), or nothing that can be used (closed by the player-count setting, or a saved game's lobby). Use it to offer "follows: <player>" choices on a card.
 
 | argument | type |
 |---|---|
@@ -1687,9 +1687,9 @@ Only while a lobby is open: from lobby.on_lobby_opened, lobby.on_slot_action, lo
 | argument | type |
 |---|---|
 | `slot` | int (1-3) |
-| `card` | table — one of: `title: string (up to 31 characters)`, `edit_title: boolean (the host can type over the title; sent as control "title", input "text")`, `rows: array of up to 5 rows, each one of { text = "..." } | { cycle = "control", text = "..." } | { buttons = { "control", ... }, labels = { "...", ... } } (1 to 3 buttons; text and labels up to 40 characters; a control id is letters, digits, _ . -, up to 32)` |
+| `card` | table — one of: `title: string (up to 31 bytes)`, `edit_title: boolean (the host can type over the title; sent as control "title", input "text")`, `rows: array of up to 5 rows, each one of { text = "..." } | { cycle = "control", text = "..." } | { buttons = { "control", ... }, labels = { "...", ... } } (1 to 3 buttons; text and labels up to 40 bytes, and a letter outside plain English takes 2 to 4; a control id is letters, digits, _ . -, up to 32)` |
 
-**Returns:** true when the card is shown (boolean); false, with the reason in the log, for a slot with a player in it, a slot the lobby has closed, a slot another mod holds, or a card that breaks a limit
+**Returns:** true when the card is shown (boolean); false, with the reason in the log, for a slot with a player in it, a slot the lobby has closed, a slot another mod holds, a card that breaks a limit or is too long in all to send (about 430 bytes of text), no lobby open, a saved game's lobby, or a call on a client
 
 **Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. A S.A.M player in the lobby sees the card read-only and follows every change; a player on a stock game sees a locked slot.
 
@@ -2684,9 +2684,9 @@ Whose follower a creature is. Works for any ally the player's side owns, not onl
 
 ### `sam_give_item_to_ally(player, uid, item_uid, [count])`
 
-Hands an item from a player's backpack to an ally that follows them. count is how many (leave it out, or 0, for the whole stack). The whole stack moves as the same item, with the same uid; a part makes a new item for the part and the player keeps the rest under the old uid. Nothing moves until the next game tick, so the call is safe from inside any event handler.
+Hands an item from a player's backpack to an ally that follows them. count is how many (leave it out, or 0, for the whole stack; more than the stack, or below 0, is bad_count). The whole stack moves as the same item, with the same uid; a part makes a new item for the part and the player keeps the rest under the old uid. Nothing moves until the next game tick, so the call is safe from inside any event handler.
 
-For a player on another machine the host asks that machine to take the item off itself and makes the ally's copy when it answers, so the done event can come a few ticks later (its new_item_uid is the new pocket item); a player whose game does not run S.A.M. answers stock_peer. If the connection is repaired or the player leaves while the question is out, the transfer fails (link_reset, player_gone) and the item MAY already have left the player: see the log. The ally's pockets count as full at Barony's own limit (9 items, 5 for an automaton).
+For a player on another machine the host asks that machine to take the item off itself and makes the ally's copy when it answers, so the done event can come a few ticks later (its new_item_uid is the new pocket item); a player whose game does not run S.A.M. answers stock_peer. Their game takes the item off at once as it answers, and an answer that names another item than the one asked for (only a broken or altered game sends one) makes nothing, on either side. If the connection is repaired, their game does not answer in 5 seconds (no_answer: an older S.A.M does not know the question, and a game still loading a floor can be that late) or the player leaves while the question is out, the transfer fails (link_reset, no_answer, player_gone) and the item MAY already have left the player: see the log; an answer that still comes puts it back in their hands. The ally's pockets count as full at Barony's own limit (9 items, 5 for an automaton).
 
 | argument | type |
 |---|---|
@@ -2758,7 +2758,7 @@ item.on_before_monster_equip does not fire here: taking something off is not wea
 
 ### `sam_party_choice_allowed(race, class)`
 
-The character screen's own rule for this machine: DLC ownership, and the race unlocks that gate some classes. A S.A.M custom race or class carries no gate of its own, so it is always allowed.
+The character screen's own rule for this machine: DLC ownership, and the race unlocks that gate some classes. A S.A.M custom class carries no gate of its own, so it is always allowed; a S.A.M custom race carries none either, but the vanilla class it is paired with still does, as on the character screen.
 
 | argument | type |
 |---|---|
@@ -2767,7 +2767,7 @@ The character screen's own rule for this machine: DLC ownership, and the race un
 
 **Returns:** true when the character screen would allow this race with this class here (boolean); false when it would not, or for a race or class this game does not have
 
-**Multiplayer:** `local`. Answers for the machine running the script. Per machine, like the character screen: ownership is the host's when the host asks.
+**Multiplayer:** `local`. Answers for the machine running the script. Per machine, like the character screen: it reads this machine's own DLC, so the host's answer is about the host.
 
 ### `sam_party_choices()`
 
@@ -2841,7 +2841,7 @@ Every machine builds each floor itself, so a count only one machine knows would 
 |---|---|
 | `count` | int (0-3) |
 
-**Returns:** true when the count is set (boolean); false outside 0 to 3
+**Returns:** true when the count is set (boolean); false outside 0 to 3, or on a client (the host decides)
 
 **Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false. The host decides at the start of the run and the number travels with the game's own start packet, so every S.A.M machine builds the same floors.
 
@@ -2854,13 +2854,13 @@ Change a party member's options after it exists. Only the keys you give change. 
 | `uid` | uid |
 | `options` | table — one of: `wait_at_exit: boolean`, `respawn: boolean`, `grow_like_class: boolean`, `carry_on: boolean`, `tag: string (up to 31 characters)` |
 
-**Returns:** true when the options are set (boolean); false for a creature that is not a party member or a value of the wrong kind
+**Returns:** true when the options are set (boolean); false, with the reason in the log, for a creature that is not a party member, a value of the wrong kind, a tag over 31 characters, carry_on turned on once every player is down, or a call that does not run on the host (nothing changes then)
 
 **Multiplayer:** `host`. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns false.
 
 ### `sam_party_spawn(leader, spec)`
 
-Make a party member beside a player. It starts from the same baseline stats a player does and takes its class's stats (a S.A.M custom class's through the same hook a player's go through) and its class's starting kit, equipped where a player would wear it. It levels up through the class's growth rather than a monster's roll, does not count against its leader's follower limit, stays on the players' side when its leader dies, and crosses floors as a follower does. With wait_at_exit, every exit waits for it (party.on_waiting_at_exit); with respawn, it comes back beside its leader on the next floor after it dies (party.on_member_died). party.on_member_spawned fires once it exists. With carry_on (off unless you ask), the run does not end when every player is down while this member stands: the fallen wait as ghosts, the member takes the party to the next exit, and the run ends when no carry_on member is left standing.
+Make a party member beside a player. It starts from the same baseline stats a player does and takes its class's stats (a S.A.M custom class's through the same hook a player's go through) and its class's starting kit, equipped where a player would wear it. It levels up through the class's growth rather than a monster's roll, is left out of its leader's follower count when the leader recruits with Leadership (a jewel recruit still counts it), stays on the players' side when its leader dies, and crosses floors as a follower does. With wait_at_exit, every exit waits for it (party.on_waiting_at_exit); with respawn, it comes back beside its leader on the next floor after it dies (party.on_member_died). party.on_member_spawned fires once it exists. With carry_on (off unless you ask), the run does not end when every player is down while this member stands: the fallen wait as ghosts, the member takes the party to the next exit, and the run ends when no carry_on member is left standing. Online that needs S.A.M on every machine; with a player on a stock game the run ends with the last player, as in vanilla. A monster's Charm or a player's Dominate cannot take a party member away from its party.
 
 Spawn from game.on_game_start or later (a timer of a tick is safest): before the leader's body exists there is nobody to stand beside and the call is refused. A class's starting spells are not learned (a monster casts from what it carries), and race-specific items in a vanilla kit are skipped. sam_spawn_companion is a different thing: a scripted model that walks beside a player, not a creature with stats.
 
@@ -2875,7 +2875,7 @@ Spawn from game.on_game_start or later (a timer of a tick is safest): before the
 
 ### `sam_take_item_from_ally(player, uid, item_uid, [count])`
 
-Takes an item out of an ally's pockets into a player's backpack. Barony's own pick-up places it, and it may join a stack there, so item.on_ally_transfer_done tells you the uid it ended up under (new_item_uid). Something the ally wears has to come off first (sam_monster_unequip_to_inventory).
+Takes an item out of an ally's pockets into a player's backpack. count is how many (leave it out, or 0, for the whole stack; a part leaves the rest in the pockets under the old uid; more than the stack, or below 0, is bad_count). Barony's own pick-up places it, and it may join a stack there, so item.on_ally_transfer_done tells you the uid it ended up under (new_item_uid). Something the ally wears has to come off first (sam_monster_unequip_to_inventory).
 
 Refused with backpack_full when the backpack has no free slot, even for an item that would have joined a stack (a player on another machine is not checked; their game places the item). For a player on another machine new_item_uid is 0, because their game gives the item its own uid, and a player whose game does not run S.A.M. answers stock_peer.
 
@@ -5019,7 +5019,7 @@ Fires the game is won or the party wipes.
 
 won is 0/1
 
-**Multiplayer:** Fires on the host, once per run (a party wipe and every win path alike).
+**Multiplayer:** Fires on the host, once per run (a party wipe and every win path alike). While a party member with carry_on carries the run on after every player is down, the run has not ended: it fires when it does, naming the last player who fell.
 
 ### `game.on_game_start`
 
@@ -5090,9 +5090,9 @@ Fires a transfer that a call accepted could not be finished.
 | `uid` | uid (the ally) |
 | `ticket` | int |
 | `item_uid` | uid |
-| `reason` | string (ally_gone, player_gone, item_gone, equipped, cursed, bad_count, pockets_full, backpack_full, stock_peer, link_reset) |
+| `reason` | string (ally_gone, player_gone, item_gone, equipped, cursed, bad_count, pockets_full, backpack_full, stock_peer, link_reset, no_answer) |
 
-On the host's own machine nothing is lost: the item never left where it was. For a player on another machine, link_reset (their connection was repaired while the question was out) can mean the item already left them; the log says so.
+On the host's own machine nothing is lost: the item never left where it was. For a player on another machine, link_reset (their connection was repaired while the question was out) and no_answer (their game did not answer in 5 seconds) can mean the item already left them; the log says so, and an answer that still comes puts it back. A run that ends while a transfer waits takes it with it, with no event.
 
 **Multiplayer:** Fires on the host.
 
@@ -5444,7 +5444,7 @@ Fires a player tried an exit that is waiting for a party member: one set to wait
 | `attempt` | int (1 the first time this exit is tried with someone missing, counting up) |
 | `message` | string |
 
-Return false to let the party go now (a party member is a follower, so Barony still brings it to the next floor beside its leader, as it does every follower). Otherwise the missing members are sent to the exit and the player is told message ("Waiting for Brienne to reach the exit..."). attempt lets a mod give up after a few tries, so a member stuck behind a wall cannot hold the party up. Check sam_party_get_info(e.first_uid).mod before giving up, so you only decide for your own members.
+Return false to let the party go now (a party member is a follower, so Barony still brings it to the next floor beside its leader, as it does every follower). Otherwise the missing members are sent to the exit and the player is told message ("Waiting for Brienne to reach the exit..."). attempt lets a mod give up after a few tries, so a member stuck behind a wall cannot hold the party up; if nothing gives up, a try 20 seconds after the first at that exit goes anyway, without firing this. Check sam_party_get_info(e.first_uid).mod before giving up, so you only decide for your own members.
 
 Vanilla's own "assemble your party" check for the players runs first; this fires only once the players are together. While every player is down and the members are taking the party to an exit themselves, it does not fire at all (nobody clicked): that exit waits up to 20 seconds for the rest on its own.
 
@@ -5727,7 +5727,7 @@ Fires a player's game-over window opens on their own machine.
 
 Your last chance to write per-run state with sam_save_data (a file on that machine) before the run is gone. Not cancellable.
 
-**Multiplayer:** Fires on the dying player's own machine (a client's own game for a client) when that player's game-over window opens. In co-op that can be a death while others still live (survived tells you), not only the end of the run. While a party member with carry_on carries the run on after every player is down, the Dismiss window does not fire it; the final window, when the party is wiped, does. The host never sees a remote player's.
+**Multiplayer:** Fires on the dying player's own machine (a client's own game for a client) when that player's game-over window opens. In co-op that can be a death while others still live (survived tells you), not only the end of the run. While a party member with carry_on carries the run on after every player is down, the Dismiss window does not fire it; the final window, when the party is wiped, does, so a player who fell earlier while another still stood gets it a second time then. The host never sees a remote player's.
 
 ### `player.on_gold_collected`
 

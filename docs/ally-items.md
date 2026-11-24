@@ -1,4 +1,4 @@
-# Gear on allies (unreleased)
+# Gear on allies (new in 3.14.0)
 
 A mod can already make a monster follow a player (`sam_make_follower`, `sam_party_spawn`). This
 adds what it could not do with one: read what an ally carries and wears, ask whether it may wear
@@ -80,8 +80,8 @@ local r = sam_take_item_from_ally(player, allyUid, itemUid, count) -- from the a
 ```
 
 `count` left out, or 0, is the whole stack. `r` is `{ ok, reason, text, ticket }`. **ok means
-accepted, not done.** The outcome always arrives as an event with the same `ticket`, so a mod has
-one code path:
+accepted, not done.** The outcome arrives as an event with the same `ticket`, so a mod has one
+code path (only a run that ends first takes its waiting transfers with it, with no event):
 
 - `item.on_ally_transfer_done { player, uid, ticket, item_uid, new_item_uid, count }`
 - `item.on_ally_transfer_failed { player, uid, ticket, item_uid, reason }`
@@ -105,10 +105,13 @@ Refused at the call: `no_ally`, `not_owner` (the ally follows someone else, or t
 here), `unknown_item`, `equipped` (take it off first), `cursed`, `busy` (that item is already
 being moved), `pockets_full`, `backpack_full`, `bad_count`, `stock_peer`.
 Failed after being accepted: `ally_gone`, `player_gone`, `item_gone`, `equipped`, `cursed`, `bad_count`,
-`pockets_full`, `backpack_full`, `stock_peer`, and for a player on another machine `link_reset`.
+`pockets_full`, `backpack_full`, `stock_peer`, and for a player on another machine `link_reset` and
+`no_answer`.
 
 `backpack_full` is Barony's own test (the backpack has no free slot); it refuses even an item that
-would have joined a stack.
+would have joined a stack. It is only asked for a player on the host's machine: the host cannot see
+the free slots of a backpack on another machine (they depend on that player's own screen layout), so
+a take to that player is handed over the way the game hands that player any item.
 
 ### A player on another machine
 
@@ -121,10 +124,17 @@ delivered through the game's own pick-up packet, the player's game gives it its 
 Both need the player's game to run S.A.M (a mod item would arrive as a rock in a stock game), so a
 player who has not said hello answers `stock_peer`, and nothing is sent.
 
-If the player's connection is repaired, or a new run begins, while the question is out, the
-transfer fails with `link_reset` and the log says the item **may** already have left the player.
-That is the one case where "nothing is lost" does not hold; a player who leaves gives
-`player_gone`.
+The player's game takes the item off at once, as it answers, so it cannot be dropped or put on
+while the ally's copy is made. The answer has to
+name the item that was asked for, the same type and count; anything else (only a broken or altered
+game sends it) makes nothing, on either side.
+
+If the player's connection is repaired while the question is out, the transfer fails with
+`link_reset` and the log says the item **may** already have left the player. If their game has not
+answered in 5 seconds (an older S.A.M does not know the question, and a game still loading a floor
+can be that late), it fails with `no_answer`. Either way an answer that still comes puts the item back in their hands. A player who
+leaves gives `player_gone`, and a new run drops the question with no event; those are the cases
+where "nothing is lost" does not hold.
 
 ## Turning it off
 
@@ -138,7 +148,11 @@ Run: the engine-level checks (real framework code against the real game code, a 
 feature) for the reasons, the identity rule, curses, species rules, the veto, both directions of
 a transfer on the host's own player, and every ticket outcome including the remote-player
 protocol against a faked channel. On a Windows build, `examples/ItemMoveTest` passes in a running
-game (56 checks), and fails on the shipped 3.12.1 exe, which has none of these calls.
+game (56 checks), and fails on the shipped 3.12.1 exe, which has none of these calls. The player's
+half of a remote give (the item off the player at once, whole or in part) is played on player 0 by
+a test probe in the framework's own test suite, whose log check fails on the build that queued the
+destroy.
+The no-answer timeout and the matching answer are read in the code, not run.
 
 Not run: anything online with two machines; whether other players see an ally's new helmet after the ally is relinked or the game
 is saved and loaded (read in the code, not watched).

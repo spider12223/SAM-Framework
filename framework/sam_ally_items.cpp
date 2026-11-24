@@ -265,11 +265,23 @@ namespace
 		bool remote = false;      // the player plays on another machine
 		bool awaiting = false;    // a give whose request is out: only the player's machine can answer it
 		std::uint32_t ownerUid = 0;   // a remote give: the uid the player's own machine knows the item by
+		int type = -1;                // a remote give: the item type the host's copy of their backpack showed
+		Uint32 sentTick = 0;          // a remote give: when the request went out
 	};
+	// A remote give whose player's game has not answered by then fails with no_answer (an older
+	// S.A.M has no handler for the request and drops it). A late answer still gives the item back.
+	constexpr Uint32 ANSWER_TICKS = TICKS_PER_SECOND * 5;
 	std::map<std::uint32_t, Ticket> g_tickets;   // in the order they were made
 	// Gives whose request was out when they were failed (link_reset, player_gone, a new run): the
-	// player's game may still answer ok, and by then the item has left them. id -> player.
-	std::map<std::uint32_t, int> g_lost;
+	// player's game may still answer ok, and by then the item has left them. id -> the ticket.
+	std::map<std::uint32_t, Ticket> g_lost;
+
+	// The answer to a remote give names the item it took off the player. It must be the one asked
+	// for: the same type and exactly the count the request said (the player's game never sends another).
+	bool replyMatches(const Ticket& t, int type, int count)
+	{
+		return type == t.type && count == t.count && count > 0;
+	}
 	std::uint32_t g_nextTicket = 1;
 
 	// The ops (offsets inside SAMNet::Op::PartyFirst; see sam_net.hpp). Host -> client and
@@ -314,7 +326,7 @@ namespace
 
 	// Everything that can be told at the call, in the order the reasons are listed in the header.
 	// `item` and `ally` are set on success.
-	SAMAllyItems::Result checkTransfer(bool give, int player, std::uint32_t allyUid, std::uint32_t itemUid, int count, int* resolvedCount)
+	SAMAllyItems::Result checkTransfer(bool give, int player, std::uint32_t allyUid, std::uint32_t itemUid, int count, int* resolvedCount, int* resolvedType)
 	{
 		Stat* as = nullptr;
 		if ( !monsterOf(allyUid, &as) || SAMAllyItems::leaderOf(allyUid) < 0 ) { return refuse("no_ally", "That is not an ally."); }
@@ -347,6 +359,7 @@ namespace
 		if ( give && pocketsFull(as) ) { return refuse("pockets_full", "Its pockets are full."); }
 		if ( !give && local && !backpackHasRoom(player) ) { return refuse("backpack_full", "Your backpack is full."); }
 		if ( resolvedCount ) { *resolvedCount = count == 0 ? (int)item->count : count; }
+		if ( resolvedType ) { *resolvedType = (int)item->type; }
 		SAMAllyItems::Result ok;
 		ok.ok = true;
 		return ok;
@@ -354,8 +367,8 @@ namespace
 
 	SAMAllyItems::Result queueTransfer(bool give, int player, std::uint32_t allyUid, std::uint32_t itemUid, int count)
 	{
-		int n = 0;
-		SAMAllyItems::Result r = checkTransfer(give, player, allyUid, itemUid, count, &n);
+		int n = 0, type = -1;
+		SAMAllyItems::Result r = checkTransfer(give, player, allyUid, itemUid, count, &n, &type);
 		if ( !r.ok ) { return r; }
 		Ticket t;
 		t.id = g_nextTicket++;
@@ -364,6 +377,7 @@ namespace
 		t.allyUid = allyUid;
 		t.itemUid = itemUid;
 		t.count = n;
+		t.type = type;
 		t.remote = !localPlayer(player);
 		if ( t.remote && give )
 		{
@@ -378,6 +392,7 @@ namespace
 			w.u16((std::uint16_t)n);
 			if ( !SAMNet::sendToClient(player, requestOp(), w.buf) ) { return refuse("stock_peer", "That player's game cannot take the request."); }
 			t.awaiting = true;
+			t.sentTick = ticks;
 		}
 		g_tickets[t.id] = t;
 		r.ticket = t.id;
@@ -686,10 +701,19 @@ namespace SAMAllyItems
 			o.t = it->second;
 			if ( o.t.awaiting )
 			{
-				if ( remotePlayer(o.t.player) ) { ++it; continue; }
-				g_lost[o.t.id] = o.t.player;
-				SAM_WARN(MOD, "Player " + std::to_string(o.t.player) + " left while an item they gave to an ally was in transit (ticket " + std::to_string(o.t.id) + "; possible loss).");
-				fail(o, "player_gone");
+				const bool here = remotePlayer(o.t.player);
+				if ( here && ticks - o.t.sentTick < ANSWER_TICKS ) { ++it; continue; }
+				g_lost[o.t.id] = o.t;
+				if ( here )
+				{
+					SAM_WARN(MOD, "Player " + std::to_string(o.t.player) + "'s game did not answer an item given to an ally (ticket " + std::to_string(o.t.id)
+						+ "); an older S.A.M does not know the request. If the answer still comes, the item goes back to them.");
+				}
+				else
+				{
+					SAM_WARN(MOD, "Player " + std::to_string(o.t.player) + " left while an item they gave to an ally was in transit (ticket " + std::to_string(o.t.id) + "; possible loss).");
+				}
+				fail(o, here ? "no_answer" : "player_gone");
 				o.t.awaiting = false;
 				o.skipPerform = true;
 			}
@@ -732,7 +756,11 @@ namespace SAMAllyItems
 		w.i64((long long)item->beatitude);
 		w.u32((std::uint32_t)item->appearance);
 		w.u8(item->identified ? 1 : 0);
-		if ( count == item->count ) { SAMItems::queueDestroy(item->uid, me); }
+		// Off the player NOW, before the answer goes: the host makes the ally's copy as soon as it
+		// reads it, and a queued destroy left the item usable for a tick (drop it or put it on, and
+		// it was in two places). This runs from SAMNet::tick, the same top-level point in the tick
+		// as the destroy queue's own drain, so nothing in the engine holds the item here.
+		if ( count == item->count ) { SAMItems::destroyNow(item, me); }
 		else { item->count -= (Sint16)count; }
 		SAMMpInventory::nudgeReport();
 		SAMNet::sendToHost(replyOp(), w.buf);
@@ -750,14 +778,15 @@ namespace SAMAllyItems
 			// Failed already (a repaired connection, a new run, a player who left) but the player's game
 			// went on and took the item off itself: nothing was made here, so it goes back to them.
 			auto lost = g_lost.find(id);
-			if ( lost != g_lost.end() && lost->second == from && ok )
+			if ( lost != g_lost.end() && lost->second.player == from && ok )
 			{
+				const Ticket was = lost->second;
 				g_lost.erase(lost);
 				const int type = (int)rd.u32(), count = rd.u16(), status = rd.u8();
 				const long long beat = rd.i64();
 				const std::uint32_t appearance = rd.u32();
 				const bool identified = rd.u8() != 0;
-				if ( rd.ok )
+				if ( rd.ok && replyMatches(was, type, count) )
 				{
 					SAM_WARN(MOD, "An item player " + std::to_string(from) + " gave to an ally (ticket " + std::to_string(id) + ") arrived after the transfer had failed; it was sent back to them.");
 					sendBack(from, type, status, (int)beat, count, appearance, identified);
@@ -782,6 +811,17 @@ namespace SAMAllyItems
 		{
 			SAM_WARN(MOD, "Player " + std::to_string(from) + " answered an item given to an ally (ticket " + std::to_string(id) + ") with a broken message; it has left them (possible loss).");
 			fireFailed(t, "link_reset");
+			return;
+		}
+		// Not the item that was asked for (another type, or another count): nothing is made from it,
+		// here or back in the player's hands. A S.A.M game always answers with the item it was asked
+		// about, so only a broken or altered one gets here.
+		if ( !replyMatches(t, type, count) )
+		{
+			SAM_WARN(MOD, "Player " + std::to_string(from) + " answered an item given to an ally (ticket " + std::to_string(id)
+				+ ") with another item than the one asked for (type " + std::to_string(type) + " x" + std::to_string(count)
+				+ ", asked type " + std::to_string(t.type) + " x" + std::to_string(t.count) + "); nothing was made.");
+			fireFailed(t, "item_gone");
 			return;
 		}
 		Stat* as = nullptr;
@@ -810,7 +850,7 @@ namespace SAMAllyItems
 			if ( it->second.awaiting && it->second.player == player )
 			{
 				const Ticket t = it->second;
-				g_lost[t.id] = t.player;
+				g_lost[t.id] = t;
 				it = g_tickets.erase(it);
 				SAM_WARN(MOD, "An item given to an ally by player " + std::to_string(player) + " (ticket " + std::to_string(t.id)
 					+ ") was still waiting when their connection was repaired; it may have been taken from them (possible loss).");

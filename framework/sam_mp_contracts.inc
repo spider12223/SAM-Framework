@@ -263,7 +263,7 @@ SAM_MP(sam_party_set_difficulty_count,    Host,   None,      0, False)
 SAM_MP(sam_party_set_options,             Host,   None,      0, False)
 SAM_MP(sam_party_spawn,                   Host,   None,      0, Nil)
 
-// ---- Ally items (unreleased)
+// ---- Ally items (3.14.0)
 // Monsters and their pockets are the host's, so every call here is the host's.
 SAM_MP(sam_get_follower_leader,           Host,   None,      0, None)
 SAM_MP(sam_give_item_to_ally,             Host,   None,      0, Nil)

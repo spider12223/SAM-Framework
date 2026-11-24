@@ -6894,7 +6894,7 @@ namespace
 		{
 			double d = 0.0;
 			if ( !samJsNum(ctx, argv[3], &d) ) { return samJsFromValue(ctx, SAMAllyItems::toValue(SAMAllyItems::Result{false, "bad_count", "That is not a number.", 0})); }
-			count = (int64_t)d;
+			count = d >= 0.0 ? (int64_t)d : -1;   // below 0 is bad_count, never a part that rounds to the whole stack
 		}
 		const std::uint32_t id = (uid > 0 && uid <= 0xFFFFFFFFLL) ? (std::uint32_t)uid : 0;
 		const std::uint32_t item = (itemUid > 0 && itemUid <= 0xFFFFFFFFLL) ? (std::uint32_t)itemUid : 0;
@@ -6920,7 +6920,7 @@ namespace
 		{
 			double d = 0.0;
 			if ( !samJsNum(ctx, argv[3], &d) ) { return samJsFromValue(ctx, SAMAllyItems::toValue(SAMAllyItems::Result{false, "bad_count", "That is not a number.", 0})); }
-			count = (int64_t)d;
+			count = d >= 0.0 ? (int64_t)d : -1;   // below 0 is bad_count, never a part that rounds to the whole stack
 		}
 		const std::uint32_t id = (uid > 0 && uid <= 0xFFFFFFFFLL) ? (std::uint32_t)uid : 0;
 		const std::uint32_t item = (itemUid > 0 && itemUid <= 0xFFFFFFFFLL) ? (std::uint32_t)itemUid : 0;

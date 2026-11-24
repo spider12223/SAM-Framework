@@ -337,12 +337,14 @@ persisted; shape the loot pool with six tables and nine generation events instea
 
 A mod can put a creature in the party the way a player is (a class's kit and growth, waited for at
 exits, back next floor if it falls), add links and cards of its own to empty player slots in the
-lobby, and, while a party member still stands, keep the run going after every player is down.
-`examples/PartyTest` runs it in a real game, and companion mods are the obvious use. (unreleased)
+lobby, and, while a party member it set to `carry_on` still stands, keep the run going after every
+player is down.
+`examples/PartyTest` runs party members in a real game (lobby cards, carry_on and online play are not in it), and
+companion mods are the obvious use. (New in 3.14.0.)
 
 **[docs/party-and-lobby.md](docs/party-and-lobby.md)**
 
-**[docs/ally-items.md](docs/ally-items.md)** (unreleased): read what an ally carries and wears, dress it, and move items between a player and it. `examples/ItemMoveTest` runs it in a real game.
+**[docs/ally-items.md](docs/ally-items.md)** (new in 3.14.0): read what an ally carries and wears, dress it, and move items between a player and it. `examples/ItemMoveTest` runs it in a real game, on the host's own player.
 
 ## Testing a mod without playing it
 
@@ -416,6 +418,14 @@ registry/        Public namespace registry (submit a PR to reserve yours)
 release-notes/   One file per release
 ```
 
+## Contributors
+
+- **[RumpleIVSkin](https://github.com/RumpleIVSkin)**: party members, lobby cards and gear on allies
+  (`sam_party_*`, `sam_lobby_*` and the ally item functions; 3.14.0).
+
+Want your name here? [CONTRIBUTING.md](CONTRIBUTING.md) is the map of where things live and how a
+feature reaches a mod.
+
 ## License
 
 S.A.M's own code, schemas, GUI, and docs are released under the [MIT License](LICENSE). Barony is © Turning Wheel LLC; you must own it to use S.A.M.
@@ -426,7 +436,7 @@ S.A.M Framework is built on Barony's open source release.
 Barony is licensed under the BSD 2-Clause License.
 Copyright (c) 2013-2020, Turning Wheel LLC
 
-S.A.M Framework code is original work by spider12223, written with AI assistance. The framework source is available at:
+S.A.M Framework code is original work by spider12223, with the contributions listed under [Contributors](#contributors), written with AI assistance. The framework source is available at:
 https://github.com/spider12223/SAM-Framework
 
 When S.A.M is distributed as a patched binary, the BSD 2-Clause copyright notice above is reproduced (as that license requires). Full third-party license texts for Barony and its bundled libraries (Dear ImGui, SDL, RapidJSON) are reproduced in [NOTICE.txt](NOTICE.txt).

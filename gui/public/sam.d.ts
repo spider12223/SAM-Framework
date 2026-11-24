@@ -954,7 +954,7 @@ declare global {
   function sam_gib(entity_uid: number, sprite?: number): boolean;
 
   /**
-   * Hands an item from a player's backpack to an ally that follows them. count is how many (leave it out, or 0, for the whole stack). The whole stack moves as the same item, with the same uid; a part makes a new item for the part and the player keeps the rest under the old uid. Nothing moves until the next game tick, so the call is safe from inside any event handler.
+   * Hands an item from a player's backpack to an ally that follows them. count is how many (leave it out, or 0, for the whole stack; more than the stack, or below 0, is bad_count). The whole stack moves as the same item, with the same uid; a part makes a new item for the part and the player keeps the rest under the old uid. Nothing moves until the next game tick, so the call is safe from inside any event handler.
    *
    * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Host only, like the monsters themselves.
    */
@@ -1367,7 +1367,7 @@ declare global {
   function sam_lobby_clear_card(slot: number): boolean;
 
   /**
-   * What a lobby slot holds right now: a player (with the name shown for them), a mod's card, nothing (open: a mod may claim it), or nothing that can be used (closed by the player-count setting, or a saved game's lobby). Use it to offer "follows: <player>" choices on a card.
+   * What a lobby slot holds right now: a player (with the name shown for them), a mod's card, nothing (open: no player is there, and the host may claim it while a lobby is open), or nothing that can be used (closed by the player-count setting, or a saved game's lobby). Use it to offer "follows: <player>" choices on a card.
    *
    * Multiplayer: local. Answers for the machine running the script. Per machine: a client knows the cards the host sent it.
    */
@@ -1556,9 +1556,9 @@ declare global {
   function sam_obituary(killer_uid: number, victim_uid: number, from_spell?: boolean): boolean;
 
   /**
-   * The character screen's own rule for this machine: DLC ownership, and the race unlocks that gate some classes. A S.A.M custom race or class carries no gate of its own, so it is always allowed.
+   * The character screen's own rule for this machine: DLC ownership, and the race unlocks that gate some classes. A S.A.M custom class carries no gate of its own, so it is always allowed; a S.A.M custom race carries none either, but the vanilla class it is paired with still does, as on the character screen.
    *
-   * Multiplayer: local. Answers for the machine running the script. Per machine, like the character screen: ownership is the host's when the host asks.
+   * Multiplayer: local. Answers for the machine running the script. Per machine, like the character screen: it reads this machine's own DLC, so the host's answer is about the host.
    */
   function sam_party_choice_allowed(race: string, class_: string): boolean | undefined;
 
@@ -1619,7 +1619,7 @@ declare global {
   function sam_party_set_options(uid: number, options: any): boolean;
 
   /**
-   * Make a party member beside a player. It starts from the same baseline stats a player does and takes its class's stats (a S.A.M custom class's through the same hook a player's go through) and its class's starting kit, equipped where a player would wear it. It levels up through the class's growth rather than a monster's roll, does not count against its leader's follower limit, stays on the players' side when its leader dies, and crosses floors as a follower does. With wait_at_exit, every exit waits for it (party.on_waiting_at_exit); with respawn, it comes back beside its leader on the next floor after it dies (party.on_member_died). party.on_member_spawned fires once it exists. With carry_on (off unless you ask), the run does not end when every player is down while this member stands: the fallen wait as ghosts, the member takes the party to the next exit, and the run ends when no carry_on member is left standing.
+   * Make a party member beside a player. It starts from the same baseline stats a player does and takes its class's stats (a S.A.M custom class's through the same hook a player's go through) and its class's starting kit, equipped where a player would wear it. It levels up through the class's growth rather than a monster's roll, is left out of its leader's follower count when the leader recruits with Leadership (a jewel recruit still counts it), stays on the players' side when its leader dies, and crosses floors as a follower does. With wait_at_exit, every exit waits for it (party.on_waiting_at_exit); with respawn, it comes back beside its leader on the next floor after it dies (party.on_member_died). party.on_member_spawned fires once it exists. With carry_on (off unless you ask), the run does not end when every player is down while this member stands: the fallen wait as ghosts, the member takes the party to the next exit, and the run ends when no carry_on member is left standing. Online that needs S.A.M on every machine; with a player on a stock game the run ends with the last player, as in vanilla. A monster's Charm or a player's Dominate cannot take a party member away from its party.
    *
    * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Party members are monsters, so every machine sees them the way it sees any ally the host spawned.
    */
@@ -2368,7 +2368,7 @@ declare global {
   function sam_stop_sound(sound: string): number;
 
   /**
-   * Takes an item out of an ally's pockets into a player's backpack. Barony's own pick-up places it, and it may join a stack there, so item.on_ally_transfer_done tells you the uid it ended up under (new_item_uid). Something the ally wears has to come off first (sam_monster_unequip_to_inventory).
+   * Takes an item out of an ally's pockets into a player's backpack. count is how many (leave it out, or 0, for the whole stack; a part leaves the rest in the pockets under the old uid; more than the stack, or below 0, is bad_count). Barony's own pick-up places it, and it may join a stack there, so item.on_ally_transfer_done tells you the uid it ended up under (new_item_uid). Something the ally wears has to come off first (sam_monster_unequip_to_inventory).
    *
    * Multiplayer: host. Runs on the host (and in singleplayer). A client's call is refused with a one-time warning and returns nil (undefined in JavaScript). Host only, like the monsters themselves.
    */
@@ -2567,7 +2567,7 @@ declare global {
   type SamEventName =
     /** Fires a script calls sam_fire_hook("namespace:name", event); delivered cross-runtime (Lua<->JS<->TS) to every loaded script's on_event. Multiplayer: Fires on the machine that calls sam_fire_hook, which is the host (a client's call is refused). */
     | "<namespace>:<hook_name>"
-    /** Fires the game is won or the party wipes. Multiplayer: Fires on the host, once per run (a party wipe and every win path alike). */
+    /** Fires the game is won or the party wipes. Multiplayer: Fires on the host, once per run (a party wipe and every win path alike). While a party member with carry_on carries the run on after every player is down, the run has not ended: it fires when it does, naming the last player who fell. */
     | "game.on_game_end"
     /** Fires a new game begins. Multiplayer: Fires on the host, once for every player. */
     | "game.on_game_start"
@@ -2655,7 +2655,7 @@ declare global {
     | "player.on_equip"
     /** Fires the party takes a ladder to a new floor. Multiplayer: Fires on the host, once for every connected player when the party takes a ladder; initiator is the player who climbed. */
     | "player.on_floor_change"
-    /** Fires a player's game-over window opens on their own machine. Multiplayer: Fires on the dying player's own machine (a client's own game for a client) when that player's game-over window opens. In co-op that can be a death while others still live (survived tells you), not only the end of the run. While a party member with carry_on carries the run on after every player is down, the Dismiss window does not fire it; the final window, when the party is wiped, does. The host never sees a remote player's. */
+    /** Fires a player's game-over window opens on their own machine. Multiplayer: Fires on the dying player's own machine (a client's own game for a client) when that player's game-over window opens. In co-op that can be a death while others still live (survived tells you), not only the end of the run. While a party member with carry_on carries the run on after every player is down, the Dismiss window does not fire it; the final window, when the party is wiped, does, so a player who fell earlier while another still stood gets it a second time then. The host never sees a remote player's. */
     | "player.on_game_over"
     /** Fires a player picks up gold. Multiplayer: Fires on the host, for every player. */
     | "player.on_gold_collected"

@@ -1,6 +1,6 @@
 # Party members and lobby cards
 
-Two things a mod could not do before this (unreleased) feature: put a creature in the party the way a player is in
+Two things a mod could not do before 3.14.0: put a creature in the party the way a player is in
 it, and let the host choose one in the lobby, in a player slot.
 
 - **Party members** (`sam_party_*`): a monster on the players' side that starts with a class's
@@ -72,7 +72,7 @@ sam_party_fallen()                                -- the ones coming back next f
 sam_party_is_member(uid)                          -- one integer test; cheap
 ```
 
-`leader` stays the player it follows while that player is down, so a fallen member comes back beside them; it is -1 only for a member that has lost its leader entirely.
+`leader` stays the player it follows while that player is down, so a fallen member comes back beside them. A member whose player leaves the game follows a player still in it within a second (that player is told), so it crosses the next floor with the party instead of staying behind.
 
 ---
 
@@ -82,7 +82,7 @@ sam_party_is_member(uid)                          -- one integer test; cheap
 |---|---|---|
 | starting gear | the species' random gear | its class's kit, worn where a player wears it |
 | level-ups | a monster's random roll | its class's growth (`playerStatIncrease`) |
-| follower limit | counts against its leader's | does not count |
+| follower limit | counts against its leader's | left out when its leader recruits with Leadership (a jewel recruit still counts it) |
 | its leader dies | turns hostile, or vanishes if summoned | stays on the players' side |
 | an exit | comes along | waits for it (`wait_at_exit`) |
 | it dies | gone | back next floor (`respawn`) |
@@ -106,8 +106,9 @@ party" check has passed. A member set to wait that is more than 4 tiles away is 
 and the player is told who is missing. `party.on_waiting_at_exit` fires each time; `e.attempt`
 counts the tries at this exit, and returning `false` lets the party go now, so a member stuck
 behind a wall cannot hold everybody up (Barony still brings every follower, party members
-included, to the next floor beside its leader). Check `sam_party_get_info(e.first_uid).mod` so you
-only give up on your own members:
+included, to the next floor beside its leader). If nothing lets the party go, a try 20 seconds
+after the first goes anyway, so a member that cannot get there never strands the players. Check
+`sam_party_get_info(e.first_uid).mod` so you only give up on your own members:
 
 ```lua
 if e.name == "party.on_waiting_at_exit" and e.attempt >= 3 then
@@ -121,17 +122,22 @@ beside its leader (or any living player) and `party.on_member_spawned` fires wit
 `respawned = 1`. One with nowhere to stand waits another floor.
 
 **Orders.** A party member takes every order in the follower menu (follow, wait, move to,
-attack, items) whatever its leader's Leadership skill: it is a companion, not a recruit. In
-online play the host tells each S.A.M client which creatures are party members, so the same
-holds for a friend's own companion.
+attack, items) whatever its leader's Leadership skill: it is a companion, not a recruit. The
+host applies the same rule when the order arrives. In online play the host tells each
+S.A.M client which creatures are party members, so the same holds for a friend's own companion.
 
-**When every player is down (unreleased).** This is off unless a mod turns it on: give a member `carry_on = true` (in `sam_party_spawn`, or later with `sam_party_set_options`). A game with no such member ends when the last player falls, as vanilla does. While a `carry_on` member still stands, the run is not over:
+**Charms.** A party member cannot be charmed or dominated away from its party: a monster's Charm
+Monster, which may steal anyone else's follower, pacifies it instead, and Dominate answers as it
+does for a creature it cannot take. (Read in the code, not run.)
+
+**When every player is down.** This is off unless a mod turns it on: give a member `carry_on = true` (in `sam_party_spawn`, or later with `sam_party_set_options`). A game with no such member ends when the last player falls, as vanilla does. While a `carry_on` member still stands, the run is not over:
 
 - The fallen get the "your party carries on" game-over window. Dismiss makes them a ghost (in
   solo too, as in co-op); the host tells every S.A.M client, so a friend's window says the same.
 - Each standing member finishes the fight it is in, then walks to an exit it can reach: the
   one another member is already making for if there is one, otherwise the nearest it has a
-  path to (a secret ladder behind a wall is passed over).
+  path to, never a secret ladder or portal (a member does not take the party to a secret level
+  on its own).
 - A member at an exit takes the party through, as a player would. The exit waits up to 20
   seconds for members still on their way; it says nothing and fires no
   `party.on_waiting_at_exit` meanwhile (nobody clicked).
@@ -144,7 +150,12 @@ holds for a friend's own companion.
   deleted, the music plays and the run's scores are posted, as when the last player dies.
   `player.on_game_over` fires for a player whose window was the final one; one who fell earlier
   while another player still stood has already had it fire for that death, and gets it again here.
+  `game.on_game_end` (won 0) fires here, once, naming the last player who fell; it does not fire
+  when that player fell, because the run had not ended then.
 - `sam_party_set_options` refuses to turn `carry_on` on once no player is standing: that run has ended.
+- Online, this needs S.A.M on every machine. With a player on a stock game, which would show its
+  own player the final game over and could not follow the run, the run ends with the last player,
+  as in vanilla, and the host's log says why.
 
 Turning `carry_on` off on the last member that carries ends the run after the same two seconds. A floor whose every exit is out
 of reach (locked, or past a boss) leaves the members waiting; the pause menu can still end the run.
@@ -199,10 +210,10 @@ Lua and JavaScript.
 
 | limit | |
 |---|---|
-| title | 31 characters |
+| title | 31 bytes |
 | rows | 5 |
 | buttons in a row | 3 |
-| a row's text, a label | 40 characters |
+| a row's text, a label | 40 bytes (a letter outside plain English takes 2 to 4) |
 | a control id | letters, digits, `_ . -`, up to 32; `"title"` is the title box's |
 | slot actions | 4 across all mods; an empty slot draws the first 2 |
 
@@ -211,7 +222,8 @@ Lua and JavaScript.
 **Who sees what.** The host sees the card with its controls. A player whose game runs S.A.M sees
 the same card read-only and follows every change. A player on a stock game sees a locked slot.
 While you hold a slot it is locked, so nobody can join into it, and the player-count setting
-leaves it alone until you give it back with `sam_lobby_clear_card`.
+leaves it alone until you give it back with `sam_lobby_clear_card`. Then the setting's word
+holds again: a slot the host closed meanwhile by lowering the player count stays closed.
 
 **What the slots hold.** `sam_lobby_get_slot(n)` answers `player` (with the name shown for them),
 `card` (with the mod and title), `open` (you may claim it), or `closed` (the player-count setting,
@@ -232,13 +244,15 @@ whatever was saved.
 | `sam_party_spawn`, `_set_options`, `_get_info`, `_is_member`, `_list`, `_fallen` | host | party members are monsters, and monsters are the host's |
 | `sam_party_set_difficulty_count` | host | read by the host when the run starts |
 | `sam_party_choices`, `_choice_allowed`, `_random_name` | local | this machine's classes, races and DLC |
-| `sam_lobby_add_slot_action` | local | every machine registers it as the mod loads |
+| `sam_lobby_add_slot_action` | all | every machine registers it as its mod loads; later, a host call is repeated on every client and a client's own call is refused |
 | `sam_lobby_set_card`, `_clear_card` | host | the host draws cards and sends them on |
 | `sam_lobby_get_slot` | local | a client knows the cards the host sent it |
 
 Every new event fires on the host. On the wire: `'SAML'` in the lobby only (a client's hello, the
 host's cards), vanilla `'LOCK'` for the slots a mod holds, and a 4-byte tail on vanilla `'STRT'` /
-`'RSTR'` for the difficulty count. A host with nothing to say sends none of it.
+`'RSTR'` for the difficulty count. A host with no cards answers a hello with one short frame and
+sends nothing else. On a direct connection the host takes a hello only from the slot it came
+from; over Steam or EOS a client's slot is its own word, as it is in every vanilla packet.
 
 ---
 
@@ -246,6 +260,12 @@ host's cards), vanilla `'LOCK'` for the slots a mod holds, and a 4-byte tail on 
 
 - A party member that died and has not come back yet when the game is **saved** is not in the
   save; living members are saved as followers, as usual.
+- A saved member keeps its class and race by number, and a mod's numbers follow the order the
+  mods load in. Add or remove a mod with classes or races between saving and loading, and a
+  member of a mod's class or race can come back as another one (a player's race is put right on
+  load; a member's is not yet).
+- After an online run that counted party members toward difficulty, a Hall of Trials or demo
+  started in the same session still uses that count, until a run is started from a lobby again.
 - In a lobby for a **saved game** there are no links and no cards, and the difficulty count is 0
   unless a mod sets it.
 - Party members think with the vanilla follower AI: they fight, follow and take commands like any

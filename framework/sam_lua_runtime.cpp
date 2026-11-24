@@ -2692,7 +2692,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		SAMLogger::noteApiCall();
 		const lua_Integer uid = luaL_checkinteger(Ls, 1);
 #ifdef SAM_LUA_HAVE_BARONY
-		lua_pushboolean(Ls, (uid > 0 && SAMParty::isMemberUid((std::uint32_t)uid)) ? 1 : 0);
+		lua_pushboolean(Ls, (uid > 0 && uid <= 0xFFFFFFFFLL && SAMParty::isMemberUid((std::uint32_t)uid)) ? 1 : 0);
 #else
 		(void)uid;
 		lua_pushboolean(Ls, 0);
@@ -2803,7 +2803,10 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		lua_Integer count = 0;
 		if ( !lua_isnoneornil(Ls, 4) )
 		{
-			if ( lua_isnumber(Ls, 4) ) { count = (lua_Integer)lua_tonumber(Ls, 4); }
+			// Range-checked as a number first (NaN or a huge value cast to an integer is undefined), and
+			// below 0 is bad_count, as in JS, never a part that rounds to the whole stack.
+			const lua_Number d = lua_tonumber(Ls, 4);
+			if ( lua_isnumber(Ls, 4) ) { count = (d >= 0.0 && d < 32768.0) ? (lua_Integer)d : -1; }
 			else { countOk = false; }
 		}
 #ifdef SAM_LUA_HAVE_BARONY
@@ -2830,7 +2833,10 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		lua_Integer count = 0;
 		if ( !lua_isnoneornil(Ls, 4) )
 		{
-			if ( lua_isnumber(Ls, 4) ) { count = (lua_Integer)lua_tonumber(Ls, 4); }
+			// Range-checked as a number first (NaN or a huge value cast to an integer is undefined), and
+			// below 0 is bad_count, as in JS, never a part that rounds to the whole stack.
+			const lua_Number d = lua_tonumber(Ls, 4);
+			if ( lua_isnumber(Ls, 4) ) { count = (d >= 0.0 && d < 32768.0) ? (lua_Integer)d : -1; }
 			else { countOk = false; }
 		}
 #ifdef SAM_LUA_HAVE_BARONY
@@ -2850,7 +2856,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		SAMLogger::noteApiCall();
 		const lua_Integer uid = luaL_checkinteger(Ls, 1);
 #ifdef SAM_LUA_HAVE_BARONY
-		if ( uid <= 0 ) { lua_pushnil(Ls); return 1; }
+		if ( uid <= 0 || uid > 0xFFFFFFFFLL ) { lua_pushnil(Ls); return 1; }
 		return samLuaPushValue(Ls, SAMParty::info((std::uint32_t)uid));
 #else
 		(void)uid;
@@ -2868,7 +2874,7 @@ bool protectedCall(int nargs, int nresults, const std::string& what)
 		std::string why;
 		if ( !lua_istable(Ls, 2) ) { SAM_WARN("LUA", "sam_party_set_options: the second argument must be a table."); lua_pushboolean(Ls, 0); return 1; }
 		if ( !samLuaToValue(Ls, 2, options, why) ) { SAM_WARN("LUA", "sam_party_set_options: the options hold " + why + "."); lua_pushboolean(Ls, 0); return 1; }
-		if ( uid <= 0 || !SAMParty::setOptions((std::uint32_t)uid, options, &why) )
+		if ( uid <= 0 || uid > 0xFFFFFFFFLL || !SAMParty::setOptions((std::uint32_t)uid, options, &why) )
 		{
 			SAM_WARN("LUA", "sam_party_set_options refused: " + (why.empty() ? std::string("not a party member") : why));
 			lua_pushboolean(Ls, 0);

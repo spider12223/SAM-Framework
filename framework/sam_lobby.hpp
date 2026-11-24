@@ -161,6 +161,9 @@ namespace SAMLobby
 
 	// 'SAML' handlers: serverPacketHandlers / clientPacketHandlers.
 	void receiveOnHost(const std::uint8_t* data, int len);
+	// The host's lobby loop, before handleSafePacket overwrites net_packet->address: where the datagram
+	// really came from (known only on a direct connection), so a hello is taken only from its own slot.
+	void noteSource(bool known, std::uint32_t host, std::uint16_t port);
 	void receiveOnClient(const std::uint8_t* data, int len);
 
 	// What a client is sent for a card, and the read-only card it draws from it: the title,

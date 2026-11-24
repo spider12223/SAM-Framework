@@ -45,6 +45,15 @@ namespace
 		if ( why ) { *why = text; }
 	}
 
+	// Shortens to at most max bytes without cutting a UTF-8 character in two.
+	void cutUtf8(std::string& s, std::size_t max)
+	{
+		if ( s.size() <= max ) { return; }
+		std::size_t cut = max;
+		while ( cut > 0 && ((unsigned char)s[cut] & 0xC0) == 0x80 ) { --cut; }
+		s.resize(cut);
+	}
+
 	// Newlines would split one row into two on the client (see displayText), and control
 	// characters draw as boxes. Text is cut to `max` bytes, never in the middle of a UTF-8
 	// sequence.
@@ -58,14 +67,15 @@ namespace
 			else if ( c < 32 || c == 127 ) { continue; }
 			else { out.push_back((char)c); }
 		}
-		if ( out.size() > max )
-		{
-			std::size_t cut = max;
-			while ( cut > 0 && ((unsigned char)out[cut] & 0xC0) == 0x80 ) { --cut; }
-			out.resize(cut);
-		}
+		cutUtf8(out, max);
 		return out;
 	}
+
+	// The real source of the datagram the host's lobby is handling, on a direct connection
+	// (SAMLobby::noteSource; Steam and EOS give none).
+	bool g_srcKnown = false;
+	std::uint32_t g_srcHost = 0;
+	std::uint16_t g_srcPort = 0;
 
 	bool validSlot(int slot) { return slot > 0 && slot < MAXPLAYERS; }
 
@@ -98,7 +108,7 @@ namespace
 		const SamValue* v = row.get(key);
 		if ( !v || v->isNil() ) { say(why, "row " + std::to_string(index) + " needs " + key + " (a string)"); return false; }
 		if ( v->type != SamValue::Type::Str ) { say(why, "row " + std::to_string(index) + ": " + key + " must be a string, not a " + SamValue::typeName(v->type)); return false; }
-		if ( (int)v->s.size() > SAMLobby::MAX_TEXT ) { say(why, "row " + std::to_string(index) + ": " + key + " is longer than " + std::to_string(SAMLobby::MAX_TEXT) + " characters"); return false; }
+		if ( (int)v->s.size() > SAMLobby::MAX_TEXT ) { say(why, "row " + std::to_string(index) + ": " + key + " is longer than " + std::to_string(SAMLobby::MAX_TEXT) + " bytes"); return false; }
 		out = clean(v->s, SAMLobby::MAX_TEXT);
 		return true;
 	}
@@ -139,11 +149,13 @@ namespace
 					return false;
 				}
 				std::string label = id.s;
-				if ( labels && labels->type == SamValue::Type::Arr && b < labels->arr.size() && !labels->arr[b].isNil() )
+				// A hole in the list is refused like any other non-string, as Lua (whose holey table
+				// is not a list at all) already refuses it.
+				if ( labels && labels->type == SamValue::Type::Arr && b < labels->arr.size() )
 				{
 					const SamValue& l = labels->arr[b];
 					if ( l.type != SamValue::Type::Str ) { say(why, "row " + std::to_string(index) + ": label " + std::to_string(b + 1) + " must be a string"); return false; }
-					if ( (int)l.s.size() > SAMLobby::MAX_TEXT ) { say(why, "row " + std::to_string(index) + ": label " + std::to_string(b + 1) + " is longer than " + std::to_string(SAMLobby::MAX_TEXT) + " characters"); return false; }
+					if ( (int)l.s.size() > SAMLobby::MAX_TEXT ) { say(why, "row " + std::to_string(index) + ": label " + std::to_string(b + 1) + " is longer than " + std::to_string(SAMLobby::MAX_TEXT) + " bytes"); return false; }
 					label = l.s;
 				}
 				row.buttons.push_back(id.s);
@@ -182,7 +194,7 @@ namespace
 		}
 		if ( (int)title->s.size() > SAMLobby::MAX_TITLE )
 		{
-			say(why, "the title is longer than " + std::to_string(SAMLobby::MAX_TITLE) + " characters");
+			say(why, "the title is longer than " + std::to_string(SAMLobby::MAX_TITLE) + " bytes");
 			return false;
 		}
 		card.title = clean(title->s, SAMLobby::MAX_TITLE);
@@ -256,7 +268,7 @@ namespace
 		const SAMLobby::Card& c = g_cards[slot];
 		const bool shown = !c.ns.empty();
 		std::string text = shown ? SAMLobby::displayText(c) : std::string();
-		if ( (int)text.size() > MAX_DISPLAY ) { text.resize(MAX_DISPLAY); }
+		cutUtf8(text, MAX_DISPLAY);
 		const std::string ns = c.ns.substr(0, 63);
 		std::string f("SAML", 4);
 		f.push_back((char)SAMLobby::Op::Card);
@@ -327,7 +339,7 @@ namespace SAMLobby
 		if ( !validId(id) ) { say(why, "'" + id + "' is not an action id (letters, digits, _ . -, up to " + std::to_string(MAX_ID) + ")"); return false; }
 		const std::string text = clean(label, MAX_TEXT);
 		if ( text.empty() ) { say(why, "the label is empty"); return false; }
-		if ( (int)label.size() > MAX_TEXT ) { say(why, "the label is longer than " + std::to_string(MAX_TEXT) + " characters"); return false; }
+		if ( (int)label.size() > MAX_TEXT ) { say(why, "the label is longer than " + std::to_string(MAX_TEXT) + " bytes"); return false; }
 		for ( auto& a : g_actions )
 		{
 			if ( a.ns == ns && a.id == id ) { a.label = text; return true; }   // re-registering: a new label
@@ -364,6 +376,14 @@ namespace SAMLobby
 		if ( have.ns.empty() && !slotOpen(slot) ) { say(why, "slot " + std::to_string(slot) + " is closed in this lobby"); return false; }
 		Card card;
 		if ( !parseCard(value, card, why) ) { return false; }
+		// Every limit can hold and the whole still not fit the one frame a client is sent (five rows
+		// of three long labels): refused here, instead of cut short on the way.
+		const std::size_t size = displayText(card).size();
+		if ( size > (std::size_t)MAX_DISPLAY )
+		{
+			say(why, "the card is too long to send: " + std::to_string(size) + " bytes of text, at most " + std::to_string(MAX_DISPLAY));
+			return false;
+		}
 		claim(slot, ns, std::move(card));
 		return true;
 	}
@@ -512,6 +532,13 @@ namespace SAMLobby
 		return true;
 	}
 
+	void noteSource(bool known, std::uint32_t host, std::uint16_t port)
+	{
+		g_srcKnown = known;
+		g_srcHost = host;
+		g_srcPort = port;
+	}
+
 	void receiveOnHost(const std::uint8_t* data, int len)
 	{
 		if ( multiplayer != SERVER || !data || len < 7 || len > NET_PACKET_SIZE ) { return; }
@@ -520,6 +547,15 @@ namespace SAMLobby
 		if ( in[4] != Op::Hello || in[5] < 1 ) { return; }
 		const int slot = in[6];
 		if ( !validSlot(slot) || client_disconnected[slot] ) { return; }
+		// The slot is the sender's own claim, as in every vanilla packet. On a direct connection the
+		// datagram's source settles it, so one client cannot say hello for another (a stock player
+		// taken for a S.A.M one would build a dungeon for a party count it never hears of). Over
+		// Steam or EOS there is no source to ask, the same limit SAMNet's own channel has.
+		if ( g_srcKnown && net_clients && (g_srcHost != net_clients[slot - 1].host || g_srcPort != net_clients[slot - 1].port) )
+		{
+			SAM_WARN(MOD, "A lobby hello claimed to be from player " + std::to_string(slot) + " but came from somewhere else; ignored.");
+			return;
+		}
 		g_hello[slot] = true;
 		for ( int s = 1; s < MAXPLAYERS; ++s )
 		{

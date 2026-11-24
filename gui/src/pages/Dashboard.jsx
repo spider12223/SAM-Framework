@@ -11,7 +11,7 @@ import { Panel, GoldButton } from '@/components/ui.jsx';
 import { NAV_ICONS } from '@/data/navIcons.js';
 
 /** The framework's own version (mods declare their own framework_min_version). */
-const SAM_FRAMEWORK_VERSION = '3.13.0';
+const SAM_FRAMEWORK_VERSION = '3.14.0';
 
 /** Where players get S.A.M itself (the framework is a dependency, not a mod). */
 const WORKSHOP_URL = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472';
@@ -29,14 +29,14 @@ const TRAVELS = [
  * thing a returning modder sees, and the point is 'here is what you can do now that you
  * could not before', not a changelog. */
 const WHATS_NEW = [
-  ["A noise of your race's own",
-   "A race can list \"emote_sounds\", such as [\"purr\", \"hiss\"]: when its player presses Use on nothing, one of them plays instead of the body's noise (a salamander growls, a human says nothing). The game's five-second wait still applies, and in multiplayer the other players hear one too (read in the code, not yet tried). The Race Editor has an Emote Sounds panel for it."],
-  ["Stop a player dead",
-   "sam_stop_momentum(player, ticks) clears a player's leftover walking, recoil and knockback at once, and with ticks holds them still while sam_move_entity still moves them along its collision checks: a leap or a dash no longer drifts off its path."],
-  ["The installer scrolls",
-   "On a short display the installer's \"Please Read First\" box was cut off with no way to reach it. Its first screen now scrolls, and Install and Close stay on screen."],
-  ["Enemies call your race by its name (3.12.2)",
-   "A human or shopkeeper who turns on a player of your race calls them by the race's \"name\" (\"Foul Catfolk! En Guarde!\"), not by the body it is built on."],
+  ["Party members, by RumpleIVSkin",
+   "sam_party_spawn(0, { name, race, class }) makes a companion that starts with its class's kit, levels up like that class, is left out of the follower count when you recruit with Leadership, waits at exits and comes back on the next floor after it dies. With carry_on, the run goes on while it stands after every player is down. Online play is read in the code, not yet tried."],
+  ["Lobby cards",
+   "sam_lobby_add_slot_action puts a link such as \"+ Add Companion\" on every empty player slot, and sam_lobby_set_card shows a card of your own there, with cycles and buttons the host presses. Players whose game runs S.A.M see it read-only."],
+  ["Gear on allies",
+   "Read what any monster carries and wears, dress an ally under the game's own rules, and move items between a player's backpack and an ally's pockets with sam_give_item_to_ally and sam_take_item_from_ally."],
+  ["Every function in the API Reference",
+   "The API Reference page showed only 15 of its categories, so 191 functions never appeared there. It now lists all 365."],
 ];
 
 /** sam-well stat box: big gold number over a small-caps label. */

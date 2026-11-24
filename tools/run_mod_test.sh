@@ -21,6 +21,7 @@ TIMEOUT="180"
 SIZE="640x480"
 GAME="${BARONY_DIR:-/c/Program Files (x86)/Steam/steamapps/common/Barony}"
 KEEP_LOG=""
+PROBE=""
 
 usage() {
 	sed -n '2,12p' "$0" | sed 's/^# \?//'
@@ -35,6 +36,7 @@ usage() {
 	echo "  --size <WxH>       window size, default 640x480"
 	echo "  --game <path>      the Barony folder (or set BARONY_DIR)"
 	echo "  --keep-log <path>  copy sam_log.txt here afterwards"
+	echo "  --probe <name>     run one of the engine-level checks in sam_test.cpp once the game has begun"
 	exit 64
 }
 
@@ -48,6 +50,7 @@ while [ $# -gt 0 ]; do
 		--size)     SIZE="$2"; shift 2;;
 		--game)     GAME="$2"; shift 2;;
 		--keep-log) KEEP_LOG="$2"; shift 2;;
+		--probe)    PROBE="$2"; shift 2;;
 		-h|--help)  usage;;
 		-*)         echo "unknown option: $1" >&2; usage;;
 		*)          if [ -z "$MODS" ]; then MODS="$1"; else MODS="$MODS,$1"; fi; shift;;
@@ -76,6 +79,7 @@ ARGS=(-samtest="$MODS" -samtesttimeout="$TIMEOUT" -windowed -size="$SIZE")
 [ -n "$RACE" ] && ARGS+=(-samtestrace="$RACE")
 [ -n "$SEED" ]  && ARGS+=(-samtestseed="$SEED")
 [ -n "$FLOOR" ] && ARGS+=(-samtestfloor="$FLOOR")
+[ -n "$PROBE" ] && ARGS+=(-samtestprobe="$PROBE")
 
 echo "running $MODS (timeout ${TIMEOUT}s)..."
 started=$(date +%s)
