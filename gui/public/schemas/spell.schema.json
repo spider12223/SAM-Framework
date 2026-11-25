@@ -188,7 +188,7 @@
         "none"
       ],
       "default": "missile",
-      "description": "How the spell is delivered. 'missile' = a single bolt (Barony PROPULSION_MISSILE / spell_element_missile root). 'missile_trio' = a 3-way spread (PROPULSION_MISSILE_TRIO / spell_element_trio). 'none' only marks the tooltip as a self spell: the spell still fires its bolt, so a spell that must not shoot needs a script on player.on_spell_cast that returns false."
+      "description": "How the spell is delivered. 'missile' = a single bolt (Barony PROPULSION_MISSILE / spell_element_missile root). 'missile_trio' = a 3-way spread (PROPULSION_MISSILE_TRIO / spell_element_trio). 'none' (from 3.14.1) casts like any spell and sends nothing: its mana is spent, the cast counts and player.on_spell_cast fires, so a mod does the spell's work in that handler and lets the cast go on. The cast sound the bolt would play is left out too. Its tooltip calls it a self spell. sam_cast_spell (and _at, _pos) and sam_monster_cast_spell of it send nothing."
     },
     "payload": {
       "enum": [

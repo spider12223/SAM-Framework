@@ -355,7 +355,8 @@ void SAMSpells::buildEngineSpell(const SAMSpellDef& def)
 	const bool trio = (def.projectileType == "missile_trio");
 	const bool selfCast = (def.projectileType == "none");
 
-	// Root (propulsion). Even a "none"/self spell gets a missile root for now so it casts.
+	// Root (propulsion). A "none"/self spell gets a missile root too, so it casts like any other;
+	// castSpell sees "none" and sends no bolt (from 3.14.1).
 	spellElement_t* rootGlobal = trio ? &spellElement_missile_trio : &spellElement_missile;
 	node_t* node = list_AddNodeLast(&spell->elements);
 	node->element = copySpellElement(rootGlobal);

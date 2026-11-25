@@ -209,7 +209,7 @@ export default function SpellEditor() {
               {SPELL_PAYLOADS.map((p) => <option key={p} value={p}>{p}</option>)}
             </select>
           </Field>
-          <Field label="Projectile" hint="How the spell is delivered.">
+          <Field label="Projectile" hint="How the spell is delivered. none: the cast spends its mana and sends nothing (no bolt, no cast sound); your script does the work on player.on_spell_cast.">
             <select className="sam-input" value={projectile} onChange={(e) => setProjectile(e.target.value)}>
               {SPELL_PROJECTILE_TYPES.map((p) => <option key={p} value={p}>{p}</option>)}
             </select>

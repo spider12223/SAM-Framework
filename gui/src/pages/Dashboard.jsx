@@ -11,7 +11,7 @@ import { Panel, GoldButton } from '@/components/ui.jsx';
 import { NAV_ICONS } from '@/data/navIcons.js';
 
 /** The framework's own version (mods declare their own framework_min_version). */
-const SAM_FRAMEWORK_VERSION = '3.14.0';
+const SAM_FRAMEWORK_VERSION = '3.14.1';
 
 /** Where players get S.A.M itself (the framework is a dependency, not a mod). */
 const WORKSHOP_URL = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472';
@@ -29,6 +29,8 @@ const TRAVELS = [
  * thing a returning modder sees, and the point is 'here is what you can do now that you
  * could not before', not a changelog. */
 const WHATS_NEW = [
+  ["Spells that send nothing (3.14.1)",
+   "A spell with \"projectile_type\": \"none\" is now cast like any other, spending its mana and firing player.on_spell_cast, but sends no bolt and so plays no cast sound: do the spell's work, and any sound, in that handler and let the cast go on."],
   ["Party members, by RumpleIVSkin",
    "sam_party_spawn(0, { name, race, class }) makes a companion that starts with its class's kit, levels up like that class, is left out of the follower count when you recruit with Leadership, waits at exits and comes back on the next floor after it dies. With carry_on, the run goes on while it stands after every player is down. Online play is read in the code, not yet tried."],
   ["Lobby cards",

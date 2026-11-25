@@ -29,6 +29,8 @@
 #include "sam_net.hpp"     // SAMNet::Writer: that half's request, as the host would send it
 #include "sam_items.hpp"   // SAMItems::destroyNow: the probe takes its leftovers away again
 #include "items.hpp"       // newItem, uidToItem
+#include "sam_spells.hpp"  // -samtestprobe=select:<spell>: the spell to put in player 1's hands
+#include "magic/magic.hpp" // getSpellFromID
 #include <algorithm>       // std::max
 
 #include <cstdio>
@@ -261,6 +263,19 @@ namespace
 			+ ", part of a stack " + std::to_string(applesLeft) + " of 5 left at once.");
 	}
 
+	// (from 3.14.1) -samtestprobe=select:<spell>: teach player 1 a spell and put it in their hands, as
+	// picking it would, so a test can press Cast Spell and cast it the real way (no script call selects
+	// a spell, and in singleplayer the mana is taken by the casting animation, not by castSpell).
+	void probeSelectSpell(const std::string& name)
+	{
+		const int id = SAMSpells::resolveSpellRef(name);
+		spell_t* sp = id >= 0 ? getSpellFromID(id) : nullptr;
+		if ( !sp ) { SAM_WARN(MOD, "Select probe: no spell called '" + name + "'."); return; }
+		SAMSpells::grantSpell(0, id);
+		players[0]->magic.equipSpell(sp);
+		SAM_INFO(MOD, "Select probe: player 1 holds " + name + ".");
+	}
+
 	// (from 3.13.0) The noise player 1 makes on a Use that hits nothing: SAMRaces::emoteSound, what
 	// collision.cpp asks. In the race's own body as it is, then with its abilities off, polymorphed,
 	// shapeshifted and in another body, each put back before the next. "none" = the body's own noise,
@@ -468,6 +483,7 @@ void tick()
 	{
 		s_probed = true;
 		if ( s_probe == "allygive" ) { probeAllyGive(); }
+		else if ( s_probe.rfind("select:", 0) == 0 ) { probeSelectSpell(s_probe.substr(7)); }
 		else { SAM_WARN(MOD, "No test probe is called '" + s_probe + "'."); }
 	}
 	if ( s_timeout <= 0 ) { return; }
