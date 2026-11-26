@@ -2276,6 +2276,10 @@ void SAMItems::drainDestroyQueue()
 	// destroyNow, and this is the one point per frame where that is known to be safe.
 	SAMSpells::drainRemoveQueue();
 
+	// Then the polymorphs an on_hit_effect asked for (3.15.0): each one deletes the monster it
+	// replaces, so they wait for this point too.
+	SAMSpells::drainPolymorphs();
+
 	// Then the one container removal the loot module defers: an item taken out of its chest or
 	// shop from inside the loot event that was about it, while the engine still wrote to it.
 	// Same rule, same safe point; that queue is not keyed by a player's backpack, so it is its own.

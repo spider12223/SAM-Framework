@@ -62,6 +62,7 @@ struct SAMSpellDef
 
 	int damageMin = 0;
 	int damageMax = 0;
+	bool damageMaxSet = false;      // (3.15.0) written in the JSON: then 0 means no damage, not the payload's own
 	int range = 0;
 	int speed = 0;
 
@@ -153,6 +154,15 @@ public:
 	static bool queueRemoveSpell(int player, int spellId);
 	static void drainRemoveQueue();
 	static void clearRemoveQueue();
+
+	// (3.15.0) An on_hit_effect of EFF_POLYMORPH (a spell's or a weapon's) really polymorphs,
+	// through the game's own spellEffectPolymorph: a monster becomes a random other one, a player
+	// takes a random form for `duration` ticks. That call deletes the monster it replaces at once,
+	// and every on-hit site still holds it, so the hit only queues it here (host only) and the
+	// host does it at the next safe point (drainPolymorphs, from SAMItems::drainDestroyQueue).
+	// clearRemoveQueue drops what is still waiting.
+	static void queuePolymorph(unsigned int targetUid, unsigned int casterUid, int duration);
+	static void drainPolymorphs();
 
 	// (3.7.0) What a player still lacks to learn this spell from a book or tome, in words
 	// ("You need 10 Charisma to learn Summon Rat (you have 7)."), or "" when they meet its

@@ -37,6 +37,8 @@
 #include "sam_mp_inventory.hpp"  // noteOwnerRefusal: a carried grant/removal that failed here
 #include "player.hpp"            // players[]->magic (spell list, selected spells) and the hotbar
 #include "stat.hpp"              // stats[]->inventory (the spell items addSpell creates)
+#include "entity.hpp"            // uidToEntity, actMonster: the polymorph queue (3.15.0)
+#include "game.hpp"              // currentlevel, secretlevel
 
 #include <fstream>
 #include <sstream>
@@ -44,6 +46,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <cctype>
+#include <algorithm>
 
 using nlohmann::json;
 
@@ -209,6 +212,7 @@ void SAMSpells::loadFromManifest(const SAMModManifest& manifest)
 		def.payload       = getStr("payload");
 		def.damageMin     = getInt("damage_min", 0);
 		def.damageMax     = getInt("damage_max", 0);
+		def.damageMaxSet  = j.contains("damage_max") && j["damage_max"].is_number_integer();
 		def.range         = getInt("range", 0);
 		// `range` is the bolt's lifetime in game TICKS (50 per second; the engine default is
 		// 75). A modder reading it as tiles and writing 6 gets a spell that dies on the
@@ -386,7 +390,9 @@ void SAMSpells::buildEngineSpell(const SAMSpellDef& def)
 		node->deconstructor = &spellElementDeconstructor;
 		spellElement_t* payload = (spellElement_t*)node->element;
 		payload->node = node;
-		if ( def.damageMax > 0 ) { payload->setDamage(def.damageMax); }
+		// A written damage_max is the damage, 0 included (3.15.0): "damage_max": 0 used to keep the
+		// payload's own damage, so a spell meant to do no harm hurt, and angered, what it hit.
+		if ( def.damageMaxSet ) { payload->setDamage(std::max(0, def.damageMax)); }
 	}
 	else
 	{
@@ -803,9 +809,49 @@ void SAMSpells::drainRemoveQueue()
 	}
 }
 
+namespace
+{
+	struct SamPendingPolymorph
+	{
+		unsigned int target;
+		unsigned int caster;
+		int duration;
+		int level;        // a uid is only good on its own floor
+		bool secret;
+	};
+	std::vector<SamPendingPolymorph> s_pendingPolymorphs;
+}
+
+void SAMSpells::queuePolymorph(unsigned int targetUid, unsigned int casterUid, int duration)
+{
+	if ( multiplayer == CLIENT || targetUid == 0 ) { return; }
+	for ( const auto& q : s_pendingPolymorphs ) { if ( q.target == targetUid ) { return; } }   // one change per hit
+	s_pendingPolymorphs.push_back({ targetUid, casterUid, duration, currentlevel, secretlevel });
+}
+
+void SAMSpells::drainPolymorphs()
+{
+	if ( s_pendingPolymorphs.empty() ) { return; }
+	std::vector<SamPendingPolymorph> batch;
+	batch.swap(s_pendingPolymorphs);
+	if ( multiplayer == CLIENT ) { return; }
+	for ( const auto& q : batch )
+	{
+		if ( q.level != currentlevel || q.secret != secretlevel ) { continue; }
+		Entity* target = uidToEntity(q.target);
+		if ( !target || (target->behavior != &actMonster && target->behavior != &actPlayer) ) { continue; }
+		Stat* st = target->getStats();
+		if ( !st || st->HP <= 0 ) { continue; }   // the hit itself killed it
+		// The game's own rules from here: bosses, shopkeepers and the like are left alone ("had no
+		// effect"), a monster's change is for good, a player's form lasts `duration`.
+		spellEffectPolymorph(target, uidToEntity(q.caster), true, q.duration);
+	}
+}
+
 void SAMSpells::clearRemoveQueue()
 {
 	s_pendingSpellRemovals.clear();
+	s_pendingPolymorphs.clear();   // the same rule for a polymorph: a uid from the old run means nothing
 }
 
 void SAMSpells::removeEngineSpells()

@@ -1,6 +1,6 @@
 # S.A.M function reference
 
-Every script function the framework exposes: **365 functions** and **96 events**.
+Every script function the framework exposes: **365 functions** and **97 events**.
 All of them work identically in Lua, JavaScript and TypeScript.
 
 This page is generated from the API definition, so it cannot fall behind the code. If a
@@ -67,7 +67,7 @@ For guides and worked examples, see [scripting-reference.md](scripting-reference
 - [Truth](#truth) (17)
 - [World](#world) (23)
 - [Your own logic](#your-own-logic) (7)
-- [Events](#events) (96)
+- [Events](#events) (97)
 
 
 ## Camera
@@ -5353,7 +5353,7 @@ Fires a mod-defined message sent with sam_send_packet arrives.
 | `tag` | string |
 | `payload` | string |
 
-no player. prefix. The only event a client's own scripts run besides player.on_before_equip and player.on_game_over, which makes it how a host tells a client's script something and the client answers (sam_send_packet from inside the handler). Delivery is reliable but NOT ordered.
+no player. prefix. The only event a client's own scripts run besides player.on_before_equip, player.on_before_spell_cast and player.on_game_over, which makes it how a host tells a client's script something and the client answers (sam_send_packet from inside the handler). Delivery is reliable but NOT ordered.
 
 **Multiplayer:** Fires on the machine the packet was sent to: a client's scripts for a packet from the host, the host's scripts for a packet from a client.
 
@@ -5546,6 +5546,22 @@ Fires before a dead player is brought back.
 Return false to refuse the revive. This is the hook for a permadeath rule or a resurrection cost. floor is the floor being loaded and keep_gear is 1 when the server keeps inventory on death, so a cost can depend on both. The FIRST floor load of a run is never asked -- there is no level-change packet at that point to carry an answer to the clients on, so a run that begins with a dead player in the party (loading a co-op save) revives them as vanilla does. A player you refuse stays dead for the rest of the run: their body is taken down again on every later floor, player.on_death does NOT fire a second time, and on every machine they get a camera to watch from with no fresh game-over prompt.
 
 **Multiplayer:** Fires on the host only (or in splitscreen singleplayer), once per dead player, before the level change. Its answer applies on every machine; a joiner's game no longer asks its own scripts.
+
+### `player.on_before_spell_cast`
+
+> Cancellable: return `false` to stop it.
+
+Fires a player is about to start casting a spell (from 3.15.0).
+
+| field | type |
+|---|---|
+| `player` | int |
+| `spell_id` | int |
+| `spell_name` | string |
+
+Return false to stop the cast before it begins: no casting animation, no mana, no gold and no bolt, and player.on_spell_cast does not fire, so a refused cast costs nothing in single-player or online. Use it for what a spell needs before it may go (the armour worn, the ground ahead, a cooldown) and do the spell's work in player.on_spell_cast, which fires when the cast is let go. spell_name is the same as player.on_spell_cast's. The game's own refusals come first (not enough mana or gold, paralysed, asleep), so this is asked only about a cast that would otherwise start. It covers a player's own casts from the spell list, the hotbar and a spellbook; magic staffs, scrolls and sam_cast_spell are not asked. A refusal is SILENT. Say why with sam_hud_text: this handler runs on the caster's own machine, so a screen call for that player works in the host's game and in a joiner's alike, while sam_message and sam_play_sound are host functions and are refused in a joiner's game. Decide from what that machine can see: the caster's own equipped items (sam_get_equipped_item, sam_get_equipped_item_id), facing, position and the map's tiles are all readable there; sam_get_player_data is not (it returns nil in a joiner's game, so a check built on it passes there). The player can still turn and move while the casting animation plays, so if the answer can change by the time the cast is let go, check again in player.on_spell_cast (a cancel there costs nothing online, but in single-player the animation has already spent most of the mana).
+
+**Multiplayer:** Fires on the caster's own machine when the cast starts, before anything is spent or sent: the host for its own and splitscreen players, the joiner's own game for a joiner. A joiner whose game does not run S.A.M is never asked.
 
 ### `player.on_bleed_tick`
 
@@ -5998,7 +6014,7 @@ Fires a player casts a spell.
 | `spell_name` | string |
 | `target_uid` | uid |
 
-For a spell that came from a mod, spell_name is the id its JSON declared (for example "mymod:summon_rats"), the same form sam_get_spells reports (before 3.5.0 it was an internal name like spell_sam_mymod_summon_rats). A vanilla spell answers with the engine's name, such as "spell_forcebolt". Returning false cancels the cast: no bolt, no fizzle message, and no Sorcery skill-up. In multiplayer nothing has been spent yet. In single-player most of the mana is already gone, because the casting animation spends it before this event, so a cancelled cast is not free there. A spell with projectile_type "none" sends no bolt (from 3.14.1), and so plays no cast sound: let its cast go on and do the spell's work (and any sound) here; on a player's own cast its mana is spent like any cast's. This event fires before a beginner's fumble and the swimming check, so the work also happens on a cast that then fails.
+For a spell that came from a mod, spell_name is the id its JSON declared (for example "mymod:summon_rats"), the same form sam_get_spells reports (before 3.5.0 it was an internal name like spell_sam_mymod_summon_rats). A vanilla spell answers with the engine's name, such as "spell_forcebolt". Returning false cancels the cast: no bolt, no fizzle message, and no Sorcery skill-up. In multiplayer nothing has been spent yet. In single-player most of the mana is already gone, because the casting animation spends it before this event, so a cancelled cast is not free there: to refuse a cast before it costs anything, return false from player.on_before_spell_cast instead (from 3.15.0). A spell with projectile_type "none" sends no bolt (from 3.14.1), and so plays no cast sound: let its cast go on and do the spell's work (and any sound) here; on a player's own cast its mana is spent like any cast's. This event fires before a beginner's fumble and the swimming check, so the work also happens on a cast that then fails.
 
 **Multiplayer:** Fires on the host, for every player (a joiner's cast arrives before mana is spent; in single-player the casting animation has already spent most of it).
 

@@ -591,6 +591,16 @@ export const CONDITIONS = [
     note: 'Class scripts get every event for every player, so this is how an ability stays yours.',
   },
   {
+    // Eli: "things only trigger if requirements are met and you are the race". Race scripts get
+    // every event for every player too, like class scripts.
+    id: 'race_is', label: 'is playing a race', negatable: true,
+    params: [{ name: 'race', type: 'text', default: 'mymod:my_race', label: 'race id ("namespace:race", or a vanilla race like human)' }],
+    lua: (p) => `sam_get_race(player) == ${q(p.race)}`,
+    phrase: (p) => `the player is a ${p.race}`,
+    phraseNeg: (p) => `the player is NOT a ${p.race}`,
+    note: 'Race scripts get every event for every player, so this keeps an ability to your race. Add more conditions to the same rule and it fires only when all of them hold.',
+  },
+  {
     id: 'floor_cmp', label: 'dungeon floor compares to', negatable: false,
     params: [
       { name: 'op', type: 'select', values: ['<', '<=', '==', '>=', '>'], default: '>=' },

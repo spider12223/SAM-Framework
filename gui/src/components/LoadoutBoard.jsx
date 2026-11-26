@@ -15,16 +15,98 @@
  * (the Wizard's staff starts in hand and on key 1); the engine does both for one entry. `_key`
  * and `_slot` are UI-only and stripped on save (see ClassEditor buildDef).
  */
-import { useState } from 'react';
-import { Panel, Select, NumberInput, ItemPickerModal, PixelIcon, Gem } from '@/components/ui.jsx';
-import { itemIconUrl, SLOT_ICON_FILE } from '@/data/fallbackIcons.js';
+import { useMemo, useState } from 'react';
+import { Panel, Select, NumberInput, ItemPickerModal, PixelIcon, Gem, ItemIcon } from '@/components/ui.jsx';
+import { itemIconUrl, SLOT_ICON_FILE, kindIconFile, CATEGORY_ICON_FILE } from '@/data/fallbackIcons.js';
+import { ITEM_ICONS } from '@/data/itemIcons.js';
+import { ITEM_TYPES, FRAMEWORK_ITEMS } from '@/data/schemas.js';
 import { looksOf } from '@/data/itemLooks.js';
 import {
   EQUIP_SLOTS, equipSlotOf, itemsForSlot, findSlot,
   BLESSING_MIN, BLESSING_MAX, blessingLabel, STATUSES, newEntry,
-  statusStyleFor, statusWord,
+  statusStyleFor, statusWord, entryFromJson,
 } from '@/data/equipment.js';
 import { BOOKS, bookTitle } from '@/data/books.js';
+
+/* Real in-game icon URL for an ItemType, or null if we don't have one.
+ * import.meta.env.BASE_URL is '/' in dev and '/SAM-Framework/' in the Pages build. */
+function iconSrc(type) {
+  const file = ITEM_ICONS[type];
+  return file ? `${import.meta.env.BASE_URL}item-icons/${file}` : null;
+}
+
+/* What the grid + picker render for an item: its own Barony PNG, or else the icon of an item of
+ * the same kind (data/fallbackIcons.js). */
+export function itemIcon(type) {
+  return <ItemIcon src={iconSrc(type) ?? itemIconUrl(kindIconFile(type))} />;
+}
+
+/* Group an ItemType into one of the schema's categories for the picker.
+ * Barony names items by category prefix (POTION_, SCROLL_, TOOL_, …); the rest
+ * (weapons/armor named by material+type) fall to keyword matching. Heuristic —
+ * only drives grouping in the picker, so the odd edge case is harmless. */
+export function itemCategory(t) {
+  if (/^POTION_/.test(t)) return 'POTION';
+  if (/^SCROLL_/.test(t)) return 'SCROLL';
+  if (/^SPELLBOOK_/.test(t)) return 'SPELLBOOK';
+  if (/^TOME_/.test(t)) return 'TOME_SPELL';
+  if (/^MAGICSTAFF_/.test(t)) return 'MAGICSTAFF';
+  if (/^RING_/.test(t)) return 'RING';
+  if (/^AMULET_/.test(t)) return 'AMULET';
+  if (/^GEM_/.test(t)) return 'GEM';
+  if (/^FOOD_/.test(t)) return 'FOOD';
+  if (/^TOOL_|^KEY_|^INSTRUMENT_/.test(t)) return 'TOOL';
+  if (t === 'SPELL_ITEM') return 'SPELL_CAT';
+  if (t === 'READABLE_BOOK') return 'BOOK';
+  if (/TOMAHAWK|CHAKRAM|SHURIKEN|BOOMERANG|BOLAS|PLUMBATA|DART|GREASE_BALL|DUST_BALL|SLOP_BALL|THROWING/.test(t)) return 'THROWN';
+  if (/SWORD|DAGGER|RAPIER|CLAYMORE|ANELACE|FALSHION|AXE|MACE|FLAIL|SHILLELAGH|KNUCKLES|SPEAR|HALBERD|TRIDENT|LANCE|GLAIVE|POLEARM|BOW|CROSSBOW|SLING|QUIVER|KNIFE|SCEPTER/.test(t)) return 'WEAPON';
+  if (/SHIELD|SCUTUM|BREASTPIECE|DOUBLET|TUNIC|GAMBESON|HAUBERK|ROBE|SHAWL|HELM|HAT|HOOD|MASK|CAP|COIF|CROWN|CIRCLET|LAURELS|TURBAN|HEADDRESS|MITER|BOOTS|LOAFERS|CLEAT|GLOVES|GAUNTLETS|BRACERS|CLOAK|PAULDRONS|APRON|VISOR/.test(t)) return 'ARMOR';
+  return 'TOOL';
+}
+
+// A custom item declares a `category` (WEAPON/ARMOR/POTION/…); show the icon of a vanilla item of
+// that category so it reads in the loadout picker even though it has no PNG of its own.
+export const customIconSrc = (it) => itemIconUrl((it && CATEGORY_ICON_FILE[it.category]) || 'tinker_toolkit.png');
+
+// A custom item's `slot` (EQUIPPABLE_IN_SLOT_*) → the loadout paperdoll slot id, so a
+// one-click add can EQUIP a weapon/armour custom item, not just stash it in the backpack.
+export const CUSTOM_SLOT_TO_PAPERDOLL = {
+  EQUIPPABLE_IN_SLOT_WEAPON: 'weapon', EQUIPPABLE_IN_SLOT_SHIELD: 'shield',
+  EQUIPPABLE_IN_SLOT_MASK: 'mask', EQUIPPABLE_IN_SLOT_HELM: 'helmet',
+  EQUIPPABLE_IN_SLOT_GLOVES: 'gloves', EQUIPPABLE_IN_SLOT_BOOTS: 'boots',
+  EQUIPPABLE_IN_SLOT_BREASTPLATE: 'breastplate', EQUIPPABLE_IN_SLOT_CLOAK: 'cloak',
+  EQUIPPABLE_IN_SLOT_AMULET: 'amulet', EQUIPPABLE_IN_SLOT_RING: 'ring',
+};
+
+// The item list a loadout board picks from, and how it draws and groups each item: the vanilla
+// items, the framework's built-ins (they ship inside the framework, so any class or race can use
+// them) and this mod's own items. Shared by the Class Editor and the Race Editor.
+export function useItemCatalog(modItems) {
+  const customItemMap = useMemo(
+    () => Object.fromEntries([...FRAMEWORK_ITEMS, ...(modItems || [])].map((it) => [it.id, it])),
+    [modItems],
+  );
+  const allTypes = useMemo(
+    () => [...ITEM_TYPES, ...FRAMEWORK_ITEMS.map((it) => it.id), ...(modItems || []).map((it) => it.id)],
+    [modItems],
+  );
+  const iconFor = (type) =>
+    customItemMap[type] ? <ItemIcon src={customIconSrc(customItemMap[type])} /> : itemIcon(type);
+  const categoryFor = (type) =>
+    customItemMap[type] ? (customItemMap[type].category || 'TOOL') : itemCategory(type);
+  return { customItemMap, allTypes, iconFor, categoryFor };
+}
+
+// Saved starting_items back into board entries. The paperdoll cell of a vanilla item comes from its
+// type; a custom item's comes from the slot its own JSON declares. entryFromJson cannot know that,
+// so without this a custom weapon reopened from a saved file lands in the "slot already taken" tray.
+export function entriesFromJson(list, customItemMap) {
+  return (list ?? []).map((si) => {
+    const e = entryFromJson(si);
+    const cell = e.equip ? CUSTOM_SLOT_TO_PAPERDOLL[customItemMap[e.type]?.slot] : undefined;
+    return cell ? { ...e, _slot: cell } : e;
+  });
+}
 
 /** Which paperdoll slot an entry occupies: its item's natural slot, or its stored hint. */
 const slotOfEntry = (it) => equipSlotOf(it.type) || it._slot || null;

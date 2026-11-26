@@ -224,7 +224,7 @@
     "damage_max": {
       "type": "integer",
       "minimum": 0,
-      "description": "Damage the bolt deals (the payload's damage is set to this). Leave it out to keep the payload's own damage."
+      "description": "Damage the bolt deals (the payload's damage is set to this). 0 means no damage (from 3.15.0; before, 0 was read as left out). Leave it out to keep the payload's own damage."
     },
     "range": {
       "type": "integer",
@@ -238,7 +238,7 @@
     },
     "on_hit_effect": {
       "type": "string",
-      "description": "Optional. Status effect applied to whatever the bolt hits: a built-in name such as 'EFF_POISONED', or one of your own custom effects by its exact id ('namespace:effect', lowercase, e.g. 'mymod:plague'). A name that matches nothing is ignored, with one warning line in sam_log.txt. For payloads that apply a status of their own (slow, confuse, sleep and similar) it applies only when that status lands too. It applies whenever the bolt reports a hit: never for ghost_bolt or dig, for steal_weapon only when a weapon is actually taken, and for charm_monster only when the charm or pacify lands."
+      "description": "Optional. Status effect applied to whatever the bolt hits: a built-in name such as 'EFF_POISONED', or one of your own custom effects by its exact id ('namespace:effect', lowercase, e.g. 'mymod:plague'). A name that matches nothing is ignored, with one warning line in sam_log.txt. For payloads that apply a status of their own (slow, confuse, sleep and similar) it applies only when that status lands too. It applies whenever the bolt reports a hit: never for ghost_bolt or dig, for steal_weapon only when a weapon is actually taken, and for charm_monster only when the charm or pacify lands. 'EFF_POLYMORPH' (from 3.15.0) is the real polymorph, as the game's polymorph potion does it: a monster turns into a random other monster for good, a player takes a random form for on_hit_duration; bosses, shopkeepers and the other monsters the game never polymorphs are left as they are."
     },
     "on_hit_duration": {
       "type": "integer",

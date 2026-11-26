@@ -6,10 +6,9 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  CORE_ATTRIBUTES, OFFSET_STATS, SKILLS, ITEM_TYPES, ROLL_STATS, CATEGORIES, FRAMEWORK_ITEMS,
+  CORE_ATTRIBUTES, OFFSET_STATS, SKILLS, ROLL_STATS, CATEGORIES,
   CLASS_SPELL_REF_PATTERN, skillLabel, skillBaseAttr,
 } from '@/data/schemas.js';
-import { ITEM_ICONS } from '@/data/itemIcons.js';
 import { SPELLS } from '@/data/samApi.js';
 import { ALL_HEADS, APPEARANCE_RACES, headLabel } from '@/data/characterHeads.js';
 import CharacterBox from '@/components/CharacterBox.jsx';
@@ -21,11 +20,11 @@ import { useMod } from '@/state/ModContext.jsx';
 import ScriptEditor from '@/components/ScriptEditor.jsx';
 import {
   Panel, Field, TextInput, NumberInput, Stepper, GoldButton,
-  ItemIcon, ErrorList, SavedNote, BalanceHints, SearchSelect, PixelIcon, Gem,
+  ErrorList, SavedNote, BalanceHints, SearchSelect, PixelIcon, Gem,
 } from '@/components/ui.jsx';
-import { itemIconUrl, kindIconFile, CATEGORY_ICON_FILE } from '@/data/fallbackIcons.js';
-import LoadoutBoard from '@/components/LoadoutBoard.jsx';
-import { entryFromJson, entryToJson, newEntry, equipSlotOf } from '@/data/equipment.js';
+import { itemIconUrl } from '@/data/fallbackIcons.js';
+import LoadoutBoard, { useItemCatalog, entriesFromJson, customIconSrc, CUSTOM_SLOT_TO_PAPERDOLL } from '@/components/LoadoutBoard.jsx';
+import { entryToJson, newEntry, equipSlotOf } from '@/data/equipment.js';
 
 const MAX_PORTRAIT_BYTES = 256 * 1024; // portraits are 54x54 — anything big is a mistake
 
@@ -57,56 +56,6 @@ const SKILL_ICONS = {  // <PixelIcon> names
   PRO_THAUMATURGY: 'amulet', PRO_ALCHEMY: 'flask',
 };
 
-/* Real in-game icon URL for an ItemType, or null if we don't have one.
- * import.meta.env.BASE_URL is '/' in dev and '/SAM-Framework/' in the Pages build. */
-function iconSrc(type) {
-  const file = ITEM_ICONS[type];
-  return file ? `${import.meta.env.BASE_URL}item-icons/${file}` : null;
-}
-
-/* What the grid + picker render for an item: its own Barony PNG, or else the icon of an item of
- * the same kind (data/fallbackIcons.js). */
-function itemIcon(type) {
-  return <ItemIcon src={iconSrc(type) ?? itemIconUrl(kindIconFile(type))} />;
-}
-
-/* Group an ItemType into one of the schema's categories for the picker.
- * Barony names items by category prefix (POTION_, SCROLL_, TOOL_, …); the rest
- * (weapons/armor named by material+type) fall to keyword matching. Heuristic —
- * only drives grouping in the picker, so the odd edge case is harmless. */
-function itemCategory(t) {
-  if (/^POTION_/.test(t)) return 'POTION';
-  if (/^SCROLL_/.test(t)) return 'SCROLL';
-  if (/^SPELLBOOK_/.test(t)) return 'SPELLBOOK';
-  if (/^TOME_/.test(t)) return 'TOME_SPELL';
-  if (/^MAGICSTAFF_/.test(t)) return 'MAGICSTAFF';
-  if (/^RING_/.test(t)) return 'RING';
-  if (/^AMULET_/.test(t)) return 'AMULET';
-  if (/^GEM_/.test(t)) return 'GEM';
-  if (/^FOOD_/.test(t)) return 'FOOD';
-  if (/^TOOL_|^KEY_|^INSTRUMENT_/.test(t)) return 'TOOL';
-  if (t === 'SPELL_ITEM') return 'SPELL_CAT';
-  if (t === 'READABLE_BOOK') return 'BOOK';
-  if (/TOMAHAWK|CHAKRAM|SHURIKEN|BOOMERANG|BOLAS|PLUMBATA|DART|GREASE_BALL|DUST_BALL|SLOP_BALL|THROWING/.test(t)) return 'THROWN';
-  if (/SWORD|DAGGER|RAPIER|CLAYMORE|ANELACE|FALSHION|AXE|MACE|FLAIL|SHILLELAGH|KNUCKLES|SPEAR|HALBERD|TRIDENT|LANCE|GLAIVE|POLEARM|BOW|CROSSBOW|SLING|QUIVER|KNIFE|SCEPTER/.test(t)) return 'WEAPON';
-  if (/SHIELD|SCUTUM|BREASTPIECE|DOUBLET|TUNIC|GAMBESON|HAUBERK|ROBE|SHAWL|HELM|HAT|HOOD|MASK|CAP|COIF|CROWN|CIRCLET|LAURELS|TURBAN|HEADDRESS|MITER|BOOTS|LOAFERS|CLEAT|GLOVES|GAUNTLETS|BRACERS|CLOAK|PAULDRONS|APRON|VISOR/.test(t)) return 'ARMOR';
-  return 'TOOL';
-}
-
-// A custom item declares a `category` (WEAPON/ARMOR/POTION/…); show the icon of a vanilla item of
-// that category so it reads in the loadout picker even though it has no PNG of its own.
-const customIconSrc = (it) => itemIconUrl((it && CATEGORY_ICON_FILE[it.category]) || 'tinker_toolkit.png');
-
-// A custom item's `slot` (EQUIPPABLE_IN_SLOT_*) → the loadout paperdoll slot id, so a
-// one-click add can EQUIP a weapon/armour custom item, not just stash it in the backpack.
-const CUSTOM_SLOT_TO_PAPERDOLL = {
-  EQUIPPABLE_IN_SLOT_WEAPON: 'weapon', EQUIPPABLE_IN_SLOT_SHIELD: 'shield',
-  EQUIPPABLE_IN_SLOT_MASK: 'mask', EQUIPPABLE_IN_SLOT_HELM: 'helmet',
-  EQUIPPABLE_IN_SLOT_GLOVES: 'gloves', EQUIPPABLE_IN_SLOT_BOOTS: 'boots',
-  EQUIPPABLE_IN_SLOT_BREASTPLATE: 'breastplate', EQUIPPABLE_IN_SLOT_CLOAK: 'cloak',
-  EQUIPPABLE_IN_SLOT_AMULET: 'amulet', EQUIPPABLE_IN_SLOT_RING: 'ring',
-};
-
 function slugify(name) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'unnamed';
 }
@@ -117,21 +66,7 @@ export default function ClassEditor() {
   // Custom items from THIS mod become pickable starting gear alongside the vanilla list.
   // The engine already grants a "namespace:item" in starting_items (sam_classes.cpp) — the
   // Class Editor just never offered them, which is the gap Absidian hit.
-  // Framework built-ins are offered alongside the mod's own items: they need no
-  // dependency and ship inside the framework, so a class can always include them.
-  const customItemMap = useMemo(
-    () => Object.fromEntries([...FRAMEWORK_ITEMS, ...(modItems || [])].map((it) => [it.id, it])),
-    [modItems],
-  );
-  const allItemTypes = useMemo(
-    () => [...ITEM_TYPES, ...FRAMEWORK_ITEMS.map((it) => it.id), ...(modItems || []).map((it) => it.id)],
-    [modItems],
-  );
-  // Icon + category resolvers that fall back to the custom item's own declared category.
-  const iconForType = (type) =>
-    customItemMap[type] ? <ItemIcon src={customIconSrc(customItemMap[type])} /> : itemIcon(type);
-  const categoryForType = (type) =>
-    customItemMap[type] ? (customItemMap[type].category || 'TOOL') : itemCategory(type);
+  const { customItemMap, allTypes: allItemTypes, iconFor: iconForType, categoryFor: categoryForType } = useItemCatalog(modItems);
 
   // "Edit" handoff from the Mod Builder: seed the form from a saved class.
   const editDef = editing?.kind === 'class' ? classes.find((c) => c.id === editing.id) : null;
@@ -170,16 +105,7 @@ export default function ClassEditor() {
   const [skills, setSkills] = useState(() =>
     draft?.skills ?? Object.fromEntries(SKILLS.map((s) => [s, editDef?.skills?.[s] ?? 0]))
   );
-  const [items, setItems] = useState(() =>
-    draft?.items ?? (editDef?.starting_items ?? []).map((si) => {
-      const e = entryFromJson(si);
-      // The paperdoll cell of a vanilla item comes from its type; a custom item's comes from the
-      // slot its own JSON declares. entryFromJson cannot know that, so without this a custom
-      // weapon reopened from a saved class lands in the "slot already taken" rescue tray.
-      const cell = e.equip ? CUSTOM_SLOT_TO_PAPERDOLL[customItemMap[e.type]?.slot] : undefined;
-      return cell ? { ...e, _slot: cell } : e;
-    })
-  );
+  const [items, setItems] = useState(() => draft?.items ?? entriesFromJson(editDef?.starting_items, customItemMap));
   const [spells, setSpells] = useState(draft?.spells ?? editDef?.starting_spells ?? []);
   const [spellError, setSpellError] = useState('');
   // Per-attribute level-up growth WEIGHT (number). 2 = neutral; higher = raised more often;

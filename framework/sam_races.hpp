@@ -25,6 +25,8 @@
 #include <vector>
 #include <map>
 
+#include "sam_classes.hpp"   // SAMStartingItem: a race's starting_items are the same entries as a class's
+
 struct SAMModManifest;  // from sam_workshop.hpp (full type only needed in the .cpp)
 class Stat;             // Barony stat.hpp — forward declared so this header stays light
 class Entity;           // Barony entity.hpp — same reason
@@ -75,6 +77,10 @@ struct SAMRaceDef
 	// Optional "starting_spells": innate spells this race knows from creation (vanilla
 	// "SPELL_X" names or custom "namespace:spell"). Granted by SAMRaces::applySpells.
 	std::vector<std::string> startingSpells;
+
+	// Optional "starting_items" (3.15.0): the same entries as a class's starting_items, given to
+	// a character of this race on top of their class's, whatever the class. SAMClasses::applyRaceLoadout.
+	std::vector<SAMStartingItem> startingItems;
 
 	// Optional "allies" / "enemies": monster types (Monster enum values) this race is at
 	// peace with, or always hostile to, REGARDLESS of what its host body says.

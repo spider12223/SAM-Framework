@@ -4,7 +4,7 @@
 // Drop this beside your mod's .ts files, or reference it:
 //   /// <reference path="sam.d.ts" />
 //
-// 365 functions, 96 events. Each function's "Multiplayer:" line starts with
+// 365 functions, 97 events. Each function's "Multiplayer:" line starts with
 // its kind (host, owner, screen, read, all, local, any); see docs/multiplayer.md.
 
 declare global {
@@ -2633,6 +2633,8 @@ declare global {
     | "player.on_before_item_pickup"
     /** Fires before a dead player is brought back. Multiplayer: Fires on the host only (or in splitscreen singleplayer), once per dead player, before the level change. Its answer applies on every machine; a joiner's game no longer asks its own scripts. */
     | "player.on_before_revive"
+    /** Fires a player is about to start casting a spell (from 3.15.0). Multiplayer: Fires on the caster's own machine when the cast starts, before anything is spent or sent: the host for its own and splitscreen players, the joiner's own game for a joiner. A joiner whose game does not run S.A.M is never asked. */
+    | "player.on_before_spell_cast"
     /** Fires bleeding ticks damage on a player. Multiplayer: Fires on the host, for every player. */
     | "player.on_bleed_tick"
     /** Fires a player blocks a hit while defending with a shield (partial or full). Multiplayer: Fires on the host, for every player. */

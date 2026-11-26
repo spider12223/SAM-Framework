@@ -144,6 +144,12 @@ namespace SAMMpInput
 	// (sam_message and sam_play_sound are host-kind and refused there).
 	bool playerMayEquip(int player, const Item* item);
 
+	// (3.15.0) player.on_before_spell_cast, decided on the caster's own machine when a cast is
+	// about to start: after the game's own refusals (not enough mana or gold and the like), before any mana,
+	// gold, casting animation or packet. False = a handler refused, and the cast never begins, so it
+	// costs nothing in singleplayer or online. Silent, as playerMayEquip is.
+	bool playerMayCast(int player, int spellId);
+
 	// ------------------------------------------------------------------ revive
 
 	// Host and singleplayer, MAIN thread, before the level-change packets go out: fire

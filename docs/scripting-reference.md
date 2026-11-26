@@ -524,15 +524,16 @@ Fields vary per event; `sam_log(e.name)` inside your handler and read the log if
 
 ### Magic and effects
 
-`player.on_spell_cast` `player.on_spell_failed` `player.on_spell_learned`
+`player.on_before_spell_cast` `player.on_spell_cast` `player.on_spell_failed` `player.on_spell_learned`
 `player.on_effect_applied` `player.on_effect_removed` `player.on_effect_expired`
 `player.on_status_effect_tick` `player.on_poison_tick` `player.on_bleed_tick`
 
 #### A custom spell that does something new
 
 A spell's JSON picks one of the 21 built-in payloads, so a bolt, a spread or a status is as far as
-JSON goes. For anything else (summoning, a teleport, a heal), give the spell any payload and let a
-script do the work from `player.on_spell_cast`, then cancel the bolt:
+JSON goes. For anything else (summoning, a teleport, a heal), give the spell any payload and
+`"projectile_type": "none"`, so the cast sends nothing (from 3.14.1), and let a script do the work
+from `player.on_spell_cast`. The cast goes on as any other and spends its mana:
 
 ```lua
 local SPELL = "mymod:summon_rats"        -- the id in the spell's JSON
@@ -546,7 +547,6 @@ function on_event(e)
         sam_remove_entity(rat)            -- refused (over the follower cap): do not leave a wild rat behind
       end
     end
-    return false                          -- no bolt
   end
 end
 ```
@@ -556,8 +556,12 @@ end
   engine's name, such as `"spell_forcebolt"`.
 * The player has to know the spell: put its id in a class's or race's `starting_spells`, or call
   `sam_grant_spell`. Otherwise the event never fires.
-* `return false` stops the bolt. It does not give the mana back in single-player, where the casting
-  animation has already spent most of it.
+* Returning `false` from `player.on_spell_cast` stops the cast, but it does not give the mana back in
+  single-player, where the casting animation has already spent most of it. To refuse a cast so that it
+  costs nothing, return `false` from `player.on_before_spell_cast` (below).
+* (new in 3.15.0) `"damage_max": 0` means the bolt does no damage. Before, 0 was read as left out and the
+  bolt did its payload's own damage. Leave `damage_max` out to keep the payload's damage. A bolt that hits
+  still counts as an attack, so a monster it hits turns on the caster, as with any attack spell.
 * **Spawned monsters are wild until you recruit them.** `sam_spawn_monster` and `sam_spawn_monsters`
   make ordinary monsters that hunt the player. `sam_make_follower(player, uid)` turns one into a
   real follower, the way the Scroll of Summon does: on the player's side, in the follower list, on
@@ -571,6 +575,65 @@ end
 * A custom spell can apply a status of your own: put the effect's exact id (for example
   `"mymod:plague"`, lowercase, with the namespace) in the spell's `on_hit_effect`. A misspelled id
   applies nothing and leaves one warning line in `sam_log.txt`.
+* (new in 3.15.0) `"on_hit_effect": "EFF_POLYMORPH"` really polymorphs, the way the game's polymorph potion
+  does: a monster it hits turns into a random other monster, for good, and a player takes a random
+  monster's form for `on_hit_duration` ticks (5 seconds if left out). Bosses, shopkeepers and the other
+  monsters the game never polymorphs are left as they are, and the caster reads "had no effect". On a monster these
+  are the game's own polymorph rules: species immunities and `on_before_effect_applied` are not asked. It
+  happens on the host a moment after the hit (the game deletes the monster it replaces). Before, a monster
+  only got the status icon and stayed what it was.
+
+#### Refusing a cast before it starts (new in 3.15.0)
+
+`player.on_before_spell_cast` fires when a player starts a cast, after the game's own refusals (not enough
+mana or gold, paralysed or asleep) and before anything else: no gold or mana is taken, the casting animation has not
+started, and nothing has been sent. Return `false` and the cast never begins, in single-player and online
+alike, and `player.on_spell_cast` does not fire. A spell that needs conditions checks them here and does its
+work in `player.on_spell_cast`. A leap that needs light armour, a gap in front and floor beyond it:
+
+```lua
+local LEAP = "mymod:leap"
+local HEAVY = { STEEL_BREASTPIECE = true, IRON_BREASTPIECE = true, CRYSTAL_BREASTPIECE = true }
+
+-- The tile `steps` tiles in front of a player, from where they stand and the way they face.
+local function ahead(player, steps)
+  local x, y = sam_get_position_precise(sam_get_player_uid(player))
+  local yaw = sam_get_facing(player)
+  return math.floor((x + math.cos(yaw) * 16 * steps) / 16), math.floor((y + math.sin(yaw) * 16 * steps) / 16)
+end
+
+function on_event(e)
+  if e.name == "player.on_before_spell_cast" and e.spell_name == LEAP then
+    local gap, land = sam_get_tile(ahead(e.player, 1)), sam_get_tile(ahead(e.player, 2))
+    local why
+    if HEAVY[sam_get_equipped_item(e.player, "ARMOR") or ""] then why = "Too heavy to leap."
+    elseif not gap or gap.solid or gap.floor ~= 0 then why = "There is no gap to leap."
+    elseif not land or not land.walkable then why = "There is nowhere to land."
+    end
+    if why then
+      sam_hud_text("leap_refused", 20, 120, why, nil, e.player)
+      return false                       -- the cast never starts: no mana, no animation
+    end
+    sam_hud_clear("leap_refused", e.player)   -- this one goes ahead: take an old refusal off the screen
+  end
+end
+```
+
+* It runs on the caster's own machine: the host's game for the host and splitscreen players, a joiner's own
+  game for a joiner. There, `sam_message` and `sam_play_sound` are host functions and are refused, so say why
+  with `sam_hud_text`, which shows on that player's screen on either machine. Decide from what that machine
+  can see: the caster's own equipped items, facing and position, and the map's tiles, are all readable there.
+  `sam_get_player_data` is not (it returns nil in a joiner's game, so a check built on it lets every joiner
+  through). Timers run on the host only, which is why the example takes its line down on the next cast that
+  goes ahead rather than after a few seconds.
+* A refusal is silent: nothing is printed and no sound plays unless your handler says so.
+* It covers casts from the spell list, the hotbar and a spellbook. Magic staffs, scrolls and `sam_cast_spell`
+  are not asked.
+* The player can still turn and move while the casting animation plays. If the answer can change by the time
+  the cast is let go, check again in `player.on_spell_cast` and return `false` there: online that costs
+  nothing, but in single-player the animation has already spent most of the mana.
+* `sam_get_equipped_item` names vanilla items only. For your own armour compare `sam_get_equipped_item_id`
+  with `sam_item_id("mymod:plate")`, or decide by weight with `sam_get_item_info`.
 * **Innate spells on the hotbar (new in 3.6.0).** A race or class lists spells in `starting_spells`; when
   a character is created they are also put on the first free hotbar slots, after the class's own
   layout (which the game builds from a file that can name only vanilla classes and spells, so
@@ -701,6 +764,10 @@ A trait puts the item on one of the game's lists, and the game then treats it th
   claw), to a bugbear's shield bash, or while the wielder is a shapeshifted player.
 * The usual effect rules apply: species immunities and the `on_before_effect_applied` event. It
   never shortens an effect the target already has, and leaves a permanent one alone.
+* (new in 3.15.0) `EFF_POLYMORPH` is the real polymorph, as on a spell (see "A custom spell that does something
+  new"): a monster turns into a random other one, a player takes a random form for the duration. On a monster the
+  game's own polymorph rules apply in place of the rules above: species immunities and `on_before_effect_applied` are
+  not asked, and the bosses and others the game never polymorphs are left alone.
 * A player who lands a fully charged, damaging swing at skill 100 with a weapon whose `weapon_skill` is
   sword, axe, mace or polearm can also trigger the game's own proc for that skill, on top of this. A
   monster wielding the weapon never does.
@@ -776,6 +843,27 @@ that); a type that is also under `enemies` or `neutral` is dropped from `recruit
 shopkeepers, mimics, bats, the tinkering bots and holograms are types that can never be made followers and
 are dropped with a warning. The player's Leadership still caps how many followers they can have. For
 any other recruiting rule, handle `player.on_callout` or an action press yourself and call `sam_make_follower`.
+
+### Races: starting items (new in 3.15.0)
+
+A race can give every character of it some items of its own, whatever class they pick:
+
+```json
+{ "id": "mymod:ratkin", "name": "Ratkin", "host_body": "human",
+  "starting_items": [ { "type": "FOOD_CHEESE", "count": 3 }, { "type": "mymod:rat_cloak", "equip": true } ] }
+```
+
+* The entries are the same as a class's `starting_items` (`type`, `count`, `status`, `beatitude`,
+  `appearance`, `identified`, `equip`, `hotbar_slot`). They are given after the class's own kit, to a vanilla
+  class as well as a custom one. An item with `"equip": true` is put on even when the class's kit already
+  filled that slot, and the class's item goes to the backpack.
+* Only for a character who plays the race with its abilities. One who picked it for its look alone gets
+  none, as with `starting_spells`.
+* Only a new character gets them: a loaded saved game keeps what it was saved with.
+* The Race Editor has the Class Editor's loadout board for them, without the gold.
+* For anything else only your race should get, gate it in a race script with
+  `sam_get_race(player) == "mymod:ratkin"`. In the block builder that is the condition
+  "is playing a race" (from 3.15.0); put more conditions on the same rule and it fires only when all of them hold.
 
 ### Races: the name on the character sheet (new in 3.8.1)
 

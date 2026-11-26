@@ -218,7 +218,7 @@ export default function SpellEditor() {
             <Field label="Mana cost"><NumberInput value={manaCost} min={0} onChange={setManaCost} /></Field>
             <Field label="Range"><NumberInput value={range} min={0} onChange={setRange} /></Field>
             <Field label="Damage min"><NumberInput value={damageMin} min={0} onChange={setDamageMin} /></Field>
-            <Field label="Damage max"><NumberInput value={damageMax} min={0} onChange={setDamageMax} /></Field>
+            <Field label="Damage max" hint="Blank keeps the payload's own damage; 0 means none (from 3.15.0)."><NumberInput value={damageMax} min={0} onChange={setDamageMax} /></Field>
             <Field label="Projectile speed"><NumberInput value={speed} min={0} onChange={setSpeed} /></Field>
           </div>
           <div className="sam-divider" />

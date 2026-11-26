@@ -614,6 +614,31 @@ void SAMRaces::loadFromManifest(const SAMModManifest& manifest)
 				if ( e.is_string() ) { def.startingSpells.push_back(e.get<std::string>()); }
 			}
 		}
+		// (3.15.0) "starting_items": read exactly as a class's are (sam_classes.cpp), a field of the
+		// wrong type falling back to its default. An unknown item is reported when it is given.
+		if ( j.contains("starting_items") && j["starting_items"].is_array() )
+		{
+			for ( const json& e : j["starting_items"] )
+			{
+				if ( !e.is_object() || !e.contains("type") || !e["type"].is_string() ) { continue; }
+				auto num = [&](const char* k, int dv) { return ( e.contains(k) && e[k].is_number_integer() ) ? e[k].get<int>() : dv; };
+				auto flag = [&](const char* k, bool dv) { return ( e.contains(k) && e[k].is_boolean() ) ? e[k].get<bool>() : dv; };
+				SAMStartingItem si;
+				si.type = e["type"].get<std::string>();
+				if ( si.type.empty() ) { continue; }
+				if ( e.contains("status") && e["status"].is_string() && !e["status"].get<std::string>().empty() )
+				{
+					si.status = e["status"].get<std::string>();
+				}
+				si.beatitude = num("beatitude", 0);
+				si.count = num("count", 1);
+				si.appearance = num("appearance", 0);
+				si.identified = flag("identified", true);
+				si.equip = flag("equip", false);
+				si.hotbarSlot = num("hotbar_slot", -1);
+				def.startingItems.push_back(si);
+			}
+		}
 
 		def.numericId = s_nextId++;
 		s_byId[def.numericId] = def;

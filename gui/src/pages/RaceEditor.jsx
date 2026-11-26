@@ -13,7 +13,9 @@ import { useMod } from '@/state/ModContext.jsx';
 import { Panel, Field, TextInput, NumberInput, Select, SearchSelect, GoldButton, ErrorList, SavedNote, PixelIcon } from '@/components/ui.jsx';
 import ScriptEditor from '@/components/ScriptEditor.jsx';
 import { MONSTERS, SPELLS } from '@/data/samApi.js';
-import { CLASS_SPELL_REF_PATTERN } from '@/data/schemas.js';
+import { CLASS_SPELL_REF_PATTERN, CATEGORIES } from '@/data/schemas.js';
+import LoadoutBoard, { useItemCatalog, entriesFromJson } from '@/components/LoadoutBoard.jsx';
+import { entryToJson } from '@/data/equipment.js';
 
 const ATTRS = ['STR', 'DEX', 'CON', 'INT', 'PER', 'CHR'];
 const ATTR_ICONS = { STR: 'str', DEX: 'dex', CON: 'con', INT: 'int', PER: 'per', CHR: 'chr' };  // <PixelIcon> names
@@ -73,7 +75,7 @@ function slugify(name) {
 }
 
 export default function RaceEditor() {
-  const { meta, races, spells: modSpells, sounds: modSounds, scripts, editing, dispatch } = useMod();
+  const { meta, races, items: modItems, spells: modSpells, sounds: modSounds, scripts, editing, dispatch } = useMod();
   const editDef = editing?.kind === 'race' ? races.find((r) => r.id === editing.id) : null;
 
   // The def as it was when this page opened. `editDef` is derived from `editing`, and the
@@ -102,6 +104,9 @@ export default function RaceEditor() {
   const [vision, setVision] = useState(editDef?.vision ?? 0);
   const [sneakVision, setSneakVision] = useState(editDef?.sneak_vision ?? 0);
   const [startingSpells, setStartingSpells] = useState(editDef?.starting_spells ?? []);
+  // Items every character of this race starts with, on top of their class's (from 3.15.0).
+  const { customItemMap, allTypes: allItemTypes, iconFor: iconForType, categoryFor: categoryForType } = useItemCatalog(modItems);
+  const [startingItems, setStartingItems] = useState(() => entriesFromJson(editDef?.starting_items, customItemMap));
   // Sound ids this race says on a Use that hits nothing, in place of its host body's noise.
   const [emoteSounds, setEmoteSounds] = useState(editDef?.emote_sounds ?? []);
   const [emoteError, setEmoteError] = useState('');
@@ -160,6 +165,7 @@ export default function RaceEditor() {
     if (vis) def.vision = vis;
     if (sneakVis) def.sneak_vision = sneakVis;
     if (startingSpells.length) def.starting_spells = startingSpells;
+    if (startingItems.length) def.starting_items = startingItems.map(entryToJson);
     if (emoteSounds.length) def.emote_sounds = emoteSounds;
     const lm = {};
     for (const [k] of LIMB_SLOTS) {
@@ -245,7 +251,7 @@ export default function RaceEditor() {
 
   const def = useMemo(buildDef,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [name, description, lore, icon, iconData, hostBody, mods, bloodDiet, canOpenTins, vision, sneakVision, startingSpells, emoteSounds, allies, enemies, neutral, recruits, limbModels, limbBent, namespace]);
+    [name, description, lore, icon, iconData, hostBody, mods, bloodDiet, canOpenTins, vision, sneakVision, startingSpells, startingItems, emoteSounds, allies, enemies, neutral, recruits, limbModels, limbBent, namespace]);
   const preview = useMemo(() => JSON.stringify(def, null, 2), [def]);
   const setMod = (a, v) => setMods((prev) => ({ ...prev, [a]: v }));
 
@@ -496,6 +502,20 @@ export default function RaceEditor() {
           )}
         </Panel>
       </div>
+
+      {/* Starting items of the race's own (from 3.15.0): the Class Editor's board, without gold. */}
+      <div className="text-xs -mb-2" style={{ color: 'var(--color-ink-dim)' }}>
+        Race starting items: every character of this race starts with these, whatever class they pick,
+        after the class&apos;s own kit. Not for a character who picked the race for its look alone.
+      </div>
+      <LoadoutBoard
+        items={startingItems}
+        onChange={setStartingItems}
+        allTypes={allItemTypes}
+        iconFor={iconForType}
+        categoryFor={categoryForType}
+        categories={CATEGORIES}
+      />
 
       <Panel title="Behavior Script (optional)">
         <div className="text-xs mb-2" style={{ color: 'var(--color-ink-dim)' }}>

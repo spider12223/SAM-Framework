@@ -73,6 +73,9 @@ static std::map<int, std::set<int>> s_classPassives;
 // therefore failed to compile this file at all. The two types are the same width and
 // the same type on every platform we build for, so nothing else changes.
 static std::map<int, std::vector<std::pair<int, uint32_t>>> s_hotbarPins;
+// (3.15.0) The same for a custom race's own starting_items, kept apart because their freshness
+// follows the race, not the class: applyRaceLoadout rebuilds them for every character of a custom race.
+static std::map<int, std::vector<std::pair<int, uint32_t>>> s_racePins;
 
 static bool readWholeFile(const std::string& path, std::string& out)
 {
@@ -1354,21 +1357,16 @@ void SAMClasses::applyPassives(int classnum, Stat* stat)
 	SAM_INFO(MOD, "Applied " + std::to_string(it->second.size()) + " passive effect(s) to class " + std::to_string(classnum));
 }
 
-void SAMClasses::applyLoadout(int player)
+// One loadout's items into a player's hands: a class's (applyLoadout) or a custom race's
+// (applyRaceLoadout). `owner` names it in the log ("class [ns:x]"); each hotbar_slot is recorded
+// in `pins`, re-applied after assignHotbarSlots wipes the bar. Returns the stacks given.
+static int grantStartingItems(int player, const std::vector<SAMStartingItem>& list, const std::string& owner,
+	std::vector<std::pair<int, uint32_t>>& pins)
 {
-	if ( player < 0 || player >= MAXPLAYERS || !players[player] ) { return; }
-	const SAMClassDef* def = getClass(client_classes[player]);
-	if ( !def ) { return; }
-
 	const bool isLocalPlayer = players[player]->isLocalPlayer();
-	// Defensive multiplayer guard (the charclass.cpp hook also returns before
-	// calling us for players we don't own).
-	if ( !isLocalPlayer && multiplayer == CLIENT && intro == false ) { return; }
-
 	auto& hotbar = players[player]->hotbar.slots();
-	s_hotbarPins[player].clear(); // rebuilt below; re-applied after assignHotbarSlots wipes the bar
 	int given = 0;
-	for ( const SAMStartingItem& si : def->startingItems )
+	for ( const SAMStartingItem& si : list )
 	{
 		ItemType type;
 		const bool isCustomRef = si.type.find(':') != std::string::npos;
@@ -1388,7 +1386,7 @@ void SAMClasses::applyLoadout(int player)
 		}
 		if ( !resolved )
 		{
-			SAM_ERROR(MOD, "class [" + def->id + "] references item '" + si.type + "' — "
+			SAM_ERROR(MOD, owner + " references item '" + si.type + "' — "
 				+ (isCustomRef ? "custom item not registered (is that mod loaded?)"
 				               : "not a known item type") + " — skipping.");
 			continue;
@@ -1399,12 +1397,12 @@ void SAMClasses::applyLoadout(int player)
 		if ( !item ) { continue; }
 		if ( isCustomRef )
 		{
-			SAM_INFO(MOD, "class [" + def->id + "] granted CUSTOM starting item '" + si.type
+			SAM_INFO(MOD, owner + " granted CUSTOM starting item '" + si.type
 				+ "' (runtime slot " + std::to_string(static_cast<int>(type)) + ").");
 		}
 		else
 		{
-			SAM_DEBUG(MOD, "class [" + def->id + "] granted starting item '" + si.type + "'.");
+			SAM_DEBUG(MOD, owner + " granted starting item '" + si.type + "'.");
 		}
 
 		if ( isLocalPlayer )
@@ -1420,7 +1418,7 @@ void SAMClasses::applyLoadout(int player)
 				if ( si.hotbarSlot >= 0 && si.hotbarSlot < static_cast<int>(NUM_HOTBAR_SLOTS) )
 				{
 					hotbar[si.hotbarSlot].item = pickedUid;
-					s_hotbarPins[player].push_back({ si.hotbarSlot, pickedUid }); // re-applied later
+					pins.push_back({ si.hotbarSlot, pickedUid }); // re-applied later
 				}
 			}
 			free(item);
@@ -1437,7 +1435,44 @@ void SAMClasses::applyLoadout(int player)
 			+ (si.equip ? " (equipped)" : "")
 			+ (si.hotbarSlot >= 0 ? (" -> hotbar " + std::to_string(si.hotbarSlot)) : std::string()));
 	}
+	return given;
+}
+
+void SAMClasses::applyLoadout(int player)
+{
+	if ( player < 0 || player >= MAXPLAYERS || !players[player] ) { return; }
+	const SAMClassDef* def = getClass(client_classes[player]);
+	if ( !def ) { return; }
+
+	const bool isLocalPlayer = players[player]->isLocalPlayer();
+	// Defensive multiplayer guard (the charclass.cpp hook also returns before
+	// calling us for players we don't own).
+	if ( !isLocalPlayer && multiplayer == CLIENT && intro == false ) { return; }
+
+	s_hotbarPins[player].clear(); // rebuilt below; re-applied after assignHotbarSlots wipes the bar
+	const int given = grantStartingItems(player, def->startingItems, "class [" + def->id + "]", s_hotbarPins[player]);
 	SAM_INFO(MOD, "Applied loadout for [" + def->id + "]: " + std::to_string(given) + " item stack(s).");
+}
+
+// Whether this character's race is a custom one with its abilities on (stat_appearance 0), the
+// only case whose starting_items are given: an "appearance only" pick keeps the race's look alone.
+static const SAMRaceDef* raceWithAbilities(int player)
+{
+	if ( !stats[player] || stats[player]->stat_appearance != 0 ) { return nullptr; }
+	return SAMRaces::get(stats[player]->playerRace);
+}
+
+void SAMClasses::applyRaceLoadout(int player)
+{
+	if ( player < 0 || player >= MAXPLAYERS || !players[player] ) { return; }
+	const SAMRaceDef* race = raceWithAbilities(player);
+	if ( !race ) { return; }
+	if ( !players[player]->isLocalPlayer() && multiplayer == CLIENT && intro == false ) { return; }
+
+	s_racePins[player].clear(); // rebuilt for every character of a custom race, items or not
+	if ( race->startingItems.empty() ) { return; }
+	const int given = grantStartingItems(player, race->startingItems, "race [" + race->id + "]", s_racePins[player]);
+	SAM_INFO(MOD, "Applied race loadout for [" + race->id + "]: " + std::to_string(given) + " item stack(s).");
 }
 
 // Innate spells on the hotbar. initClass puts every spell a character starts with on the first free
@@ -1504,25 +1539,34 @@ void SAMClasses::reapplyClassItemPins(int player)
 	// Only a currently-custom class has fresh pins. applyLoadout isn't called for a vanilla
 	// class, so without this guard a vanilla character following a custom-class game would
 	// re-apply the previous game's stale uids and clobber its correct vanilla hotbar.
-	if ( !getClass(client_classes[player]) ) { s_hotbarPins.erase(player); return; }
-	auto it = s_hotbarPins.find(player);
-	if ( it == s_hotbarPins.end() || it->second.empty() ) { return; }
+	if ( !getClass(client_classes[player]) ) { s_hotbarPins.erase(player); }
+	// The same rule for a custom race's items (3.15.0): fresh only while the race still gives them.
+	if ( !raceWithAbilities(player) ) { s_racePins.erase(player); }
 	auto& hotbar = players[player]->hotbar.slots();
-	for ( const auto& pin : it->second )
+	int count = 0;
+	for ( const auto* pins : { &s_hotbarPins, &s_racePins } )
 	{
-		const int slot = pin.first;
-		const Uint32 uid = pin.second;
-		if ( slot < 0 || slot >= static_cast<int>(NUM_HOTBAR_SLOTS) ) { continue; }
-		// The default-layout pass may have auto-placed this same item in another slot;
-		// clear those so a pinned item isn't duplicated across the bar.
-		for ( int i = 0; i < static_cast<int>(NUM_HOTBAR_SLOTS); ++i )
+		auto it = pins->find(player);
+		if ( it == pins->end() ) { continue; }
+		count += static_cast<int>(it->second.size());
+		for ( const auto& pin : it->second )
 		{
-			if ( i != slot && hotbar[i].item == uid ) { hotbar[i].item = 0; }
+			const int slot = pin.first;
+			const Uint32 uid = pin.second;
+			if ( slot < 0 || slot >= static_cast<int>(NUM_HOTBAR_SLOTS) ) { continue; }
+			// The default-layout pass may have auto-placed this same item in another slot;
+			// clear those so a pinned item isn't duplicated across the bar.
+			for ( int i = 0; i < static_cast<int>(NUM_HOTBAR_SLOTS); ++i )
+			{
+				if ( i != slot && hotbar[i].item == uid ) { hotbar[i].item = 0; }
+			}
+			hotbar[slot].item = uid;
 		}
-		hotbar[slot].item = uid;
 	}
-	SAM_DEBUG(MOD, "Re-applied " + std::to_string(it->second.size()) + " hotbar pin(s) for player "
-		+ std::to_string(player) + ".");
+	if ( count > 0 )
+	{
+		SAM_DEBUG(MOD, "Re-applied " + std::to_string(count) + " hotbar pin(s) for player " + std::to_string(player) + ".");
+	}
 }
 
 void SAMClasses::applySpells(int player)

@@ -257,6 +257,9 @@ public:
 	static void applyPassives(int classnum, Stat* myStats);
 	// Grant starting items (called from initClass items chain).
 	static void applyLoadout(int player);
+	// (3.15.0) Grant a custom race's own starting_items, after the class's, for any class
+	// (called from initClass for a custom race with its abilities on, stat_appearance 0).
+	static void applyRaceLoadout(int player);
 
 	// Re-apply the class's hotbar pins after Barony's assignHotbarSlots() wipes the bar.
 	// Must be called at the END of ClassHotbarConfig_t::assignHotbarSlots.

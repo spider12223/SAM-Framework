@@ -1187,6 +1187,20 @@ bool playerMayEquip(int player, const Item* item)
 	return ev.fire();
 }
 
+// Asked where the cast starts (castSpellInit, which only the caster's own input reaches), not at
+// player.on_spell_cast: by then singleplayer's casting animation has spent most of the mana, and a
+// joiner's animation has played. Same machine rule and the same silence as playerMayEquip.
+bool playerMayCast(int player, int spellId)
+{
+	if ( player < 0 || player >= MAXPLAYERS || !players[player] || !players[player]->isLocalPlayer() ) { return true; }
+	if ( !SamEvent::anyScripts() ) { return true; }
+	SamEvent ev("player.on_before_spell_cast");
+	ev.i("player", (long long)player)
+		.i("spell_id", (long long)spellId)
+		.s("spell_name", SAMSpells::scriptName(spellId));
+	return ev.fire();
+}
+
 // -------------------------------------------------------------------- revive
 
 void decideFloorRevives()

@@ -33,6 +33,7 @@
 #include "prng.hpp"     // local_rng: the on_hit_chance roll
 #include "sam_items.hpp"    // the item's declared on_hit_effect
 #include "sam_effects.hpp"  // an effect's own default duration
+#include "sam_spells.hpp"   // queuePolymorph: a weapon's EFF_POLYMORPH is the real polymorph
 
 namespace SAMCombat
 {
@@ -565,7 +566,6 @@ namespace SAMCombat
 
 	void applyItemOnHit(int itemType, Entity* attacker, Entity* victim, Stat* victimStats)
 	{
-		(void)attacker;
 		const SAMItemDef* d = SAMItems::getItem(itemType);
 		if ( !d || d->onHitEffectSlot < 0 || !victim || !victimStats || victimStats->HP <= 0 ) { return; }
 		const int slot = d->onHitEffectSlot;
@@ -574,6 +574,12 @@ namespace SAMCombat
 		{
 			if ( d->onHitChance <= 0.0 ) { return; }
 			if ( (int)(local_rng.rand() % 10000) >= (int)(d->onHitChance * 10000.0) ) { return; }
+		}
+		if ( slot == EFF_POLYMORPH )
+		{
+			// (3.15.0) The real polymorph, as a spell's (SAMSpells::queuePolymorph says why it waits).
+			SAMSpells::queuePolymorph(victim->getUID(), attacker ? attacker->getUID() : 0, SAMItems::onHitDurationTicks(*d));
+			return;
 		}
 		// A permanent effect (-1) is left alone: refreshing it with a number would end it.
 		if ( victimStats->EFFECTS_TIMERS[slot] == -1 && victimStats->getEffectActive(slot) ) { return; }

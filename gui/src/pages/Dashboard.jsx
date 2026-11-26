@@ -11,7 +11,7 @@ import { Panel, GoldButton } from '@/components/ui.jsx';
 import { NAV_ICONS } from '@/data/navIcons.js';
 
 /** The framework's own version (mods declare their own framework_min_version). */
-const SAM_FRAMEWORK_VERSION = '3.14.1';
+const SAM_FRAMEWORK_VERSION = '3.15.0';
 
 /** Where players get S.A.M itself (the framework is a dependency, not a mod). */
 const WORKSHOP_URL = 'https://steamcommunity.com/sharedfiles/filedetails/?id=3763844472';
@@ -29,6 +29,12 @@ const TRAVELS = [
  * thing a returning modder sees, and the point is 'here is what you can do now that you
  * could not before', not a changelog. */
 const WHATS_NEW = [
+  ["Refuse a cast before it starts (3.15.0)",
+   "Return false from the new player.on_before_spell_cast and the cast never begins: no mana, no animation, in single-player and online. It runs on the caster's own machine, so check what a spell needs there (the armour worn, the ground ahead) and say why with sam_hud_text."],
+  ["Race starting items (3.15.0)",
+   "A race's \"starting_items\" gives every character who plays the race (not one picked for its look alone) items of its own, whatever class they pick, after the class's kit. The Race Editor has the loadout board for them, and the block builder a new \"is playing a race\" condition."],
+  ["A real polymorph, and damage 0 (3.15.0)",
+   "An on_hit_effect of EFF_POLYMORPH, on a spell or a weapon, now turns a monster into a random other one (a player takes a random form) instead of only showing the icon. A spell's \"damage_max\": 0 now means no damage; before, 0 kept the payload's own."],
   ["Spells that send nothing (3.14.1)",
    "A spell with \"projectile_type\": \"none\" is now cast like any other, spending its mana and firing player.on_spell_cast, but sends no bolt and so plays no cast sound: do the spell's work, and any sound, in that handler and let the cast go on."],
   ["Party members, by RumpleIVSkin",
